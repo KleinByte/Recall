@@ -1,0 +1,256 @@
+<script setup lang="ts">
+import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
+import {
+  faChartSimple,
+  faDragon,
+  faGear,
+  faListUl,
+  faRadiation,
+  faRotate,
+  faSeedling,
+  faTrophy,
+  type IconDefinition,
+} from "@fortawesome/free-solid-svg-icons"
+import type { Summoner } from "../types/lol"
+import type { PageId } from "../helpers/navigation"
+
+defineProps<{
+  page: PageId
+  connected: boolean
+  summoner: Summoner | null
+  refreshing: boolean
+  refreshMessage: string | null
+}>()
+
+const emit = defineEmits<{
+  (event: "update:page", value: PageId): void
+  (event: "refresh"): void
+}>()
+
+const items: { id: PageId; label: string; icon: IconDefinition }[] = [
+  { id: "dashboard", label: "Dashboard", icon: faChartSimple },
+  { id: "challenges", label: "Challenges", icon: faTrophy },
+  { id: "matches", label: "Matches", icon: faListUl },
+  { id: "skill", label: "Skill", icon: faRadiation },
+  { id: "progress", label: "Progress", icon: faSeedling },
+  { id: "champions", label: "Champions", icon: faDragon },
+  { id: "settings", label: "Settings", icon: faGear },
+]
+</script>
+
+<template>
+  <nav class="sidebar">
+    <div class="brand">
+      <span class="brand-mark">RECALL</span>
+      <span class="brand-name">League companion</span>
+    </div>
+
+    <ul class="nav">
+      <li v-for="item in items" :key="item.id">
+        <button
+          class="nav-item"
+          :class="{ active: page === item.id }"
+          @click="emit('update:page', item.id)"
+        >
+          <FontAwesomeIcon :icon="item.icon" class="nav-icon" fixed-width />
+          <span>{{ item.label }}</span>
+        </button>
+      </li>
+    </ul>
+
+    <button
+      class="refresh"
+      :disabled="refreshing || !connected"
+      :title="connected ? 'Refresh matches, challenges, profile, and ranked data' : 'Start League before refreshing'"
+      @click="emit('refresh')"
+    >
+      <FontAwesomeIcon :icon="faRotate" :class="{ spinning: refreshing }" fixed-width />
+      <span>{{ refreshing ? "Refreshing…" : "Refresh" }}</span>
+    </button>
+    <p v-if="refreshMessage" class="refresh-message" role="status">
+      {{ refreshMessage }}
+    </p>
+
+    <div class="status">
+      <div class="status-row">
+        <span class="dot" :class="{ online: connected }" />
+        <span class="status-text">
+          {{ connected ? "Client connected" : "Client not detected" }}
+        </span>
+      </div>
+      <div v-if="summoner" class="summoner">
+        {{ summoner.gameName }}
+        <span class="tag">#{{ summoner.tagLine }}</span>
+      </div>
+    </div>
+  </nav>
+</template>
+
+<style scoped>
+.sidebar {
+  width: var(--sidebar-width);
+  flex: 0 0 var(--sidebar-width);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-1);
+  border-right: 1px solid var(--border-subtle);
+  padding: var(--space-5) var(--space-3) var(--space-3);
+  box-sizing: border-box;
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 var(--space-2) var(--space-5);
+}
+
+.brand-mark {
+  font-family: var(--font-display);
+  font-size: 22px;
+  letter-spacing: 3px;
+  color: var(--gold);
+  line-height: 1;
+}
+
+.brand-name {
+  font-family: var(--font-heading);
+  font-size: 11px;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.nav {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1;
+}
+
+.nav-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  font-family: var(--font-body);
+  font-size: 13px;
+  letter-spacing: 0.6px;
+  text-align: left;
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+
+.nav-item:hover {
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+
+.nav-item.active {
+  background: var(--surface-2);
+  border-left-color: var(--gold);
+  color: var(--gold-bright);
+}
+
+.nav-icon {
+  font-size: 13px;
+  opacity: 0.85;
+}
+
+.refresh {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  width: 100%;
+  margin: var(--space-3) 0 var(--space-2);
+  padding: var(--space-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--gold-bright);
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 12px;
+}
+
+.refresh:hover:not(:disabled) {
+  border-color: var(--gold);
+}
+
+.refresh:disabled {
+  cursor: not-allowed;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.spinning {
+  animation: spin 0.8s linear infinite;
+}
+
+.refresh-message {
+  margin: 0 0 var(--space-2);
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.status {
+  border-top: 1px solid var(--border-subtle);
+  padding: var(--space-3) var(--space-2) var(--space-1);
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.dot.online {
+  background: var(--win);
+  box-shadow: 0 0 6px var(--win);
+}
+
+.status-text {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.summoner {
+  margin-top: var(--space-1);
+  padding-left: 15px;
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tag {
+  color: var(--text-muted);
+}
+</style>

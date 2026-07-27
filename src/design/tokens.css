@@ -1,0 +1,108 @@
+:root {
+  /* Surfaces — deep navy, layered from back to front */
+  --surface-0: #0a1428;
+  --surface-1: #0f1c33;
+  --surface-2: #152540;
+  --surface-3: #1d3054;
+
+  /* League gold ramp */
+  --gold-bright: #f0e6d2;
+  --gold: #c8aa6d;
+  --gold-mid: #a1854c;
+  --gold-dim: #785a28;
+  --gold-faint: #5c4a2a;
+
+  /* Text */
+  --text-primary: #f0e6d2;
+  --text-secondary: #a09b8c;
+  --text-muted: #6b6863;
+
+  /* Semantic */
+  --win: #0acbe6;
+  --win-dim: #0a4f5c;
+  --loss: #e84057;
+  --loss-dim: #5c2029;
+  --accent: #0397ab;
+
+  /* Borders */
+  --border-subtle: rgba(200, 170, 109, 0.22);
+  --border-strong: rgba(200, 170, 109, 0.55);
+
+  /* Spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  --radius-sm: 2px;
+  --radius-md: 4px;
+
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.35);
+
+  --font-display: "BeaufortforLOL Bold", "BeaufortforLOL", serif;
+  --font-heading: "BeaufortforLOL Medium", "BeaufortforLOL", serif;
+  --font-body: "Spiegel", system-ui, sans-serif;
+
+  --sidebar-width: 208px;
+}
+
+/* ---------- Shared primitives ---------- */
+
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+
+.section-title {
+  font-family: var(--font-heading);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin: 0 0 var(--space-3);
+}
+
+.muted {
+  color: var(--text-secondary);
+}
+
+.numeric {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+}
+
+.win-text {
+  color: var(--win);
+}
+
+.loss-text {
+  color: var(--loss);
+}
+
+/* Thin, unobtrusive scrollbars that match the theme */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--gold-faint) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--gold-faint);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--gold-dim);
+  background-clip: content-box;
+}

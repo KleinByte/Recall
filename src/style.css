@@ -1,0 +1,182 @@
+@import "./design/tokens.css";
+
+:root {
+  font-family: var(--font-body);
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: dark;
+  color: var(--text-primary);
+  background-color: var(--surface-0);
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+
+  --main-text-color: var(--text-primary);
+  --main-bg-gradient: linear-gradient(to left, #091428, #0a1428);
+}
+
+body {
+  height: 100vh;
+  overflow: hidden;
+  background: var(--surface-0);
+  margin: 0;
+}
+
+/* The overlay window is frameless and transparent, so nothing behind its own
+   panel may paint a background. */
+body.overlay-window,
+body.overlay-window #app {
+  background: transparent;
+}
+
+/*
+ * A bar and its fill.
+ *
+ * Declared once, globally. A scoped copy that relies on being a grid item to
+ * become block-level silently breaks the moment the bar is moved into a plain
+ * container, which is exactly what happened to the lobby panel.
+ */
+.track {
+  display: block;
+  width: 100%;
+  height: 6px;
+  background: var(--surface-3);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.track .fill,
+.fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--gold-dim), var(--gold));
+}
+
+.fill.strong {
+  background: linear-gradient(90deg, var(--win-dim), var(--win));
+}
+
+.track.thin {
+  height: 4px;
+}
+
+
+@font-face {
+  font-family: "BeaufortforLOL";
+  src: url("./fonts/BeaufortforLOL-Regular.ttf");
+}
+
+@font-face {
+  font-family: "BeaufortforLOL Bold";
+  src: url("./fonts/BeaufortforLOL-Bold.ttf");
+}
+
+@font-face {
+  font-family: "BeaufortforLOL Medium";
+  src: url("./fonts/BeaufortforLOL-Medium.ttf");
+}
+
+@font-face {
+  font-family: "Spiegel";
+  src: url("./fonts/Spiegel_TT_Regular.ttf");
+}
+
+.league-button {
+  font-family: var(--font-body);
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  background: var(--surface-2);
+  color: var(--gold);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.league-button:hover {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+  color: var(--gold-bright);
+  cursor: pointer;
+}
+
+.league-button:active {
+  background: var(--surface-1);
+}
+
+.league-button.active {
+  background: var(--surface-3);
+  border-color: var(--gold);
+  color: var(--gold-bright);
+}
+
+.league-button:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 1px;
+}
+
+.league-select {
+  font-family: var(--font-body);
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-2);
+  color: var(--gold);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.league-select:hover {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+  cursor: pointer;
+}
+
+.league-select:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 1px;
+}
+
+.league-select > option {
+  font-family: var(--font-body);
+  font-size: 13px;
+  background: var(--surface-2);
+  color: var(--gold);
+}
+
+.league-select > option.selected {
+  font-weight: bold;
+  color: var(--accent);
+}
+
+.league-input {
+  font-family: var(--font-body);
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.league-input::placeholder {
+  color: var(--text-muted);
+}
+
+.league-input::-webkit-search-cancel-button {
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.league-input:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+

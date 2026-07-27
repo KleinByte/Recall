@@ -1,0 +1,381 @@
+import type { Database } from "better-sqlite3"
+import type { StatsFilter } from "./matches-repo.js"
+import { durationBucketsFor } from "../matches/insights.js"
+import type { ModeFamily } from "../matches/types.js"
+
+export interface BucketRow {
+  label: string
+  games: number
+  wins: number
+  winRate: number
+  avgGradeScore?: number
+}
+
+export interface TimeBucketRow {
+  label: string
+  games: number
+  wins: number
+  winRate: number
+}
+
+export interface StreakBehaviour {
+  afterWin: TimeBucketRow
+  afterLoss: TimeBucketRow
+}
+
+export interface ContributionShare {
+  games: number
+  damageShare: number
+  goldShare: number
+  killShare: number
+}
+
+export interface ChampionPool {
+  champions: number
+  games: number
+  coreShare: number
+  coreWinRate: number
+  restWinRate: number
+}
+
+export interface BuiltItem {
+  itemId: number
+  games: number
+  wins: number
+  winRate: number
+}
+
+/** Three-hour blocks, which stay readable with a small history. */
+const HOUR_BLOCKS = [
+  "00–03",
+  "03–06",
+  "06–09",
+  "09–12",
+  "12–15",
+  "15–18",
+  "18–21",
+  "21–24",
+]
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
+/** How many champions count as the player's core pool. */
+const CORE_POOL_SIZE = 5
+
+/** Slots 0–5 are the build; slot 6 is the trinket, which is not a purchase. */
+const BUILD_SLOTS = ["item0", "item1", "item2", "item3", "item4", "item5"]
+
+function scope(filter: StatsFilter) {
+  const conditions = ["puuid = ?", "is_matched = 1"]
+  const params: (string | number)[] = [filter.puuid]
+
+  if (filter.mode) {
+    conditions.push("mode = ?")
+    params.push(filter.mode)
+  }
+
+  if (filter.modeFamily) {
+    conditions.push("mode_family = ?")
+    params.push(filter.modeFamily)
+  }
+
+  if (filter.sinceMs !== undefined) {
+    conditions.push("played_at >= ?")
+    params.push(filter.sinceMs)
+  }
+
+  return { where: `WHERE ${conditions.join(" AND ")}`, params }
+}
+
+/** Conditions against the participant table, optionally narrowed by mode. */
+function lobbyScope(filter: StatsFilter) {
+  const conditions = ["p.puuid = ?"]
+  const params: (string | number)[] = [filter.puuid]
+
+  if (filter.mode) {
+    conditions.push("m.mode = ?")
+    params.push(filter.mode)
+  }
+
+  if (filter.modeFamily) {
+    conditions.push("m.mode_family = ?")
+    params.push(filter.modeFamily)
+  }
+
+  return { conditions, params }
+}
+
+const rate = (wins: number, games: number) => (games === 0 ? 0 : wins / games)
+
+/**
+ * Questions about a player's record that need more than a running total.
+ *
+ * Each answer states how many games it rests on, because with a few dozen
+ * games most of these are suggestive rather than conclusive, and the caller
+ * needs to be able to say so.
+ */
+export class InsightsRepository {
+  constructor(readonly db: Database) {}
+
+  /**
+   * Results by how long the game ran.
+   *
+   * Empty bands are kept, so the shape of the answer never depends on the
+   * data and a chart does not reshuffle itself as history accumulates.
+   */
+  getDurationBuckets(filter: StatsFilter, family: ModeFamily): BucketRow[] {
+    const { where, params } = scope(filter)
+
+    const total = this.db
+      .prepare(`SELECT COUNT(*) AS games FROM matches ${where}`)
+      .get(...params) as { games: number }
+
+    if (total.games === 0) return []
+
+    let floor = 0
+
+    return durationBucketsFor(family).map((bucket) => {
+      const row = this.db
+        .prepare(
+          `SELECT COUNT(*) AS games, COALESCE(SUM(win), 0) AS wins,
+                  AVG(grade_score) AS avgGradeScore
+           FROM matches ${where}
+             AND duration_secs >= ? AND duration_secs < ?`,
+        )
+        .get(...params, floor, bucket.maxSecs) as {
+        games: number
+        wins: number
+        avgGradeScore: number | null
+      }
+
+      floor = bucket.maxSecs
+
+      return {
+        label: bucket.label,
+        games: row.games,
+        wins: row.wins,
+        winRate: rate(row.wins, row.games),
+        avgGradeScore: row.avgGradeScore ?? undefined,
+      }
+    })
+  }
+
+  /**
+   * Results by when the game was played, in the player's own timezone.
+   *
+   * Hours and weekdays are reported separately rather than as a grid: a 7 × 24
+   * heatmap needs hundreds of games before it says anything at all.
+   */
+  getTimeOfDay(filter: StatsFilter): {
+    hours: TimeBucketRow[]
+    weekdays: TimeBucketRow[]
+  } {
+    const { where, params } = scope(filter)
+
+    const rows = this.db
+      .prepare(
+        `SELECT
+           CAST(strftime('%H', played_at / 1000, 'unixepoch', 'localtime') AS INTEGER) AS hour,
+           CAST(strftime('%w', played_at / 1000, 'unixepoch', 'localtime') AS INTEGER) AS weekday,
+           COUNT(*) AS games,
+           COALESCE(SUM(win), 0) AS wins
+         FROM matches ${where}
+         GROUP BY hour, weekday`,
+      )
+      .all(...params) as {
+      hour: number
+      weekday: number
+      games: number
+      wins: number
+    }[]
+
+    if (rows.length === 0) return { hours: [], weekdays: [] }
+
+    const hours = HOUR_BLOCKS.map((label) => ({
+      label,
+      games: 0,
+      wins: 0,
+      winRate: 0,
+    }))
+    const weekdays = WEEKDAYS.map((label) => ({
+      label,
+      games: 0,
+      wins: 0,
+      winRate: 0,
+    }))
+
+    for (const row of rows) {
+      const block = hours[Math.floor(row.hour / 3)]
+      block.games += row.games
+      block.wins += row.wins
+
+      const day = weekdays[row.weekday]
+      day.games += row.games
+      day.wins += row.wins
+    }
+
+    for (const entry of [...hours, ...weekdays]) {
+      entry.winRate = rate(entry.wins, entry.games)
+    }
+
+    return { hours, weekdays }
+  }
+
+  /**
+   * How the player does after a win compared with after a loss.
+   *
+   * `LAG` reads the previous game in play order, which answers the question
+   * without pulling the whole history into memory to walk it.
+   */
+  getStreakBehaviour(filter: StatsFilter): StreakBehaviour | undefined {
+    const { where, params } = scope(filter)
+
+    const rows = this.db
+      .prepare(
+        `SELECT previous, COUNT(*) AS games, COALESCE(SUM(win), 0) AS wins
+         FROM (
+           SELECT win,
+                  LAG(win) OVER (ORDER BY played_at, game_id) AS previous
+           FROM matches ${where}
+         )
+         WHERE previous IS NOT NULL
+         GROUP BY previous`,
+      )
+      .all(...params) as { previous: number; games: number; wins: number }[]
+
+    if (rows.length === 0) return undefined
+
+    const of = (previous: number): TimeBucketRow => {
+      const row = rows.find((entry) => entry.previous === previous)
+      const games = row?.games ?? 0
+      const wins = row?.wins ?? 0
+
+      return {
+        label: previous === 1 ? "After a win" : "After a loss",
+        games,
+        wins,
+        winRate: rate(wins, games),
+      }
+    }
+
+    return { afterWin: of(1), afterLoss: of(0) }
+  }
+
+  /**
+   * The player's share of what their own side produced.
+   *
+   * Grouping by game and team and keeping only the side containing the player
+   * means a share is always out of four teammates plus themselves, never out
+   * of the whole lobby. Shares are averaged per game so one enormous game
+   * cannot speak for the rest.
+   */
+  getTeamContribution(filter: StatsFilter): ContributionShare | undefined {
+    const { conditions, params } = lobbyScope(filter)
+
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS games,
+                AVG(damageShare) AS damageShare,
+                AVG(goldShare)   AS goldShare,
+                AVG(killShare)   AS killShare
+         FROM (
+           SELECT
+             SUM(CASE WHEN p.is_player = 1 THEN p.damage_to_champions ELSE 0 END) * 1.0
+               / NULLIF(SUM(p.damage_to_champions), 0) AS damageShare,
+             SUM(CASE WHEN p.is_player = 1 THEN p.gold_earned ELSE 0 END) * 1.0
+               / NULLIF(SUM(p.gold_earned), 0) AS goldShare,
+             SUM(CASE WHEN p.is_player = 1 THEN p.kills ELSE 0 END) * 1.0
+               / NULLIF(SUM(p.kills), 0) AS killShare
+           FROM match_participants p
+           LEFT JOIN matches m
+             ON m.game_id = p.game_id AND m.puuid = p.puuid
+           WHERE ${conditions.join(" AND ")}
+           GROUP BY p.game_id, p.team_id
+           HAVING SUM(p.is_player) = 1
+         )`,
+      )
+      .get(...params) as {
+      games: number
+      damageShare: number | null
+      goldShare: number | null
+      killShare: number | null
+    }
+
+    if (row.games === 0) return undefined
+
+    return {
+      games: row.games,
+      damageShare: row.damageShare ?? 0,
+      goldShare: row.goldShare ?? 0,
+      killShare: row.killShare ?? 0,
+    }
+  }
+
+  /** How wide the champion pool is, and whether spreading out costs anything. */
+  getChampionPool(filter: StatsFilter): ChampionPool | undefined {
+    const { where, params } = scope(filter)
+
+    const rows = this.db
+      .prepare(
+        `SELECT champion_id AS championId, COUNT(*) AS games,
+                COALESCE(SUM(win), 0) AS wins
+         FROM matches ${where}
+         GROUP BY champion_id
+         ORDER BY games DESC, wins DESC`,
+      )
+      .all(...params) as { championId: number; games: number; wins: number }[]
+
+    if (rows.length === 0) return undefined
+
+    const core = rows.slice(0, CORE_POOL_SIZE)
+    const rest = rows.slice(CORE_POOL_SIZE)
+
+    const sum = (entries: typeof rows, key: "games" | "wins") =>
+      entries.reduce((total, entry) => total + entry[key], 0)
+
+    const games = sum(rows, "games")
+
+    return {
+      champions: rows.length,
+      games,
+      coreShare: games === 0 ? 0 : sum(core, "games") / games,
+      coreWinRate: rate(sum(core, "wins"), sum(core, "games")),
+      restWinRate: rate(sum(rest, "wins"), sum(rest, "games")),
+    }
+  }
+
+  /**
+   * The items the player finishes games holding.
+   *
+   * The client exposes no purchase events, so this is the final inventory and
+   * never the order things were bought in.
+   */
+  getBuildPatterns(filter: StatsFilter, limit: number): BuiltItem[] {
+    const { conditions, params } = lobbyScope(filter)
+    const all = [...conditions, "p.is_player = 1"].join(" AND ")
+
+    const slots = BUILD_SLOTS.map(
+      (slot) =>
+        `SELECT p.${slot} AS itemId, p.win AS win
+         FROM match_participants p
+         LEFT JOIN matches m
+           ON m.game_id = p.game_id AND m.puuid = p.puuid
+         WHERE ${all}`,
+    ).join(" UNION ALL ")
+
+    // The clause is repeated once per slot, so its parameters must be too.
+    const slotParams = BUILD_SLOTS.flatMap(() => params)
+
+    return this.db
+      .prepare(
+        `SELECT itemId, COUNT(*) AS games, COALESCE(SUM(win), 0) AS wins,
+                COALESCE(SUM(win), 0) * 1.0 / COUNT(*) AS winRate
+         FROM (${slots})
+         WHERE itemId > 0
+         GROUP BY itemId
+         ORDER BY games DESC, wins DESC
+         LIMIT ?`,
+      )
+      .all(...slotParams, limit) as BuiltItem[]
+  }
+}
