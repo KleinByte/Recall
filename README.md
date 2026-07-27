@@ -1,31 +1,46 @@
 # Recall
 
-> A League of Legends companion that remembers what the client forgets — every challenge, every tracked game, permanently.
+> A local League of Legends companion for permanent match history, challenge planning, champion progress, ranked goals, and playstyle analysis.
 
-![screenshot](screenshot.png)
+![Recall dashboard](image.png)
 
-# How to use
+## What Recall does
 
-It's better to launch the LoL client before
+**Keeps your history** — Recall saves supported matches locally so the League
+client's rolling history window does not erase games you have already synced.
 
-> An error popup could appear in some rare cases, you can safely ignore it
+**Turns challenges into a champion plan** — browse and filter every challenge,
+see champion-specific requirements, and pin what matters. While in champion
+select, Recall can show whether the champion you are hovering still advances a
+pinned challenge.
 
-## What Recall tracks
+**Shows the full game** — open a recorded match to compare both teams and
+expand a player for combat, economy, vision, objective, multikill, and setup
+statistics when the League client provided full game detail.
 
-**Challenges** — all of them. Recall imports your entire challenge catalogue,
-not a hand-picked subset, with tier progress, points, percentile and the full
-tier ladder. Champion-based challenges expand into a grid showing exactly which
-champions you still need.
+**Connects champion results to mastery and challenges** — compare champion
+mastery, your results, ranked performance, and remaining champion-specific
+challenge requirements.
 
-**Matches** — Ranked Solo/Duo, Ranked Flex, Normal, Quickplay, Swiftplay, ARAM
-and ARAM: Mayhem. Arena and the rotating modes are not tracked.
+**Tracks progress over time** — review ranked LP snapshots, set rank and
+challenge goals, view personal records, and explore mode-specific playstyle
+trends and lobby comparisons.
 
-Each mode shows what actually matters for it: creep score, vision, objectives
-and lane on Summoner's Rift; damage, healing and mitigation in ARAM.
+## Connected to the League client
 
-**Champions** — champion mastery combined with your own recorded results and,
-usefully, which challenges each champion still counts toward. That answers
-"who should I play next" in a way the client cannot.
+Recall reads the locally running League Client on Windows. It syncs on launch,
+after a game, and periodically while the client is available. Use **Refresh**
+when you want to sync matches, challenges, ranked snapshots, and profile data
+immediately.
+
+Pinned champion challenges can also appear in a small, draggable overlay during
+champion select. It marks whether the champion you are hovering still advances
+each pinned challenge.
+
+## Supported modes
+
+Recall records Ranked Solo/Duo, Ranked Flex, Normal, Quickplay, Swiftplay,
+ARAM, and ARAM: Mayhem. Arena and rotating modes are not currently tracked.
 
 ### Performance grades
 
@@ -41,22 +56,22 @@ Grading needs one extra request per game, so it runs after matches are recorded.
 A game that has already aged out of the client's history cannot be graded
 retroactively and will show no grade.
 
-## The 20-game limit
+## The League client's 20-game window
 
-The League client only ever exposes your **most recent 20 games**, shared across
-all modes. Requests for anything older are accepted and silently ignored, and no
+The League client exposes only its **most recent 20 games**, shared across all
+modes. Requests for anything older are accepted and silently ignored, and no
 other local endpoint offers more.
 
 Recall works around this by re-reading that window on launch, after each game
-and periodically, storing anything it has not seen before. So:
+and periodically, storing anything it has not seen before. This means:
 
 - Everything you play from installation onward is kept permanently, with no limit.
 - On first run, up to your last 20 games are imported.
 - Games played while Recall is closed are still picked up, provided you have not played more than 20 since it last ran.
 - Games from before you installed Recall cannot be recovered. Nothing can retrieve them.
 
-Match history is paged and filterable by mode, result, champion, grade, date and
-duration, so a large archive stays usable.
+Match history is paged, filterable, and sortable by mode, result, champion,
+grade, date, duration, KDA, and damage, so a large archive stays usable.
 
 Challenge progress is also snapshotted whenever a value changes, which lets
 Recall show progress over time — something the client, which only reports current
