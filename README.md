@@ -86,6 +86,18 @@ Go to the [latest release](https://github.com/nyquase/lol-challenge-tracker/rele
 
 > Windows will warn you that this exe is not safe, because it's a pain to sign an exe. Feel free to look at the code to see what it does.
 
+## Updates
+
+Recall checks public GitHub Releases after a packaged app starts. A newer
+release downloads in the background; Settings shows its progress and offers
+**Restart to update** when it is ready. Recall never restarts itself and keeps
+its user data and local database through the update.
+
+To publish a release, set `package.json` to the release version, commit it,
+then create and push the matching `v<version>` tag. The Release workflow builds
+the Windows installer and publishes its installer, blockmap, and updater
+metadata to GitHub Releases.
+
 # Build
 
 ```sh
