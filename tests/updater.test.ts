@@ -66,6 +66,45 @@ describe("createUpdaterService", () => {
     await service.retry()
     expect(updater.checkForUpdates).toHaveBeenCalledTimes(2)
   })
+
+  it("sets status to checking immediately and exposes it via status()", async () => {
+    const updater = client()
+    const publish = vi.fn()
+    const service = createUpdaterService({ updater, isPackaged: true, publish })
+
+    const startPromise = service.start()
+    expect(service.status()).toEqual({ kind: "checking" })
+    expect(publish).toHaveBeenCalledWith({ kind: "checking" })
+    await startPromise
+  })
+
+  it("does not propagate a rejected checkForUpdates() from start()", async () => {
+    const updater = client()
+    ;(updater.checkForUpdates as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("network failure"),
+    )
+    const service = createUpdaterService({
+      updater,
+      isPackaged: true,
+      publish: vi.fn(),
+    })
+    await expect(service.start()).resolves.toBeUndefined()
+  })
+
+  it("does not propagate a rejected checkForUpdates() from retry()", async () => {
+    const updater = client()
+    const service = createUpdaterService({
+      updater,
+      isPackaged: true,
+      publish: vi.fn(),
+    })
+    await service.start()
+    updater.emit("error", new Error("first failure"))
+    ;(updater.checkForUpdates as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("retry failure"),
+    )
+    await expect(service.retry()).resolves.toBeUndefined()
+  })
 })
 
 describe("registerUpdaterIpc", () => {

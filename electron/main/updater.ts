@@ -87,8 +87,8 @@ export function createUpdaterService({
 
       updater.autoDownload = true
       registerListeners()
-      publish({ kind: "checking" })
-      await updater.checkForUpdates()
+      set({ kind: "checking" })
+      await updater.checkForUpdates().catch(() => undefined)
     },
 
     status() {
@@ -97,7 +97,7 @@ export function createUpdaterService({
 
     async retry() {
       if (current.kind !== "error") return
-      await updater.checkForUpdates()
+      await updater.checkForUpdates().catch(() => undefined)
     },
 
     install() {
