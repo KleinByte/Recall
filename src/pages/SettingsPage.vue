@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue"
+import { computed, onMounted, ref } from "vue"
 import { api } from "../helpers/api"
+import { updatePresentation } from "../helpers/update"
+import type { UpdateStatus } from "../types/update"
 import type { StatsMeta } from "../types/stats"
 
 const props = defineProps<{
@@ -19,6 +21,8 @@ const emit = defineEmits<{
 const meta = ref<StatsMeta | null>(null)
 const busy = ref(false)
 const message = ref("")
+const updateStatus = ref<UpdateStatus>({ kind: "checking" })
+const update = computed(() => updatePresentation(updateStatus.value))
 
 async function loadMeta() {
   meta.value = await api.getStatsMeta()
@@ -27,7 +31,14 @@ async function loadMeta() {
 onMounted(() => {
   void loadMeta()
   api.on("stats:updated", () => void loadMeta())
+  void api.getUpdateStatus().then((status) => { updateStatus.value = status })
+  api.onUpdateStatus((status) => { updateStatus.value = status })
 })
+
+function runUpdateAction(command: "retry" | "install") {
+  if (command === "retry") void api.retryUpdate()
+  else if (command === "install") void api.installUpdate()
+}
 
 async function resync() {
   busy.value = true
@@ -117,6 +128,19 @@ const formatDate = (value?: number) =>
         />
         <span>Show champion names under icons</span>
       </label>
+    </section>
+
+    <section class="card">
+      <h2 class="section-title">Application updates</h2>
+      <p class="muted note">{{ update.message }}</p>
+      <div v-if="update.action" class="actions">
+        <button
+          class="league-button action"
+          @click="runUpdateAction(update.action!.command)"
+        >
+          {{ update.action!.label }}
+        </button>
+      </div>
     </section>
 
     <section class="card">

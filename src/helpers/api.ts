@@ -1,5 +1,6 @@
 import type { AramStats, Challenge, Champion, Summoner } from "../types/lol"
 import type { RawChallenge } from "../types/lcu"
+import type { UpdateStatus } from "../types/update"
 import type {
   ChallengeFilter,
   ChallengeHistoryRow,
@@ -254,6 +255,22 @@ export const api = {
 
   clearHistory(): Promise<{ deleted: number }> {
     return invoke("stats:clear")
+  },
+
+  getUpdateStatus(): Promise<UpdateStatus> {
+    return invoke("app:update-status")
+  },
+
+  retryUpdate(): Promise<void> {
+    return invoke("app:update-retry")
+  },
+
+  installUpdate(): Promise<boolean> {
+    return invoke("app:update-install")
+  },
+
+  onUpdateStatus(listener: (status: UpdateStatus) => void) {
+    ipc().on("app:update-status", (_event, status: UpdateStatus) => listener(status))
   },
 
   on(channel: string, listener: (...args: any[]) => void) {
