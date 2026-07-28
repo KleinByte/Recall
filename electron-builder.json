@@ -33,7 +33,8 @@
     {
       "provider": "github",
       "owner": "KleinByte",
-      "repo": "Recall"
+      "repo": "Recall",
+      "releaseType": "release"
     }
   ]
 }
