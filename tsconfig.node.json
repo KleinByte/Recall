@@ -12,5 +12,5 @@
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true
   },
-  "include": ["vite.config.ts", "electron", "src/types"]
+  "include": ["vite.config.ts", "electron"]
 }
