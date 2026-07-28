@@ -8,7 +8,7 @@ import {
   shell,
   Tray,
 } from "electron"
-import { autoUpdater } from "electron-updater"
+import electronUpdater from "electron-updater"
 import { fileURLToPath } from "node:url"
 import { writeFileSync } from "node:fs"
 import path from "node:path"
@@ -49,6 +49,8 @@ import { buildStyleProfile } from "./matches/style.js"
 import type { ModeFamily } from "./matches/types.js"
 import { migrateLegacyUserData } from "./migrate-user-data.js"
 import { createSingleFlightRefresh } from "./full-refresh.js"
+
+const { autoUpdater } = electronUpdater
 import {
   createUpdaterService,
   registerUpdaterIpc,
