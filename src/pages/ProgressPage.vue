@@ -542,6 +542,7 @@ h1 {
 .records {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-auto-rows: 1fr;
   gap: var(--space-4);
 }
 

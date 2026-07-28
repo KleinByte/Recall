@@ -267,92 +267,94 @@ const championName = (id: number) => championNameById(props.champions, id)
         <FormStrip :results="form" />
       </Panel>
 
-      <section class="split">
-        <Panel
-          v-if="rankedQueues.length"
-          title="Rank"
-          :meta="rankedQueues[0].latest.label"
-        >
-          <div v-for="queue in rankedQueues" :key="queue.queue" class="queue">
-            <div class="queue-head">
-              <span class="muted queue-label">{{ queue.label }}</span>
-              <span class="numeric">
-                {{ queue.latest.label }} · {{ queue.latest.leaguePoints }} LP
-              </span>
+      <section class="dashboard-columns">
+        <div class="dashboard-column">
+          <Panel
+            v-if="rankedQueues.length"
+            title="Rank"
+            :meta="rankedQueues[0].latest.label"
+          >
+            <div v-for="queue in rankedQueues" :key="queue.queue" class="queue">
+              <div class="queue-head">
+                <span class="muted queue-label">{{ queue.label }}</span>
+                <span class="numeric">
+                  {{ queue.latest.label }} · {{ queue.latest.leaguePoints }} LP
+                </span>
+              </div>
+              <RankGraph v-if="queue.points.length > 1" :points="queue.points" />
             </div>
-            <RankGraph v-if="queue.points.length > 1" :points="queue.points" />
-          </div>
-        </Panel>
+          </Panel>
 
-        <Panel
-          v-if="style"
-          title="Playstyle"
-          :meta="styleFamily === 'sr' ? `Summoner's Rift` : 'ARAM'"
-        >
-          <StyleRadar :axes="style.axes" />
-        </Panel>
-      </section>
-
-      <section class="split">
-        <Panel v-if="recent.length" title="Recent games">
-          <ul class="game-list">
-            <li
-              v-for="game in recent"
-              :key="game.gameId"
-              class="game"
-              :class="game.win ? 'won' : 'lost'"
-              @click="openMatch(game)"
-            >
-              <GradeBadge :grade="game.grade" />
-              <img
-                :src="championIconUrl(game.championId)"
-                :alt="championName(game.championId)"
-                class="portrait"
-              />
-              <div class="game-body">
-                <div class="game-name">{{ championName(game.championId) }}</div>
-                <div class="muted game-meta">
-                  {{ game.queueName ?? modeLabel(game.mode) }} ·
-                  {{ formatDuration(game.durationSecs) }}
+          <Panel v-if="recent.length" title="Recent games">
+            <ul class="game-list">
+              <li
+                v-for="game in recent"
+                :key="game.gameId"
+                class="game"
+                :class="game.win ? 'won' : 'lost'"
+                @click="openMatch(game)"
+              >
+                <GradeBadge :grade="game.grade" />
+                <img
+                  :src="championIconUrl(game.championId)"
+                  :alt="championName(game.championId)"
+                  class="portrait"
+                />
+                <div class="game-body">
+                  <div class="game-name">{{ championName(game.championId) }}</div>
+                  <div class="muted game-meta">
+                    {{ game.queueName ?? modeLabel(game.mode) }} ·
+                    {{ formatDuration(game.durationSecs) }}
+                  </div>
                 </div>
-              </div>
-              <div class="numeric game-kda">
-                {{ game.kills }}/{{ game.deaths }}/{{ game.assists }}
-              </div>
-              <div class="muted game-date">
-                {{ formatRelativeDate(game.playedAt) }}
-              </div>
-            </li>
-          </ul>
-        </Panel>
+                <div class="numeric game-kda">
+                  {{ game.kills }}/{{ game.deaths }}/{{ game.assists }}
+                </div>
+                <div class="muted game-date">
+                  {{ formatRelativeDate(game.playedAt) }}
+                </div>
+              </li>
+            </ul>
+          </Panel>
+        </div>
 
-        <Panel
-          v-if="ranking?.best.length"
-          title="Champions in form"
-          meta="Weighted by how much you have played them"
-        >
-          <ul class="champion-list">
-            <li
-              v-for="row in ranking.best"
-              :key="row.championId"
-              class="champion"
-              @click="openChampion(row.championId)"
-            >
-              <img
-                :src="championIconUrl(row.championId)"
-                :alt="championName(row.championId)"
-                class="portrait"
-              />
-              <span class="champion-name">
-                {{ championName(row.championId) }}
-              </span>
-              <span class="muted numeric small">
-                {{ row.games }} games · {{ formatPercent(row.winRate) }}
-              </span>
-              <GradeBadge :grade="gradeFromScore(row.adjustedGrade)" />
-            </li>
-          </ul>
-        </Panel>
+        <div class="dashboard-column">
+          <Panel
+            v-if="style"
+            title="Playstyle"
+            :meta="styleFamily === 'sr' ? `Summoner's Rift` : 'ARAM'"
+          >
+            <StyleRadar :axes="style.axes" />
+          </Panel>
+
+          <Panel
+            v-if="ranking?.best.length"
+            title="Champions in form"
+            meta="Weighted by how much you have played them"
+          >
+            <ul class="champion-list">
+              <li
+                v-for="row in ranking.best"
+                :key="row.championId"
+                class="champion"
+                @click="openChampion(row.championId)"
+              >
+                <img
+                  :src="championIconUrl(row.championId)"
+                  :alt="championName(row.championId)"
+                  class="portrait"
+                />
+                <span class="champion-name">
+                  {{ championName(row.championId) }}
+                </span>
+                <span class="muted numeric small">
+                  {{ row.games }} games · {{ formatPercent(row.winRate) }}
+                </span>
+                <GradeBadge :grade="gradeFromScore(row.adjustedGrade)" />
+              </li>
+            </ul>
+          </Panel>
+        </div>
       </section>
     </template>
 
@@ -443,14 +445,22 @@ h1 {
 .kpis {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(138px, 1fr));
+  grid-auto-rows: 1fr;
   gap: var(--space-3);
 }
 
-.split {
+.dashboard-columns {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-4);
   align-items: start;
+}
+
+.dashboard-column {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-4);
 }
 
 .queue + .queue {
@@ -561,6 +571,7 @@ h1 {
 .categories {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-auto-rows: 1fr;
   gap: var(--space-4);
 }
 
@@ -579,6 +590,7 @@ h1 {
 .near-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-auto-rows: 1fr;
   gap: var(--space-3);
 }
 
@@ -614,5 +626,11 @@ h1 {
 
 .notice {
   max-width: 60ch;
+}
+
+@media (max-width: 820px) {
+  .dashboard-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>

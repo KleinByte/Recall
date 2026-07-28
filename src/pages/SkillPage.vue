@@ -689,6 +689,7 @@ h1 {
 .kpis {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(138px, 1fr));
+  grid-auto-rows: 1fr;
   gap: var(--space-3);
 }
 
@@ -697,7 +698,7 @@ h1 {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(300px, 0.7fr);
   gap: var(--space-5);
-  align-items: center;
+  align-items: start;
 }
 
 .breakdown {
@@ -822,6 +823,7 @@ h1 {
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-auto-rows: 1fr;
   gap: var(--space-3) var(--space-4);
 }
 
@@ -846,7 +848,7 @@ h1 {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: var(--space-4);
-  align-items: start;
+  align-items: stretch;
 }
 
 .grades {
