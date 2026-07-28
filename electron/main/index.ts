@@ -8,6 +8,7 @@ import {
   shell,
   Tray,
 } from "electron"
+import { autoUpdater } from "electron-updater"
 import { fileURLToPath } from "node:url"
 import { writeFileSync } from "node:fs"
 import path from "node:path"
@@ -48,6 +49,11 @@ import { buildStyleProfile } from "./matches/style.js"
 import type { ModeFamily } from "./matches/types.js"
 import { migrateLegacyUserData } from "./migrate-user-data.js"
 import { createSingleFlightRefresh } from "./full-refresh.js"
+import {
+  createUpdaterService,
+  registerUpdaterIpc,
+  type UpdaterService,
+} from "./updater.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -635,8 +641,10 @@ async function updateOverlay(championId: number | null) {
   })
 }
 
-function registerIpc(win: BrowserWindow) {
+function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
   ipcMain.on("app-ready", () => connectToLcu(win))
+
+  registerUpdaterIpc(ipcMain, updaterService)
 
   ipcMain.on("store-set", (_event, key: string, value: unknown) => {
     store.set(key, value)
@@ -1031,7 +1039,14 @@ async function main() {
   // League client is unavailable.
   getRepository()
 
-  registerIpc(win)
+  const updater = createUpdaterService({
+    updater: autoUpdater,
+    isPackaged: app.isPackaged,
+    publish: (status) => broadcast(win, "app:update-status", status),
+  })
+
+  registerIpc(win, updater)
+  void updater.start()
 
   // A second launch reveals the running copy rather than starting another.
   app.on("second-instance", () => reveal(win))

@@ -105,6 +105,18 @@ describe("createUpdaterService", () => {
     )
     await expect(service.retry()).resolves.toBeUndefined()
   })
+
+  it("forwards updater state through the main-window publisher", async () => {
+    const updater = client()
+    const publish = vi.fn()
+    const service = createUpdaterService({ updater, isPackaged: true, publish })
+
+    await service.start()
+    updater.emit("update-not-available")
+
+    expect(publish).toHaveBeenLastCalledWith({ kind: "up-to-date" })
+    expect(updater.autoDownload).toBe(true)
+  })
 })
 
 describe("registerUpdaterIpc", () => {
