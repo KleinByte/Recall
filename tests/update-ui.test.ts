@@ -10,6 +10,16 @@ describe("updatePresentation", () => {
       message: "Checking for updates…",
       action: null,
     })
+    expect(updatePresentation({ kind: "up-to-date" })).toEqual({
+      message: "Recall is up to date.",
+      action: null,
+    })
+    expect(
+      updatePresentation({ kind: "available", version: "1.2.0" }),
+    ).toEqual({
+      message: "Downloading Recall 1.2.0…",
+      action: null,
+    })
     expect(
       updatePresentation({ kind: "downloading", version: "1.2.0", percent: 42 }),
     ).toEqual({
