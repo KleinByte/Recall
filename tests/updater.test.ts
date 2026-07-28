@@ -91,6 +91,20 @@ describe("createUpdaterService", () => {
     await expect(service.start()).resolves.toBeUndefined()
   })
 
+  it("sets status to checking immediately when retry() is called", async () => {
+    const updater = client()
+    const publish = vi.fn()
+    const service = createUpdaterService({ updater, isPackaged: true, publish })
+    await service.start()
+    updater.emit("error", new Error("socket reset"))
+    expect(service.status()).toEqual({ kind: "error", message: expect.any(String) })
+
+    const retryPromise = service.retry()
+    expect(service.status()).toEqual({ kind: "checking" })
+    expect(publish).toHaveBeenLastCalledWith({ kind: "checking" })
+    await retryPromise
+  })
+
   it("does not propagate a rejected checkForUpdates() from retry()", async () => {
     const updater = client()
     const service = createUpdaterService({

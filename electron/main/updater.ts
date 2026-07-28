@@ -103,6 +103,7 @@ export function createUpdaterService({
 
     async retry() {
       if (current.kind !== "error") return
+      set({ kind: "checking" })
       await updater.checkForUpdates().catch(() => undefined)
     },
 
