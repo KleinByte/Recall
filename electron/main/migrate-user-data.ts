@@ -1,4 +1,11 @@
-import { copyFileSync, existsSync, mkdirSync } from "node:fs"
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+} from "node:fs"
 import path from "node:path"
 
 /**
@@ -16,6 +23,21 @@ const LEGACY_FILES = [
 
 export interface MigrationResult {
   migrated: string[]
+}
+
+interface FileStamp {
+  size: number
+  modifiedAt: number
+}
+
+function stamp(filePath: string): FileStamp | undefined {
+  if (!existsSync(filePath)) return undefined
+  const details = statSync(filePath)
+  return { size: details.size, modifiedAt: details.mtimeMs }
+}
+
+function sameStamp(left: FileStamp | undefined, right: FileStamp | undefined) {
+  return left?.size === right?.size && left?.modifiedAt === right?.modifiedAt
 }
 
 /**
@@ -40,21 +62,50 @@ export function migrateLegacyUserData(
 
   mkdirSync(currentDir, { recursive: true })
 
-  for (const file of LEGACY_FILES) {
-    const source = path.join(legacyDir, file)
-    const target = path.join(currentDir, file)
+  const files = LEGACY_FILES.filter(
+    (file) =>
+      existsSync(path.join(legacyDir, file)) &&
+      !existsSync(path.join(currentDir, file)),
+  )
+  if (files.length === 0) return { migrated }
 
-    if (!existsSync(source) || existsSync(target)) continue
+  // The old and renamed apps can briefly overlap during an update. Copying a
+  // database and its WAL one file at a time while the old process is writing
+  // can produce a mismatched pair. Stage the whole import, then confirm the
+  // source did not change during the copy before making anything visible.
+  const sourceStamps = new Map(
+    files.map((file) => [file, stamp(path.join(legacyDir, file))]),
+  )
+  const staging = path.join(currentDir, `.legacy-import-${process.pid}-${Date.now()}`)
 
-    try {
-      copyFileSync(source, target)
-      migrated.push(file)
-    } catch (error) {
-      console.warn(
-        `Could not carry over ${file} from the previous install: ` +
-          `${(error as Error).message}`,
-      )
+  try {
+    mkdirSync(staging, { recursive: true })
+    for (const file of files) {
+      copyFileSync(path.join(legacyDir, file), path.join(staging, file))
     }
+
+    const changed = files.some(
+      (file) => !sameStamp(sourceStamps.get(file), stamp(path.join(legacyDir, file))),
+    )
+    if (changed) {
+      console.warn(
+        "Previous Recall data changed while it was being imported; it will be retried on the next launch.",
+      )
+      return { migrated }
+    }
+
+    for (const file of files) {
+      const target = path.join(currentDir, file)
+      if (existsSync(target)) continue
+      renameSync(path.join(staging, file), target)
+      migrated.push(file)
+    }
+  } catch (error) {
+    console.warn(
+      `Could not carry over data from the previous install: ${(error as Error).message}`,
+    )
+  } finally {
+    rmSync(staging, { recursive: true, force: true })
   }
 
   return { migrated }

@@ -9,6 +9,31 @@ import { existsSync, renameSync } from "node:fs"
 const COMPANION_SUFFIXES = ["", "-wal", "-shm"]
 
 /**
+ * SQLite reports a number of perfectly recoverable startup problems through
+ * the same error channel as corruption: a second Recall process may still be
+ * shutting down, an antivirus scan can briefly lock the file, or a migration
+ * can need attention. Starting over in any of those cases loses history.
+ *
+ * Only errors that SQLite explicitly identifies as a corrupt/non-database
+ * file are eligible for quarantine. Everything else is surfaced to the app,
+ * leaving the existing database entirely untouched.
+ */
+export function isDatabaseCorruptionError(error: unknown): boolean {
+  const candidate = error as { code?: unknown; message?: unknown }
+  const code = typeof candidate?.code === "string" ? candidate.code : ""
+  const message =
+    typeof candidate?.message === "string" ? candidate.message.toLowerCase() : ""
+
+  return (
+    code === "SQLITE_CORRUPT" ||
+    code === "SQLITE_NOTADB" ||
+    /database disk image is malformed|file is not a database|file is encrypted or is not a database/.test(
+      message,
+    )
+  )
+}
+
+/**
  * Moves a database that cannot be opened out of the way.
  *
  * The file is kept rather than deleted: it is the only copy of whatever it
@@ -45,7 +70,7 @@ export function openWithRecovery<T>(
   try {
     return open(filePath)
   } catch (error) {
-    if (!existsSync(filePath)) throw error
+    if (!existsSync(filePath) || !isDatabaseCorruptionError(error)) throw error
 
     const moved = quarantineDamaged(filePath)
 

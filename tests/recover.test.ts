@@ -7,7 +7,10 @@ import {
   readdirSync,
   writeFileSync,
 } from "node:fs"
-import { openWithRecovery } from "../electron/main/database/recover.js"
+import {
+  isDatabaseCorruptionError,
+  openWithRecovery,
+} from "../electron/main/database/recover.js"
 
 let dir: string
 let file: string
@@ -51,7 +54,7 @@ describe("openWithRecovery", () => {
     let attempt = 0
     openWithRecovery(file, () => {
       attempt += 1
-      if (attempt === 1) throw new Error("malformed")
+      if (attempt === 1) throw new Error("database disk image is malformed")
       return "opened"
     })
 
@@ -69,7 +72,7 @@ describe("openWithRecovery", () => {
     let attempt = 0
     openWithRecovery(file, () => {
       attempt += 1
-      if (attempt === 1) throw new Error("malformed")
+      if (attempt === 1) throw new Error("database disk image is malformed")
       return "opened"
     })
 
@@ -86,5 +89,39 @@ describe("openWithRecovery", () => {
         throw new Error("disk is full")
       }),
     ).toThrow("disk is full")
+  })
+
+  it("does not discard history when the database is temporarily locked", () => {
+    writeFileSync(file, "healthy history")
+    const locked = Object.assign(new Error("database is locked"), {
+      code: "SQLITE_BUSY",
+    })
+
+    expect(() => openWithRecovery(file, () => { throw locked })).toThrow(locked)
+    expect(existsSync(file)).toBe(true)
+    expect(damagedFiles()).toEqual([])
+  })
+
+  it("does not mistake a migration error for file corruption", () => {
+    writeFileSync(file, "healthy history")
+
+    expect(() =>
+      openWithRecovery(file, () => {
+        throw new Error("duplicate column name: grade")
+      }),
+    ).toThrow("duplicate column name")
+
+    expect(existsSync(file)).toBe(true)
+    expect(damagedFiles()).toEqual([])
+  })
+
+  it("only recognizes explicit SQLite corruption errors", () => {
+    expect(isDatabaseCorruptionError({ code: "SQLITE_CORRUPT" })).toBe(true)
+    expect(isDatabaseCorruptionError({ code: "SQLITE_NOTADB" })).toBe(true)
+    expect(isDatabaseCorruptionError(new Error("database disk image is malformed"))).toBe(
+      true,
+    )
+    expect(isDatabaseCorruptionError({ code: "SQLITE_BUSY" })).toBe(false)
+    expect(isDatabaseCorruptionError(new Error("duplicate column name"))).toBe(false)
   })
 })
