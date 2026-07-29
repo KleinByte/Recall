@@ -90,12 +90,17 @@ describe("classifyMatch with client queue data", () => {
     expect(result?.queueName).toBeUndefined()
   })
 
-  it("leaves untracked modes untracked even when the client describes them", () => {
+  it("retains other modes with the client-provided queue name", () => {
     const result = classifyMatch(
       game({ queueId: 1700, mapId: 30, gameMode: "CHERRY" }),
       queue({ id: 1700, name: "Arena", gameMode: "CHERRY", mapId: 30, isRanked: false }),
     )
 
-    expect(result).toBeUndefined()
+    expect(result).toEqual({
+      mode: "other",
+      family: "other",
+      isRanked: false,
+      queueName: "Arena",
+    })
   })
 })

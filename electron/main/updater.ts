@@ -28,14 +28,14 @@ export interface UpdaterService {
   start(): Promise<void>
   status(): UpdateStatus
   retry(): Promise<void>
-  install(): boolean
+  install(): Promise<boolean>
 }
 
 interface UpdaterServiceOptions {
   updater: UpdaterClient
   isPackaged: boolean
   publish: (status: UpdateStatus) => void
-  beforeInstall?: () => void
+  beforeInstall?: () => void | Promise<void>
 }
 
 const ERROR_MESSAGE =
@@ -113,10 +113,10 @@ export function createUpdaterService({
       await updater.checkForUpdates().catch(() => undefined)
     },
 
-    install() {
+    async install() {
       if (current.kind !== "downloaded") return false
       try {
-        beforeInstall()
+        await beforeInstall()
         updater.quitAndInstall()
         return true
       } catch (error) {

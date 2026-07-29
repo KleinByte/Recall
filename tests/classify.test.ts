@@ -40,14 +40,16 @@ describe("classifyMatch", () => {
     ).toBe("mayhem")
   })
 
-  it("ignores games played on other maps", () => {
+  it("keeps games played on other maps", () => {
     expect(
       classifyMatch(game({ mapId: 33, gameMode: "STRAWBERRY", queueId: 1810 })),
-    ).toBeUndefined()
+    ).toMatchObject({ mode: "other", family: "other" })
   })
 
-  it("ignores unrelated modes played on the Howling Abyss", () => {
-    expect(classifyMatch(game({ gameMode: "URF", queueId: 900 }))).toBeUndefined()
+  it("keeps unrelated modes played on the Howling Abyss", () => {
+    expect(
+      classifyMatch(game({ gameMode: "URF", queueId: 900 })),
+    ).toMatchObject({ mode: "other", family: "other" })
   })
 })
 
@@ -92,7 +94,7 @@ describe("classifyMatch — Summoner's Rift", () => {
     }
   })
 
-  it("ignores Arena", () => {
+  it("keeps Arena and future queues as other history", () => {
     const arena = {
       mapId: 30,
       gameMode: "CHERRY",
@@ -100,6 +102,11 @@ describe("classifyMatch — Summoner's Rift", () => {
       queueId: 1700,
     } as LcuGame
 
-    expect(classifyMatch(arena)).toBeUndefined()
+    expect(classifyMatch(arena)).toEqual({
+      mode: "other",
+      family: "other",
+      isRanked: false,
+      queueName: undefined,
+    })
   })
 })

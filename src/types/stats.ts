@@ -6,8 +6,9 @@ export type TrackedMode =
   | "sr_swiftplay"
   | "aram"
   | "mayhem"
+  | "other"
 
-export type ModeFamily = "sr" | "aram"
+export type ModeFamily = "sr" | "aram" | "other"
 
 export interface StatsFilter {
   mode?: TrackedMode
@@ -460,6 +461,22 @@ export interface StatsMeta {
   databasePath: string
   totalMatches: number
   oldestPlayedAt?: number
+}
+
+export interface RiotHistoryBackfillState {
+  puuid: string
+  regionalRoute: string
+  endTimeSeconds: number
+  nextOffset: number
+  idsScanned: number
+  matchesDownloaded: number
+  matchesImported: number
+  matchesSkipped: number
+  status: "idle" | "running" | "complete" | "error" | "paused"
+  lastError?: string
+  startedAt?: number
+  updatedAt: number
+  completedAt?: number
 }
 
 export interface SyncResult {

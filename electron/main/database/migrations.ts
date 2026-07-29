@@ -304,6 +304,33 @@ export const migrations: Migration[] = [
       ALTER TABLE match_participants ADD COLUMN grade_score REAL;
     `,
   },
+  {
+    // A Match-V5 import can take hours under a personal key. Store its cursor
+    // with the history so it survives restarts and cannot get ahead of a
+    // restored database snapshot.
+    version: 8,
+    up: `
+      CREATE TABLE riot_history_backfill (
+        puuid             TEXT    NOT NULL,
+        regional_route    TEXT    NOT NULL,
+        end_time_seconds  INTEGER NOT NULL,
+        next_offset       INTEGER NOT NULL DEFAULT 0,
+        ids_scanned       INTEGER NOT NULL DEFAULT 0,
+        matches_downloaded INTEGER NOT NULL DEFAULT 0,
+        matches_imported  INTEGER NOT NULL DEFAULT 0,
+        matches_skipped   INTEGER NOT NULL DEFAULT 0,
+        status            TEXT    NOT NULL DEFAULT 'idle',
+        last_error        TEXT,
+        started_at        INTEGER,
+        updated_at        INTEGER NOT NULL,
+        completed_at      INTEGER,
+        PRIMARY KEY (puuid, regional_route)
+      );
+
+      CREATE INDEX idx_riot_backfill_owner
+        ON riot_history_backfill (puuid, updated_at DESC);
+    `,
+  },
 ]
 
 export const latestSchemaVersion = migrations.at(-1)?.version ?? 0

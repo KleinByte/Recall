@@ -6,8 +6,9 @@ export type TrackedMode =
   | "sr_swiftplay"
   | "aram"
   | "mayhem"
+  | "other"
 
-export type ModeFamily = "sr" | "aram"
+export type ModeFamily = "sr" | "aram" | "other"
 
 export interface ModeInfo {
   mode: TrackedMode

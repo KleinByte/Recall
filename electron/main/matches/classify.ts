@@ -30,7 +30,8 @@ const RANKED_MODES = new Set<TrackedMode>([
  * it is authoritative and already covers queues released after this was
  * written. The table below is the fallback for when it is not.
  *
- * Arena and the rotating modes are deliberately not tracked.
+ * Everything else is retained as "other" so a complete Riot API backfill does
+ * not silently discard Arena, rotating modes, or future queues.
  */
 export function classifyMatch(
   game: LcuGame,
@@ -62,5 +63,10 @@ export function classifyMatch(
     }
   }
 
-  return undefined
+  return {
+    mode: "other",
+    family: "other",
+    isRanked: queue?.isRanked ?? false,
+    queueName,
+  }
 }

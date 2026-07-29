@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from "vue"
 import { api } from "../helpers/api"
 import { updatePresentation } from "../helpers/update"
 import type { UpdateStatus } from "../types/update"
-import type { StatsMeta } from "../types/stats"
+import type { RiotHistoryBackfillState, StatsMeta } from "../types/stats"
 
 const props = defineProps<{
   isColoredWhenDone: boolean
@@ -27,6 +27,27 @@ const riotApiKey = ref("")
 const riotKeyConfigured = ref(false)
 const riotKeyProtected = ref(false)
 const riotKeyMessage = ref("")
+const riotHistory = ref<RiotHistoryBackfillState>()
+
+const riotHistoryMessage = computed(() => {
+  const history = riotHistory.value
+  if (!history) {
+    return props.connected
+      ? "Save a key to import the complete Match-V5 history available for this account."
+      : "Connect the League client so Recall can identify the account and regional route."
+  }
+
+  if (history.status === "complete") {
+    return `History scan complete: ${history.idsScanned.toLocaleString()} IDs scanned, ${history.matchesImported.toLocaleString()} new matches imported.`
+  }
+  if (history.status === "error") {
+    return history.lastError || "The Riot history import stopped."
+  }
+  if (history.status === "paused") {
+    return `History import paused after ${history.idsScanned.toLocaleString()} IDs. It will resume when the client reconnects.`
+  }
+  return `Scanning in the background: ${history.idsScanned.toLocaleString()} IDs scanned, ${history.matchesImported.toLocaleString()} new matches imported. Riot rate limits may pause requests temporarily.`
+})
 
 async function loadMeta() {
   meta.value = await api.getStatsMeta()
@@ -40,6 +61,10 @@ onMounted(() => {
   void api.getRiotApiKeyStatus().then((status) => {
     riotKeyConfigured.value = status.configured
     riotKeyProtected.value = status.protected
+    riotHistory.value = status.history
+  })
+  api.on("riot-history:updated", (status: RiotHistoryBackfillState) => {
+    riotHistory.value = status
   })
 })
 
@@ -49,7 +74,9 @@ async function saveRiotKey() {
     await api.saveRiotApiKey(riotApiKey.value)
     riotApiKey.value = ""
     riotKeyConfigured.value = true
-    riotKeyMessage.value = "API key saved securely on this device."
+    riotKeyMessage.value = props.connected
+      ? "API key saved. The full history import is starting in the background."
+      : "API key saved. The import will start when the League client connects."
   } catch (error) {
     riotKeyMessage.value = (error as Error).message
   }
@@ -59,7 +86,14 @@ async function clearRiotKey() {
   await api.clearRiotApiKey()
   riotApiKey.value = ""
   riotKeyConfigured.value = false
+  if (riotHistory.value?.status === "running") {
+    riotHistory.value = { ...riotHistory.value, status: "paused" }
+  }
   riotKeyMessage.value = "API key removed from this device."
+}
+
+function retryRiotHistory() {
+  void api.retryRiotHistory()
 }
 
 function runUpdateAction(command: "retry" | "install") {
@@ -173,7 +207,9 @@ const formatDate = (value?: number) =>
     <section class="card">
       <h2 class="section-title">Riot API</h2>
       <p class="muted note">
-        Used for optional live teammate history. The key is encrypted by your operating system and is never shown again after saving.
+        Used for Match-V5 history and optional live teammate stats. After saving,
+        Recall imports every match Riot still exposes for your account. The key
+        is encrypted by your operating system and is never shown again.
       </p>
       <p v-if="!riotKeyProtected" class="muted note danger-note">
         Secure local storage is unavailable, so Recall will not save an API key on this computer.
@@ -195,6 +231,14 @@ const formatDate = (value?: number) =>
         <button v-if="riotKeyConfigured" class="league-button action danger" @click="clearRiotKey">Remove key</button>
       </div>
       <p class="muted note">{{ riotKeyMessage || (riotKeyConfigured ? "A key is configured on this device." : "No API key configured.") }}</p>
+      <p v-if="riotKeyConfigured" class="muted note" :class="{ 'danger-note': riotHistory?.status === 'error' }">
+        {{ riotHistoryMessage }}
+      </p>
+      <div v-if="riotKeyConfigured && (riotHistory?.status === 'error' || riotHistory?.status === 'paused')" class="actions">
+        <button class="league-button action" :disabled="!connected" @click="retryRiotHistory">
+          Resume history import
+        </button>
+      </div>
     </section>
 
     <section class="card">
@@ -216,8 +260,8 @@ const formatDate = (value?: number) =>
       </dl>
 
       <p class="muted note">
-        The League client only exposes its most recent 20 games, so the app
-        records games as you play and keeps them here permanently.
+        Recall keeps imported and newly played matches locally. Without a Riot
+        API key, the League client fallback is limited to its most recent 20 games.
       </p>
 
       <div class="actions">

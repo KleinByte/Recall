@@ -52,7 +52,7 @@ describe("createUpdaterService", () => {
       kind: "downloaded",
       version: "1.2.0",
     })
-    expect(service.install()).toBe(true)
+    await expect(service.install()).resolves.toBe(true)
     expect(beforeInstall).toHaveBeenCalledOnce()
     expect(updater.quitAndInstall).toHaveBeenCalledOnce()
   })
@@ -71,12 +71,35 @@ describe("createUpdaterService", () => {
     await service.start()
     updater.emit("update-downloaded", { version: "1.2.0" })
 
-    expect(service.install()).toBe(false)
+    await expect(service.install()).resolves.toBe(false)
     expect(updater.quitAndInstall).not.toHaveBeenCalled()
     expect(service.status()).toEqual({
       kind: "error",
       message: expect.stringContaining("safely close"),
     })
+  })
+
+  it("waits for background database work before installing", async () => {
+    const updater = client()
+    let finish!: () => void
+    const ready = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const service = createUpdaterService({
+      updater,
+      isPackaged: true,
+      publish: vi.fn(),
+      beforeInstall: () => ready,
+    })
+    await service.start()
+    updater.emit("update-downloaded", { version: "1.2.0" })
+
+    const installing = service.install()
+    expect(updater.quitAndInstall).not.toHaveBeenCalled()
+    finish()
+
+    await expect(installing).resolves.toBe(true)
+    expect(updater.quitAndInstall).toHaveBeenCalledOnce()
   })
 
   it("publishes a safe error and retries the feed check", async () => {
@@ -170,7 +193,7 @@ describe("registerUpdaterIpc", () => {
     const service = {
       status: vi.fn().mockReturnValue({ kind: "up-to-date" as const }),
       retry: vi.fn().mockResolvedValue(undefined),
-      install: vi.fn().mockReturnValue(false),
+      install: vi.fn().mockResolvedValue(false),
     }
 
     registerUpdaterIpc({ handle } as never, service)
@@ -181,6 +204,6 @@ describe("registerUpdaterIpc", () => {
     })
     await handlers.get("app:update-retry")!()
     expect(service.retry).toHaveBeenCalledOnce()
-    expect(handlers.get("app:update-install")!()).toBe(false)
+    await expect(handlers.get("app:update-install")!()).resolves.toBe(false)
   })
 })

@@ -66,6 +66,8 @@ export const modeLabel = (mode: string) => {
       return "Swiftplay"
     case "sr_normal":
       return "Normal"
+    case "other":
+      return "Other"
     default:
       return mode
   }

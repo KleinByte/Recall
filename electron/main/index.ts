@@ -37,6 +37,7 @@ import { GoalsRepository, type GoalInput } from "./database/goals-repo.js"
 import { rankToPoints, formatRank } from "./ranked/rank.js"
 import { ChallengeSync } from "./challenges/challenge-sync.js"
 import { InsightsRepository } from "./database/insights-repo.js"
+import { RiotBackfillRepository } from "./database/riot-backfill-repo.js"
 import {
   matchAxes,
   pickBestAndWorst,
@@ -55,6 +56,9 @@ import type { ModeFamily } from "./matches/types.js"
 import { migrateLegacyUserData } from "./migrate-user-data.js"
 import { createSingleFlightRefresh } from "./full-refresh.js"
 import { readLiveSession, type LivePhase, type LiveSession } from "./live-session.js"
+import { fetchQueues } from "./matches/queues.js"
+import { RiotHistoryBackfill } from "./riot/history-backfill.js"
+import { regionalRouteFor } from "./riot/routing.js"
 
 const { autoUpdater } = electronUpdater
 import {
@@ -120,6 +124,7 @@ interface Session {
   sync: MatchSync
   challengeSync: ChallengeSync
   summoner: Summoner
+  regionalRoute?: string
   timer: NodeJS.Timeout
 }
 
@@ -155,6 +160,22 @@ let participants: ParticipantsRepository | undefined
 let rankedHistory: RankedRepository | undefined
 let goals: GoalsRepository | undefined
 let insights: InsightsRepository | undefined
+let riotBackfills: RiotBackfillRepository | undefined
+let riotBackfillAbort: AbortController | undefined
+let riotBackfillTask: Promise<void> | undefined
+let riotBackfillRevision = 0
+const databaseTasks = new Set<Promise<unknown>>()
+let shutdownPrepared = false
+let shutdownPreparing: Promise<void> | undefined
+
+function trackDatabaseTask<T>(task: Promise<T>): Promise<T> {
+  databaseTasks.add(task)
+  void task.then(
+    () => databaseTasks.delete(task),
+    () => databaseTasks.delete(task),
+  )
+  return task
+}
 
 function getDatabase() {
   if (!database) {
@@ -208,6 +229,27 @@ function adoptPreviousInstallData() {
   const { migrated } = migrateLegacyUserData(legacyDir, currentDir)
   if (migrated.length > 0) {
     console.log(`Carried over from the previous install: ${migrated.join(", ")}`)
+  }
+}
+
+function getRiotBackfills(): RiotBackfillRepository {
+  if (!riotBackfills) riotBackfills = new RiotBackfillRepository(getDatabase())
+  return riotBackfills
+}
+
+function readRiotApiKey(): string | undefined {
+  const encrypted = store.get(RIOT_API_KEY_STORE)
+  if (typeof encrypted !== "string" || !safeStorage.isEncryptionAvailable()) {
+    return undefined
+  }
+
+  try {
+    return safeStorage.decryptString(Buffer.from(encrypted, "base64"))
+  } catch (error) {
+    console.warn(
+      `Could not decrypt the configured Riot API key: ${(error as Error).message}`,
+    )
+    return undefined
   }
 }
 
@@ -307,6 +349,7 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
   const client = new LcuClient(credentials)
 
   let summoner: Summoner
+  let regionalRoute: string | undefined
   try {
     summoner = await client.request<Summoner>(
       "/lol-summoner/v1/current-summoner",
@@ -325,6 +368,17 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
     return
   }
 
+  try {
+    const locale = await client.request<{
+      region?: string
+      webRegion?: string
+    }>("/riotclient/region-locale")
+    const platform = locale.region || locale.webRegion
+    regionalRoute = platform ? regionalRouteFor(platform) : undefined
+  } catch (error) {
+    console.warn(`Could not determine Riot API route: ${(error as Error).message}`)
+  }
+
   const sync = new MatchSync(
     client,
     getRepository(),
@@ -340,11 +394,11 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
 
   events.on("end-of-game", () => {
     broadcast(win, "end-of-game")
-    void catchFinishedGame(win)
+    void trackDatabaseTask(catchFinishedGame(win))
   })
   events.on("game-end", () => {
     clearLiveSession(win)
-    void catchFinishedGame(win)
+    void trackDatabaseTask(catchFinishedGame(win))
   })
   events.on("pick", (championId: number | null) => {
     broadcast(win, "pick", championId)
@@ -368,12 +422,14 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
     sync,
     challengeSync,
     summoner,
+    regionalRoute,
     timer: setInterval(() => void runSync(win), PERIODIC_SYNC_INTERVAL_MS),
   }
 
   broadcast(win, "lcu:status", { connected: true, summoner })
   void initialiseLiveSession(win)
   await runSync(win)
+  void startRiotHistoryBackfill(win, false)
 }
 
 function stopSession(win: BrowserWindow) {
@@ -384,6 +440,9 @@ function stopSession(win: BrowserWindow) {
 
   if (!session) return
 
+  riotBackfillRevision += 1
+  riotBackfillAbort?.abort()
+  riotBackfillAbort = undefined
   clearInterval(session.timer)
   session.events.stop()
   session.client.close()
@@ -466,7 +525,88 @@ async function performFullSync(win: BrowserWindow) {
 const refreshAll = createSingleFlightRefresh(performFullSync)
 
 async function runSync(win: BrowserWindow) {
-  return refreshAll(win)
+  return trackDatabaseTask(refreshAll(win))
+}
+
+/**
+ * Starts or resumes the long Match-V5 import without blocking the renderer.
+ *
+ * Only one generation may write progress at a time. Replacing a key or
+ * changing League accounts aborts and drains the previous generation first.
+ */
+async function startRiotHistoryBackfill(
+  win: BrowserWindow,
+  restart: boolean,
+) {
+  const revision = ++riotBackfillRevision
+  riotBackfillAbort?.abort()
+  const previous = riotBackfillTask
+  if (previous) await previous.catch(() => undefined)
+  if (revision !== riotBackfillRevision) return
+
+  const active = session
+  const apiKey = readRiotApiKey()
+  if (!active || !active.regionalRoute || !apiKey) return
+
+  const queues = await fetchQueues(active.client)
+  if (revision !== riotBackfillRevision || session !== active) return
+
+  const controller = new AbortController()
+  riotBackfillAbort = controller
+  let announcedImported: number | undefined
+
+  const backfill = new RiotHistoryBackfill(
+    apiKey,
+    active.regionalRoute,
+    active.summoner.puuid,
+    getRepository(),
+    getParticipants(),
+    queues,
+    getRiotBackfills(),
+    {
+      onProgress: (state) => {
+        if (revision !== riotBackfillRevision) return
+        broadcast(win, "riot-history:updated", state)
+        if (announcedImported === undefined) {
+          announcedImported = state.matchesImported
+          return
+        }
+
+        const imported = state.matchesImported - announcedImported
+        if (
+          imported > 0 &&
+          (imported >= 10 || state.status !== "running")
+        ) {
+          announcedImported = state.matchesImported
+          broadcast(win, "stats:updated", {
+            inserted: imported,
+            source: "riot-api",
+          })
+        }
+      },
+    },
+  )
+
+  const task = trackDatabaseTask(
+    backfill
+      .run(restart, controller.signal)
+      .then(() => undefined)
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          console.warn(`Riot history import stopped: ${(error as Error).message}`)
+        }
+      }),
+  )
+  riotBackfillTask = task
+
+  try {
+    await task
+  } finally {
+    if (revision === riotBackfillRevision) {
+      riotBackfillAbort = undefined
+      riotBackfillTask = undefined
+    }
+  }
 }
 
 /** Tells the renderer what changed, and refreshes everything a game affects. */
@@ -724,10 +864,14 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
   // A Riot key must never travel back to the renderer. Electron delegates
   // encryption to the operating system (DPAPI on Windows, Keychain on macOS)
   // and only the main process can retrieve it for future API requests.
-  ipcMain.handle("riot-api-key:status", () => ({
-    configured: typeof store.get(RIOT_API_KEY_STORE) === "string",
-    protected: safeStorage.isEncryptionAvailable(),
-  }))
+  ipcMain.handle("riot-api-key:status", () => {
+    const puuid = currentPuuid()
+    return {
+      configured: typeof store.get(RIOT_API_KEY_STORE) === "string",
+      protected: safeStorage.isEncryptionAvailable(),
+      history: puuid ? getRiotBackfills().getLatest(puuid) : undefined,
+    }
+  })
 
   ipcMain.handle("riot-api-key:save", (_event, value: unknown) => {
     if (typeof value !== "string" || value.trim().length === 0) {
@@ -738,12 +882,21 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     }
     const encrypted = safeStorage.encryptString(value.trim()).toString("base64")
     store.set(RIOT_API_KEY_STORE, encrypted)
+    void startRiotHistoryBackfill(win, true)
     return { configured: true }
   })
 
   ipcMain.handle("riot-api-key:clear", () => {
+    riotBackfillRevision += 1
+    riotBackfillAbort?.abort()
+    riotBackfillAbort = undefined
     store.delete(RIOT_API_KEY_STORE)
     return { configured: false }
+  })
+
+  ipcMain.handle("riot-history:retry", () => {
+    void startRiotHistoryBackfill(win, false)
+    return true
   })
 
   ipcMain.handle("lcu:status", () => ({
@@ -1106,19 +1259,64 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
       defaultId: 0,
       cancelId: 0,
       title: "Delete recorded history",
-      message: "Delete all recorded ARAM history?",
+      message: "Delete all recorded match history?",
       detail:
-        "This cannot be undone. The League Client can only restore the most " +
-        "recent 20 games, so anything older is lost permanently.",
+        "This removes local matches, scoreboards, and Riot import progress. " +
+        "Saving an API key again can re-import matches Riot still exposes.",
     })
 
     if (response !== 1) return { deleted: 0 }
 
+    riotBackfillRevision += 1
+    riotBackfillAbort?.abort()
+    riotBackfillAbort = undefined
+    const activeBackfill = riotBackfillTask
+    if (activeBackfill) await activeBackfill.catch(() => undefined)
+    riotBackfillTask = undefined
+    getParticipants().deleteAll(puuid)
+    getRiotBackfills().deleteAll(puuid)
     const deleted = getRepository().deleteAll(puuid)
     broadcast(win, "stats:updated", { fetched: 0, inserted: 0 })
 
     return { deleted }
   })
+}
+
+async function prepareShutdown(
+  win: BrowserWindow,
+  createSnapshot: boolean,
+) {
+  if (shutdownPrepared) return
+
+  quitting = true
+  hideOverlay()
+  riotBackfillRevision += 1
+  riotBackfillAbort?.abort()
+  riotBackfillAbort = undefined
+  stopSession(win)
+
+  // Aborted API requests still need one turn to record their durable paused
+  // cursor. Local match/challenge syncs are also allowed to finish before the
+  // database is checkpointed or closed.
+  await Promise.allSettled([...databaseTasks])
+  riotBackfillTask = undefined
+
+  try {
+    if (database?.open && createSnapshot) {
+      createUpdateSnapshot(
+        database,
+        getDatabasePath(),
+        getDatabaseBackupDir(),
+      )
+    }
+    if (database?.open) database.close()
+    database = undefined
+    shutdownPrepared = true
+  } catch (error) {
+    // The updater will report the failure and leave the running database open.
+    quitting = false
+    throw error
+  }
 }
 
 async function main() {
@@ -1162,20 +1360,7 @@ async function main() {
     updater: autoUpdater,
     isPackaged: app.isPackaged,
     publish: (status) => broadcast(win, "app:update-status", status),
-    beforeInstall: () => {
-      if (database?.open) {
-        createUpdateSnapshot(
-          database,
-          getDatabasePath(),
-          getDatabaseBackupDir(),
-        )
-        database.close()
-        database = undefined
-      }
-      quitting = true
-      hideOverlay()
-      stopSession(win)
-    },
+    beforeInstall: () => prepareShutdown(win, true),
   })
 
   registerIpc(win, updater)
@@ -1184,12 +1369,18 @@ async function main() {
   // A second launch reveals the running copy rather than starting another.
   app.on("second-instance", () => reveal(win))
 
-  app.on("before-quit", () => {
-    quitting = true
-    hideOverlay()
-    stopSession(win)
-    if (database?.open) database.close()
-    database = undefined
+  app.on("before-quit", (event) => {
+    if (shutdownPrepared) return
+    event.preventDefault()
+    if (shutdownPreparing) return
+
+    shutdownPreparing = prepareShutdown(win, false)
+      .then(() => app.quit())
+      .catch((error) => {
+        shutdownPreparing = undefined
+        quitting = false
+        console.error(`Could not close Recall safely: ${(error as Error).message}`)
+      })
   })
 
   // The window only hides, so this fires solely on a real quit. Recall must

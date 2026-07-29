@@ -22,6 +22,7 @@ import type {
   PersonalRecord,
   ProfileSummary,
   RankedHistory,
+  RiotHistoryBackfillState,
   StatsFilter,
   StatsMeta,
   StatsSummary,
@@ -105,7 +106,11 @@ export const api = {
     send("store-set", key, value)
   },
 
-  getRiotApiKeyStatus(): Promise<{ configured: boolean; protected: boolean }> {
+  getRiotApiKeyStatus(): Promise<{
+    configured: boolean
+    protected: boolean
+    history?: RiotHistoryBackfillState
+  }> {
     return invoke("riot-api-key:status")
   },
 
@@ -115,6 +120,10 @@ export const api = {
 
   clearRiotApiKey(): Promise<{ configured: boolean }> {
     return invoke("riot-api-key:clear")
+  },
+
+  retryRiotHistory(): Promise<boolean> {
+    return invoke("riot-history:retry")
   },
 
   getSummary(filter: Partial<MatchQuery>): Promise<StatsSummary> {

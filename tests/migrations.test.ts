@@ -150,6 +150,7 @@ describe("applyMigrations", () => {
     expect(tables).toContain("challenges")
     expect(tables).toContain("challenge_history")
     expect(tables).toContain("profile_snapshots")
+    expect(tables).toContain("riot_history_backfill")
   })
 
   it("fills in per-minute rates for games recorded before those columns existed", () => {

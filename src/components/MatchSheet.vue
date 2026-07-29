@@ -55,11 +55,19 @@ async function load(match: MatchRow) {
   loading.value = true
   try {
     const family = match.modeFamily
+    const detailRequest = api.getMatchDetail(match.gameId)
+
+    if (family === "other") {
+      detail.value = await detailRequest
+      gameAxes.value = []
+      careerAxes.value = undefined
+      return
+    }
 
     const [axes, career, matchDetail] = await Promise.all([
       api.getMatchAxes(match.gameId, family),
       api.getStyleReport({ modeFamily: family }, family),
-      api.getMatchDetail(match.gameId),
+      detailRequest,
     ])
 
     gameAxes.value = axes.axes
@@ -174,8 +182,11 @@ const kda = computed(() =>
             secondary-label="Your average"
           />
           <p v-else-if="!loading" class="muted note">
-            No scoreboard was recorded for this game, so it cannot be scored on
-            its own.
+            {{
+              match.modeFamily === "other"
+                ? "Style scoring is available for Rift and ARAM games."
+                : "No scoreboard was recorded for this game, so it cannot be scored on its own."
+            }}
           </p>
           <p v-if="gameAxes.length" class="muted footnote">
             Gold is this game. Blue is how you usually play this mode.
@@ -205,8 +216,8 @@ const kda = computed(() =>
           </ul>
 
           <p v-else-if="!loading" class="muted note">
-            The lobby for this game was never captured. Recall can only read one
-            while the game is still among the client's last twenty.
+            The lobby for this game was not available from the League client or
+            Riot API.
           </p>
         </div>
       </div>

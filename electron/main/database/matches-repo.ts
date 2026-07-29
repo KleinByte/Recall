@@ -256,6 +256,22 @@ export class MatchesRepository {
     return row.total
   }
 
+  hasCompleteMatch(gameId: number, puuid: string): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT mode_family AS modeFamily, grade
+         FROM matches WHERE game_id = ? AND puuid = ? LIMIT 1`,
+      )
+      .get(gameId, puuid) as
+      | { modeFamily: ModeFamily; grade: string | null }
+      | undefined
+
+    return (
+      row !== undefined &&
+      (row.modeFamily === "other" || row.grade !== null)
+    )
+  }
+
   getOldestPlayedAt(puuid: string): number | undefined {
     const row = this.db
       .prepare("SELECT MIN(played_at) AS oldest FROM matches WHERE puuid = ?")
@@ -289,6 +305,7 @@ export class MatchesRepository {
       .prepare(
         `SELECT game_id AS gameId, mode_family AS modeFamily FROM matches
          WHERE puuid = ? AND grade IS NULL
+           AND mode_family IN ('sr', 'aram')
          ORDER BY played_at DESC
          LIMIT ?`,
       )
@@ -785,4 +802,3 @@ function toMatchRow(row: Record<string, never>): MatchRow {
     queueName: row.queue_name ?? undefined,
   }
 }
-

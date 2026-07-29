@@ -325,6 +325,29 @@ export class ParticipantsRepository {
     this.insertTeamStatement = db.prepare(INSERT_TEAM_SQL)
   }
 
+  hasCurrentLobby(gameId: number, puuid: string): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS participants,
+                MIN(detail_version) AS oldestVersion,
+                (SELECT COUNT(*) FROM match_teams
+                 WHERE game_id = ? AND puuid = ?) AS teams
+         FROM match_participants
+         WHERE game_id = ? AND puuid = ?`,
+      )
+      .get(gameId, puuid, gameId, puuid) as {
+      participants: number
+      oldestVersion: number | null
+      teams: number
+    }
+
+    return (
+      row.participants > 0 &&
+      row.teams > 0 &&
+      (row.oldestVersion ?? 0) >= LOBBY_DETAIL_VERSION
+    )
+  }
+
   insertMany(rows: ParticipantRow[]): number {
     if (rows.length === 0) return 0
 
@@ -402,6 +425,17 @@ export class ParticipantsRepository {
       .get(puuid) as { total: number }
 
     return row.total
+  }
+
+  deleteAll(puuid: string): number {
+    const remove = this.db.transaction(() => {
+      const participants = this.db
+        .prepare("DELETE FROM match_participants WHERE puuid = ?")
+        .run(puuid).changes
+      this.db.prepare("DELETE FROM match_teams WHERE puuid = ?").run(puuid)
+      return participants
+    })
+    return remove()
   }
 
   /** Column names, so a test can assert no identifying data is stored. */

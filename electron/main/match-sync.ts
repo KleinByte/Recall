@@ -135,7 +135,7 @@ export class MatchSync {
 
     const stored = this.participants.insertMany(rows) > 0
     this.participants.insertTeams(mapTeams(detail, this.puuid))
-    if (family && detail.gameId) {
+    if ((family === "aram" || family === "sr") && detail.gameId) {
       this.participants.setGrades(detail.gameId, this.puuid, gradeLobby(this.gradeInputs(detail), family))
     }
 

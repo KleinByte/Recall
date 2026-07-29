@@ -31,6 +31,7 @@ const MODES: { value: TrackedMode; label: string }[] = [
   { value: "sr_swiftplay", label: "Swiftplay" },
   { value: "aram", label: "ARAM" },
   { value: "mayhem", label: "Mayhem" },
+  { value: "other", label: "Other" },
 ]
 
 const RANGES = [
@@ -108,14 +109,21 @@ async function load() {
   }
 }
 
-onMounted(async () => {
+async function loadPlayedChampions() {
   try {
     playedChampionIds.value = await api.getPlayedChampionIds()
   } catch {
     playedChampionIds.value = []
   }
+}
+
+onMounted(async () => {
+  await loadPlayedChampions()
   void load()
-  api.on("stats:updated", () => void load())
+  api.on("stats:updated", () => {
+    void loadPlayedChampions()
+    void load()
+  })
   api.on("lcu:status", () => void load())
 })
 
@@ -286,9 +294,9 @@ const averageGrade = computed(() => gradeFromScore(summary.value?.avgGradeScore)
       <template v-else>
         <h2 class="section-title">No matches recorded yet</h2>
         <p class="muted">
-          Recall records games from the moment it is installed and keeps them
-          permanently. The League client can only ever hand over its most recent
-          20 games, so history before that cannot be recovered.
+          Recall records games as you play and keeps them permanently. Add a
+          Riot API key in Settings to import every older match Riot still
+          exposes; without one, the League client fallback provides 20 games.
         </p>
       </template>
     </div>

@@ -267,8 +267,8 @@ const confidenceLabel: Record<string, string> = {
       <h2 class="section-title">Nothing recorded for this mode yet</h2>
       <p class="muted">
         Play a game of {{ selected.label }} with Recall running and your shape
-        will appear here. The client only ever hands over its last 20 games, so
-        history before Recall was installed cannot be recovered.
+        will appear here. A Riot API key in Settings can import older history;
+        the League client fallback provides only its last 20 games.
       </p>
     </div>
 

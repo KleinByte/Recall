@@ -49,7 +49,7 @@ const aramGame = (gameId: number, gameMode = "ARAM"): LcuGame =>
     ],
   }) as LcuGame
 
-/** Arena is deliberately not tracked. */
+/** Arena is retained under the generic "other" history family. */
 const arenaGame = (gameId: number): LcuGame =>
   ({
     ...aramGame(gameId),
@@ -169,7 +169,7 @@ beforeEach(() => {
 })
 
 describe("MatchSync", () => {
-  it("stores tracked modes and skips the rest", () => {
+  it("stores every mode without losing Arena or rotating games", () => {
     const games = [
       ...[1, 2, 3, 4].map((id) => aramGame(id)),
       ...[5, 6].map((id) => aramGame(id, "KIWI")),
@@ -181,9 +181,9 @@ describe("MatchSync", () => {
 
     return sync.syncNow().then((result) => {
       expect(result.fetched).toBe(10)
-      // Four ARAM, two Mayhem and two Rift games; Arena is excluded.
-      expect(result.inserted).toBe(8)
-      expect(repo.countMatches(PUUID)).toBe(8)
+      // Four ARAM, two Mayhem, two Rift and two other-mode games.
+      expect(result.inserted).toBe(10)
+      expect(repo.countMatches(PUUID)).toBe(10)
     })
   })
 

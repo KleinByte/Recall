@@ -90,13 +90,14 @@ describe("mapMatchRow", () => {
     expect(mapMatchRow(game, PUUID)?.visionScore).toBe(0)
   })
 
-  it("returns undefined for modes that are not tracked", () => {
-    expect(
-      mapMatchRow(
-        mayhemGame({ mapId: 30, gameMode: "CHERRY", queueId: 1700 }),
-        PUUID,
-      ),
-    ).toBeUndefined()
+  it("retains modes outside Rift and ARAM as other", () => {
+    const row = mapMatchRow(
+      mayhemGame({ mapId: 30, gameMode: "CHERRY", queueId: 1700 }),
+      PUUID,
+    )
+
+    expect(row?.mode).toBe("other")
+    expect(row?.modeFamily).toBe("other")
   })
 
   it("returns undefined when the payload has no participant", () => {

@@ -8,8 +8,8 @@ const bool = (value: boolean | undefined) => (value ? 1 : 0)
 /**
  * Converts a match history game into a database row.
  *
- * Returns `undefined` for anything that is not a tracked ARAM mode, or for
- * payloads missing the player's participant entry.
+ * Returns `undefined` only when the payload is missing the player's
+ * participant entry. Unknown queues are retained in the "other" family.
  */
 export function mapMatchRow(
   game: LcuGame,
