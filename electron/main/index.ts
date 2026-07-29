@@ -1116,12 +1116,27 @@ async function main() {
   // recorded games.
   adoptPreviousInstallData()
 
+  // Open and validate persistent data before showing the renderer. If startup
+  // cannot continue, a half-initialised window would only emit a wall of "No
+  // handler registered" errors because IPC registration happens afterwards.
+  try {
+    getRepository()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error(`Could not initialise Recall's database: ${message}`)
+    dialog.showErrorBox(
+      "Recall could not open your history",
+      `${message}\n\nYour database was left untouched at:\n${path.join(
+        app.getPath("userData"),
+        "stats.db",
+      )}`,
+    )
+    app.quit()
+    return
+  }
+
   const win = await createWindow()
   createTray(win)
-
-  // Open the database up front so recorded history is readable even while the
-  // League client is unavailable.
-  getRepository()
 
   const updater = createUpdaterService({
     updater: autoUpdater,

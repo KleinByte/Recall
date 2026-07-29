@@ -60,6 +60,22 @@ describe("migrateLegacyUserData", () => {
     )
   })
 
+  it("never attaches a legacy WAL to an existing current database", () => {
+    seedLegacy()
+    writeFileSync(path.join(legacyDir, "stats.db-wal"), "legacy-wal")
+    writeFileSync(path.join(legacyDir, "stats.db-shm"), "legacy-shm")
+    writeFileSync(path.join(currentDir, "stats.db"), "current-database")
+
+    const result = migrateLegacyUserData(legacyDir, currentDir)
+
+    expect(result.migrated).toEqual(["config.json"])
+    expect(existsSync(path.join(currentDir, "stats.db-wal"))).toBe(false)
+    expect(existsSync(path.join(currentDir, "stats.db-shm"))).toBe(false)
+    expect(readFileSync(path.join(currentDir, "stats.db"), "utf8")).toBe(
+      "current-database",
+    )
+  })
+
   it("does nothing when there is no previous installation", () => {
     const result = migrateLegacyUserData(legacyDir, currentDir)
 

@@ -62,11 +62,19 @@ export function migrateLegacyUserData(
 
   mkdirSync(currentDir, { recursive: true })
 
-  const files = LEGACY_FILES.filter(
-    (file) =>
-      existsSync(path.join(legacyDir, file)) &&
-      !existsSync(path.join(currentDir, file)),
-  )
+  const currentDatabaseExists = existsSync(path.join(currentDir, "stats.db"))
+  const databaseFiles = currentDatabaseExists
+    ? []
+    : LEGACY_FILES.filter(
+        (file) =>
+          file.startsWith("stats.db") && existsSync(path.join(legacyDir, file)),
+      )
+  const configFiles =
+    existsSync(path.join(legacyDir, "config.json")) &&
+    !existsSync(path.join(currentDir, "config.json"))
+      ? ["config.json"]
+      : []
+  const files = [...databaseFiles, ...configFiles]
   if (files.length === 0) return { migrated }
 
   // The old and renamed apps can briefly overlap during an update. Copying a
