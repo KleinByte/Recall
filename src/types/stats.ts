@@ -256,6 +256,8 @@ export interface ParticipantRow {
   longestTimeLiving: number
   firstBlood: number
   firstTower: number
+  grade?: string
+  gradeScore?: number
   lane?: string
   role?: string
 }

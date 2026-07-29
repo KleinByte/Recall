@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import GradeBadge from "./GradeBadge.vue"
+import { faChevronRight } from "@fortawesome/free-solid-svg-icons"
+import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
 import type { MatchRow } from "../types/stats"
 import type { Champion } from "../types/lol"
 import { openMatch } from "../helpers/navigation"
@@ -71,6 +73,7 @@ const kda = (match: MatchRow) =>
         </div>
 
         <div class="date muted">{{ formatRelativeDate(match.playedAt) }}</div>
+        <FontAwesomeIcon :icon="faChevronRight" class="open-indicator" />
       </button>
     </div>
 
@@ -106,7 +109,7 @@ const kda = (match: MatchRow) =>
 .row {
   width: 100%;
   display: grid;
-  grid-template-columns: 38px 32px minmax(120px, 1.4fr) 80px 1.2fr 1fr 90px;
+  grid-template-columns: 38px 40px minmax(140px, 1.5fr) 80px 1.2fr 1fr 90px 14px;
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
@@ -124,9 +127,9 @@ const kda = (match: MatchRow) =>
 }
 
 .icon {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-sm);
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
   border: 1px solid var(--border-subtle);
 }
 
@@ -160,6 +163,29 @@ const kda = (match: MatchRow) =>
 .date {
   text-align: right;
   font-size: 11px;
+}
+
+.open-indicator {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+@media (max-width: 780px) {
+  .row {
+    grid-template-columns: 34px 36px minmax(110px, 1fr) 1fr 14px;
+    gap: var(--space-2);
+  }
+
+  .result,
+  .damage,
+  .date {
+    display: none;
+  }
+
+  .icon {
+    width: 36px;
+    height: 36px;
+  }
 }
 
 .detail {

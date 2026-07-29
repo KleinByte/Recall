@@ -1,7 +1,7 @@
 import type { MatchesRepository } from "./database/matches-repo.js"
 import type { ParticipantsRepository } from "./database/participants-repo.js"
 import type { LcuClient } from "./lcu-client.js"
-import { gradeMatch, type GradeInput } from "./matches/grade.js"
+import { gradeLobby, type GradeInput } from "./matches/grade.js"
 import { mapMatchRow } from "./matches/map-match.js"
 import {
   mapParticipants,
@@ -86,7 +86,7 @@ export class MatchSync {
 
     const inserted = this.repository.insertMany(rows)
     const graded = await this.gradePendingMatches()
-    const lobbies = await this.backfillLobbies(rows.map((row) => row.gameId))
+    const lobbies = await this.backfillLobbies(rows)
 
     return { fetched: games.length, inserted, graded, lobbies }
   }
@@ -98,12 +98,12 @@ export class MatchSync {
    * older is gone for good, which is why this runs on every sync rather than
    * once.
    */
-  private async backfillLobbies(windowGameIds: number[]): Promise<number> {
+  private async backfillLobbies(windowRows: MatchRow[]): Promise<number> {
     if (!this.participants) return 0
 
     const missing = this.participants.getGamesMissingLobby(
       this.puuid,
-      windowGameIds,
+      windowRows.map((row) => row.gameId),
       MAX_LOBBY_BACKFILL_PER_SYNC,
     )
 
@@ -114,7 +114,8 @@ export class MatchSync {
         const detail = await this.client.request<GameDetail>(
           `/lol-match-history/v1/games/${gameId}`,
         )
-        if (this.storeLobby(detail)) stored += 1
+        const family = windowRows.find((row) => row.gameId === gameId)?.modeFamily
+        if (this.storeLobby(detail, family)) stored += 1
       } catch (error) {
         console.warn(
           `Could not read the lobby for game ${gameId}: ${(error as Error).message}`,
@@ -126,7 +127,7 @@ export class MatchSync {
     return stored
   }
 
-  private storeLobby(detail: GameDetail): boolean {
+  private storeLobby(detail: GameDetail, family?: ModeFamily): boolean {
     if (!this.participants) return false
 
     const rows = mapParticipants(detail, this.puuid)
@@ -134,6 +135,9 @@ export class MatchSync {
 
     const stored = this.participants.insertMany(rows) > 0
     this.participants.insertTeams(mapTeams(detail, this.puuid))
+    if (family && detail.gameId) {
+      this.participants.setGrades(detail.gameId, this.puuid, gradeLobby(this.gradeInputs(detail), family))
+    }
 
     return stored
   }
@@ -161,9 +165,9 @@ export class MatchSync {
 
         // The lobby is already in hand, so keep it rather than paying for the
         // same request again later.
-        this.storeLobby(detail)
+        this.storeLobby(detail, modeFamily)
 
-        const result = this.gradeFromDetail(detail, modeFamily)
+        const result = gradeLobby(this.gradeInputs(detail), modeFamily).get(identityParticipantId(detail, this.puuid))
         if (!result) continue
 
         this.repository.setGrade(
@@ -186,15 +190,10 @@ export class MatchSync {
     return graded
   }
 
-  private gradeFromDetail(detail: GameDetail, family: ModeFamily) {
-    const identity = detail.participantIdentities?.find(
-      (entry) => entry.player?.puuid === this.puuid,
-    )
-    if (!identity || !detail.participants) return undefined
-
+  private gradeInputs(detail: GameDetail): GradeInput[] {
     const minutes = Math.max(1, (detail.gameDuration ?? 0) / 60)
 
-    const lobby: GradeInput[] = detail.participants.map((participant) => ({
+    const lobby: GradeInput[] = (detail.participants ?? []).map((participant) => ({
       participantId: participant.participantId,
       teamId: participant.teamId,
       kills: number(participant.stats?.kills),
@@ -212,8 +211,12 @@ export class MatchSync {
       role: participant.timeline?.role,
     }))
 
-    return gradeMatch(lobby, identity.participantId, family)
+    return lobby
   }
+}
+
+function identityParticipantId(detail: GameDetail, puuid: string): number {
+  return detail.participantIdentities?.find((entry) => entry.player?.puuid === puuid)?.participantId ?? -1
 }
 
 const number = (value: number | boolean | undefined) =>

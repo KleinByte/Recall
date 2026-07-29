@@ -294,6 +294,16 @@ export const migrations: Migration[] = [
       CREATE INDEX idx_teams_owner ON match_teams (puuid, game_id);
     `,
   },
+  {
+    // A match grade belongs to every player on the scoreboard, not only the
+    // owner of the local history. Existing lobbies are refreshed while they
+    // remain in the client's twenty-game window.
+    version: 7,
+    up: `
+      ALTER TABLE match_participants ADD COLUMN grade TEXT;
+      ALTER TABLE match_participants ADD COLUMN grade_score REAL;
+    `,
+  },
 ]
 
 export function applyMigrations(db: Database): number {

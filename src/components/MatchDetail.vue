@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue"
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
 import { faChevronDown } from "@fortawesome/free-solid-svg-icons"
+import GradeBadge from "./GradeBadge.vue"
 import { championIconUrl, championNameById, formatCompact } from "../helpers/format"
 import { itemIconUrl, summonerSpellIconUrl } from "../helpers/ddragon"
 import {
@@ -130,6 +131,8 @@ const kdaOf = (row: ParticipantRow) =>
             </div>
 
             <span class="numeric kda">{{ kdaOf(row) }}</span>
+
+            <GradeBadge :grade="row.grade" />
 
             <span class="numeric cs">
               {{ row.totalMinionsKilled + row.neutralMinions }} CS
@@ -338,7 +341,7 @@ const kdaOf = (row: ParticipantRow) =>
 
 .player {
   display: grid;
-  grid-template-columns: minmax(150px, 1.4fr) 66px 62px minmax(90px, 1fr) auto 28px;
+  grid-template-columns: minmax(150px, 1.4fr) 66px 36px 62px minmax(90px, 1fr) auto 28px;
   align-items: center;
   gap: var(--space-3);
   padding: 3px var(--space-2);
@@ -562,7 +565,7 @@ const kdaOf = (row: ParticipantRow) =>
 
 @media (max-width: 850px) {
   .player {
-    grid-template-columns: minmax(130px, 1fr) 60px 54px minmax(75px, 1fr) 28px;
+    grid-template-columns: minmax(130px, 1fr) 60px 36px 54px minmax(75px, 1fr) 28px;
   }
 
   .items {

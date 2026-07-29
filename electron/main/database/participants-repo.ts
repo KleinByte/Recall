@@ -5,6 +5,7 @@ import type {
   TeamRow,
   TrackedMode,
 } from "../matches/types.js"
+import type { GradeResult } from "../matches/grade.js"
 
 export interface LobbyFilter {
   puuid: string
@@ -124,7 +125,7 @@ const TEAM_COLUMNS = [
  * Raise this whenever the scoreboard gains fields worth going back for, and
  * games still inside the client's window will be read again to fill them in.
  */
-export const LOBBY_DETAIL_VERSION = 1
+export const LOBBY_DETAIL_VERSION = 2
 
 /**
  * Replaces rather than ignores, so a lobby captured under an earlier, narrower
@@ -308,6 +309,8 @@ function toParticipantRow(row: Record<string, never>): ParticipantRow {
     longestTimeLiving: row.longest_time_living,
     firstBlood: row.first_blood,
     firstTower: row.first_tower,
+    grade: row.grade ?? undefined,
+    gradeScore: row.grade_score ?? undefined,
     lane: row.lane ?? undefined,
     role: row.role ?? undefined,
   }
@@ -348,6 +351,19 @@ export class ParticipantsRepository {
     })
 
     return insertAll(rows)
+  }
+
+  setGrades(gameId: number, puuid: string, grades: Map<number, GradeResult>) {
+    if (grades.size === 0) return
+    const update = this.db.prepare(
+      "UPDATE match_participants SET grade = ?, grade_score = ? WHERE game_id = ? AND puuid = ? AND participant_id = ?",
+    )
+    const save = this.db.transaction(() => {
+      for (const [participantId, result] of grades) {
+        update.run(result.grade, result.score, gameId, puuid, participantId)
+      }
+    })
+    save()
   }
 
   /** The full scoreboard for one game, ordered as it appears in the client. */
