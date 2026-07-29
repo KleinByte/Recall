@@ -29,6 +29,7 @@ import type {
   StyleReport,
   SyncResult,
 } from "../types/stats"
+import type { LiveSession } from "../types/live"
 
 const ipc = () => window.ipcRenderer
 
@@ -72,6 +73,10 @@ export const api = {
     return invoke("lcu:status")
   },
 
+  getLiveSession(): Promise<LiveSession> {
+    return invoke("live:get")
+  },
+
   getSummoner(): Promise<Summoner> {
     return lcuRequest<Summoner>("/lol-summoner/v1/current-summoner")
   },
@@ -98,6 +103,18 @@ export const api = {
 
   setSetting(key: string, value: unknown) {
     send("store-set", key, value)
+  },
+
+  getRiotApiKeyStatus(): Promise<{ configured: boolean; protected: boolean }> {
+    return invoke("riot-api-key:status")
+  },
+
+  saveRiotApiKey(value: string): Promise<{ configured: boolean }> {
+    return invoke("riot-api-key:save", value)
+  },
+
+  clearRiotApiKey(): Promise<{ configured: boolean }> {
+    return invoke("riot-api-key:clear")
   },
 
   getSummary(filter: Partial<MatchQuery>): Promise<StatsSummary> {

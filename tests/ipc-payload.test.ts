@@ -62,6 +62,16 @@ describe("toPlainPayload", () => {
     expect(toPlainPayload(undefined)).toBe(undefined)
   })
 
+  it("sends an API key only to the write-only secure IPC endpoint", async () => {
+    const invoke = vi.fn().mockResolvedValue({ configured: true })
+    vi.stubGlobal("window", { ipcRenderer: { invoke } })
+
+    await api.saveRiotApiKey("development-key")
+
+    expect(invoke).toHaveBeenCalledWith("riot-api-key:save", "development-key")
+    expect(Object.keys(api)).not.toContain("getRiotApiKey")
+  })
+
   it("copies nested reactive structures", () => {
     const championIds = ref<number[]>([])
     championIds.value = [84, 22]

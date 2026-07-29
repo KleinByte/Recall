@@ -5,6 +5,7 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  safeStorage,
   shell,
   Tray,
 } from "electron"
@@ -49,6 +50,7 @@ import { buildStyleProfile } from "./matches/style.js"
 import type { ModeFamily } from "./matches/types.js"
 import { migrateLegacyUserData } from "./migrate-user-data.js"
 import { createSingleFlightRefresh } from "./full-refresh.js"
+import { readLiveSession, type LivePhase, type LiveSession } from "./live-session.js"
 
 const { autoUpdater } = electronUpdater
 import {
@@ -84,6 +86,7 @@ const preload = path.join(__dirname, "../preload/index.mjs")
 const indexHtml = path.join(RENDERER_DIST, "index.html")
 
 const store = new Store()
+const RIOT_API_KEY_STORE = "riot-api-key-encrypted"
 
 /** How long the client needs after a game before its history is readable. */
 const PERIODIC_SYNC_INTERVAL_MS = 5 * 60_000
@@ -113,6 +116,14 @@ let connectRetry: NodeJS.Timeout | undefined
 let tray: Tray | undefined
 let overlay: Overlay | undefined
 let overlayRevision = 0
+let liveRevision = 0
+let liveSession: LiveSession = {
+  phase: "Idle",
+  benchChampionIds: [],
+  allies: [],
+  enemies: [],
+  updatedAt: Date.now(),
+}
 
 /** Champion names, read from the client once per session for the overlay. */
 let championNames: Map<number, string> | undefined
@@ -319,14 +330,23 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
     broadcast(win, "end-of-game")
     void catchFinishedGame(win)
   })
-  events.on("game-end", () => void catchFinishedGame(win))
+  events.on("game-end", () => {
+    clearLiveSession(win)
+    void catchFinishedGame(win)
+  })
   events.on("pick", (championId: number | null) => {
     broadcast(win, "pick", championId)
     void updateOverlay(championId)
   })
+  events.on("champ-select", () => void refreshLiveSession(win, "ChampSelect"))
   events.on("game-start", (selections: unknown) => {
     broadcast(win, "game-start", selections)
     hideOverlay()
+    void refreshLiveSession(win, "InProgress")
+  })
+  events.on("phase", (phase: string) => {
+    if (phase === "ChampSelect") void refreshLiveSession(win, "ChampSelect")
+    if (phase === "InProgress") void refreshLiveSession(win, "InProgress")
   })
   events.start()
 
@@ -340,6 +360,7 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
   }
 
   broadcast(win, "lcu:status", { connected: true, summoner })
+  void initialiseLiveSession(win)
   await runSync(win)
 }
 
@@ -357,8 +378,42 @@ function stopSession(win: BrowserWindow) {
   session = undefined
   championNames = undefined
   hideOverlay()
+  clearLiveSession(win)
 
   broadcast(win, "lcu:status", { connected: false, summoner: null })
+}
+
+function clearLiveSession(win: BrowserWindow) {
+  liveRevision += 1
+  liveSession = { phase: "Idle", benchChampionIds: [], allies: [], enemies: [], updatedAt: Date.now() }
+  broadcast(win, "live:updated", liveSession)
+}
+
+/** Reads a new, self-contained live snapshot without letting stale requests win. */
+async function refreshLiveSession(win: BrowserWindow, phase: LivePhase) {
+  if (!session) return
+  const revision = ++liveRevision
+  try {
+    const next = await readLiveSession(session.client, phase)
+    if (revision !== liveRevision) return
+    liveSession = next
+    broadcast(win, "live:updated", liveSession)
+  } catch (error) {
+    console.warn(`Could not refresh live game: ${(error as Error).message}`)
+  }
+}
+
+/** Covers the case where Recall connects after champion select has begun. */
+async function initialiseLiveSession(win: BrowserWindow) {
+  if (!session) return
+  try {
+    const phase = await session.client.request<string>("/lol-gameflow/v1/gameflow-phase")
+    if (phase === "ChampSelect") await refreshLiveSession(win, "ChampSelect")
+    if (phase === "InProgress") await refreshLiveSession(win, "InProgress")
+  } catch {
+    // The client moves through transitional phases quickly; the event stream
+    // will provide the next stable state.
+  }
 }
 
 /**
@@ -654,10 +709,37 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
 
   ipcMain.handle("store-get", (_event, key: string) => store.get(key))
 
+  // A Riot key must never travel back to the renderer. Electron delegates
+  // encryption to the operating system (DPAPI on Windows, Keychain on macOS)
+  // and only the main process can retrieve it for future API requests.
+  ipcMain.handle("riot-api-key:status", () => ({
+    configured: typeof store.get(RIOT_API_KEY_STORE) === "string",
+    protected: safeStorage.isEncryptionAvailable(),
+  }))
+
+  ipcMain.handle("riot-api-key:save", (_event, value: unknown) => {
+    if (typeof value !== "string" || value.trim().length === 0) {
+      throw new Error("Enter an API key before saving")
+    }
+    if (!safeStorage.isEncryptionAvailable()) {
+      throw new Error("Secure local storage is unavailable on this computer")
+    }
+    const encrypted = safeStorage.encryptString(value.trim()).toString("base64")
+    store.set(RIOT_API_KEY_STORE, encrypted)
+    return { configured: true }
+  })
+
+  ipcMain.handle("riot-api-key:clear", () => {
+    store.delete(RIOT_API_KEY_STORE)
+    return { configured: false }
+  })
+
   ipcMain.handle("lcu:status", () => ({
     connected: session !== undefined,
     summoner: session?.summoner ?? null,
   }))
+
+  ipcMain.handle("live:get", () => liveSession)
 
   ipcMain.handle("lcu:request", (_event, requestPath: string) =>
     requireSession().client.request(requestPath),

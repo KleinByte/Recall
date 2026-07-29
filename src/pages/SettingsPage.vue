@@ -23,6 +23,10 @@ const busy = ref(false)
 const message = ref("")
 const updateStatus = ref<UpdateStatus>({ kind: "checking" })
 const update = computed(() => updatePresentation(updateStatus.value))
+const riotApiKey = ref("")
+const riotKeyConfigured = ref(false)
+const riotKeyProtected = ref(false)
+const riotKeyMessage = ref("")
 
 async function loadMeta() {
   meta.value = await api.getStatsMeta()
@@ -33,7 +37,30 @@ onMounted(() => {
   api.on("stats:updated", () => void loadMeta())
   void api.getUpdateStatus().then((status) => { updateStatus.value = status })
   api.onUpdateStatus((status) => { updateStatus.value = status })
+  void api.getRiotApiKeyStatus().then((status) => {
+    riotKeyConfigured.value = status.configured
+    riotKeyProtected.value = status.protected
+  })
 })
+
+async function saveRiotKey() {
+  riotKeyMessage.value = ""
+  try {
+    await api.saveRiotApiKey(riotApiKey.value)
+    riotApiKey.value = ""
+    riotKeyConfigured.value = true
+    riotKeyMessage.value = "API key saved securely on this device."
+  } catch (error) {
+    riotKeyMessage.value = (error as Error).message
+  }
+}
+
+async function clearRiotKey() {
+  await api.clearRiotApiKey()
+  riotApiKey.value = ""
+  riotKeyConfigured.value = false
+  riotKeyMessage.value = "API key removed from this device."
+}
 
 function runUpdateAction(command: "retry" | "install") {
   if (command === "retry") void api.retryUpdate()
@@ -141,6 +168,33 @@ const formatDate = (value?: number) =>
           {{ update.action!.label }}
         </button>
       </div>
+    </section>
+
+    <section class="card">
+      <h2 class="section-title">Riot API</h2>
+      <p class="muted note">
+        Used for optional live teammate history. The key is encrypted by your operating system and is never shown again after saving.
+      </p>
+      <p v-if="!riotKeyProtected" class="muted note danger-note">
+        Secure local storage is unavailable, so Recall will not save an API key on this computer.
+      </p>
+      <div class="key-row">
+        <input
+          v-model="riotApiKey"
+          type="password"
+          class="league-input"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="Paste a regenerated Riot API key"
+          :disabled="!riotKeyProtected"
+          @keyup.enter="saveRiotKey"
+        />
+        <button class="league-button action" :disabled="!riotApiKey || !riotKeyProtected" @click="saveRiotKey">
+          {{ riotKeyConfigured ? "Replace key" : "Save key" }}
+        </button>
+        <button v-if="riotKeyConfigured" class="league-button action danger" @click="clearRiotKey">Remove key</button>
+      </div>
+      <p class="muted note">{{ riotKeyMessage || (riotKeyConfigured ? "A key is configured on this device." : "No API key configured.") }}</p>
     </section>
 
     <section class="card">
@@ -275,6 +329,31 @@ h1 {
   display: flex;
   gap: var(--space-2);
   flex-wrap: wrap;
+}
+
+.key-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  margin-top: var(--space-3);
+}
+
+.league-input {
+  min-width: 0;
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-primary);
+  background: var(--surface-0);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font: 12px var(--font-body);
+}
+
+.league-input:focus { outline: none; border-color: var(--gold); }
+.danger-note { color: var(--loss); }
+
+@media (max-width: 620px) {
+  .key-row { align-items: stretch; flex-direction: column; }
 }
 
 .action {

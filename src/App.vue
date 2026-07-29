@@ -8,6 +8,7 @@ import PostGameBanner from "./components/PostGameBanner.vue"
 import ChallengesPage from "./pages/ChallengesPage.vue"
 import ChampionsPage from "./pages/ChampionsPage.vue"
 import DashboardPage from "./pages/DashboardPage.vue"
+import LiveGamePage from "./pages/LiveGamePage.vue"
 import MatchesPage from "./pages/MatchesPage.vue"
 import ProgressPage from "./pages/ProgressPage.vue"
 import SettingsPage from "./pages/SettingsPage.vue"
@@ -19,6 +20,7 @@ import { parseMerakiFile } from "./helpers/utils"
 import type { AramStats, Champion, Summoner } from "./types/lol"
 import type { MatchRow } from "./types/stats"
 import type { StoredSettings } from "./types/app"
+import type { LiveSession } from "./types/live"
 
 const connected = ref(false)
 const summoner = ref<Summoner | null>(null)
@@ -27,6 +29,7 @@ const stats = ref<AramStats | null>(null)
 const lastGame = ref<MatchRow | null>(null)
 const refreshing = ref(false)
 const refreshMessage = ref<string | null>(null)
+let hasFocusedLiveGame = false
 
 const isColoredWhenDone = ref(false)
 const showChampionNames = ref(false)
@@ -117,6 +120,15 @@ onMounted(async () => {
     },
   )
 
+  api.on("live:updated", (live: LiveSession) => {
+    if (live.phase === "Idle") {
+      hasFocusedLiveGame = false
+    } else if (!hasFocusedLiveGame) {
+      page.value = "live"
+      hasFocusedLiveGame = true
+    }
+  })
+
   // Shown wherever the user happens to be, and never steals focus.
   api.on("match:recorded", (match: MatchRow) => {
     lastGame.value = match
@@ -150,6 +162,11 @@ onMounted(async () => {
         v-if="page === 'dashboard'"
         :champions="allChampions"
         :connected="connected"
+      />
+
+      <LiveGamePage
+        v-else-if="page === 'live'"
+        :champions="allChampions"
       />
 
       <ChallengesPage

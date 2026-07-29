@@ -104,6 +104,7 @@ export class LcuEvents extends EventEmitter {
         break
 
       case LCUEvents.ChampSelectSession: {
+        this.emit("champ-select", event.data)
         const championId = parseSessionEvent(event.data)
         if (championId !== undefined && championId < 0) {
           this.emit("pick", null)
@@ -114,6 +115,7 @@ export class LcuEvents extends EventEmitter {
       }
 
       case LCUEvents.GameSession:
+        this.emit("phase", event.data.phase)
         if (event.data.phase === "InProgress") {
           this.inGame = true
           this.emit(

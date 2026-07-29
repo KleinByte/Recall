@@ -3,6 +3,7 @@ import type { MatchRow } from "../types/stats"
 
 export type PageId =
   | "dashboard"
+  | "live"
   | "challenges"
   | "matches"
   | "skill"
