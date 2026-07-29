@@ -1,6 +1,6 @@
 {
   "name": "recall",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "main": "dist-electron/main/index.js",
   "description": "League of Legends challenge and ARAM stat tracker that remembers what the client forgets.",
   "private": true,
