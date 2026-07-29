@@ -46,6 +46,8 @@ const byChampion = computed(() => new Map(stats.value.map((row) => [row.champion
 const localPlayer = computed(() => live.value.allies.find((row) => row.cellId === live.value.localPlayerCellId))
 const localChampionId = computed(() => localPlayer.value?.championId || localPlayer.value?.championPickIntent || 0)
 const available = computed(() => [...new Set([localChampionId.value, ...live.value.benchChampionIds].filter((id) => id > 0))])
+const selectedChampionId = (player: LiveSession["allies"][number]) =>
+  player.championId || player.championPickIntent || 0
 const championName = (id: number) => championNameById(props.champions, id)
 const stat = (id: number) => byChampion.value.get(id)
 const confidence = (games: number) => games >= 12 ? "Solid" : games >= 5 ? "Fair" : "Thin"
@@ -78,14 +80,16 @@ const gradeFor = (row: ChampionStatRow | undefined) => gradeFromScore(row?.avgGr
         <div class="teams">
           <div class="team"><h3>Your team</h3>
             <div v-for="player in live.allies" :key="player.cellId" class="player" :class="{ me: player.cellId === live.localPlayerCellId }">
-              <img :src="championIconUrl(player.championId || player.championPickIntent)" :alt="championName(player.championId || player.championPickIntent)" />
+              <img v-if="selectedChampionId(player)" :src="championIconUrl(selectedChampionId(player))" :alt="championName(selectedChampionId(player))" />
+              <span v-else class="champion-placeholder" aria-label="Champion not selected">?</span>
               <span>{{ player.displayName ?? (player.cellId === live.localPlayerCellId ? 'You' : 'Teammate') }}</span>
               <span class="muted champ-name">{{ player.championId ? championName(player.championId) : player.championPickIntent ? championName(player.championPickIntent) : 'Waiting…' }}</span>
             </div>
           </div>
           <div class="team enemy"><h3>Opponents</h3>
             <div v-for="player in live.enemies" :key="player.cellId" class="player">
-              <img :src="championIconUrl(player.championId || player.championPickIntent)" :alt="championName(player.championId || player.championPickIntent)" />
+              <img v-if="selectedChampionId(player)" :src="championIconUrl(selectedChampionId(player))" :alt="championName(selectedChampionId(player))" />
+              <span v-else class="champion-placeholder" aria-label="Champion not selected">?</span>
               <span>{{ player.displayName ?? 'Opponent' }}</span>
               <span class="muted champ-name">{{ player.championId ? championName(player.championId) : player.championPickIntent ? championName(player.championPickIntent) : 'Waiting…' }}</span>
             </div>
@@ -123,7 +127,7 @@ h1 { margin:0; font:22px var(--font-display); letter-spacing:1px; color:var(--go
 .phase.champselect{color:var(--gold);border-color:var(--gold)} .phase.inprogress{color:var(--win);border-color:var(--win)}
 .empty { max-width:620px; }.empty p { margin-bottom:0; font-size:13px; }.section-title { margin:0; font:13px var(--font-heading); letter-spacing:1px; text-transform:uppercase; color:var(--text-primary); }
 .roster,.choices { padding:var(--space-4); }.teams { display:grid; grid-template-columns:1fr 1fr; gap:var(--space-4); margin-top:var(--space-3); }.team h3{margin:0 0 var(--space-2);font:11px var(--font-heading);text-transform:uppercase;letter-spacing:1px;color:var(--win)}.enemy h3{color:var(--loss)}
-.player { display:grid; grid-template-columns:30px minmax(0,1fr) auto; align-items:center; gap:var(--space-2); min-height:38px; padding:4px var(--space-2); border-bottom:1px solid var(--border-subtle); font-size:12px; }.player.me{background:var(--surface-3);border-left:2px solid var(--gold)}.player img{width:28px;height:28px;border-radius:50%;border:1px solid var(--border-subtle)}.champ-name{font-size:11px}
+.player { display:grid; grid-template-columns:30px minmax(0,1fr) auto; align-items:center; gap:var(--space-2); min-height:38px; padding:4px var(--space-2); border-bottom:1px solid var(--border-subtle); font-size:12px; }.player.me{background:var(--surface-3);border-left:2px solid var(--gold)}.player img,.champion-placeholder{width:28px;height:28px;border-radius:50%;border:1px solid var(--border-subtle)}.champion-placeholder{display:grid;place-items:center;background:var(--surface-3);color:var(--text-muted);font:14px var(--font-heading)}.champ-name{font-size:11px}
 .choice-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:var(--space-3); margin-top:var(--space-3); }.choice { min-height:150px; display:grid; grid-template-columns:50px 1fr; grid-template-rows:auto auto auto; column-gap:var(--space-3); align-items:center; padding:var(--space-3); border:1px solid var(--border-subtle); background:var(--surface-2); border-radius:var(--radius-sm); font-size:11px; }.choice.current{border-color:var(--gold)}.portrait{width:50px;height:50px;border-radius:50%;grid-row:span 2;border:1px solid var(--border-strong)}.choice-title{display:flex;gap:var(--space-2);align-items:baseline}.choice strong{color:var(--text-primary)}.current-tag{font-size:9px;text-transform:uppercase;color:var(--gold)}.winrate{font-size:20px;color:var(--win)!important}.choice :deep(.grade){grid-column:2;justify-self:start;margin-top:var(--space-1)}.no-data{grid-column:1 / -1;margin:var(--space-2) 0 0}.empty-note{margin:var(--space-3) 0 0;font-size:12px}
 @media(max-width:780px){.teams{grid-template-columns:1fr}.enemy{display:none}.choice-grid{grid-template-columns:1fr}.page-head{align-items:flex-start}}
 </style>

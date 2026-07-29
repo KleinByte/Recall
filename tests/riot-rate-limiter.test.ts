@@ -108,6 +108,20 @@ describe("RiotApiClient", () => {
     await expect(client.get("/matches", "ids")).rejects.toThrow(message)
   })
 
+  it("identifies Account-V1 failures without exposing the Riot ID", async () => {
+    const client = new RiotApiClient("RGAPI-test", "americas", {
+      fetch: vi.fn().mockResolvedValue(new Response("", { status: 400 })),
+      limiter: {
+        acquire: vi.fn().mockResolvedValue(undefined),
+        observe: vi.fn(),
+      } as never,
+    })
+
+    await expect(
+      client.get("/account-path-containing-a-name", "account"),
+    ).rejects.toThrow("Recall's Account-V1 request")
+  })
+
   it("honours Retry-After and keeps the key out of the URL", async () => {
     const sleeps: number[] = []
     const fetcher = vi

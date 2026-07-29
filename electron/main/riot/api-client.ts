@@ -40,11 +40,12 @@ interface RiotApiClientOptions {
 
 const RETRYABLE = new Set([500, 502, 503, 504])
 
-function failureMessage(status: number) {
+function failureMessage(status: number, scope: string) {
+  const api = scope === "account" ? "Account-V1" : "Match-V5"
   switch (status) {
     case 400:
       return (
-        "Riot rejected Recall's Match-V5 request as invalid (400). " +
+        `Riot rejected Recall's ${api} request as invalid (400). ` +
         "Retry the history import; if it continues, update Recall."
       )
     case 401:
@@ -123,7 +124,7 @@ export class RiotApiClient {
       }
 
       throw new RiotApiError(
-        failureMessage(response.status),
+        failureMessage(response.status, scope),
         response.status,
       )
     }

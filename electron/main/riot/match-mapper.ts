@@ -196,14 +196,15 @@ function lcuStats(participant: RiotMatchParticipant): LcuParticipantStats {
 
 export function mapRiotMatch(
   dto: RiotMatchDto,
-  puuid: string,
+  ownerPuuid: string,
   queue?: QueueInfo,
+  participantPuuid = ownerPuuid,
 ): MappedRiotMatch | undefined {
   const info = dto.info
   if (!info?.gameId || !info.participants?.length) return undefined
 
   const mine = info.participants.find(
-    (participant) => participant.puuid === puuid,
+    (participant) => participant.puuid === participantPuuid,
   )
   if (!mine) return undefined
 
@@ -225,7 +226,7 @@ export function mapRiotMatch(
       },
     ],
   }
-  const match = mapMatchRow(game, puuid, queue)
+  const match = mapMatchRow(game, ownerPuuid, queue)
   if (!match) return undefined
 
   const participants = info.participants.map((participant, index) => {
@@ -236,10 +237,10 @@ export function mapRiotMatch(
 
     return {
       gameId: info.gameId!,
-      puuid,
+      puuid: ownerPuuid,
       participantId: int(participant.participantId) || index + 1,
       teamId: int(participant.teamId),
-      isPlayer: participant.puuid === puuid ? 1 : 0,
+      isPlayer: participant.puuid === participantPuuid ? 1 : 0,
       championId: int(participant.championId),
       win: bool(participant.win),
       summonerName: displayName(participant),
@@ -302,7 +303,7 @@ export function mapRiotMatch(
 
   const teams = (info.teams ?? []).map((team) => ({
     gameId: info.gameId!,
-    puuid,
+    puuid: ownerPuuid,
     teamId: int(team.teamId),
     win: bool(team.win),
     bans: JSON.stringify(

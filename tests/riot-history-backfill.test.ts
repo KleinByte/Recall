@@ -8,8 +8,9 @@ import { RiotHistoryBackfill } from "../electron/main/riot/history-backfill.js"
 import type { RiotMatchDto } from "../electron/main/riot/match-mapper.js"
 
 const PUUID = "owner"
+const MATCH_PUUID = "official-owner-puuid"
 
-function dto(gameId: number): RiotMatchDto {
+function dto(gameId: number, ownerPuuid = PUUID): RiotMatchDto {
   return {
     metadata: { matchId: `NA1_${gameId}` },
     info: {
@@ -23,7 +24,7 @@ function dto(gameId: number): RiotMatchDto {
       mapId: 12,
       participants: Array.from({ length: 10 }, (_, index) => ({
         participantId: index + 1,
-        puuid: index === 0 ? PUUID : `other-${index}`,
+        puuid: index === 0 ? ownerPuuid : `other-${index}`,
         championId: 22 + index,
         teamId: index < 5 ? 100 : 200,
         win: index < 5,
@@ -99,6 +100,45 @@ describe("RiotHistoryBackfill", () => {
     expect(participants.getMatchDetail(1, PUUID).participants).toHaveLength(10)
     expect(participants.hasCurrentLobby(2, PUUID)).toBe(true)
     expect(updates).toEqual(["running", "running", "running", "complete"])
+  })
+
+  it("resolves the Match-V5 PUUID from Riot ID but stores under the client identity", async () => {
+    const api = {
+      get: vi.fn(async (path: string) => {
+        if (path.includes("/accounts/by-riot-id/")) {
+          return { puuid: MATCH_PUUID }
+        }
+        if (path.includes("/ids?")) return ["NA1_7"]
+        return dto(7, MATCH_PUUID)
+      }),
+    }
+    const backfill = new RiotHistoryBackfill(
+      "key",
+      "americas",
+      PUUID,
+      matches,
+      participants,
+      new Map(),
+      progress,
+      {
+        api: api as never,
+        riotId: { gameName: "Space Name", tagLine: "N#A" },
+      },
+    )
+
+    await backfill.run(true)
+
+    expect(api.get.mock.calls[0][0]).toContain(
+      "/accounts/by-riot-id/Space%20Name/N%23A",
+    )
+    expect(api.get.mock.calls[1][0]).toContain(
+      `/by-puuid/${MATCH_PUUID}/ids?`,
+    )
+    expect(api.get.mock.calls[1][0]).not.toContain(`/by-puuid/${PUUID}/`)
+    expect(matches.countMatches(PUUID)).toBe(1)
+    expect(participants.getMatchDetail(7, PUUID).participants[0]).toMatchObject({
+      isPlayer: 1,
+    })
   })
 
   it("resumes the durable offset without replaying completed pages", async () => {

@@ -466,7 +466,11 @@ async function refreshLiveSession(win: BrowserWindow, phase: LivePhase) {
   if (!session) return
   const revision = ++liveRevision
   try {
-    const next = await readLiveSession(session.client, phase)
+    const next = await readLiveSession(
+      session.client,
+      phase,
+      session.summoner.puuid,
+    )
     if (revision !== liveRevision) return
     liveSession = next
     broadcast(win, "live:updated", liveSession)
@@ -565,6 +569,10 @@ async function startRiotHistoryBackfill(
     queues,
     getRiotBackfills(),
     {
+      riotId: {
+        gameName: active.summoner.gameName,
+        tagLine: active.summoner.tagLine,
+      },
       onProgress: (state) => {
         if (revision !== riotBackfillRevision) return
         broadcast(win, "riot-history:updated", state)

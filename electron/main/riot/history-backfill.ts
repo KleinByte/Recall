@@ -17,6 +17,10 @@ interface MatchApi {
 
 interface BackfillOptions {
   api?: MatchApi
+  riotId?: {
+    gameName: string
+    tagLine: string
+  }
   onProgress?: (state: RiotBackfillState) => void
 }
 
@@ -34,6 +38,7 @@ const gameIdFromMatchId = (matchId: string) => {
 export class RiotHistoryBackfill {
   private readonly api: MatchApi
   private readonly progress: RiotBackfillRepository
+  private readonly riotId: BackfillOptions["riotId"]
   private readonly onProgress: (state: RiotBackfillState) => void
 
   constructor(
@@ -49,6 +54,7 @@ export class RiotHistoryBackfill {
     this.api =
       options.api ?? new RiotApiClient(this.apiKey, this.regionalRoute)
     this.progress = progress
+    this.riotId = options.riotId
     this.onProgress = options.onProgress ?? (() => undefined)
   }
 
@@ -67,10 +73,12 @@ export class RiotHistoryBackfill {
     this.onProgress(state)
 
     try {
+      const matchPuuid = await this.resolveMatchPuuid(signal)
+
       while (!signal?.aborted) {
         const ids = await this.api.get<string[]>(
           `/lol/match/v5/matches/by-puuid/${encodeURIComponent(
-            this.puuid,
+            matchPuuid,
           )}/ids?start=${state.nextOffset}&count=${PAGE_SIZE}` +
             `&endTime=${state.endTimeSeconds}`,
           "match-ids",
@@ -130,6 +138,7 @@ export class RiotHistoryBackfill {
             dto,
             this.puuid,
             this.queues.get(dto.info?.queueId ?? 0),
+            matchPuuid,
           )
           if (!mapped) {
             skipped += 1
@@ -215,6 +224,27 @@ export class RiotHistoryBackfill {
       this.onProgress(state)
       throw error
     }
+  }
+
+  /**
+   * The League client now exposes a local 36-character account UUID, while
+   * Match-V5 still requires Riot's encrypted PUUID. Resolve it from the
+   * signed-in Riot ID and retain the local UUID as Recall's storage key.
+   */
+  private async resolveMatchPuuid(signal?: AbortSignal): Promise<string> {
+    if (!this.riotId) return this.puuid
+
+    const account = await this.api.get<{ puuid?: unknown }>(
+      `/riot/account/v1/accounts/by-riot-id/` +
+        `${encodeURIComponent(this.riotId.gameName)}/` +
+        `${encodeURIComponent(this.riotId.tagLine)}`,
+      "account",
+      signal,
+    )
+    if (typeof account.puuid !== "string" || account.puuid.length === 0) {
+      throw new Error("Riot's account response did not include a PUUID")
+    }
+    return account.puuid
   }
 
   private advanceOne(

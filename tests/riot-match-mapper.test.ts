@@ -104,6 +104,21 @@ describe("mapRiotMatch", () => {
     expect(result.gradeInputs).toHaveLength(10)
   })
 
+  it("separates Recall's local owner key from Riot's participant PUUID", () => {
+    const result = mapRiotMatch(
+      match(),
+      "local-client-uuid",
+      undefined,
+      PUUID,
+    )!
+
+    expect(result.match.puuid).toBe("local-client-uuid")
+    expect(result.participants[0]).toMatchObject({
+      puuid: "local-client-uuid",
+      isPlayer: 1,
+    })
+  })
+
   it("normalises old millisecond durations and retains other modes", () => {
     const result = mapRiotMatch(
       match({
