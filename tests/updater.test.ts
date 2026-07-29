@@ -9,6 +9,7 @@ import {
 function client(): UpdaterClient & EventEmitter {
   const value = new EventEmitter() as UpdaterClient & EventEmitter
   value.autoDownload = false
+  value.autoInstallOnAppQuit = true
   value.checkForUpdates = vi.fn().mockResolvedValue(undefined)
   value.downloadUpdate = vi.fn().mockResolvedValue([])
   value.quitAndInstall = vi.fn()
@@ -33,7 +34,13 @@ describe("createUpdaterService", () => {
   it("publishes progress and enables installation only after download", async () => {
     const updater = client()
     const publish = vi.fn()
-    const service = createUpdaterService({ updater, isPackaged: true, publish })
+    const beforeInstall = vi.fn()
+    const service = createUpdaterService({
+      updater,
+      isPackaged: true,
+      publish,
+      beforeInstall,
+    })
     await service.start()
 
     expect(updater.checkForUpdates).toHaveBeenCalledOnce()
@@ -46,7 +53,30 @@ describe("createUpdaterService", () => {
       version: "1.2.0",
     })
     expect(service.install()).toBe(true)
+    expect(beforeInstall).toHaveBeenCalledOnce()
     expect(updater.quitAndInstall).toHaveBeenCalledOnce()
+  })
+
+  it("refuses to install when the database cannot be safely closed", async () => {
+    const updater = client()
+    const publish = vi.fn()
+    const service = createUpdaterService({
+      updater,
+      isPackaged: true,
+      publish,
+      beforeInstall: () => {
+        throw new Error("database is busy")
+      },
+    })
+    await service.start()
+    updater.emit("update-downloaded", { version: "1.2.0" })
+
+    expect(service.install()).toBe(false)
+    expect(updater.quitAndInstall).not.toHaveBeenCalled()
+    expect(service.status()).toEqual({
+      kind: "error",
+      message: expect.stringContaining("safely close"),
+    })
   })
 
   it("publishes a safe error and retries the feed check", async () => {
@@ -130,6 +160,7 @@ describe("createUpdaterService", () => {
 
     expect(publish).toHaveBeenLastCalledWith({ kind: "up-to-date" })
     expect(updater.autoDownload).toBe(true)
+    expect(updater.autoInstallOnAppQuit).toBe(false)
   })
 })
 

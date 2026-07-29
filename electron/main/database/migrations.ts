@@ -306,6 +306,8 @@ export const migrations: Migration[] = [
   },
 ]
 
+export const latestSchemaVersion = migrations.at(-1)?.version ?? 0
+
 export function applyMigrations(db: Database): number {
   const current = db.pragma("user_version", { simple: true }) as number
 

@@ -90,4 +90,26 @@ describe("migrateLegacyUserData", () => {
 
     expect(result.migrated).toContain("stats.db-wal")
   })
+
+  it("replaces a zero-byte setup placeholder with valid previous data", () => {
+    seedLegacy()
+    writeFileSync(path.join(currentDir, "stats.db"), "")
+
+    const result = migrateLegacyUserData(legacyDir, currentDir)
+
+    expect(result.migrated).toContain("stats.db")
+    expect(readFileSync(path.join(currentDir, "stats.db"), "utf8")).toBe(
+      "recorded-history",
+    )
+  })
+
+  it("ignores a zero-byte previous database", () => {
+    mkdirSync(legacyDir, { recursive: true })
+    writeFileSync(path.join(legacyDir, "stats.db"), "")
+
+    const result = migrateLegacyUserData(legacyDir, currentDir)
+
+    expect(result.migrated).toEqual([])
+    expect(existsSync(path.join(currentDir, "stats.db"))).toBe(false)
+  })
 })

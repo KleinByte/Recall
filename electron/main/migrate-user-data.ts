@@ -62,13 +62,25 @@ export function migrateLegacyUserData(
 
   mkdirSync(currentDir, { recursive: true })
 
-  const currentDatabaseExists = existsSync(path.join(currentDir, "stats.db"))
+  const currentDatabasePath = path.join(currentDir, "stats.db")
+  const currentDatabaseStamp = stamp(currentDatabasePath)
+  if (currentDatabaseStamp?.size === 0) {
+    // Failed first-run setup can leave an empty placeholder. It contains no
+    // SQLite pages and must not block adoption of a valid previous database.
+    rmSync(currentDatabasePath, { force: true })
+  }
+
+  const currentDatabaseExists = existsSync(currentDatabasePath)
+  const sourceDatabaseExists =
+    (stamp(path.join(legacyDir, "stats.db"))?.size ?? 0) > 0
   const databaseFiles = currentDatabaseExists
     ? []
-    : LEGACY_FILES.filter(
-        (file) =>
-          file.startsWith("stats.db") && existsSync(path.join(legacyDir, file)),
-      )
+    : sourceDatabaseExists
+      ? LEGACY_FILES.filter(
+          (file) =>
+            file.startsWith("stats.db") && existsSync(path.join(legacyDir, file)),
+        )
+      : []
   const configFiles =
     existsSync(path.join(legacyDir, "config.json")) &&
     !existsSync(path.join(currentDir, "config.json"))
@@ -85,6 +97,7 @@ export function migrateLegacyUserData(
     files.map((file) => [file, stamp(path.join(legacyDir, file))]),
   )
   const staging = path.join(currentDir, `.legacy-import-${process.pid}-${Date.now()}`)
+  const placed: string[] = []
 
   try {
     mkdirSync(staging, { recursive: true })
@@ -106,9 +119,14 @@ export function migrateLegacyUserData(
       const target = path.join(currentDir, file)
       if (existsSync(target)) continue
       renameSync(path.join(staging, file), target)
+      placed.push(target)
       migrated.push(file)
     }
   } catch (error) {
+    // Sources were copied, never moved. Roll back any partially placed target
+    // set so the next startup retries the entire SQLite generation together.
+    for (const target of placed) rmSync(target, { force: true })
+    migrated.length = 0
     console.warn(
       `Could not carry over data from the previous install: ${(error as Error).message}`,
     )

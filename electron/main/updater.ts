@@ -8,6 +8,7 @@ export type UpdateStatus =
 
 export interface UpdaterClient {
   autoDownload: boolean
+  autoInstallOnAppQuit: boolean
   checkForUpdates(): Promise<unknown>
   downloadUpdate(): Promise<unknown>
   quitAndInstall(): void
@@ -34,6 +35,7 @@ interface UpdaterServiceOptions {
   updater: UpdaterClient
   isPackaged: boolean
   publish: (status: UpdateStatus) => void
+  beforeInstall?: () => void
 }
 
 const ERROR_MESSAGE =
@@ -43,6 +45,7 @@ export function createUpdaterService({
   updater,
   isPackaged,
   publish,
+  beforeInstall = () => undefined,
 }: UpdaterServiceOptions): UpdaterService {
   let current: UpdateStatus = { kind: "up-to-date" }
 
@@ -92,6 +95,9 @@ export function createUpdaterService({
       if (!isPackaged) return
 
       updater.autoDownload = true
+      // electron-updater otherwise installs a downloaded release on an
+      // ordinary app quit, bypassing our verified database snapshot.
+      updater.autoInstallOnAppQuit = false
       registerListeners()
       set({ kind: "checking" })
       await updater.checkForUpdates().catch(() => undefined)
@@ -109,8 +115,19 @@ export function createUpdaterService({
 
     install() {
       if (current.kind !== "downloaded") return false
-      updater.quitAndInstall()
-      return true
+      try {
+        beforeInstall()
+        updater.quitAndInstall()
+        return true
+      } catch (error) {
+        console.error("[updater] could not prepare database for install:", error)
+        set({
+          kind: "error",
+          message:
+            "Could not safely close your history for the update. Please retry after restarting Recall.",
+        })
+        return false
+      }
     },
   }
 }

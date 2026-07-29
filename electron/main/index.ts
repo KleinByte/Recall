@@ -17,6 +17,10 @@ import os from "node:os"
 import Store from "electron-store"
 import { openDatabase } from "./database/connection.js"
 import {
+  createUpdateSnapshot,
+  restoreLatestUpdateSnapshot,
+} from "./database/snapshots.js"
+import {
   MatchesRepository,
   type MatchQuery,
   type StatsFilter,
@@ -85,8 +89,16 @@ if (!app.requestSingleInstanceLock()) {
 const preload = path.join(__dirname, "../preload/index.mjs")
 const indexHtml = path.join(RENDERER_DIST, "index.html")
 
-const store = new Store()
+let store: Store
 const RIOT_API_KEY_STORE = "riot-api-key-encrypted"
+
+function getDatabasePath() {
+  return path.join(app.getPath("userData"), "stats.db")
+}
+
+function getDatabaseBackupDir() {
+  return path.join(app.getPath("appData"), "Recall Database Backups")
+}
 
 /** How long the client needs after a game before its history is readable. */
 const PERIODIC_SYNC_INTERVAL_MS = 5 * 60_000
@@ -146,7 +158,7 @@ let insights: InsightsRepository | undefined
 
 function getDatabase() {
   if (!database) {
-    database = openDatabase(path.join(app.getPath("userData"), "stats.db"))
+    database = openDatabase(getDatabasePath())
   }
   return database
 }
@@ -774,7 +786,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     const puuid = currentPuuid()
 
     return {
-      databasePath: path.join(app.getPath("userData"), "stats.db"),
+      databasePath: getDatabasePath(),
       totalMatches: puuid ? repo.countMatches(puuid) : 0,
       oldestPlayedAt: puuid ? repo.getOldestPlayedAt(puuid) : undefined,
       totalChallenges: puuid ? getChallenges().countChallenges(puuid) : 0,
@@ -1112,9 +1124,20 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
 async function main() {
   await app.whenReady()
 
+  const restoredSnapshot = restoreLatestUpdateSnapshot(
+    getDatabasePath(),
+    getDatabaseBackupDir(),
+  )
+  if (restoredSnapshot) {
+    console.log(`Restored database after update from ${restoredSnapshot}`)
+  }
+
   // Must run before the database is opened so a renamed install keeps its
   // recorded games.
   adoptPreviousInstallData()
+  // Constructing electron-store creates config.json, so it must happen only
+  // after the previous installation has had a chance to copy that file.
+  store = new Store()
 
   // Open and validate persistent data before showing the renderer. If startup
   // cannot continue, a half-initialised window would only emit a wall of "No
@@ -1126,10 +1149,7 @@ async function main() {
     console.error(`Could not initialise Recall's database: ${message}`)
     dialog.showErrorBox(
       "Recall could not open your history",
-      `${message}\n\nYour database was left untouched at:\n${path.join(
-        app.getPath("userData"),
-        "stats.db",
-      )}`,
+      `${message}\n\nYour database was left untouched at:\n${getDatabasePath()}`,
     )
     app.quit()
     return
@@ -1142,6 +1162,20 @@ async function main() {
     updater: autoUpdater,
     isPackaged: app.isPackaged,
     publish: (status) => broadcast(win, "app:update-status", status),
+    beforeInstall: () => {
+      if (database?.open) {
+        createUpdateSnapshot(
+          database,
+          getDatabasePath(),
+          getDatabaseBackupDir(),
+        )
+        database.close()
+        database = undefined
+      }
+      quitting = true
+      hideOverlay()
+      stopSession(win)
+    },
   })
 
   registerIpc(win, updater)
@@ -1154,7 +1188,8 @@ async function main() {
     quitting = true
     hideOverlay()
     stopSession(win)
-    database?.close()
+    if (database?.open) database.close()
+    database = undefined
   })
 
   // The window only hides, so this fires solely on a real quit. Recall must

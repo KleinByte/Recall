@@ -5,10 +5,17 @@ import Database from "better-sqlite3-node"
 import { describe, expect, it } from "vitest"
 import {
   applyMigrations,
+  latestSchemaVersion,
   migrations,
 } from "../electron/main/database/migrations.js"
 
 describe("applyMigrations", () => {
+  it("keeps migration versions unique, ordered, and contiguous", () => {
+    expect(migrations.map((migration) => migration.version)).toEqual(
+      Array.from({ length: latestSchemaVersion }, (_, index) => index + 1),
+    )
+  })
+
   it("creates the matches table and sets the schema version", () => {
     const db = new Database(":memory:")
     const version = applyMigrations(db)
@@ -31,6 +38,23 @@ describe("applyMigrations", () => {
     const second = applyMigrations(db)
 
     expect(second).toBe(first)
+  })
+
+  it("upgrades every historical schema version to the latest", () => {
+    for (let version = 1; version < latestSchemaVersion; version += 1) {
+      const db = new Database(":memory:")
+      for (const migration of migrations.slice(0, version)) {
+        db.exec(migration.up)
+      }
+      db.pragma(`user_version = ${version}`)
+
+      expect(() => applyMigrations(db)).not.toThrow()
+      expect(db.pragma("user_version", { simple: true })).toBe(
+        latestSchemaVersion,
+      )
+      expect(db.pragma("integrity_check", { simple: true })).toBe("ok")
+      db.close()
+    }
   })
 
   it("adds grade columns", () => {
