@@ -211,6 +211,10 @@ const formatDate = (value?: number) =>
         Recall imports every match Riot still exposes for your account. The key
         is encrypted by your operating system and is never shown again.
       </p>
+      <p class="muted note">
+        Paste the Web API key beginning with <code>RGAPI-</code>. An RSO client
+        secret or access token cannot be used for Match-V5.
+      </p>
       <p v-if="!riotKeyProtected" class="muted note danger-note">
         Secure local storage is unavailable, so Recall will not save an API key on this computer.
       </p>

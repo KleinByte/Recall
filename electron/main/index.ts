@@ -59,6 +59,7 @@ import { readLiveSession, type LivePhase, type LiveSession } from "./live-sessio
 import { fetchQueues } from "./matches/queues.js"
 import { RiotHistoryBackfill } from "./riot/history-backfill.js"
 import { regionalRouteFor } from "./riot/routing.js"
+import { normalizeRiotApiKey } from "./riot/api-client.js"
 
 const { autoUpdater } = electronUpdater
 import {
@@ -874,13 +875,11 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
   })
 
   ipcMain.handle("riot-api-key:save", (_event, value: unknown) => {
-    if (typeof value !== "string" || value.trim().length === 0) {
-      throw new Error("Enter an API key before saving")
-    }
+    const apiKey = normalizeRiotApiKey(value)
     if (!safeStorage.isEncryptionAvailable()) {
       throw new Error("Secure local storage is unavailable on this computer")
     }
-    const encrypted = safeStorage.encryptString(value.trim()).toString("base64")
+    const encrypted = safeStorage.encryptString(apiKey).toString("base64")
     store.set(RIOT_API_KEY_STORE, encrypted)
     void startRiotHistoryBackfill(win, true)
     return { configured: true }

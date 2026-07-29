@@ -82,7 +82,7 @@ export class RiotBackfillRepository {
              (puuid, regional_route, end_time_seconds, status, started_at, updated_at)
            VALUES (?, ?, ?, 'running', ?, ?)`,
         )
-        .run(puuid, regionalRoute, Math.floor(now / 1_000) + 1, now, now)
+        .run(puuid, regionalRoute, Math.floor(now / 1_000), now, now)
     } else if (restart) {
       this.db
         .prepare(
@@ -101,7 +101,7 @@ export class RiotBackfillRepository {
            WHERE puuid = ? AND regional_route = ?`,
         )
         .run(
-          Math.floor(now / 1_000) + 1,
+          Math.floor(now / 1_000),
           now,
           now,
           puuid,

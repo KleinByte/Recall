@@ -14,6 +14,24 @@ export class RiotApiError extends Error {
   }
 }
 
+/**
+ * Accepts only Riot Web API keys. RSO client secrets and access tokens are
+ * different credential types and cannot authenticate Match-V5 requests.
+ */
+export function normalizeRiotApiKey(value: unknown): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error("Enter an API key before saving")
+  }
+
+  const key = value.trim()
+  if (!key.startsWith("RGAPI-") || /\s/.test(key)) {
+    throw new Error(
+      "Paste the RGAPI-… Web API key from developer.riotgames.com, not an RSO client secret or access token.",
+    )
+  }
+  return key
+}
+
 interface RiotApiClientOptions {
   fetch?: typeof fetch
   limiter?: RiotRateLimiter
@@ -21,6 +39,28 @@ interface RiotApiClientOptions {
 }
 
 const RETRYABLE = new Set([500, 502, 503, 504])
+
+function failureMessage(status: number) {
+  switch (status) {
+    case 400:
+      return (
+        "Riot rejected Recall's Match-V5 request as invalid (400). " +
+        "Retry the history import; if it continues, update Recall."
+      )
+    case 401:
+      return (
+        "Riot did not receive a usable Web API key (401). Paste the " +
+        "RGAPI-… key from developer.riotgames.com, not an RSO client secret."
+      )
+    case 403:
+      return (
+        "Riot rejected this API key or API route (403). Development keys " +
+        "expire every 24 hours; regenerate the key and try again."
+      )
+    default:
+      return `Riot API request failed (${status}).`
+  }
+}
 
 export class RiotApiClient {
   private readonly fetcher: typeof fetch
@@ -82,12 +122,8 @@ export class RiotApiClient {
         continue
       }
 
-      const suffix =
-        response.status === 401 || response.status === 403
-          ? " Check or regenerate the API key in Settings."
-          : ""
       throw new RiotApiError(
-        `Riot API request failed (${response.status}).${suffix}`,
+        failureMessage(response.status),
         response.status,
       )
     }

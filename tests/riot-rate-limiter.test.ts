@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
-import { RiotApiClient } from "../electron/main/riot/api-client.js"
+import {
+  normalizeRiotApiKey,
+  RiotApiClient,
+} from "../electron/main/riot/api-client.js"
 import { RiotRateLimiter } from "../electron/main/riot/rate-limiter.js"
 
 describe("RiotRateLimiter", () => {
@@ -77,6 +80,34 @@ describe("RiotRateLimiter", () => {
 })
 
 describe("RiotApiClient", () => {
+  it("accepts only RGAPI Web API credentials", () => {
+    expect(normalizeRiotApiKey("  RGAPI-valid-key  ")).toBe("RGAPI-valid-key")
+    expect(() => normalizeRiotApiKey("")).toThrow("Enter an API key")
+    expect(() => normalizeRiotApiKey("rso-client-secret")).toThrow(
+      "not an RSO client secret",
+    )
+  })
+
+  it.each([
+    [
+      400,
+      "Riot rejected Recall's Match-V5 request as invalid (400).",
+    ],
+    [401, "Riot did not receive a usable Web API key (401)."],
+    [403, "Riot rejected this API key or API route (403)."],
+  ])("explains Riot HTTP %i failures", async (status, message) => {
+    const limiter = {
+      acquire: vi.fn().mockResolvedValue(undefined),
+      observe: vi.fn(),
+    }
+    const client = new RiotApiClient("RGAPI-test", "americas", {
+      fetch: vi.fn().mockResolvedValue(new Response("", { status })),
+      limiter: limiter as never,
+    })
+
+    await expect(client.get("/matches", "ids")).rejects.toThrow(message)
+  })
+
   it("honours Retry-After and keeps the key out of the URL", async () => {
     const sleeps: number[] = []
     const fetcher = vi

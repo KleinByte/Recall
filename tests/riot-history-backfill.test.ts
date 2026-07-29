@@ -58,6 +58,12 @@ describe("RiotHistoryBackfill", () => {
 
   afterEach(() => db.close())
 
+  it("freezes endTime at the current second, never in the future", () => {
+    const state = progress.start(PUUID, "americas", true, 1_999)
+
+    expect(state.endTimeSeconds).toBe(1)
+  })
+
   it("imports every returned ID and completes at the oldest page", async () => {
     const api = {
       get: vi.fn(async (path: string) => {
