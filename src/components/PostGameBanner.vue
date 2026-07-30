@@ -15,7 +15,10 @@ const props = defineProps<{
   champions: Champion[] | null
 }>()
 
-const emit = defineEmits<{ (event: "dismiss"): void }>()
+const emit = defineEmits<{
+  (event: "dismiss"): void
+  (event: "review", gameId: number): void
+}>()
 
 const champion = computed(() =>
   championNameById(props.champions, props.match.championId),
@@ -44,6 +47,9 @@ const kda = computed(
     </div>
 
     <GradeBadge :grade="match.grade" size="lg" />
+    <button class="league-button review" @click="emit('review', match.gameId)">
+      Review game
+    </button>
 
     <button class="close" title="Dismiss" @click="emit('dismiss')">×</button>
   </div>
@@ -118,5 +124,10 @@ const kda = computed(
 
 .close:hover {
   color: var(--text-primary);
+}
+
+.review {
+  padding: var(--space-2) var(--space-3);
+  white-space: nowrap;
 }
 </style>

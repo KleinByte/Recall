@@ -4,6 +4,7 @@ import { api } from "../helpers/api"
 import { updatePresentation } from "../helpers/update"
 import type { UpdateStatus } from "../types/update"
 import type { RiotHistoryBackfillState, StatsMeta } from "../types/stats"
+import type { DataTrustReport } from "../types/review"
 
 const props = defineProps<{
   isColoredWhenDone: boolean
@@ -28,6 +29,8 @@ const riotKeyConfigured = ref(false)
 const riotKeyProtected = ref(false)
 const riotKeyMessage = ref("")
 const riotHistory = ref<RiotHistoryBackfillState>()
+const trust = ref<DataTrustReport>()
+const trustBusy = ref(false)
 
 const riotHistoryMessage = computed(() => {
   const history = riotHistory.value
@@ -66,7 +69,49 @@ onMounted(() => {
   api.on("riot-history:updated", (status: RiotHistoryBackfillState) => {
     riotHistory.value = status
   })
+  void loadTrust()
+  api.on("data-trust:updated", () => void loadTrust())
 })
+
+async function loadTrust(check = false) {
+  trustBusy.value = true
+  try {
+    trust.value = check ? await api.checkDataTrust() : await api.getDataTrust()
+  } finally {
+    trustBusy.value = false
+  }
+}
+
+async function createBackup() {
+  trustBusy.value = true
+  try {
+    await api.createBackup()
+    await loadTrust()
+  } finally {
+    trustBusy.value = false
+  }
+}
+
+async function deleteBackup(fileName: string) {
+  if (!window.confirm("Delete this database backup? This cannot be undone.")) return
+  await api.deleteBackup(fileName)
+  await loadTrust()
+}
+
+async function restoreBackup(fileName: string) {
+  if (!window.confirm("Inspect and restore this verified backup?")) return
+  if (!window.confirm(
+    "Recall will create a pre-restore backup, replace the active database, and restart. Continue?",
+  )) return
+  await api.restoreBackup(fileName)
+}
+
+const bytes = (value?: number) => {
+  if (!value) return "0 B"
+  const units = ["B", "KB", "MB", "GB"]
+  const power = Math.min(units.length - 1, Math.floor(Math.log(value) / Math.log(1024)))
+  return `${(value / 1024 ** power).toFixed(power ? 1 : 0)} ${units[power]}`
+}
 
 async function saveRiotKey() {
   riotKeyMessage.value = ""
@@ -287,6 +332,94 @@ const formatDate = (value?: number) =>
       <p v-if="message" class="muted note">{{ message }}</p>
     </section>
 
+    <section class="card trust-center">
+      <div class="trust-head">
+        <div>
+          <h2 class="section-title">Data Trust Center</h2>
+          <span class="trust-state" :class="trust?.state">
+            {{ (trust?.state ?? "checking").replace("_", " ") }}
+          </span>
+        </div>
+        <button class="league-button action" :disabled="trustBusy" @click="loadTrust(true)">
+          {{ trustBusy ? "Checking…" : "Check now" }}
+        </button>
+      </div>
+
+      <div v-if="trust" class="trust-grid">
+        <article class="trust-card">
+          <h3>Local database</h3>
+          <dl class="trust-list">
+            <div><dt>Integrity</dt><dd>{{ trust.database.integrity }}</dd></div>
+            <div><dt>Schema</dt><dd>v{{ trust.database.schemaVersion }}</dd></div>
+            <div><dt>Size</dt><dd>{{ bytes(trust.database.sizeBytes) }}</dd></div>
+            <div><dt>Matches</dt><dd>{{ trust.database.matchCount.toLocaleString() }}</dd></div>
+            <div><dt>Full scoreboards</dt><dd>{{ trust.database.completeScoreboardPercent.toFixed(1) }}%</dd></div>
+            <div><dt>Graded</dt><dd>{{ trust.database.gradedPercent.toFixed(1) }}%</dd></div>
+            <div><dt>Timelines</dt><dd>{{ trust.database.timelineCount }}</dd></div>
+          </dl>
+          <p class="path">{{ trust.database.path }}</p>
+        </article>
+
+        <article class="trust-card">
+          <h3>League client sync</h3>
+          <dl class="trust-list">
+            <div><dt>Client</dt><dd>{{ connected ? "Connected" : "Offline" }}</dd></div>
+            <div><dt>First observed</dt><dd>{{ formatDate(trust.leagueClient.firstObservedAt) }}</dd></div>
+            <div><dt>Last success</dt><dd>{{ formatDate(trust.leagueClient.lastSuccessAt) }}</dd></div>
+            <div><dt>Latest inserted</dt><dd>{{ trust.leagueClient.itemsWritten }}</dd></div>
+          </dl>
+          <p v-if="trust.leagueClient.lastError" class="danger-note">{{ trust.leagueClient.lastError }}</p>
+        </article>
+
+        <article class="trust-card">
+          <h3>Riot history</h3>
+          <p class="muted">{{ trust.riotHistory.keyConfigured ? "Protected API key configured" : "Local only — no Riot key" }}</p>
+          <dl class="trust-list">
+            <div><dt>Route</dt><dd>{{ trust.riotHistory.route || "—" }}</dd></div>
+            <div><dt>IDs scanned</dt><dd>{{ trust.riotHistory.coverage.idsScanned.toLocaleString() }}</dd></div>
+            <div><dt>Downloaded</dt><dd>{{ trust.riotHistory.coverage.downloaded.toLocaleString() }}</dd></div>
+            <div><dt>Imported</dt><dd>{{ trust.riotHistory.coverage.imported.toLocaleString() }}</dd></div>
+            <div><dt>Skipped</dt><dd>{{ trust.riotHistory.coverage.skipped.toLocaleString() }}</dd></div>
+          </dl>
+          <p class="muted">
+            {{ trust.riotHistory.coverage.status === "complete" && trust.riotHistory.coverage.through
+              ? `Riot history complete through ${formatDate(trust.riotHistory.coverage.through)}`
+              : trust.riotHistory.coverage.status === "running"
+                ? "Historical import in progress"
+                : trust.riotHistory.coverage.status === "needs_attention"
+                  ? "Needs attention"
+                  : `League-client history observed since ${formatDate(trust.riotHistory.coverage.firstObservedAt)}` }}
+          </p>
+          <div v-if="trust.riotHistory.rateLimits.length" class="rate-limits">
+            <strong>Observed Riot rate limits</strong>
+            <span v-for="window in trust.riotHistory.rateLimits"
+              :key="`${window.limit}-${window.seconds}`">
+              {{ window.used }}/{{ window.limit }} requests per {{ window.seconds }}s
+            </span>
+            <span v-if="trust.riotHistory.nextEligibleAt">
+              Next eligible request: {{ formatDate(trust.riotHistory.nextEligibleAt) }}
+            </span>
+          </div>
+        </article>
+
+        <article class="trust-card backups">
+          <div class="trust-head">
+            <h3>Backups</h3>
+            <button class="league-button mini" :disabled="trustBusy" @click="createBackup">Create backup</button>
+          </div>
+          <p v-if="trust.backups.length === 0" class="muted">No managed backups yet.</p>
+          <div v-for="backup in trust.backups" :key="backup.fileName" class="backup-row">
+            <div><strong>{{ backup.reason }}</strong>
+              <span class="muted">{{ formatDate(backup.createdAt) }} · {{ backup.matchCount }} matches · {{ bytes(backup.sizeBytes) }} · {{ backup.integrity }}</span></div>
+            <div class="actions">
+              <button class="league-button mini" :disabled="backup.integrity !== 'ok'" @click="restoreBackup(backup.fileName)">Restore</button>
+              <button class="league-button mini danger" @click="deleteBackup(backup.fileName)">Delete</button>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
     <section class="card">
       <h2 class="section-title">Challenge data</h2>
       <div class="actions">
@@ -297,6 +430,16 @@ const formatDate = (value?: number) =>
           Refresh ARAM balance data
         </button>
       </div>
+    </section>
+
+    <section class="card">
+      <h2 class="section-title">About Recall</h2>
+      <p class="muted note">
+        Recall is not endorsed by Riot Games and does not reflect the views or
+        opinions of Riot Games or anyone officially involved in producing or
+        managing Riot Games properties. Riot Games and all associated
+        properties are trademarks or registered trademarks of Riot Games, Inc.
+      </p>
     </section>
   </div>
 </template>
@@ -417,4 +560,18 @@ h1 {
   border-color: var(--loss);
   color: var(--loss);
 }
+
+.trust-center { max-width: 1080px; }
+.trust-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.trust-head h2, .trust-head h3 { margin-bottom: 0; }
+.trust-state { display: inline-block; margin-top: 4px; text-transform: uppercase; font-size: 10px; letter-spacing: 1px; color: var(--text-secondary); }
+.trust-state.healthy { color: var(--win); }.trust-state.needs_attention { color: var(--loss); }.trust-state.syncing { color: var(--gold); }
+.trust-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); margin-top: var(--space-3); }
+.trust-card { background: var(--surface-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: var(--space-3); }
+.trust-card h3 { margin: 0 0 var(--space-2); font: 15px var(--font-heading); color: var(--gold-bright); }
+.trust-list { margin: 0; display: grid; gap: 4px; font-size: 11px; }.trust-list div { display: flex; justify-content: space-between; gap: var(--space-2); }.trust-list dt { color: var(--text-secondary); }.trust-list dd { margin: 0; text-align: right; }
+.backups { grid-column: 1 / -1; }.backup-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-top: 1px solid var(--border-subtle); }.backup-row > div:first-child { display: flex; flex-direction: column; font-size: 11px; }
+.rate-limits { display: grid; gap: 2px; margin-top: var(--space-2); font-size: 10px; color: var(--text-secondary); }
+.mini { padding: 4px 8px; font-size: 10px; }
+@media (max-width: 760px) { .trust-grid { grid-template-columns: 1fr; }.backups { grid-column: auto; }.backup-row { align-items: flex-start; flex-direction: column; } }
 </style>

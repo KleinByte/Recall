@@ -114,6 +114,20 @@ export class RiotRateLimiter {
     )
   }
 
+  snapshot() {
+    const now = this.now()
+    return [...this.windows.values()]
+      .filter((window) => window.kind === "app")
+      .map((window) => ({
+        limit: window.capacity,
+        seconds: window.windowMs / 1_000,
+        used: window.count,
+        resetsAt: window.observedAt + window.windowMs > now
+          ? window.observedAt + window.windowMs
+          : undefined,
+      }))
+  }
+
   private applicable(scope: string) {
     return [...this.windows.values()].filter(
       (window) => window.kind === "app" || window.scope === scope,

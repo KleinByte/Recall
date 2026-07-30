@@ -29,8 +29,24 @@ import type {
   StyleAxis,
   StyleReport,
   SyncResult,
+  TrackedMode,
 } from "../types/stats"
 import type { LiveSession } from "../types/live"
+import type {
+  AnnotationTag,
+  BackupSummary,
+  ChampionChoice,
+  ChampionChoiceObjective,
+  DataTrustReport,
+  ExperimentOutcomeValue,
+  MatchAnnotation,
+  MatchReview,
+  PracticeExperiment,
+  ReviewOverview,
+  ReviewSession,
+  SessionBoundaryAction,
+  TimelineState,
+} from "../types/review"
 
 const ipc = () => window.ipcRenderer
 
@@ -281,6 +297,117 @@ export const api = {
 
   clearHistory(): Promise<{ deleted: number }> {
     return invoke("stats:clear")
+  },
+
+  getDataTrust(): Promise<DataTrustReport> {
+    return invoke("data-trust:get")
+  },
+
+  checkDataTrust(): Promise<DataTrustReport> {
+    return invoke("data-trust:check")
+  },
+
+  listBackups(): Promise<BackupSummary[]> {
+    return invoke("backups:list")
+  },
+
+  createBackup(): Promise<BackupSummary> {
+    return invoke("backups:create")
+  },
+
+  restoreBackup(fileName: string): Promise<boolean> {
+    return invoke("backups:restore", fileName)
+  },
+
+  deleteBackup(fileName: string): Promise<boolean> {
+    return invoke("backups:delete", fileName)
+  },
+
+  getReviewOverview(): Promise<ReviewOverview> {
+    return invoke("review:overview")
+  },
+
+  getMatchReview(gameId: number): Promise<MatchReview> {
+    return invoke("review:match", gameId)
+  },
+
+  getReviewSessions(page = 1, pageSize = 20): Promise<{
+    rows: ReviewSession[]
+    total: number
+    page: number
+    pageSize: number
+  }> {
+    return invoke("review:sessions", page, pageSize)
+  },
+
+  setSessionBoundary(gameId: number, action: SessionBoundaryAction): Promise<boolean> {
+    return invoke("review:session-boundary", gameId, action)
+  },
+
+  getChampionRecommendations(
+    championIds: number[],
+    mode: TrackedMode,
+    objective: ChampionChoiceObjective,
+  ): Promise<ChampionChoice[]> {
+    return invoke("recommendations:champions", championIds, mode, objective)
+  },
+
+  getTimeline(gameId: number): Promise<TimelineState> {
+    return invoke("timeline:get", gameId)
+  },
+
+  requestTimeline(gameId: number, manualRetry = false): Promise<TimelineState> {
+    return invoke("timeline:request", gameId, manualRetry)
+  },
+
+  getAnnotation(gameId: number): Promise<MatchAnnotation> {
+    return invoke("annotations:get", gameId)
+  },
+
+  saveAnnotation(
+    gameId: number,
+    input: { note: string; bookmarked: boolean; tagIds: number[] },
+  ): Promise<MatchAnnotation> {
+    return invoke("annotations:save", gameId, input)
+  },
+
+  listTags(): Promise<AnnotationTag[]> {
+    return invoke("tags:list")
+  },
+
+  createTag(name: string, color?: string): Promise<AnnotationTag> {
+    return invoke("tags:create", name, color)
+  },
+
+  deleteTag(id: number): Promise<boolean> {
+    return invoke("tags:delete", id)
+  },
+
+  listExperiments(): Promise<PracticeExperiment[]> {
+    return invoke("experiments:list")
+  },
+
+  createExperiment(input: Omit<PracticeExperiment, "id" | "startedAt">) {
+    return invoke<PracticeExperiment>("experiments:create", input)
+  },
+
+  updateExperiment(id: number, input: Omit<PracticeExperiment, "id" | "startedAt">) {
+    return invoke<PracticeExperiment | undefined>("experiments:update", id, input)
+  },
+
+  setExperimentOutcome(
+    gameId: number,
+    experimentId: number,
+    outcome: ExperimentOutcomeValue,
+    note: string,
+  ): Promise<boolean> {
+    return invoke(
+      "experiments:set-match-outcome",
+      gameId,
+      experimentId,
+      outcome,
+      note,
+    )
   },
 
   getUpdateStatus(): Promise<UpdateStatus> {

@@ -11,11 +11,17 @@ import DashboardPage from "./pages/DashboardPage.vue"
 import LiveGamePage from "./pages/LiveGamePage.vue"
 import MatchesPage from "./pages/MatchesPage.vue"
 import ProgressPage from "./pages/ProgressPage.vue"
+import ReviewPage from "./pages/ReviewPage.vue"
 import SettingsPage from "./pages/SettingsPage.vue"
 import SkillPage from "./pages/SkillPage.vue"
 import { api } from "./helpers/api"
 import { loadDataDragonVersion } from "./helpers/ddragon"
-import { detailChampionId, detailMatch, page } from "./helpers/navigation"
+import {
+  detailChampionId,
+  detailMatch,
+  page,
+  reviewMatch,
+} from "./helpers/navigation"
 import { parseMerakiFile } from "./helpers/utils"
 import type { AramStats, Champion, Summoner } from "./types/lol"
 import type { MatchRow } from "./types/stats"
@@ -156,6 +162,7 @@ onMounted(async () => {
         :match="lastGame"
         :champions="allChampions"
         @dismiss="lastGame = null"
+        @review="reviewMatch"
       />
 
       <DashboardPage
@@ -166,6 +173,11 @@ onMounted(async () => {
 
       <LiveGamePage
         v-else-if="page === 'live'"
+        :champions="allChampions"
+      />
+
+      <ReviewPage
+        v-else-if="page === 'review'"
         :champions="allChampions"
       />
 

@@ -11,6 +11,7 @@ import {
   applyMigrations,
   latestSchemaVersion,
 } from "./migrations.js"
+import { BackupManager } from "./backup-manager.js"
 
 const DATABASE_BUSY_TIMEOUT_PRAGMA = "busy_timeout = 10000"
 const SQLITE_COMPANION_SUFFIXES = ["", "-wal", "-shm"]
@@ -18,6 +19,7 @@ const SQLITE_COMPANION_SUFFIXES = ["", "-wal", "-shm"]
 export interface OpenDatabaseOptions {
   DatabaseClass?: typeof Database
   now?: () => number
+  backupDir?: string
 }
 
 function assertHealthy(db: Database.Database) {
@@ -41,6 +43,8 @@ function backUpBeforeMigration(
   filePath: string,
   currentVersion: number,
   now: () => number,
+  backupDir?: string,
+  DatabaseClass: typeof Database = Database,
 ) {
   // A completed checkpoint makes the main database file a self-contained,
   // consistent snapshot. If another process is still writing, abort the
@@ -55,6 +59,12 @@ function backUpBeforeMigration(
       new Error("Database is busy; update will be retried after Recall restarts."),
       { code: "SQLITE_BUSY" },
     )
+  }
+
+  if (backupDir) {
+    return new BackupManager(filePath, backupDir, { DatabaseClass, now })
+      .create(db, "pre-migration")
+      .fileName
   }
 
   const backupPath = `${filePath}.pre-migration-v${currentVersion}-${now()}.bak`
@@ -98,7 +108,14 @@ export function openDatabase(
     }
 
     if (hadUserDataBeforeOpen && currentVersion < latestSchemaVersion) {
-      backUpBeforeMigration(db, filePath, currentVersion, now)
+      backUpBeforeMigration(
+        db,
+        filePath,
+        currentVersion,
+        now,
+        options.backupDir,
+        DatabaseClass,
+      )
     }
 
     applyMigrations(db)

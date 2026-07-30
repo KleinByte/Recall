@@ -11,6 +11,8 @@ export interface RiotBackfillState {
   puuid: string
   regionalRoute: string
   endTimeSeconds: number
+  startTimeSeconds?: number
+  coverageThroughSeconds?: number
   nextOffset: number
   idsScanned: number
   matchesDownloaded: number
@@ -35,6 +37,8 @@ const SELECT = `
     puuid,
     regional_route AS regionalRoute,
     end_time_seconds AS endTimeSeconds,
+    start_time_seconds AS startTimeSeconds,
+    coverage_through_seconds AS coverageThroughSeconds,
     next_offset AS nextOffset,
     ids_scanned AS idsScanned,
     matches_downloaded AS matchesDownloaded,
@@ -72,6 +76,7 @@ export class RiotBackfillRepository {
     regionalRoute: string,
     restart: boolean,
     now = Date.now(),
+    startTimeSeconds?: number,
   ): RiotBackfillState {
     const existing = this.get(puuid, regionalRoute)
 
@@ -79,16 +84,25 @@ export class RiotBackfillRepository {
       this.db
         .prepare(
           `INSERT INTO riot_history_backfill
-             (puuid, regional_route, end_time_seconds, status, started_at, updated_at)
-           VALUES (?, ?, ?, 'running', ?, ?)`,
+             (puuid, regional_route, end_time_seconds, start_time_seconds,
+              status, started_at, updated_at)
+           VALUES (?, ?, ?, ?, 'running', ?, ?)`,
         )
-        .run(puuid, regionalRoute, Math.floor(now / 1_000), now, now)
+        .run(
+          puuid,
+          regionalRoute,
+          Math.floor(now / 1_000),
+          startTimeSeconds ?? null,
+          now,
+          now,
+        )
     } else if (restart) {
       this.db
         .prepare(
           `UPDATE riot_history_backfill
            SET next_offset = 0,
                end_time_seconds = ?,
+               start_time_seconds = ?,
                ids_scanned = 0,
                matches_downloaded = 0,
                matches_imported = 0,
@@ -102,6 +116,7 @@ export class RiotBackfillRepository {
         )
         .run(
           Math.floor(now / 1_000),
+          startTimeSeconds ?? null,
           now,
           now,
           puuid,
@@ -163,6 +178,7 @@ export class RiotBackfillRepository {
       .prepare(
         `UPDATE riot_history_backfill
          SET status = 'complete',
+             coverage_through_seconds = end_time_seconds,
              last_error = NULL,
              updated_at = ?,
              completed_at = ?

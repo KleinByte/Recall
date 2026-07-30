@@ -231,9 +231,9 @@ const busiestHour = computed(() =>
 const championName = (id: number) => championNameById(props.champions, id)
 
 const confidenceLabel: Record<string, string> = {
-  thin: "1–2 games",
-  fair: "3–4 games",
-  solid: "5+ games",
+  thin: "1–4 games",
+  fair: "5–11 games",
+  solid: "12+ games",
 }
 </script>
 

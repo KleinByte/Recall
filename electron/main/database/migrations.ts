@@ -331,6 +331,173 @@ export const migrations: Migration[] = [
         ON riot_history_backfill (puuid, updated_at DESC);
     `,
   },
+  {
+    // Personal review data. Everything is additive and account-scoped. Match
+    // owned records use the same composite key as matches so restores and
+    // account switches cannot leave detached review data behind.
+    version: 9,
+    up: `
+      ALTER TABLE matches ADD COLUMN riot_match_id TEXT;
+
+      CREATE UNIQUE INDEX idx_matches_riot_match_id
+        ON matches (puuid, riot_match_id)
+        WHERE riot_match_id IS NOT NULL;
+
+      CREATE TABLE riot_accounts (
+        puuid             TEXT    PRIMARY KEY,
+        match_puuid       TEXT    NOT NULL,
+        regional_route    TEXT    NOT NULL,
+        platform_id       TEXT    NOT NULL,
+        game_name         TEXT    NOT NULL DEFAULT '',
+        tag_line          TEXT    NOT NULL DEFAULT '',
+        resolved_at       INTEGER NOT NULL
+      );
+
+      CREATE TABLE sync_health (
+        puuid             TEXT    NOT NULL,
+        source            TEXT    NOT NULL,
+        first_observed_at INTEGER NOT NULL,
+        last_attempt_at   INTEGER,
+        last_success_at   INTEGER,
+        last_error_at     INTEGER,
+        last_error        TEXT,
+        items_seen        INTEGER NOT NULL DEFAULT 0,
+        items_written     INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (puuid, source)
+      );
+
+      CREATE TABLE match_grade_breakdowns (
+        game_id              INTEGER NOT NULL,
+        puuid                TEXT    NOT NULL,
+        participant_id       INTEGER NOT NULL,
+        algorithm_version    INTEGER NOT NULL,
+        composite_percentile REAL    NOT NULL,
+        components_json      TEXT    NOT NULL,
+        created_at           INTEGER NOT NULL,
+        PRIMARY KEY (game_id, puuid, participant_id, algorithm_version),
+        FOREIGN KEY (game_id, puuid) REFERENCES matches (game_id, puuid)
+          ON DELETE CASCADE
+      );
+
+      CREATE TABLE session_boundary_overrides (
+        game_id    INTEGER NOT NULL,
+        puuid      TEXT    NOT NULL,
+        action     TEXT    NOT NULL CHECK (action IN ('split', 'join')),
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (game_id, puuid),
+        FOREIGN KEY (game_id, puuid) REFERENCES matches (game_id, puuid)
+          ON DELETE CASCADE
+      );
+
+      CREATE TABLE match_timeline_cache (
+        game_id       INTEGER NOT NULL,
+        puuid         TEXT    NOT NULL,
+        riot_match_id TEXT,
+        status        TEXT    NOT NULL CHECK (
+          status IN ('not_requested', 'pending', 'loading', 'ready', 'unavailable', 'error')
+        ),
+        mapper_version INTEGER NOT NULL DEFAULT 1,
+        fetched_at     INTEGER,
+        last_error     TEXT,
+        data_json      TEXT,
+        updated_at     INTEGER NOT NULL,
+        PRIMARY KEY (game_id, puuid),
+        FOREIGN KEY (game_id, puuid) REFERENCES matches (game_id, puuid)
+          ON DELETE CASCADE
+      );
+
+      CREATE TABLE match_annotations (
+        game_id   INTEGER NOT NULL,
+        puuid     TEXT    NOT NULL,
+        note      TEXT    NOT NULL DEFAULT '',
+        bookmarked INTEGER NOT NULL DEFAULT 0 CHECK (bookmarked IN (0, 1)),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (game_id, puuid),
+        FOREIGN KEY (game_id, puuid) REFERENCES matches (game_id, puuid)
+          ON DELETE CASCADE
+      );
+
+      CREATE TABLE annotation_tags (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        puuid           TEXT    NOT NULL,
+        name            TEXT    NOT NULL,
+        normalized_name TEXT    NOT NULL,
+        color           TEXT    NOT NULL,
+        created_at      INTEGER NOT NULL,
+        UNIQUE (puuid, normalized_name)
+      );
+
+      CREATE TABLE match_annotation_tags (
+        game_id INTEGER NOT NULL,
+        puuid   TEXT    NOT NULL,
+        tag_id  INTEGER NOT NULL,
+        PRIMARY KEY (game_id, puuid, tag_id),
+        FOREIGN KEY (game_id, puuid) REFERENCES matches (game_id, puuid)
+          ON DELETE CASCADE,
+        FOREIGN KEY (tag_id) REFERENCES annotation_tags (id)
+          ON DELETE CASCADE
+      );
+
+      CREATE TABLE practice_experiments (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        puuid        TEXT    NOT NULL,
+        name         TEXT    NOT NULL,
+        hypothesis   TEXT    NOT NULL DEFAULT '',
+        champion_ids TEXT    NOT NULL DEFAULT '[]',
+        modes        TEXT    NOT NULL DEFAULT '[]',
+        status       TEXT    NOT NULL CHECK (status IN ('active', 'paused', 'completed')),
+        started_at   INTEGER NOT NULL,
+        ended_at     INTEGER,
+        created_at   INTEGER NOT NULL,
+        updated_at   INTEGER NOT NULL
+      );
+
+      CREATE TABLE match_experiments (
+        game_id      INTEGER NOT NULL,
+        puuid        TEXT    NOT NULL,
+        experiment_id INTEGER NOT NULL,
+        outcome      TEXT    NOT NULL DEFAULT 'unrated' CHECK (
+          outcome IN ('worked', 'mixed', 'did_not_work', 'unrated')
+        ),
+        outcome_note TEXT    NOT NULL DEFAULT '',
+        attached_at  INTEGER NOT NULL,
+        PRIMARY KEY (game_id, puuid, experiment_id),
+        FOREIGN KEY (game_id, puuid) REFERENCES matches (game_id, puuid)
+          ON DELETE CASCADE,
+        FOREIGN KEY (experiment_id) REFERENCES practice_experiments (id)
+          ON DELETE CASCADE
+      );
+
+      CREATE INDEX idx_sync_health_owner
+        ON sync_health (puuid, last_attempt_at DESC);
+      CREATE INDEX idx_grade_breakdowns_match
+        ON match_grade_breakdowns (puuid, game_id);
+      CREATE INDEX idx_timeline_status
+        ON match_timeline_cache (puuid, status, updated_at);
+      CREATE INDEX idx_annotations_bookmarked
+        ON match_annotations (puuid, bookmarked, updated_at DESC);
+      CREATE INDEX idx_annotation_tags_owner
+        ON annotation_tags (puuid, name);
+      CREATE INDEX idx_experiments_owner
+        ON practice_experiments (puuid, status, started_at DESC);
+      CREATE INDEX idx_match_experiments_owner
+        ON match_experiments (puuid, experiment_id, attached_at);
+    `,
+  },
+  {
+    // Keep the durable coverage boundary separate from an in-flight rolling
+    // refresh. A crash can resume the same overlap window without claiming
+    // that newer history is complete.
+    version: 10,
+    up: `
+      ALTER TABLE riot_history_backfill ADD COLUMN start_time_seconds INTEGER;
+      ALTER TABLE riot_history_backfill ADD COLUMN coverage_through_seconds INTEGER;
+      UPDATE riot_history_backfill
+      SET coverage_through_seconds = end_time_seconds
+      WHERE status = 'complete';
+    `,
+  },
 ]
 
 export const latestSchemaVersion = migrations.at(-1)?.version ?? 0

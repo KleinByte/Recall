@@ -52,14 +52,29 @@ import { LcuEvents as LcuEventStream } from "./lcu-events.js"
 import { MatchSync } from "./match-sync.js"
 import { syncUntilRecorded } from "./post-game-sync.js"
 import { buildStyleProfile } from "./matches/style.js"
-import type { ModeFamily } from "./matches/types.js"
+import type { ModeFamily, TrackedMode } from "./matches/types.js"
 import { migrateLegacyUserData } from "./migrate-user-data.js"
 import { createSingleFlightRefresh } from "./full-refresh.js"
 import { readLiveSession, type LivePhase, type LiveSession } from "./live-session.js"
 import { fetchQueues } from "./matches/queues.js"
 import { RiotHistoryBackfill } from "./riot/history-backfill.js"
-import { regionalRouteFor } from "./riot/routing.js"
+import { canonicalPlatformId, regionalRouteFor } from "./riot/routing.js"
 import { normalizeRiotApiKey } from "./riot/api-client.js"
+import { BackupManager } from "./database/backup-manager.js"
+import { DataTrustService } from "./database/data-trust.js"
+import {
+  ReviewRepository,
+  type ExperimentInput,
+  type ExperimentOutcome,
+} from "./database/review-repo.js"
+import { TimelineService } from "./riot/timeline-service.js"
+import { ReviewService } from "./review/review-service.js"
+import {
+  recommendChampions,
+  type RecommendationCandidate,
+} from "./review/recommendations.js"
+import type { ChampionChoiceObjective } from "./review/types.js"
+import { latestSchemaVersion } from "./database/migrations.js"
 
 const { autoUpdater } = electronUpdater
 import {
@@ -126,6 +141,7 @@ interface Session {
   challengeSync: ChallengeSync
   summoner: Summoner
   regionalRoute?: string
+  platformId?: string
   timer: NodeJS.Timeout
 }
 
@@ -162,6 +178,12 @@ let rankedHistory: RankedRepository | undefined
 let goals: GoalsRepository | undefined
 let insights: InsightsRepository | undefined
 let riotBackfills: RiotBackfillRepository | undefined
+let reviewRepository: ReviewRepository | undefined
+let backupManager: BackupManager | undefined
+let dataTrustService: DataTrustService | undefined
+let timelineService: TimelineService | undefined
+let reviewService: ReviewService | undefined
+let startupRestoreError: string | undefined
 let riotBackfillAbort: AbortController | undefined
 let riotBackfillTask: Promise<void> | undefined
 let riotBackfillRevision = 0
@@ -180,7 +202,9 @@ function trackDatabaseTask<T>(task: Promise<T>): Promise<T> {
 
 function getDatabase() {
   if (!database) {
-    database = openDatabase(getDatabasePath())
+    database = openDatabase(getDatabasePath(), {
+      backupDir: getDatabaseBackupDir(),
+    })
   }
   return database
 }
@@ -238,6 +262,30 @@ function getRiotBackfills(): RiotBackfillRepository {
   return riotBackfills
 }
 
+function getReviewRepository() {
+  if (!reviewRepository) reviewRepository = new ReviewRepository(getDatabase())
+  return reviewRepository
+}
+
+function getBackupManager() {
+  if (!backupManager) {
+    backupManager = new BackupManager(getDatabasePath(), getDatabaseBackupDir())
+  }
+  return backupManager
+}
+
+function getDataTrustService() {
+  if (!dataTrustService) {
+    dataTrustService = new DataTrustService(
+      getDatabase(),
+      getDatabasePath(),
+      getBackupManager(),
+    )
+    if (startupRestoreError) dataTrustService.setStartupError(startupRestoreError)
+  }
+  return dataTrustService
+}
+
 function readRiotApiKey(): string | undefined {
   const encrypted = store.get(RIOT_API_KEY_STORE)
   if (typeof encrypted !== "string" || !safeStorage.isEncryptionAvailable()) {
@@ -252,6 +300,30 @@ function readRiotApiKey(): string | undefined {
     )
     return undefined
   }
+}
+
+function getTimelineService(win: BrowserWindow) {
+  if (!timelineService) {
+    timelineService = new TimelineService(
+      getDatabase(),
+      readRiotApiKey,
+      (gameId) => broadcast(win, "timeline:updated", gameId),
+    )
+  }
+  return timelineService
+}
+
+function getReviewService(win: BrowserWindow) {
+  if (!reviewService) {
+    reviewService = new ReviewService(
+      getDatabase(),
+      getRepository(),
+      getParticipants(),
+      getReviewRepository(),
+      getTimelineService(win),
+    )
+  }
+  return reviewService
 }
 
 async function createWindow() {
@@ -351,6 +423,7 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
 
   let summoner: Summoner
   let regionalRoute: string | undefined
+  let platformId: string | undefined
   try {
     summoner = await client.request<Summoner>(
       "/lol-summoner/v1/current-summoner",
@@ -375,6 +448,7 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
       webRegion?: string
     }>("/riotclient/region-locale")
     const platform = locale.region || locale.webRegion
+    platformId = platform ? canonicalPlatformId(platform) : undefined
     regionalRoute = platform ? regionalRouteFor(platform) : undefined
   } catch (error) {
     console.warn(`Could not determine Riot API route: ${(error as Error).message}`)
@@ -424,6 +498,7 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
     challengeSync,
     summoner,
     regionalRoute,
+    platformId,
     timer: setInterval(() => void runSync(win), PERIODIC_SYNC_INTERVAL_MS),
   }
 
@@ -559,6 +634,7 @@ async function startRiotHistoryBackfill(
   const controller = new AbortController()
   riotBackfillAbort = controller
   let announcedImported: number | undefined
+  let attachedImported: number | undefined
 
   const backfill = new RiotHistoryBackfill(
     apiKey,
@@ -573,9 +649,60 @@ async function startRiotHistoryBackfill(
         gameName: active.summoner.gameName,
         tagLine: active.summoner.tagLine,
       },
+      onAccountResolved: (matchPuuid) => {
+        getDatabase().prepare(
+          `INSERT INTO riot_accounts
+           (puuid, match_puuid, regional_route, platform_id,
+            game_name, tag_line, resolved_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(puuid) DO UPDATE SET
+             match_puuid = excluded.match_puuid,
+             regional_route = excluded.regional_route,
+             platform_id = excluded.platform_id,
+             game_name = excluded.game_name,
+             tag_line = excluded.tag_line,
+             resolved_at = excluded.resolved_at`,
+        ).run(
+          active.summoner.puuid,
+          matchPuuid,
+          active.regionalRoute,
+          active.platformId ?? "",
+          active.summoner.gameName,
+          active.summoner.tagLine,
+          Date.now(),
+        )
+        getTimelineService(win).queuePendingBookmarks(active.summoner.puuid)
+      },
       onProgress: (state) => {
         if (revision !== riotBackfillRevision) return
         broadcast(win, "riot-history:updated", state)
+        if (attachedImported === undefined) {
+          attachedImported = state.matchesImported
+        } else if (state.matchesImported > attachedImported) {
+          const added = state.matchesImported - attachedImported
+          attachedImported = state.matchesImported
+          for (const match of getRepository().getRecentMatches(
+            { puuid: active.summoner.puuid },
+            added,
+          )) getReviewRepository().attachMatchingExperiments(match)
+        }
+        if (state.status === "complete") {
+          getDataTrustService().recordSync(active.summoner.puuid, "riot_history", {
+            success: true,
+            seen: state.idsScanned,
+            written: state.matchesImported,
+          })
+          if (state.matchesImported > 0) createDailyBackupIfNeeded(win)
+          broadcast(win, "data-trust:updated")
+        } else if (state.status === "error") {
+          getDataTrustService().recordSync(active.summoner.puuid, "riot_history", {
+            success: false,
+            seen: state.idsScanned,
+            written: state.matchesImported,
+            error: state.lastError,
+          })
+          broadcast(win, "data-trust:updated")
+        }
         if (announcedImported === undefined) {
           announcedImported = state.matchesImported
           return
@@ -594,6 +721,10 @@ async function startRiotHistoryBackfill(
         }
       },
     },
+  )
+  getDataTrustService().recordAttempt(
+    active.summoner.puuid,
+    "riot_history",
   )
 
   const task = trackDatabaseTask(
@@ -628,13 +759,25 @@ async function afterSync(
   if (result.inserted > 0) {
     broadcast(win, "stats:updated", result)
 
-    // The newest game is the one just played, and it now carries a grade.
-    const [latest] = getRepository().getRecentMatches(
+    // Every newly inserted game is checked against active experiment scopes;
+    // the newest one drives the post-game banner.
+    const recent = getRepository().getRecentMatches(
       { puuid: session.summoner.puuid },
-      1,
+      result.inserted,
     )
-    if (latest) broadcast(win, "match:recorded", latest)
+    const [latest] = recent
+    for (const match of recent) getReviewRepository().attachMatchingExperiments(match)
+    if (latest) {
+      broadcast(win, "match:recorded", latest)
+      broadcast(win, "review:updated", latest.gameId)
+    }
+    createDailyBackupIfNeeded(win)
   }
+  getDataTrustService().recordSync(session.summoner.puuid, "league_client", {
+    success: true,
+    seen: result.inserted,
+    written: result.inserted,
+  })
 
   // Challenges are synced after matches so a challenge failure can never cost
   // us a recorded game.
@@ -870,6 +1013,267 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
 
   ipcMain.handle("store-get", (_event, key: string) => store.get(key))
 
+  ipcMain.handle("data-trust:get", () =>
+    getDataTrustService().report(
+      currentPuuid(),
+      typeof store.get(RIOT_API_KEY_STORE) === "string",
+      safeStorage.isEncryptionAvailable(),
+    ),
+  )
+
+  ipcMain.handle("data-trust:check", () => {
+    const service = getDataTrustService()
+    service.check()
+    const report = service.report(
+      currentPuuid(),
+      typeof store.get(RIOT_API_KEY_STORE) === "string",
+      safeStorage.isEncryptionAvailable(),
+    )
+    broadcast(win, "data-trust:updated", report)
+    return report
+  })
+
+  ipcMain.handle("backups:list", () => getBackupManager().list())
+  ipcMain.handle("backups:create", () => {
+    const backup = getBackupManager().create(getDatabase(), "manual")
+    broadcast(win, "data-trust:updated")
+    return backup
+  })
+  ipcMain.handle("backups:delete", (_event, fileName: unknown) => {
+    const deleted = getBackupManager().delete(
+      limitedString(fileName, "Backup name", 180),
+    )
+    broadcast(win, "data-trust:updated")
+    return deleted
+  })
+  ipcMain.handle("backups:restore", (_event, fileName: unknown) => {
+    getBackupManager().prepareRestore(
+      getDatabase(),
+      limitedString(fileName, "Backup name", 180),
+    )
+    setImmediate(() => {
+      quitting = true
+      app.relaunch()
+      app.quit()
+    })
+    return true
+  })
+
+  ipcMain.handle("review:overview", () =>
+    getReviewService(win).overview(withPuuid().puuid),
+  )
+  ipcMain.handle("review:match", (_event, rawGameId: unknown) =>
+    getReviewService(win).match(
+      integer(rawGameId, "Game id"),
+      withPuuid().puuid,
+    ),
+  )
+  ipcMain.handle(
+    "review:sessions",
+    (_event, rawPage: unknown, rawPageSize: unknown) =>
+      getReviewService(win).sessions(
+        withPuuid().puuid,
+        integer(rawPage, "Page"),
+        integer(rawPageSize, "Page size"),
+      ),
+  )
+  ipcMain.handle(
+    "review:session-boundary",
+    (_event, rawGameId: unknown, rawAction: unknown) => {
+      const gameId = integer(rawGameId, "Game id")
+      const action = rawAction === null
+        ? null
+        : oneOf(rawAction, ["split", "join"] as const, "Boundary action")
+      const puuid = withPuuid().puuid
+      if (!getRepository().getMatch(gameId, puuid)) throw new Error("Match not found")
+      getReviewRepository().setBoundaryOverride(gameId, puuid, action)
+      broadcast(win, "review:updated", gameId)
+      return true
+    },
+  )
+
+  ipcMain.handle(
+    "recommendations:champions",
+    async (
+      _event,
+      rawChampionIds: unknown,
+      rawMode: unknown,
+      rawObjective: unknown,
+    ) => {
+      if (!Array.isArray(rawChampionIds) || rawChampionIds.length > 200) {
+        throw new Error("Champion options are invalid")
+      }
+      const championIds = [...new Set(rawChampionIds.map((value) =>
+        integer(value, "Champion id"),
+      ))]
+      const mode = oneOf(rawMode, [
+        "sr_ranked_solo", "sr_ranked_flex", "sr_normal", "sr_quickplay",
+        "sr_swiftplay", "aram", "mayhem", "other",
+      ] as const, "Mode")
+      const objective = oneOf(rawObjective, [
+        "best_overall", "recent_form", "challenges", "practice", "most_reliable",
+      ] as const, "Objective") as ChampionChoiceObjective
+      const puuid = withPuuid().puuid
+      const all = getRepository().getAllMatches(puuid)
+        .filter((match) => match.mode === mode)
+      const candidates: RecommendationCandidate[] = await Promise.all(
+        championIds.map(async (championId) => {
+          const statuses = await Promise.resolve(
+            readPinned().flatMap((id) => {
+              const challenge = getChallenges().getById(id, puuid)
+              if (!challenge) return []
+              const status = championStatusFor(challenge, championId)
+              return status && !status.completed ? [status.name] : []
+            }),
+          )
+          return {
+            championId,
+            championName: (await championNameFor(championId)) ?? `Champion ${championId}`,
+            incompleteChallengeNames: statuses,
+            games: all.filter((match) => match.championId === championId).map((match) => ({
+              championId,
+              championName: "",
+              playedAt: match.playedAt,
+              win: match.win === 1,
+              kills: match.kills,
+              deaths: match.deaths,
+              assists: match.assists,
+              gradeScore: match.gradeScore,
+            })),
+          }
+        }),
+      )
+      store.set("recommendation-objective", objective)
+      return recommendChampions(candidates, objective)
+    },
+  )
+
+  ipcMain.handle("timeline:get", (_event, rawGameId: unknown) =>
+    getTimelineService(win).get(
+      integer(rawGameId, "Game id"),
+      withPuuid().puuid,
+    ),
+  )
+  ipcMain.handle(
+    "timeline:request",
+    (_event, rawGameId: unknown, manualRetry: unknown) =>
+      getTimelineService(win).request(
+        integer(rawGameId, "Game id"),
+        withPuuid().puuid,
+        manualRetry === true,
+      ),
+  )
+
+  ipcMain.handle("annotations:get", (_event, rawGameId: unknown) =>
+    getReviewRepository().getAnnotation(
+      integer(rawGameId, "Game id"),
+      withPuuid().puuid,
+    ),
+  )
+  ipcMain.handle(
+    "annotations:save",
+    (_event, rawGameId: unknown, rawInput: unknown) => {
+      const input = rawInput as Record<string, unknown>
+      const gameId = integer(rawGameId, "Game id")
+      const puuid = withPuuid().puuid
+      if (!getRepository().getMatch(gameId, puuid)) throw new Error("Match not found")
+      if (!Array.isArray(input?.tagIds)) throw new Error("Tags are invalid")
+      const saved = getReviewRepository().saveAnnotation(gameId, puuid, {
+        note: boundedText(input.note ?? "", "Note", 4_000),
+        bookmarked: input.bookmarked === true,
+        tagIds: input.tagIds.map((tagId) => integer(tagId, "Tag id")).slice(0, 20),
+      })
+      if (saved.bookmarked) void getTimelineService(win).request(gameId, puuid)
+      broadcast(win, "review:updated", gameId)
+      return saved
+    },
+  )
+  ipcMain.handle("tags:list", () =>
+    getReviewRepository().listTags(withPuuid().puuid),
+  )
+  ipcMain.handle(
+    "tags:create",
+    (_event, rawName: unknown, rawColor: unknown) => {
+      const name = limitedString(rawName, "Tag name", 24)
+      if (!name) throw new Error("Tag name is required")
+      return getReviewRepository().createTag(
+        withPuuid().puuid,
+        name,
+        typeof rawColor === "string" ? rawColor : undefined,
+      )
+    },
+  )
+  ipcMain.handle("tags:delete", (_event, rawId: unknown) =>
+    getReviewRepository().deleteTag(
+      integer(rawId, "Tag id"),
+      withPuuid().puuid,
+    ),
+  )
+
+  ipcMain.handle("experiments:list", () =>
+    getReviewRepository().listExperiments(withPuuid().puuid),
+  )
+  const experimentInput = (raw: unknown): ExperimentInput => {
+    const input = raw as Record<string, unknown>
+    if (!Array.isArray(input?.championIds) || !Array.isArray(input?.modes)) {
+      throw new Error("Experiment scope is invalid")
+    }
+    const name = limitedString(input.name, "Experiment name", 80)
+    if (!name) throw new Error("Experiment name is required")
+    return {
+      name,
+      hypothesis: boundedText(input.hypothesis ?? "", "Hypothesis", 500),
+      championIds: input.championIds.map((id) => integer(id, "Champion id")),
+      modes: input.modes.map((mode) => oneOf(mode, [
+        "sr_ranked_solo", "sr_ranked_flex", "sr_normal", "sr_quickplay",
+        "sr_swiftplay", "aram", "mayhem", "other",
+      ] as const, "Mode")) as TrackedMode[],
+      status: input.status === undefined
+        ? undefined
+        : oneOf(input.status, ["active", "paused", "completed"] as const, "Status"),
+    }
+  }
+  ipcMain.handle("experiments:create", (_event, rawInput: unknown) => {
+    const input = experimentInput(rawInput)
+    const created = getReviewRepository().createExperiment(withPuuid().puuid, input)
+    broadcast(win, "review:updated")
+    return created
+  })
+  ipcMain.handle(
+    "experiments:update",
+    (_event, rawId: unknown, rawInput: unknown) => {
+      const updated = getReviewRepository().updateExperiment(
+        integer(rawId, "Experiment id"),
+        withPuuid().puuid,
+        experimentInput(rawInput),
+      )
+      broadcast(win, "review:updated")
+      return updated
+    },
+  )
+  ipcMain.handle(
+    "experiments:set-match-outcome",
+    (
+      _event,
+      rawGameId: unknown,
+      rawExperimentId: unknown,
+      rawOutcome: unknown,
+      rawNote: unknown,
+    ) => {
+      const updated = getReviewRepository().setExperimentOutcome(
+        integer(rawGameId, "Game id"),
+        withPuuid().puuid,
+        integer(rawExperimentId, "Experiment id"),
+        oneOf(rawOutcome, [
+          "worked", "mixed", "did_not_work", "unrated",
+        ] as const, "Outcome") as ExperimentOutcome,
+        boundedText(rawNote ?? "", "Outcome note", 1_000),
+      )
+      broadcast(win, "review:updated", rawGameId)
+      return updated
+    },
+  )
+
   // A Riot key must never travel back to the renderer. Electron delegates
   // encryption to the operating system (DPAPI on Windows, Keychain on macOS)
   // and only the main process can retrieve it for future API requests.
@@ -890,6 +1294,8 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     const encrypted = safeStorage.encryptString(apiKey).toString("base64")
     store.set(RIOT_API_KEY_STORE, encrypted)
     void startRiotHistoryBackfill(win, true)
+    const puuid = currentPuuid()
+    if (puuid) getTimelineService(win).queuePendingBookmarks(puuid)
     return { configured: true }
   })
 
@@ -1289,6 +1695,45 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
   })
 }
 
+function createDailyBackupIfNeeded(win: BrowserWindow) {
+  const today = new Date().toISOString().slice(0, 10)
+  if (store.get("last-daily-backup") === today) return
+  getBackupManager().create(getDatabase(), "daily")
+  store.set("last-daily-backup", today)
+  broadcast(win, "data-trust:updated")
+}
+
+function integer(value: unknown, label: string, minimum = 1) {
+  if (!Number.isSafeInteger(value) || Number(value) < minimum) {
+    throw new Error(`${label} is invalid`)
+  }
+  return Number(value)
+}
+
+function limitedString(value: unknown, label: string, maximum: number) {
+  if (typeof value !== "string") throw new Error(`${label} is invalid`)
+  const trimmed = value.trim()
+  if (trimmed.length > maximum) throw new Error(`${label} is too long`)
+  return trimmed
+}
+
+function boundedText(value: unknown, label: string, maximum: number) {
+  if (typeof value !== "string") throw new Error(`${label} is invalid`)
+  if (value.length > maximum) throw new Error(`${label} is too long`)
+  return value
+}
+
+function oneOf<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  label: string,
+): T {
+  if (typeof value !== "string" || !allowed.includes(value as T)) {
+    throw new Error(`${label} is invalid`)
+  }
+  return value as T
+}
+
 async function prepareShutdown(
   win: BrowserWindow,
   createSnapshot: boolean,
@@ -1310,6 +1755,7 @@ async function prepareShutdown(
 
   try {
     if (database?.open && createSnapshot) {
+      getBackupManager().create(database, "pre-update")
       createUpdateSnapshot(
         database,
         getDatabasePath(),
@@ -1328,6 +1774,17 @@ async function prepareShutdown(
 
 async function main() {
   await app.whenReady()
+
+  try {
+    const restored = getBackupManager().applyRestoreIntent(latestSchemaVersion)
+    if (restored) console.log("Restored the selected verified database backup")
+  } catch (error) {
+    startupRestoreError = (error as Error).message
+    dialog.showErrorBox(
+      "Recall could not restore the selected backup",
+      `${(error as Error).message}\n\nThe existing database was retained.`,
+    )
+  }
 
   const restoredSnapshot = restoreLatestUpdateSnapshot(
     getDatabasePath(),

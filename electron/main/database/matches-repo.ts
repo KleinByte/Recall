@@ -99,6 +99,10 @@ export interface MatchQuery extends StatsFilter {
   minDurationSecs?: number
   sortBy?: "played_at" | "kda" | "damage" | "grade" | "duration"
   sortDir?: "asc" | "desc"
+  bookmarked?: boolean
+  hasNotes?: boolean
+  tagIds?: number[]
+  experimentId?: number
 }
 
 export interface MatchPage {
@@ -158,6 +162,7 @@ const COLUMNS = [
   "cs_per_min",
   "gold_per_min",
   "queue_name",
+  "riot_match_id",
 ] as const
 
 const INSERT_SQL = `
@@ -215,6 +220,7 @@ function toValues(row: MatchRow) {
     row.csPerMin,
     row.goldPerMin,
     row.queueName ?? null,
+    row.riotMatchId ?? null,
   ]
 }
 
@@ -254,6 +260,21 @@ export class MatchesRepository {
       .get(puuid) as { total: number }
 
     return row.total
+  }
+
+  getMatch(gameId: number, puuid: string): MatchRow | undefined {
+    const row = this.db
+      .prepare("SELECT * FROM matches WHERE game_id = ? AND puuid = ?")
+      .get(gameId, puuid) as Record<string, never> | undefined
+    return row ? toMatchRow(row) : undefined
+  }
+
+  setRiotMatchId(gameId: number, puuid: string, riotMatchId: string) {
+    this.db
+      .prepare(
+        "UPDATE matches SET riot_match_id = ? WHERE game_id = ? AND puuid = ?",
+      )
+      .run(riotMatchId, gameId, puuid)
   }
 
   hasCompleteMatch(gameId: number, puuid: string): boolean {
@@ -567,7 +588,27 @@ export class MatchesRepository {
 
     const rows = this.db
       .prepare(
-        `SELECT * FROM matches ${clause}
+        `SELECT matches.*,
+                EXISTS (
+                  SELECT 1 FROM match_annotations ma
+                  WHERE ma.game_id = matches.game_id AND ma.puuid = matches.puuid
+                    AND ma.bookmarked = 1
+                ) AS bookmarked,
+                EXISTS (
+                  SELECT 1 FROM match_annotations ma
+                  WHERE ma.game_id = matches.game_id AND ma.puuid = matches.puuid
+                    AND LENGTH(TRIM(ma.note)) > 0
+                ) AS has_note,
+                COALESCE((
+                  SELECT GROUP_CONCAT(t.name, ' · ')
+                  FROM match_annotation_tags mat
+                  JOIN annotation_tags t ON t.id = mat.tag_id
+                  WHERE mat.game_id = matches.game_id AND mat.puuid = matches.puuid
+                ), '') AS tag_names,
+                (SELECT COUNT(*) FROM match_experiments me
+                 WHERE me.game_id = matches.game_id AND me.puuid = matches.puuid)
+                  AS experiment_count
+         FROM matches ${clause}
          ORDER BY ${orderBy(query)}
          LIMIT ? OFFSET ?`,
       )
@@ -686,6 +727,48 @@ function buildQuery(query: MatchQuery) {
     params.push(query.minDurationSecs)
   }
 
+  if (query.bookmarked !== undefined) {
+    conditions.push(
+      `${query.bookmarked ? "" : "NOT "}EXISTS (
+        SELECT 1 FROM match_annotations ma
+        WHERE ma.game_id = matches.game_id AND ma.puuid = matches.puuid
+          AND ma.bookmarked = 1
+      )`,
+    )
+  }
+
+  if (query.hasNotes !== undefined) {
+    conditions.push(
+      `${query.hasNotes ? "" : "NOT "}EXISTS (
+        SELECT 1 FROM match_annotations ma
+        WHERE ma.game_id = matches.game_id AND ma.puuid = matches.puuid
+          AND LENGTH(TRIM(ma.note)) > 0
+      )`,
+    )
+  }
+
+  if (query.tagIds?.length) {
+    conditions.push(
+      `EXISTS (
+        SELECT 1 FROM match_annotation_tags mat
+        WHERE mat.game_id = matches.game_id AND mat.puuid = matches.puuid
+          AND mat.tag_id IN (${query.tagIds.map(() => "?").join(", ")})
+      )`,
+    )
+    params.push(...query.tagIds)
+  }
+
+  if (query.experimentId !== undefined) {
+    conditions.push(
+      `EXISTS (
+        SELECT 1 FROM match_experiments me
+        WHERE me.game_id = matches.game_id AND me.puuid = matches.puuid
+          AND me.experiment_id = ?
+      )`,
+    )
+    params.push(query.experimentId)
+  }
+
   return { clause: `WHERE ${conditions.join(" AND ")}`, params }
 }
 
@@ -800,5 +883,12 @@ function toMatchRow(row: Record<string, never>): MatchRow {
     csPerMin: row.cs_per_min,
     goldPerMin: row.gold_per_min,
     queueName: row.queue_name ?? undefined,
+    riotMatchId: row.riot_match_id ?? undefined,
+    bookmarked: row.bookmarked === undefined ? undefined : row.bookmarked === 1,
+    hasNote: row.has_note === undefined ? undefined : row.has_note === 1,
+    tagNames: typeof row.tag_names === "string" && row.tag_names
+      ? (row.tag_names as unknown as string).split(" · ")
+      : undefined,
+    experimentCount: row.experiment_count ?? undefined,
   }
 }

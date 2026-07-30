@@ -26,6 +26,10 @@ export interface MatchQuery extends StatsFilter {
   minDurationSecs?: number
   sortBy?: "played_at" | "kda" | "damage" | "grade" | "duration"
   sortDir?: "asc" | "desc"
+  bookmarked?: boolean
+  hasNotes?: boolean
+  tagIds?: number[]
+  experimentId?: number
 }
 
 export interface MatchPage {
@@ -455,6 +459,11 @@ export interface MatchRow {
   csPerMin: number
   goldPerMin: number
   queueName?: string
+  riotMatchId?: string
+  bookmarked?: boolean
+  hasNote?: boolean
+  tagNames?: string[]
+  experimentCount?: number
 }
 
 export interface StatsMeta {

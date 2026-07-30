@@ -49,6 +49,27 @@ describe("RiotHistoryBackfill", () => {
   let participants: ParticipantsRepository
   let progress: RiotBackfillRepository
 
+  it("advances the durable coverage boundary only after a rolling job completes", () => {
+    const first = progress.start(PUUID, "americas", true, 1_700_000_000_000)
+    const completed = progress.complete(PUUID, "americas", 1_700_000_100_000)
+    expect(completed.coverageThroughSeconds).toBe(first.endTimeSeconds)
+
+    const rolling = progress.start(
+      PUUID,
+      "americas",
+      true,
+      1_700_100_000_000,
+      completed.coverageThroughSeconds! - 86_400,
+    )
+    expect(rolling.coverageThroughSeconds).toBe(first.endTimeSeconds)
+    expect(rolling.startTimeSeconds).toBe(
+      completed.coverageThroughSeconds! - 86_400,
+    )
+
+    const refreshed = progress.complete(PUUID, "americas", 1_700_100_100_000)
+    expect(refreshed.coverageThroughSeconds).toBe(rolling.endTimeSeconds)
+  })
+
   beforeEach(() => {
     db = new Database(":memory:")
     applyMigrations(db as never)

@@ -51,6 +51,12 @@ const kda = (match: MatchRow) =>
           <div class="meta muted">
             <span class="mode-tag">{{ modeLabel(match.mode) }}</span>
             <span>{{ formatDuration(match.durationSecs) }}</span>
+            <span v-if="match.bookmarked" title="Bookmarked">★</span>
+            <span v-if="match.hasNote" title="Has note">Note</span>
+            <span v-if="match.experimentCount" title="Practice experiment">Experiment</span>
+          </div>
+          <div v-if="match.tagNames?.length" class="row-tags muted">
+            {{ match.tagNames.join(" · ") }}
           </div>
         </div>
 
@@ -148,6 +154,8 @@ const kda = (match: MatchRow) =>
   border-radius: var(--radius-sm);
   padding: 0 var(--space-1);
 }
+
+.row-tags { font-size: 10px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .result {
   font-family: var(--font-heading);

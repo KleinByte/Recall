@@ -26,6 +26,10 @@ challenge requirements.
 challenge goals, view personal records, and explore mode-specific playstyle
 trends and lobby comparisons.
 
+**Builds a personal review journal** — explain every grade, compare a game only
+with matches played before it, review sessions, bookmark important games, keep
+notes and tags, and run reusable practice experiments.
+
 ## Connected to the League client
 
 Recall reads the locally running League Client on Windows. It syncs on launch,
@@ -44,7 +48,7 @@ ARAM, and ARAM: Mayhem. Arena and rotating modes are not currently tracked.
 
 ### Performance grades
 
-Every game gets a letter grade from S+ down to D.
+Every complete scoreboard gets a letter grade from S+ down to D.
 
 Riot does not expose a grade through the local client API, so Recall derives one
 by comparing you against the other nine players in that same game. On Summoner's
@@ -52,37 +56,44 @@ Rift, role-sensitive statistics like creep score are measured against others in
 your role — a support is not marked down for farming less than the mid laner. An
 average game lands on a B.
 
-Grading needs one extra request per game, so it runs after matches are recorded.
-A game that has already aged out of the client's history cannot be graded
-retroactively and will show no grade.
+The Review page shows the lobby percentile, component weights, and weighted
+contributions produced by that same grading calculation. Imported Match-V5
+scoreboards can be graded retroactively; a game without a complete lobby keeps
+its existing grade and explains why no breakdown is available.
 
-## The League client's 20-game window
+## Local and Riot history
 
 The League client exposes only its **most recent 20 games**, shared across all
 modes. Requests for anything older are accepted and silently ignored, and no
-other local endpoint offers more.
+other local endpoint offers more. Recall still re-reads that window on launch,
+after each game, and periodically so new matches are captured without a web API
+key.
 
-Recall works around this by re-reading that window on launch, after each game
-and periodically, storing anything it has not seen before. This means:
+Optionally, add a personal `RGAPI-…` Web API key in Settings. Recall encrypts it
+using operating-system secure storage and uses Match-V5 to import every match
+Riot still exposes for the signed-in account. Imports resume after restarts,
+share Riot's observed application and method rate limits, and refresh new
+history with a 24-hour overlap after the initial scan.
 
-- Everything you play from installation onward is kept permanently, with no limit.
-- On first run, up to your last 20 games are imported.
-- Games played while Recall is closed are still picked up, provided you have not played more than 20 since it last ran.
-- Games from before you installed Recall cannot be recovered. Nothing can retrieve them.
+Match timelines are never fetched automatically just because a review opens.
+Use **Load timeline**, or bookmark the match, to fetch and permanently cache a
+compact local summary. Raw Riot timeline responses are not stored.
 
 Match history is paged, filterable, and sortable by mode, result, champion,
-grade, date, duration, KDA, and damage, so a large archive stays usable.
+grade, date, duration, KDA, damage, bookmark, notes, tags, and experiments, so
+a large archive stays usable.
 
 Challenge progress is also snapshotted whenever a value changes, which lets
 Recall show progress over time — something the client, which only reports current
 values, cannot do.
 
-The database lives in your user data folder and survives app updates. Its exact
-path is shown on the Settings page, along with export and reset actions.
+The database lives in your user data folder and survives app updates. Settings
+includes a Data Trust Center for integrity checks, history coverage, sync
+health, verified backups, and safe restoration.
 
 # Install (Windows only)
 
-Go to the [latest release](https://github.com/nyquase/lol-challenge-tracker/releases/latest)
+Go to the [latest release](https://github.com/KleinByte/Recall/releases/latest)
 
 > Windows will warn you that this exe is not safe, because it's a pain to sign an exe. Feel free to look at the code to see what it does.
 
@@ -130,6 +141,14 @@ is kept at the plain Node ABI so the test suite can run outside Electron.
 
 ## Privacy
 
-Recall stores your own data locally and sends nothing anywhere. The challenge
-payload from the client includes a `friendsAtLevels` field listing your friends'
-identifiers; Recall deliberately discards it, and a test enforces that.
+Recall stores review data locally. If you configure a Riot Web API key, the main
+process sends authenticated account, match-history, and on-demand timeline
+requests directly to Riot; the key and full external PUUID never reach the
+renderer or logs. The challenge payload from the client includes a
+`friendsAtLevels` field listing your friends' identifiers; Recall deliberately
+discards it, and a test enforces that.
+
+Recall is not endorsed by Riot Games and does not reflect the views or opinions
+of Riot Games or anyone officially involved in producing or managing Riot Games
+properties. Riot Games and all associated properties are trademarks or
+registered trademarks of Riot Games, Inc.

@@ -45,8 +45,10 @@ describe("shrinkToward", () => {
 describe("confidenceOf", () => {
   it("labels the sample honestly", () => {
     expect(confidenceOf(1)).toBe("thin")
-    expect(confidenceOf(3)).toBe("fair")
-    expect(confidenceOf(9)).toBe("solid")
+    expect(confidenceOf(4)).toBe("thin")
+    expect(confidenceOf(5)).toBe("fair")
+    expect(confidenceOf(11)).toBe("fair")
+    expect(confidenceOf(12)).toBe("solid")
   })
 })
 

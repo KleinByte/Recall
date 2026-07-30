@@ -8,6 +8,9 @@
  */
 
 import type { ModeFamily } from "./types.js"
+import type { GradeBreakdown, GradeComponent } from "../review/types.js"
+
+export const GRADE_ALGORITHM_VERSION = 1
 
 export const GRADES = [
   "S+", "S", "S-", "A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D",
@@ -34,6 +37,9 @@ export interface GradeResult {
   grade: Grade
   /** Standard deviations from this lobby's average composite score. */
   score: number
+  /** Lobby percentile of the same composite used to derive the letter. */
+  percentile: number
+  breakdown: GradeBreakdown
 }
 
 interface Weights {
@@ -101,7 +107,11 @@ function rolePercentile(
   return percentile(peers.length >= 2 ? peers.map(get) : lobby.map(get), get(player))
 }
 
-function composite(player: GradeInput, lobby: GradeInput[], weights: Weights): number {
+function componentValues(
+  player: GradeInput,
+  lobby: GradeInput[],
+  weights: Weights,
+): GradeComponent[] {
   const team = lobby.filter((entry) => entry.teamId === player.teamId)
   const teamKills = team.reduce((sum, entry) => sum + entry.kills, 0)
   const teamDamage = team.reduce((sum, entry) => sum + entry.damageToChampions, 0)
@@ -119,27 +129,55 @@ function composite(player: GradeInput, lobby: GradeInput[], weights: Weights): n
       share(entry.damageToChampions, entry.teamId === player.teamId ? teamDamage : lobby.filter((p) => p.teamId === entry.teamId).reduce((sum, p) => sum + p.damageToChampions, 0)) * 4,
   ), kda + damageShare * 4)
 
-  return (
-    weights.combat * combat +
-    weights.participation * percentile(lobby.map((entry) => {
+  const participationPercentile = percentile(lobby.map((entry) => {
       const kills = lobby.filter((p) => p.teamId === entry.teamId).reduce((sum, p) => sum + p.kills, 0)
       return share(entry.kills + entry.assists, kills)
-    }), participation) +
+    }), participation)
+  const economy = weights.farming > 0
+    ? rolePercentile(player, lobby, (entry) => entry.goldEarned)
+    : percentile(lobby.map((entry) => entry.goldEarned), player.goldEarned)
+  const survival = percentile(lobby.map((entry) => -entry.deaths), -player.deaths)
+  const frontlining = percentile(lobby.map((entry) => entry.damageTaken), player.damageTaken)
+  const farming = rolePercentile(player, lobby, (entry) => entry.csPerMin ?? 0)
+  const vision = rolePercentile(player, lobby, (entry) => entry.visionScore ?? 0)
+  const objectives = percentile(lobby.map((entry) => {
+    const total = lobby.filter((p) => p.teamId === entry.teamId).reduce((sum, p) => sum + (p.damageObjectives ?? 0), 0)
+    return share(entry.damageObjectives ?? 0, total)
+  }), objectiveShare)
+
+  const values: Array<[GradeComponent["key"], string, number, GradeComponent["scope"]]> = [
+    ["combat", "Combat", combat, "lobby"],
+    ["participation", "Participation", participationPercentile, "team"],
+    ["economy", "Economy", economy, weights.farming > 0 ? "role" : "lobby"],
+    ["survival", "Survival", survival, "lobby"],
+    ["frontlining", "Frontlining", frontlining, "lobby"],
+    ["farming", "Farming", farming, "role"],
+    ["vision", "Vision", vision, "role"],
+    ["objectives", "Objectives", objectives, "team"],
+  ]
+
+  return values.flatMap(([key, label, value, scope]) => {
+    const weight = weights[key]
+    return weight === 0
+      ? []
+      : [{
+          key,
+          label,
+          percentile: value,
+          weight,
+          contribution: value * weight,
+          scope,
+        }]
+  })
+}
+
+function composite(components: GradeComponent[]): number {
+  return components.reduce((sum, component) => sum + component.contribution, 0)
+  /*
     // Support income is intentionally lower than a carry's. On the Rift,
     // assess economy within the job instead of rewarding a support for taking
     // minions that belonged to their laner.
-    weights.economy * (weights.farming > 0
-      ? rolePercentile(player, lobby, (entry) => entry.goldEarned)
-      : percentile(lobby.map((entry) => entry.goldEarned), player.goldEarned)) +
-    weights.survival * percentile(lobby.map((entry) => -entry.deaths), -player.deaths) +
-    weights.frontlining * percentile(lobby.map((entry) => entry.damageTaken), player.damageTaken) +
-    weights.farming * rolePercentile(player, lobby, (entry) => entry.csPerMin ?? 0) +
-    weights.vision * rolePercentile(player, lobby, (entry) => entry.visionScore ?? 0) +
-    weights.objectives * percentile(lobby.map((entry) => {
-      const total = lobby.filter((p) => p.teamId === entry.teamId).reduce((sum, p) => sum + (p.damageObjectives ?? 0), 0)
-      return share(entry.damageObjectives ?? 0, total)
-    }), objectiveShare)
-  )
+  */
 }
 
 /** Grades the complete lobby at once so every scoreboard row stays consistent. */
@@ -147,7 +185,8 @@ export function gradeLobby(lobby: GradeInput[], family: ModeFamily): Map<number,
   if (lobby.length < 10) return new Map()
 
   const weights = family === "sr" ? RIFT_WEIGHTS : ARAM_WEIGHTS
-  const raw = lobby.map((player) => composite(player, lobby, weights))
+  const components = lobby.map((player) => componentValues(player, lobby, weights))
+  const raw = components.map(composite)
   const mean = raw.reduce((sum, value) => sum + value, 0) / raw.length
   const deviation = Math.sqrt(raw.reduce((sum, value) => sum + (value - mean) ** 2, 0) / raw.length)
 
@@ -156,7 +195,17 @@ export function gradeLobby(lobby: GradeInput[], family: ModeFamily): Map<number,
     // lobby. It is still a tie, not a random C/D split.
     const score = deviation < 1e-10 ? 0 : (raw[index] - mean) / deviation
     const grade = THRESHOLDS.find(([, minimum]) => score >= minimum)?.[0] ?? "D"
-    return [player.participantId, { grade, score }]
+    const compositePercentile = percentile(raw, raw[index])
+    return [player.participantId, {
+      grade,
+      score,
+      percentile: compositePercentile,
+      breakdown: {
+        algorithmVersion: GRADE_ALGORITHM_VERSION,
+        compositePercentile,
+        components: components[index],
+      },
+    }]
   }))
 }
 

@@ -25,6 +25,23 @@ const gradeAram = (lobby: GradeInput[], id: number) =>
   gradeMatch(lobby, id, "aram")!
 
 describe("gradeMatch", () => {
+  it("explains the exact composite used by the grade", () => {
+    const result = gradeAram(evenLobby(), 1)
+    expect(result.breakdown.components.map((component) => component.key)).toEqual([
+      "combat",
+      "participation",
+      "economy",
+      "survival",
+      "frontlining",
+    ])
+    expect(
+      result.breakdown.components.reduce(
+        (sum, component) => sum + component.contribution,
+        0,
+      ),
+    ).toBeCloseTo(.45)
+    expect(result.percentile).toBe(.5)
+  })
   it("gives an average grade when everyone performed identically", () => {
     const lobby = evenLobby()
 

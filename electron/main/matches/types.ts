@@ -222,4 +222,10 @@ export interface MatchRow {
   csPerMin: number
   goldPerMin: number
   queueName?: string
+  /** Canonical platform-prefixed Match-V5 id, for example NA1_123456789. */
+  riotMatchId?: string
+  bookmarked?: boolean
+  hasNote?: boolean
+  tagNames?: string[]
+  experimentCount?: number
 }

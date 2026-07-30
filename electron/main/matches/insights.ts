@@ -31,8 +31,8 @@ export function shrinkToward(
 }
 
 export function confidenceOf(games: number): Confidence {
-  if (games >= 5) return "solid"
-  if (games >= 3) return "fair"
+  if (games >= 12) return "solid"
+  if (games >= 5) return "fair"
   return "thin"
 }
 

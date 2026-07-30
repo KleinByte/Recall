@@ -22,6 +22,7 @@ interface BackfillOptions {
     tagLine: string
   }
   onProgress?: (state: RiotBackfillState) => void
+  onAccountResolved?: (matchPuuid: string) => void
 }
 
 const gameIdFromMatchId = (matchId: string) => {
@@ -40,6 +41,7 @@ export class RiotHistoryBackfill {
   private readonly progress: RiotBackfillRepository
   private readonly riotId: BackfillOptions["riotId"]
   private readonly onProgress: (state: RiotBackfillState) => void
+  private readonly onAccountResolved: (matchPuuid: string) => void
 
   constructor(
     private readonly apiKey: string,
@@ -56,31 +58,51 @@ export class RiotHistoryBackfill {
     this.progress = progress
     this.riotId = options.riotId
     this.onProgress = options.onProgress ?? (() => undefined)
+    this.onAccountResolved = options.onAccountResolved ?? (() => undefined)
   }
 
   async run(restart: boolean, signal?: AbortSignal) {
     const existing = this.progress.get(this.puuid, this.regionalRoute)
-    if (!restart && existing?.status === "complete") {
-      this.onProgress(existing)
-      return existing
-    }
-
-    let state = this.progress.start(
-      this.puuid,
-      this.regionalRoute,
-      restart,
-    )
-    this.onProgress(state)
-
+    const persistedStart = typeof existing?.startTimeSeconds === "number"
+      ? existing.startTimeSeconds
+      : undefined
+    const incrementalFrom = existing?.status === "complete"
+      ? Math.max(
+        0,
+        (existing.coverageThroughSeconds ?? existing.endTimeSeconds) -
+          24 * 60 * 60,
+      )
+      : persistedStart
+    let state = existing
     try {
       const matchPuuid = await this.resolveMatchPuuid(signal)
+      if (
+        !restart &&
+        existing?.status === "complete" &&
+        (existing.completedAt ?? 0) >= Date.now() - 6 * 60 * 60 * 1000
+      ) {
+        this.onProgress(existing)
+        return existing
+      }
+
+      state = this.progress.start(
+        this.puuid,
+        this.regionalRoute,
+        restart || incrementalFrom !== undefined,
+        Date.now(),
+        incrementalFrom,
+      )
+      this.onProgress(state)
 
       while (!signal?.aborted) {
         const ids = await this.api.get<string[]>(
           `/lol/match/v5/matches/by-puuid/${encodeURIComponent(
             matchPuuid,
           )}/ids?start=${state.nextOffset}&count=${PAGE_SIZE}` +
-            `&endTime=${state.endTimeSeconds}`,
+            `&endTime=${state.endTimeSeconds}` +
+            (typeof state.startTimeSeconds !== "number"
+              ? ""
+              : `&startTime=${state.startTimeSeconds}`),
           "match-ids",
           signal,
         )
@@ -103,6 +125,7 @@ export class RiotHistoryBackfill {
             this.matches.hasCompleteMatch(knownGameId, this.puuid) &&
             this.participants.hasCurrentLobby(knownGameId, this.puuid)
           ) {
+            this.matches.setRiotMatchId(knownGameId, this.puuid, matchId)
             state = this.advanceOne(state, {
               downloaded,
               imported,
@@ -205,6 +228,13 @@ export class RiotHistoryBackfill {
       this.onProgress(state)
       return state
     } catch (error) {
+      if (!state) {
+        state = this.progress.start(
+          this.puuid,
+          this.regionalRoute,
+          false,
+        )
+      }
       if (signal?.aborted) {
         state = this.progress.stop(
           this.puuid,
@@ -244,6 +274,7 @@ export class RiotHistoryBackfill {
     if (typeof account.puuid !== "string" || account.puuid.length === 0) {
       throw new Error("Riot's account response did not include a PUUID")
     }
+    this.onAccountResolved(account.puuid)
     return account.puuid
   }
 

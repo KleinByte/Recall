@@ -381,9 +381,24 @@ export class ParticipantsRepository {
     const update = this.db.prepare(
       "UPDATE match_participants SET grade = ?, grade_score = ? WHERE game_id = ? AND puuid = ? AND participant_id = ?",
     )
+    const saveBreakdown = this.db.prepare(
+      `INSERT OR REPLACE INTO match_grade_breakdowns
+       (game_id, puuid, participant_id, algorithm_version,
+        composite_percentile, components_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
     const save = this.db.transaction(() => {
       for (const [participantId, result] of grades) {
         update.run(result.grade, result.score, gameId, puuid, participantId)
+        saveBreakdown.run(
+          gameId,
+          puuid,
+          participantId,
+          result.breakdown.algorithmVersion,
+          result.breakdown.compositePercentile,
+          JSON.stringify(result.breakdown.components),
+          Date.now(),
+        )
       }
     })
     save()

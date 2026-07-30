@@ -4,6 +4,7 @@ import type { MatchRow } from "../types/stats"
 export type PageId =
   | "dashboard"
   | "live"
+  | "review"
   | "challenges"
   | "matches"
   | "skill"
@@ -29,6 +30,7 @@ export const detailChampionId = ref<number | null>(null)
 
 /** A match whose full sheet is open, shown over whatever page is beneath. */
 export const detailMatch = ref<MatchRow | null>(null)
+export const focusReviewGameId = ref<number | null>(null)
 
 export function goTo(target: PageId) {
   page.value = target
@@ -49,6 +51,11 @@ export function closeChampion() {
 
 export function openMatch(match: MatchRow) {
   detailMatch.value = match
+}
+
+export function reviewMatch(gameId: number) {
+  focusReviewGameId.value = gameId
+  page.value = "review"
 }
 
 export function closeMatch() {

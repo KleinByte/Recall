@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
-import GradeBadge from "../components/GradeBadge.vue"
 import { api } from "../helpers/api"
-import { championIconUrl, championNameById, formatDecimal, formatPercent, gradeFromScore } from "../helpers/format"
+import { championIconUrl, championNameById, formatDecimal, formatPercent } from "../helpers/format"
 import type { Champion } from "../types/lol"
-import type { ChampionStatRow } from "../types/stats"
 import type { LiveSession } from "../types/live"
+import type {
+  ChampionChoice,
+  ChampionChoiceObjective,
+} from "../types/review"
 
 const props = defineProps<{ champions: Champion[] | null }>()
 
@@ -13,19 +15,24 @@ const empty: LiveSession = {
   phase: "Idle", benchChampionIds: [], allies: [], enemies: [], updatedAt: 0,
 }
 const live = ref<LiveSession>(empty)
-const stats = ref<ChampionStatRow[]>([])
+const recommendations = ref<ChampionChoice[]>([])
 const loading = ref(false)
+const objective = ref<ChampionChoiceObjective>("best_overall")
 
-async function loadStats() {
-  if (!live.value.mode) {
-    stats.value = []
+async function loadRecommendations() {
+  if (!live.value.mode || available.value.length === 0) {
+    recommendations.value = []
     return
   }
   loading.value = true
   try {
-    stats.value = await api.getChampionStats({ mode: live.value.mode })
+    recommendations.value = await api.getChampionRecommendations(
+      available.value,
+      live.value.mode,
+      objective.value,
+    )
   } catch {
-    stats.value = []
+    recommendations.value = []
   } finally {
     loading.value = false
   }
@@ -34,15 +41,21 @@ async function loadStats() {
 async function update(next: LiveSession) {
   const modeChanged = next.mode !== live.value.mode
   live.value = next
-  if (modeChanged || stats.value.length === 0) await loadStats()
+  if (modeChanged || recommendations.value.length === 0) {
+    await loadRecommendations()
+  }
 }
 
 onMounted(async () => {
+  const stored = await api.getSetting<ChampionChoiceObjective>("recommendation-objective")
+  if (stored) objective.value = stored
   await update(await api.getLiveSession())
   api.on("live:updated", (next: LiveSession) => void update(next))
 })
 
-const byChampion = computed(() => new Map(stats.value.map((row) => [row.championId, row])))
+const byChampion = computed(() =>
+  new Map(recommendations.value.map((row) => [row.championId, row])),
+)
 const localPlayer = computed(() => live.value.allies.find((row) => row.cellId === live.value.localPlayerCellId))
 const localChampionId = computed(() => localPlayer.value?.championId || localPlayer.value?.championPickIntent || 0)
 const available = computed(() => [...new Set([localChampionId.value, ...live.value.benchChampionIds].filter((id) => id > 0))])
@@ -50,8 +63,10 @@ const selectedChampionId = (player: LiveSession["allies"][number]) =>
   player.championId || player.championPickIntent || 0
 const championName = (id: number) => championNameById(props.champions, id)
 const stat = (id: number) => byChampion.value.get(id)
-const confidence = (games: number) => games >= 12 ? "Solid" : games >= 5 ? "Fair" : "Thin"
-const gradeFor = (row: ChampionStatRow | undefined) => gradeFromScore(row?.avgGradeScore)
+async function changeObjective() {
+  api.setSetting("recommendation-objective", objective.value)
+  await loadRecommendations()
+}
 </script>
 
 <template>
@@ -98,15 +113,32 @@ const gradeFor = (row: ChampionStatRow | undefined) => gradeFromScore(row?.avgGr
       </section>
 
       <section v-if="live.mode === 'aram' || live.mode === 'mayhem'" class="card choices">
-        <div class="section-head"><div><h2 class="section-title">Your available champions</h2><p class="muted hint">Personal {{ live.mode === 'mayhem' ? 'ARAM: Mayhem' : 'ARAM' }} history only—never mixed between modes.</p></div><span v-if="loading" class="muted">Updating…</span></div>
+        <div class="section-head"><div><h2 class="section-title">Your available champions</h2><p class="muted hint">Confidence-aware recommendations from your {{ live.mode === 'mayhem' ? 'ARAM: Mayhem' : 'ARAM' }} history only.</p></div>
+          <div class="objective-row">
+            <label class="muted" for="choice-objective">Optimize for</label>
+            <select id="choice-objective" v-model="objective" class="league-select" @change="changeObjective">
+              <option value="best_overall">Best Overall</option>
+              <option value="recent_form">Recent Form</option>
+              <option value="challenges">Challenges</option>
+              <option value="practice">Practice</option>
+              <option value="most_reliable">Most Reliable</option>
+            </select>
+            <span v-if="loading" class="muted">Updating…</span>
+          </div>
+        </div>
         <div v-if="available.length" class="choice-grid">
           <article v-for="id in available" :key="id" class="choice" :class="{ current: id === localChampionId }">
             <img :src="championIconUrl(id)" :alt="championName(id)" class="portrait" />
             <div class="choice-title"><strong>{{ championName(id) }}</strong><span v-if="id === localChampionId" class="current-tag">Current</span></div>
             <template v-if="stat(id)">
-              <strong class="winrate">{{ formatPercent(stat(id)!.winRate) }}</strong><span class="muted">{{ stat(id)!.wins }}–{{ stat(id)!.games - stat(id)!.wins }} · {{ stat(id)!.games }} games</span>
-              <span class="muted">{{ formatDecimal(stat(id)!.kda, 2) }} KDA · {{ confidence(stat(id)!.games) }} confidence</span>
-              <GradeBadge v-if="gradeFor(stat(id))" :grade="gradeFor(stat(id))" />
+              <strong class="winrate">#{{ stat(id)!.rank }} · {{ Math.round(stat(id)!.score) }}</strong>
+              <span class="muted">{{ formatPercent(stat(id)!.adjustedWinRate) }} smoothed · {{ stat(id)!.wins }}–{{ stat(id)!.losses }}</span>
+              <span class="muted">{{ formatDecimal(stat(id)!.kda, 2) }} KDA · {{ stat(id)!.confidence }} confidence · {{ stat(id)!.recentDirection }} form</span>
+              <details class="breakdown"><summary>Score breakdown</summary>
+                <div v-for="signal in stat(id)!.signals" :key="signal.key">
+                  <span>{{ signal.label }}</span><strong>{{ Math.round(signal.score) }} × {{ Math.round(signal.weight * 100) }}%</strong>
+                </div>
+              </details>
             </template>
             <p v-else class="muted no-data">No recorded games in this mode yet.</p>
           </article>
@@ -128,6 +160,7 @@ h1 { margin:0; font:22px var(--font-display); letter-spacing:1px; color:var(--go
 .empty { max-width:620px; }.empty p { margin-bottom:0; font-size:13px; }.section-title { margin:0; font:13px var(--font-heading); letter-spacing:1px; text-transform:uppercase; color:var(--text-primary); }
 .roster,.choices { padding:var(--space-4); }.teams { display:grid; grid-template-columns:1fr 1fr; gap:var(--space-4); margin-top:var(--space-3); }.team h3{margin:0 0 var(--space-2);font:11px var(--font-heading);text-transform:uppercase;letter-spacing:1px;color:var(--win)}.enemy h3{color:var(--loss)}
 .player { display:grid; grid-template-columns:30px minmax(0,1fr) auto; align-items:center; gap:var(--space-2); min-height:38px; padding:4px var(--space-2); border-bottom:1px solid var(--border-subtle); font-size:12px; }.player.me{background:var(--surface-3);border-left:2px solid var(--gold)}.player img,.champion-placeholder{width:28px;height:28px;border-radius:50%;border:1px solid var(--border-subtle)}.champion-placeholder{display:grid;place-items:center;background:var(--surface-3);color:var(--text-muted);font:14px var(--font-heading)}.champ-name{font-size:11px}
-.choice-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:var(--space-3); margin-top:var(--space-3); }.choice { min-height:150px; display:grid; grid-template-columns:50px 1fr; grid-template-rows:auto auto auto; column-gap:var(--space-3); align-items:center; padding:var(--space-3); border:1px solid var(--border-subtle); background:var(--surface-2); border-radius:var(--radius-sm); font-size:11px; }.choice.current{border-color:var(--gold)}.portrait{width:50px;height:50px;border-radius:50%;grid-row:span 2;border:1px solid var(--border-strong)}.choice-title{display:flex;gap:var(--space-2);align-items:baseline}.choice strong{color:var(--text-primary)}.current-tag{font-size:9px;text-transform:uppercase;color:var(--gold)}.winrate{font-size:20px;color:var(--win)!important}.choice :deep(.grade){grid-column:2;justify-self:start;margin-top:var(--space-1)}.no-data{grid-column:1 / -1;margin:var(--space-2) 0 0}.empty-note{margin:var(--space-3) 0 0;font-size:12px}
+.choice-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:var(--space-3); margin-top:var(--space-3); }.choice { min-height:170px; display:grid; grid-template-columns:50px 1fr; grid-template-rows:auto auto auto; column-gap:var(--space-3); align-items:center; padding:var(--space-3); border:1px solid var(--border-subtle); background:var(--surface-2); border-radius:var(--radius-sm); font-size:11px; }.choice.current{border-color:var(--gold)}.portrait{width:50px;height:50px;border-radius:50%;grid-row:span 2;border:1px solid var(--border-strong)}.choice-title{display:flex;gap:var(--space-2);align-items:baseline}.choice strong{color:var(--text-primary)}.current-tag{font-size:9px;text-transform:uppercase;color:var(--gold)}.winrate{font-size:18px;color:var(--win)!important}.no-data{grid-column:1 / -1;margin:var(--space-2) 0 0}.empty-note{margin:var(--space-3) 0 0;font-size:12px}
+.objective-row { display:flex; align-items:center; gap:var(--space-2); flex-wrap:wrap; font-size:11px; }.breakdown { grid-column:1 / -1; margin-top:var(--space-2); }.breakdown summary { cursor:pointer; color:var(--gold); }.breakdown div { display:flex; justify-content:space-between; gap:var(--space-2); margin-top:3px; }
 @media(max-width:780px){.teams{grid-template-columns:1fr}.enemy{display:none}.choice-grid{grid-template-columns:1fr}.page-head{align-items:flex-start}}
 </style>

@@ -70,9 +70,9 @@ const kdaOf = (row: ParticipantRow) =>
     <p v-if="loading" class="muted note">Reading the scoreboard…</p>
 
     <p v-else-if="!sides.length" class="muted note">
-      No scoreboard was recorded for this game. Recall can only capture one
-      while the game is still inside the client's last twenty, so games older
-      than that keep just your own line.
+      No scoreboard was recorded for this game. Add a Riot API key in Settings
+      to import full Match-V5 scoreboards where Riot still exposes them; local
+      client-only games may keep just your own line.
     </p>
 
     <div v-else class="sides">

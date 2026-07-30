@@ -6,6 +6,7 @@ import {
   faGear,
   faListUl,
   faTowerBroadcast,
+  faBookOpen,
   faRadiation,
   faRotate,
   faSeedling,
@@ -31,6 +32,7 @@ const emit = defineEmits<{
 const items: { id: PageId; label: string; icon: IconDefinition }[] = [
   { id: "dashboard", label: "Dashboard", icon: faChartSimple },
   { id: "live", label: "Live Game", icon: faTowerBroadcast },
+  { id: "review", label: "Review", icon: faBookOpen },
   { id: "challenges", label: "Challenges", icon: faTrophy },
   { id: "matches", label: "Matches", icon: faListUl },
   { id: "skill", label: "Skill", icon: faRadiation },

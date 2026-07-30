@@ -228,6 +228,10 @@ export function mapRiotMatch(
   }
   const match = mapMatchRow(game, ownerPuuid, queue)
   if (!match) return undefined
+  match.riotMatchId =
+    typeof dto.metadata?.matchId === "string" && dto.metadata.matchId.length > 0
+      ? dto.metadata.matchId
+      : undefined
 
   const participants = info.participants.map((participant, index) => {
     const styles = participant.perks?.styles ?? []

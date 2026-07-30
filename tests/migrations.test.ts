@@ -69,6 +69,31 @@ describe("applyMigrations", () => {
     expect(columns).toContain("grade_score")
   })
 
+  it("adds account-scoped review tables and canonical Riot match ids", () => {
+    const db = new Database(":memory:")
+    applyMigrations(db)
+    const matchColumns = (
+      db.pragma("table_info(matches)") as { name: string }[]
+    ).map((column) => column.name)
+    expect(matchColumns).toContain("riot_match_id")
+    const tables = (
+      db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as {
+        name: string
+      }[]
+    ).map((row) => row.name)
+    expect(tables).toEqual(expect.arrayContaining([
+      "riot_accounts",
+      "sync_health",
+      "match_grade_breakdowns",
+      "session_boundary_overrides",
+      "match_timeline_cache",
+      "match_annotations",
+      "annotation_tags",
+      "practice_experiments",
+      "match_experiments",
+    ]))
+  })
+
   it("upgrades an existing database without losing recorded games", () => {
     const db = new Database(":memory:")
 

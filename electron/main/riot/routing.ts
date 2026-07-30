@@ -35,3 +35,14 @@ const ROUTES: Record<string, string> = {
 export function regionalRouteFor(platform: string): string | undefined {
   return ROUTES[platform.trim().toUpperCase()]
 }
+
+const CANONICAL_PLATFORM: Record<string, string> = {
+  NA: "NA1", EUW: "EUW1", EUNE: "EUN1", BR: "BR1", LAN: "LA1",
+  LAS: "LA2", OCE: "OC1", JP: "JP1", TR: "TR1", PH: "PH2",
+  SG: "SG2", TH: "TH2", TW: "TW2", VN: "VN2",
+}
+
+export function canonicalPlatformId(platform: string): string {
+  const normalized = platform.trim().toUpperCase()
+  return CANONICAL_PLATFORM[normalized] ?? normalized
+}

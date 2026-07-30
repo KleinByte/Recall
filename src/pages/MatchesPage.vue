@@ -17,6 +17,7 @@ import type {
   StatsSummary,
   TrackedMode,
 } from "../types/stats"
+import type { AnnotationTag, PracticeExperiment } from "../types/review"
 
 const props = defineProps<{
   champions: Champion[] | null
@@ -62,6 +63,12 @@ const minGradeScore = ref<number | undefined>(undefined)
 const excludeRemakes = ref(true)
 const sortBy = ref<MatchQuery["sortBy"]>("played_at")
 const sortDir = ref<"asc" | "desc">("desc")
+const bookmarked = ref(false)
+const hasNotes = ref(false)
+const tagId = ref<number>()
+const experimentId = ref<number>()
+const tags = ref<AnnotationTag[]>([])
+const experiments = ref<PracticeExperiment[]>([])
 
 const page = ref(1)
 const pageSize = ref(25)
@@ -84,6 +91,10 @@ const query = computed<MatchQuery>(() => ({
   minDurationSecs: excludeRemakes.value ? 300 : undefined,
   sortBy: sortBy.value,
   sortDir: sortDir.value,
+  bookmarked: bookmarked.value || undefined,
+  hasNotes: hasNotes.value || undefined,
+  tagIds: tagId.value ? [tagId.value] : undefined,
+  experimentId: experimentId.value,
 }))
 
 async function load() {
@@ -125,6 +136,9 @@ onMounted(async () => {
     void load()
   })
   api.on("lcu:status", () => void load())
+  void api.listTags().then((rows) => { tags.value = rows })
+  void api.listExperiments().then((rows) => { experiments.value = rows })
+  api.on("review:updated", () => void load())
 })
 
 // Any filter change starts again from the first page.
@@ -155,7 +169,11 @@ const hasFilters = computed(
     rangeDays.value !== null ||
     result.value !== undefined ||
     championId.value !== undefined ||
-    minGradeScore.value !== undefined,
+    minGradeScore.value !== undefined ||
+    bookmarked.value ||
+    hasNotes.value ||
+    tagId.value !== undefined ||
+    experimentId.value !== undefined,
 )
 
 const clearFilters = () => {
@@ -164,6 +182,10 @@ const clearFilters = () => {
   result.value = undefined
   championId.value = undefined
   minGradeScore.value = undefined
+  bookmarked.value = false
+  hasNotes.value = false
+  tagId.value = undefined
+  experimentId.value = undefined
 }
 
 const averageGrade = computed(() => gradeFromScore(summary.value?.avgGradeScore))
@@ -259,6 +281,34 @@ const averageGrade = computed(() => gradeFromScore(summary.value?.avgGradeScore)
         <label class="toggle">
           <input type="checkbox" v-model="excludeRemakes" />
           <span>Hide remakes</span>
+        </label>
+
+        <label class="toggle">
+          <input v-model="bookmarked" type="checkbox" />
+          <span>Bookmarked</span>
+        </label>
+
+        <label class="toggle">
+          <input v-model="hasNotes" type="checkbox" />
+          <span>Has notes</span>
+        </label>
+
+        <label v-if="tags.length" class="field">
+          <span class="muted field-label">Tag</span>
+          <select v-model="tagId" class="league-select">
+            <option :value="undefined">Any tag</option>
+            <option v-for="tag in tags" :key="tag.id" :value="tag.id">{{ tag.name }}</option>
+          </select>
+        </label>
+
+        <label v-if="experiments.length" class="field">
+          <span class="muted field-label">Experiment</span>
+          <select v-model="experimentId" class="league-select">
+            <option :value="undefined">Any experiment</option>
+            <option v-for="experiment in experiments" :key="experiment.id" :value="experiment.id">
+              {{ experiment.name }}
+            </option>
+          </select>
         </label>
 
         <button
