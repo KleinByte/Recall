@@ -7,6 +7,11 @@ import {
   formatDuration,
   modeLabel,
 } from "../helpers/format"
+import {
+  itemIconUrl,
+  loadGameAssets,
+  type GameAssetCatalog,
+} from "../helpers/game-assets"
 import { focusReviewGameId } from "../helpers/navigation"
 import GradeBadge from "../components/GradeBadge.vue"
 import type { Champion } from "../types/lol"
@@ -18,6 +23,8 @@ import type {
   MatchReview,
   PracticeExperiment,
   ReviewSession,
+  OwnerAugmentSummary,
+  TimelineEvent,
 } from "../types/review"
 
 const props = defineProps<{ champions: Champion[] | null }>()
@@ -35,12 +42,18 @@ const experimentName = ref("")
 const experimentHypothesis = ref("")
 const experimentChampionIds = ref<number[]>([])
 const experimentModes = ref<TrackedMode[]>([])
-const timelineFilter = ref<"all" | "you" | "kills" | "objectives" | "items">("all")
+const timelineFilter = ref<"all" | "you" | "kills" | "objectives" | "items" | "levels" | "vision">("all")
+const assets = ref<GameAssetCatalog>({ version: "latest", items: {}, augments: {} })
+const augmentSummary = ref<Record<number, OwnerAugmentSummary>>({})
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 
 const owner = computed(() =>
   review.value?.scoreboard.find((participant) => participant.isPlayer === 1),
 )
+const teams = computed(() => [100, 200].map((teamId) => ({
+  teamId,
+  players: review.value?.scoreboard.filter((player) => player.teamId === teamId) ?? [],
+})))
 const timelinePoints = computed(() => {
   const frames = review.value?.timeline.summary?.frames ?? []
   if (frames.length < 2) return ""
@@ -61,15 +74,57 @@ const filteredTimelineEvents = computed(() => {
     )
   }
   if (timelineFilter.value === "kills") {
-    return events.filter((event) => event.type === "CHAMPION_KILL")
+    return events.filter((event) => event.category === "kill")
   }
   if (timelineFilter.value === "objectives") {
     return events.filter((event) =>
-      event.type === "ELITE_MONSTER_KILL" || event.type === "BUILDING_KILL",
+      event.category === "objective",
     )
   }
-  return events.filter((event) => event.type.startsWith("ITEM_"))
+  if (timelineFilter.value === "items") return events.filter((event) => event.category === "item")
+  if (timelineFilter.value === "levels") return events.filter((event) => event.category === "level")
+  return events.filter((event) => event.category === "vision")
 })
+
+function participant(participantId?: number) {
+  return review.value?.scoreboard.find((entry) => entry.participantId === participantId)
+}
+
+function eventTime(timestamp: number) {
+  return `${Math.floor(timestamp / 60_000)}:${String(Math.floor(timestamp / 1_000) % 60).padStart(2, "0")}`
+}
+
+function objectiveName(value?: string) {
+  return (value ?? "Objective").replaceAll("_", " ").toLowerCase()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
+function itemId(event: TimelineEvent) {
+  return event.itemId ?? event.afterId ?? event.beforeId
+}
+
+function itemName(event: TimelineEvent) {
+  const id = itemId(event)
+  return assets.value.items[id ?? 0]?.name ?? `Item ${id ?? "unknown"}`
+}
+
+function itemIcon(event: TimelineEvent) {
+  const id = itemId(event)
+  return assets.value.items[id ?? 0]?.icon ?? itemIconUrl(id, assets.value.version)
+}
+
+function augmentName(augmentId: number) {
+  return assets.value.augments[augmentId]?.name ?? `Augment ${augmentId}`
+}
+
+function augmentIcon(augmentId: number, fallback?: string) {
+  return assets.value.augments[augmentId]?.icon || fallback || "/recall-icon.png"
+}
+
+async function loadAugmentSummary(augmentId: number) {
+  const result = (await api.getOwnerAugmentSummaries(augmentId))[0]
+  if (result) augmentSummary.value = { ...augmentSummary.value, [augmentId]: result }
+}
 
 async function load(gameId?: number) {
   busy.value = true
@@ -209,6 +264,21 @@ watch(focusReviewGameId, (gameId) => {
 
 onMounted(() => {
   void load()
+  void loadGameAssets().then((catalog) => {
+    assets.value = catalog
+    const entries = Object.entries(catalog.augments).map(([id, augment]) => ({
+      augmentId: Number(id),
+      name: augment.name,
+      iconPath: augment.icon,
+      rarity: augment.rarity,
+    }))
+    if (entries.length) {
+      void api.cacheAugmentCatalog({
+        dataVersion: catalog.version,
+        entries,
+      })
+    }
+  })
   api.on("review:updated", () => {
     if (!saveTimer) void load(review.value?.match.gameId)
   })
@@ -310,16 +380,59 @@ onBeforeUnmount(() => {
       </div>
 
       <section class="card">
-        <h2 class="section-title">Scoreboard</h2>
-        <div class="scoreboard">
-          <div v-for="player in review.scoreboard" :key="player.participantId"
-            class="score-row" :class="{ owner: player.isPlayer }">
-            <img :src="championIconUrl(player.championId)" alt="" />
-            <span class="name">{{ player.summonerName || `Player ${player.participantId}` }}</span>
-            <span>{{ player.kills }}/{{ player.deaths }}/{{ player.assists }}</span>
-            <span>{{ player.damageToChampions.toLocaleString() }} dmg</span>
-            <GradeBadge :grade="player.grade" />
+        <div class="section-heading">
+          <div><span class="eyebrow">Complete lobby</span><h2 class="section-title">Scoreboard</h2></div>
+          <span class="muted">Items and augments are captured for every visible participant</span>
+        </div>
+        <div class="team-grid">
+          <div v-for="team in teams" :key="team.teamId" class="score-team"
+            :class="team.teamId === 100 ? 'blue' : 'red'">
+            <div class="team-head">
+              <strong>{{ team.teamId === 100 ? "Blue team" : "Red team" }}</strong>
+              <span>{{ team.players.reduce((sum, player) => sum + player.kills, 0) }} kills</span>
+            </div>
+            <article v-for="player in team.players" :key="player.participantId"
+              class="score-row" :class="{ owner: player.isPlayer }">
+              <img class="champion-portrait" :src="championIconUrl(player.championId)"
+                :alt="championNameById(champions, player.championId)" />
+              <div class="player-block">
+                <strong class="name">{{ player.summonerName || `Player ${player.participantId}` }}</strong>
+                <span class="muted">Level {{ player.champLevel }} · {{ player.totalMinionsKilled + player.neutralMinions }} CS</span>
+              </div>
+              <div class="kda"><strong>{{ player.kills }}/{{ player.deaths }}/{{ player.assists }}</strong>
+                <span>{{ player.damageToChampions.toLocaleString() }} damage</span></div>
+              <div class="loadout" aria-label="Final items">
+                <img v-for="(id, index) in player.items.filter(Boolean)" :key="`${id}-${index}`"
+                  :src="assets.items[id]?.icon || itemIconUrl(id, assets.version)"
+                  :title="assets.items[id]?.name || `Item ${id}`" alt="" />
+              </div>
+              <div v-if="player.augments?.length" class="augment-loadout" aria-label="Selected augments">
+                <button v-for="augment in player.augments" :key="augment.slot"
+                  :title="augmentName(augment.augmentId)"
+                  @click="player.isPlayer && loadAugmentSummary(augment.augmentId)">
+                  <img :src="augmentIcon(augment.augmentId, augment.iconPath)" alt="" />
+                </button>
+              </div>
+              <div v-else class="augment-missing" title="This source did not include augments">—</div>
+              <GradeBadge :grade="player.grade" />
+            </article>
           </div>
+        </div>
+        <div v-if="owner?.augments?.length" class="owner-augment-context">
+          <article v-for="augment in owner.augments" :key="augment.slot">
+            <img :src="augmentIcon(augment.augmentId, augment.iconPath)" alt="" />
+            <div><strong>{{ augmentName(augment.augmentId) }}</strong>
+              <span v-if="augmentSummary[augment.augmentId]" class="muted">
+                {{ augmentSummary[augment.augmentId].games }} personal games ·
+                {{ augmentSummary[augment.augmentId].kda.toFixed(2) }} KDA ·
+                {{ Math.round(augmentSummary[augment.augmentId].damagePerMinute).toLocaleString() }} DPM
+              </span>
+              <button v-else class="text-button" @click="loadAugmentSummary(augment.augmentId)">
+                Show your non-win performance context
+              </button>
+            </div>
+          </article>
+          <p class="policy-note">Recall records selections, but does not calculate augment win rates or rank augments.</p>
         </div>
       </section>
 
@@ -362,7 +475,10 @@ onBeforeUnmount(() => {
       </div>
 
       <section class="card">
-        <h2 class="section-title">Timeline</h2>
+        <div class="section-heading">
+          <div><span class="eyebrow">Match chronology</span><h2 class="section-title">Timeline</h2></div>
+          <span class="muted">Named events from Riot Match‑V5</span>
+        </div>
         <div v-if="review.timeline.status === 'ready' && review.timeline.summary">
           <svg class="gold-chart" viewBox="0 0 100 100" preserveAspectRatio="none"
             aria-label="Team gold difference across the match">
@@ -370,26 +486,46 @@ onBeforeUnmount(() => {
             <polyline :points="timelinePoints" />
           </svg>
           <div class="timeline-filters">
-            <button v-for="filter in (['all', 'you', 'kills', 'objectives', 'items'] as const)"
+            <button v-for="filter in (['all', 'you', 'kills', 'objectives', 'items', 'levels', 'vision'] as const)"
               :key="filter" class="league-button" :class="{ active: timelineFilter === filter }"
               @click="timelineFilter = filter">
               {{ filter[0].toUpperCase() + filter.slice(1) }}
             </button>
           </div>
           <div class="events">
-            <span v-for="event in filteredTimelineEvents.slice(0, 80)"
-              :key="`${event.timestamp}-${event.type}`">
-              {{ Math.floor(event.timestamp / 60000) }}:{{ String(Math.floor(event.timestamp / 1000) % 60).padStart(2, '0') }}
-              · {{ event.type.replaceAll('_', ' ').toLowerCase() }}
-            </span>
+            <article v-for="event in filteredTimelineEvents.slice(0, 160)"
+              :key="event.eventId" class="event-row" :class="event.category">
+              <time>{{ eventTime(event.timestamp) }}</time>
+              <template v-if="event.category === 'kill'">
+                <img :src="championIconUrl(participant(event.participantId)?.championId || 0)" alt="" />
+                <div><strong>{{ participant(event.participantId)?.summonerName || (event.participantId ? `Player ${event.participantId}` : "Execution") }}</strong>
+                  <span>killed <strong>{{ participant(event.targetId)?.summonerName || `Player ${event.targetId}` }}</strong>
+                    <template v-if="event.assistingParticipantIds?.length">
+                      · assisted by {{ event.assistingParticipantIds.map(id => participant(id)?.summonerName || `Player ${id}`).join(", ") }}
+                    </template>
+                  </span></div>
+                <img class="victim" :src="championIconUrl(participant(event.targetId)?.championId || 0)" alt="" />
+              </template>
+              <template v-else-if="event.category === 'item'">
+                <img :src="itemIcon(event)" :alt="itemName(event)" />
+                <div><strong>{{ participant(event.participantId)?.summonerName || `Player ${event.participantId}` }}</strong>
+                  <span>{{ event.type.replace("ITEM_", "").toLowerCase() }} {{ itemName(event) }}</span></div>
+              </template>
+              <template v-else>
+                <span class="event-glyph">{{ event.category === 'objective' ? '◆' : event.category === 'level' ? '↑' : '◉' }}</span>
+                <div><strong>{{ participant(event.participantId)?.summonerName || (event.teamId ? `Team ${event.teamId}` : "Match") }}</strong>
+                  <span>{{ objectiveName(event.objective || event.type) }}</span></div>
+              </template>
+            </article>
           </div>
           <div class="purchase-path">
             <strong>Your purchase path</strong>
-            <span v-for="event in review.timeline.summary.events.filter(event =>
+            <figure v-for="event in review.timeline.summary.events.filter(event =>
               event.participantId === owner?.participantId && event.type.startsWith('ITEM_')
-            )" :key="`item-${event.timestamp}-${event.itemId}`">
-              {{ Math.floor(event.timestamp / 60000) }}m · item {{ event.itemId || event.afterId || event.beforeId }}
-            </span>
+            )" :key="event.eventId" :title="itemName(event)">
+              <img :src="itemIcon(event)" :alt="itemName(event)" />
+              <figcaption>{{ eventTime(event.timestamp) }}</figcaption>
+            </figure>
           </div>
           <div v-if="review.timeline.summary.turningPoints.length" class="turning-points">
             <strong>Measured turning points</strong>
@@ -511,29 +647,40 @@ h2 { margin: 0; }
 .page-head p { margin: 2px 0 0; font-size: 12px; }
 .tabs { display: flex; gap: var(--space-2); flex-wrap: wrap; }
 .tabs button, .bookmark, .timeline-empty button, .inline button, .experiments-page button { padding: var(--space-2) var(--space-3); }
-.hero { border-left: 3px solid var(--border-strong); }.hero.won { border-left-color: var(--win); }.hero.lost { border-left-color: var(--loss); }
+.hero { position: relative; overflow: hidden; border: 1px solid var(--border-strong); border-left: 4px solid var(--border-strong); background: linear-gradient(110deg, color-mix(in srgb, var(--surface-2) 94%, transparent), var(--surface-1)); box-shadow: 0 18px 44px rgba(0, 0, 0, .22); }.hero.won { border-left-color: var(--win); }.hero.lost { border-left-color: var(--loss); }
 .hero > img { width: 64px; height: 64px; border-radius: var(--radius-sm); }.grow { flex: 1; }.eyebrow { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .8px; }
 .hero h2 { font: 20px var(--font-heading); color: var(--gold-bright); }.hero p { margin: 3px 0 0; }
 .compact-session { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); }.compact-session > div { display: flex; flex-direction: column; }.compact-session button { padding: var(--space-2) var(--space-3); }
 .review-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
 .components, .baseline, .highlights, .scoreboard, .events, .turning-points { display: grid; gap: var(--space-2); }
+.section-heading { display: flex; justify-content: space-between; align-items: end; gap: var(--space-3); margin-bottom: var(--space-3); }
 .component { display: grid; grid-template-columns: minmax(140px, 1fr) 1fr 58px; align-items: center; gap: var(--space-3); }
 .component div:first-child { display: flex; flex-direction: column; font-size: 12px; }.numeric { text-align: right; font-variant-numeric: tabular-nums; }
 .highlight { display: flex; flex-direction: column; padding: var(--space-2); background: var(--surface-2); border-radius: var(--radius-sm); font-size: 12px; }
 .baseline > div { display: grid; grid-template-columns: 1fr 70px 100px; gap: var(--space-2); font-size: 12px; }.positive { color: var(--win); }.negative, .error { color: var(--loss); }
-.score-row { display: grid; grid-template-columns: 30px minmax(120px, 1fr) 80px 110px 38px; align-items: center; gap: var(--space-2); padding: 5px var(--space-2); font-size: 12px; border-radius: var(--radius-sm); }
-.score-row.owner { background: color-mix(in srgb, var(--gold) 12%, transparent); }.score-row img { width: 28px; height: 28px; border-radius: 50%; }.name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.team-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.score-team { overflow: hidden; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface-0); }
+.score-team.blue { border-top: 2px solid #3b82c4; }.score-team.red { border-top: 2px solid #c95d65; }
+.team-head { display: flex; justify-content: space-between; padding: 8px 10px; background: var(--surface-2); color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: .7px; }
+.score-row { display: grid; grid-template-columns: 38px minmax(92px, 1fr) 92px minmax(96px, 1fr) auto 34px; align-items: center; gap: 8px; min-height: 52px; padding: 6px 8px; font-size: 11px; border-bottom: 1px solid var(--border-subtle); }
+.score-row:last-child { border-bottom: 0; }.score-row.owner { background: color-mix(in srgb, var(--gold) 13%, transparent); box-shadow: inset 3px 0 var(--gold); }
+.champion-portrait { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; }.name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player-block, .kda { min-width: 0; display: flex; flex-direction: column; }.kda span { color: var(--text-muted); font-size: 10px; }
+.loadout, .augment-loadout { display: flex; gap: 2px; flex-wrap: wrap; }.loadout img, .augment-loadout img { width: 22px; height: 22px; border-radius: 3px; object-fit: cover; background: var(--surface-3); }
+.augment-loadout { max-width: 76px; }.augment-loadout button { display: contents; cursor: pointer; }.augment-missing { color: var(--text-muted); }
+.owner-augment-context { display: flex; gap: var(--space-2); flex-wrap: wrap; padding-top: var(--space-3); }.owner-augment-context article { display: flex; gap: 8px; align-items: center; min-width: 200px; padding: 7px 9px; border: 1px solid var(--border-subtle); background: var(--surface-2); border-radius: var(--radius-sm); }.owner-augment-context article > img { width: 34px; height: 34px; border-radius: 50%; }.owner-augment-context article div { display: flex; flex-direction: column; }.text-button { padding: 0; border: 0; background: transparent; color: var(--gold); text-align: left; cursor: pointer; font-size: 10px; }.policy-note { flex-basis: 100%; margin: 2px 0 0; color: var(--text-muted); font-size: 10px; }
 textarea { width: 100%; box-sizing: border-box; min-height: 110px; resize: vertical; background: var(--surface-0); color: var(--text-primary); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: var(--space-3); font: 12px var(--font-body); }
 .tag-list, .inline, .experiment-outcome, .session-games { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-2); }.tag { border: 1px solid var(--border-subtle); background: var(--surface-2); color: var(--text-secondary); border-radius: 99px; padding: 4px 9px; }.tag.selected { color: var(--gold-bright); border-color: var(--gold); }
 .inline input { flex: 1; }.experiment-outcome { justify-content: space-between; align-items: center; }.outcome-note { flex-basis: 100%; }
 .gold-chart { width: 100%; height: 180px; background: var(--surface-0); border-radius: var(--radius-sm); }.gold-chart line { stroke: var(--border-strong); stroke-width: .5; }.gold-chart polyline { fill: none; stroke: var(--gold); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
 .timeline-filters { display: flex; gap: var(--space-2); margin-top: var(--space-2); flex-wrap: wrap; }.timeline-filters button { padding: 4px 8px; font-size: 10px; }
-.events { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); max-height: 180px; overflow: auto; margin-top: var(--space-3); font-size: 11px; color: var(--text-secondary); }.turning-points { margin-top: var(--space-3); font-size: 12px; }
-.purchase-path { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-3); font-size: 11px; }.purchase-path strong { flex-basis: 100%; }
+.events { max-height: 430px; overflow: auto; margin-top: var(--space-3); padding-left: 18px; font-size: 11px; color: var(--text-secondary); border-left: 1px solid var(--border-strong); }.event-row { position: relative; display: grid; grid-template-columns: 42px 30px minmax(0, 1fr) 28px; align-items: center; gap: 8px; min-height: 44px; padding: 4px 8px; border-bottom: 1px solid var(--border-subtle); background: color-mix(in srgb, var(--surface-1) 92%, transparent); }.event-row::before { content: ""; position: absolute; left: -22px; width: 7px; height: 7px; border: 2px solid var(--gold); border-radius: 50%; background: var(--surface-0); }.event-row time { color: var(--gold); font-variant-numeric: tabular-nums; }.event-row img { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }.event-row .victim { filter: grayscale(.35); }.event-row > div { min-width: 0; display: flex; flex-direction: column; }.event-row > div span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.event-glyph { display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid var(--border-strong); border-radius: 50%; color: var(--gold); }.turning-points { margin-top: var(--space-3); font-size: 12px; }
+.purchase-path { display: flex; align-items: end; gap: 6px; flex-wrap: wrap; margin-top: var(--space-3); font-size: 10px; }.purchase-path strong { flex-basis: 100%; }.purchase-path figure { margin: 0; text-align: center; }.purchase-path img { display: block; width: 34px; height: 34px; border: 1px solid var(--border-strong); border-radius: 4px; }.purchase-path figcaption { margin-top: 2px; color: var(--text-muted); }
 .session-list, .experiments-page { display: grid; gap: var(--space-3); }.session-head > div { display: flex; flex-direction: column; }.match-control { display: flex; align-items: center; position: relative; }.match-chip { display: flex; align-items: center; gap: 4px; background: var(--surface-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 3px; cursor: pointer; }.match-chip img { width: 30px; height: 30px; border-radius: var(--radius-sm); }.boundary summary { cursor: pointer; padding: 0 4px; }.boundary[open] { position: relative; }.boundary[open] > button { display: block; width: 110px; background: var(--surface-3); color: var(--text-primary); border: 1px solid var(--border-subtle); padding: 4px; font-size: 10px; cursor: pointer; }
 .experiments-page { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }.experiments-page .card:first-child { display: grid; gap: var(--space-2); }.status { margin-left: var(--space-2); color: var(--gold); text-transform: uppercase; font-size: 10px; }
 .scope-label { display: grid; gap: 4px; font-size: 11px; }.scope-label select { min-height: 72px; }.experiment-actions { display: flex; gap: var(--space-2); margin-top: var(--space-2); }.experiment-actions button { padding: 4px 8px; font-size: 10px; }
 .bookmark-row { width: 100%; display: grid; grid-template-columns: 34px 1fr 36px; align-items: center; gap: var(--space-2); padding: var(--space-2); background: var(--surface-2); color: var(--text-primary); border: 1px solid var(--border-subtle); text-align: left; }.bookmark-row img { width: 32px; height: 32px; border-radius: 50%; }
-@media (max-width: 800px) { .review-grid { grid-template-columns: 1fr; }.page-head, .hero { align-items: flex-start; flex-wrap: wrap; }.score-row { grid-template-columns: 30px 1fr 70px 35px; }.score-row span:nth-of-type(3) { display: none; } }
+@media (max-width: 1050px) { .team-grid { grid-template-columns: 1fr; } }
+@media (max-width: 800px) { .review-grid { grid-template-columns: 1fr; }.page-head, .hero { align-items: flex-start; flex-wrap: wrap; }.score-row { grid-template-columns: 38px 1fr 82px 34px; }.score-row .loadout, .score-row .augment-loadout { display: none; }.section-heading { align-items: flex-start; flex-direction: column; }.event-row { grid-template-columns: 36px 26px minmax(0, 1fr); }.event-row .victim { display: none; } }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
 </style>

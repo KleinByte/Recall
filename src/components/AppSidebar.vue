@@ -33,11 +33,11 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
   { id: "dashboard", label: "Dashboard", icon: faChartSimple },
   { id: "live", label: "Live Game", icon: faTowerBroadcast },
   { id: "review", label: "Review", icon: faBookOpen },
-  { id: "challenges", label: "Challenges", icon: faTrophy },
   { id: "matches", label: "Matches", icon: faListUl },
   { id: "skill", label: "Skill", icon: faRadiation },
   { id: "progress", label: "Progress", icon: faSeedling },
   { id: "champions", label: "Champions", icon: faDragon },
+  { id: "challenges", label: "Challenges", icon: faTrophy },
   { id: "settings", label: "Settings", icon: faGear },
 ]
 </script>

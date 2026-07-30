@@ -104,6 +104,23 @@ describe("mapRiotMatch", () => {
     expect(result.gradeInputs).toHaveLength(10)
   })
 
+  it("captures Match-V5 augments and schema drift across the whole lobby", () => {
+    const dto = match()
+    dto.info.participants = dto.info.participants.map((entry, index) => ({
+      ...entry,
+      playerAugment1: 1000 + index,
+      playerAugment2: 2000 + index,
+      newlyAddedRiotMetric: index,
+    }))
+
+    const result = mapRiotMatch(dto, PUUID)!
+
+    expect(result.participants).toHaveLength(10)
+    expect(result.participants[9].augments?.map((augment) => augment.augmentId))
+      .toEqual([1009, 2009])
+    expect(result.unknownParticipantFields).toContain("newlyAddedRiotMetric")
+  })
+
   it("separates Recall's local owner key from Riot's participant PUUID", () => {
     const result = mapRiotMatch(
       match(),

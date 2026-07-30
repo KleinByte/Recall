@@ -43,19 +43,29 @@ export class DataTrustService {
                    HAVING COUNT(*) >= 10
                  )) AS complete,
                 (SELECT COUNT(*) FROM match_timeline_cache
-                 WHERE puuid = ? AND status = 'ready') AS timelines
+                 WHERE puuid = ? AND status = 'ready') AS timelines,
+                (SELECT COUNT(*) FROM match_capture_manifests
+                 WHERE puuid = ?) AS captured,
+                (SELECT COUNT(DISTINCT game_id) FROM participant_augments
+                 WHERE puuid = ?) AS augmentMatches,
+                (SELECT COUNT(*) FROM match_capture_manifests
+                 WHERE puuid = ? AND unknown_field_names_json <> '[]') AS drifted
          FROM matches WHERE puuid = ?`,
-      ).get(puuid, puuid, puuid) as {
+      ).get(puuid, puuid, puuid, puuid, puuid, puuid) as {
         matchCount: number
         oldestPlayedAt: number | null
         newestPlayedAt: number | null
         graded: number
         complete: number
         timelines: number
+        captured: number
+        augmentMatches: number
+        drifted: number
       }
       : {
         matchCount: 0, oldestPlayedAt: null, newestPlayedAt: null,
-        graded: 0, complete: 0, timelines: 0,
+        graded: 0, complete: 0, timelines: 0, captured: 0,
+        augmentMatches: 0, drifted: 0,
       }
     const syncRows = puuid
       ? this.db.prepare(
@@ -121,6 +131,11 @@ export class DataTrustService {
           : 0,
         gradedPercent: counts.matchCount ? 100 * counts.graded / counts.matchCount : 0,
         timelineCount: counts.timelines,
+        captureManifestPercent: counts.matchCount
+          ? 100 * counts.captured / counts.matchCount
+          : 0,
+        augmentMatchCount: counts.augmentMatches,
+        schemaDriftMatchCount: counts.drifted,
         lastIntegrityCheck: this.lastIntegrityCheck,
         integrity: this.lastIntegrity,
       },

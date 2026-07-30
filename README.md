@@ -77,7 +77,18 @@ history with a 24-hour overlap after the initial scan.
 
 Match timelines are never fetched automatically just because a review opens.
 Use **Load timeline**, or bookmark the match, to fetch and permanently cache a
-compact local summary. Raw Riot timeline responses are not stored.
+compact local summary. Timeline v2 presents champion kills and deaths with
+assists, named item transactions with icons, levels, wards, objectives, the
+owner's purchase path, team-gold movement, and measured turning points. Raw
+Riot timeline responses are not stored.
+
+Recall records ordered augment selections for every participant present in the
+completed-game payload. The Review scoreboard displays those selections, while
+personal augment context is limited to the signed-in player's games, champions,
+average grade, KDA, and damage per minute. Recall deliberately does not publish
+augment win rates, rankings, or recommendations. **Enrich historical details**
+in Settings can replay accessible Match-V5 history through the durable,
+rate-limited importer to populate new fields on older matches.
 
 Match history is paged, filterable, and sortable by mode, result, champion,
 grade, date, duration, KDA, damage, bookmark, notes, tags, and experiments, so

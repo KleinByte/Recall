@@ -91,7 +91,15 @@ describe("applyMigrations", () => {
       "annotation_tags",
       "practice_experiments",
       "match_experiments",
+      "participant_augments",
+      "augment_catalog",
+      "match_capture_manifests",
+      "augment_enrichment_jobs",
     ]))
+    const participantColumns = (
+      db.pragma("table_info(match_participants)") as { name: string }[]
+    ).map((column) => column.name)
+    expect(participantColumns).toContain("extended_metrics_json")
   })
 
   it("upgrades an existing database without losing recorded games", () => {

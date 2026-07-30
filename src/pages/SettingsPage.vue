@@ -141,6 +141,12 @@ function retryRiotHistory() {
   void api.retryRiotHistory()
 }
 
+function reimportRiotDetails() {
+  riotKeyMessage.value =
+    "Re-importing historical match details for augments and newly supported fields…"
+  void api.reimportRiotDetails()
+}
+
 function runUpdateAction(command: "retry" | "install") {
   if (command === "retry") void api.retryUpdate()
   else if (command === "install") void api.installUpdate()
@@ -288,6 +294,17 @@ const formatDate = (value?: number) =>
           Resume history import
         </button>
       </div>
+      <div v-if="riotKeyConfigured" class="actions">
+        <button class="league-button action"
+          :disabled="riotHistory?.status === 'running'"
+          @click="reimportRiotDetails">
+          Enrich historical details
+        </button>
+      </div>
+      <p v-if="riotKeyConfigured" class="muted note">
+        Replays Match‑V5 history through the shared rate limiter to capture augments
+        and newly supported fields. Progress is durable and resumes after restart.
+      </p>
     </section>
 
     <section class="card">
@@ -356,6 +373,9 @@ const formatDate = (value?: number) =>
             <div><dt>Full scoreboards</dt><dd>{{ trust.database.completeScoreboardPercent.toFixed(1) }}%</dd></div>
             <div><dt>Graded</dt><dd>{{ trust.database.gradedPercent.toFixed(1) }}%</dd></div>
             <div><dt>Timelines</dt><dd>{{ trust.database.timelineCount }}</dd></div>
+            <div><dt>Capture manifests</dt><dd>{{ trust.database.captureManifestPercent.toFixed(1) }}%</dd></div>
+            <div><dt>Augment matches</dt><dd>{{ trust.database.augmentMatchCount }}</dd></div>
+            <div><dt>Schema drift</dt><dd>{{ trust.database.schemaDriftMatchCount }}</dd></div>
           </dl>
           <p class="path">{{ trust.database.path }}</p>
         </article>

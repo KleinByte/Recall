@@ -96,6 +96,51 @@ describe("ParticipantsRepository", () => {
     expect(repo.countGamesWithLobby(PUUID)).toBe(1)
   })
 
+  it("stores augments for every player but aggregates only the owner without wins", () => {
+    matches.insertMany([buildMatchRow({ gameId: 1, durationSecs: 1200 })])
+    const rows = lobby(1, 30000).map((row) => ({
+      ...row,
+      augments: [{
+        slot: 1,
+        augmentId: row.isPlayer ? 101 : 202,
+        source: "match_v5" as const,
+      }],
+    }))
+    repo.insertMany(rows)
+
+    expect(repo.getMatchDetail(1, PUUID).participants.every(
+      (row) => row.augments?.length === 1,
+    )).toBe(true)
+    const ownerSummary = repo.getOwnerAugmentSummaries(PUUID)
+    expect(ownerSummary).toHaveLength(1)
+    expect(ownerSummary[0]).toMatchObject({ augmentId: 101, games: 1 })
+    expect(ownerSummary[0]).not.toHaveProperty("wins")
+    expect(ownerSummary[0]).not.toHaveProperty("winRate")
+  })
+
+  it("caches stable augment metadata and snapshots captured selections", () => {
+    matches.insertMany([buildMatchRow({ gameId: 1 })])
+    repo.insertMany([
+      participant({
+        isPlayer: 1,
+        augments: [{ slot: 1, augmentId: 101, source: "match_v5" }],
+      }),
+    ])
+
+    expect(repo.cacheAugmentCatalog("16.15.1", [{
+      augmentId: 101,
+      name: "Measured Risk",
+      rarity: "gold",
+      iconPath: "https://raw.communitydragon.org/latest/icon.png",
+    }])).toBe(1)
+
+    expect(repo.getMatchDetail(1, PUUID).participants[0].augments?.[0])
+      .toMatchObject({
+        name: "Measured Risk",
+        rarity: "gold",
+      })
+  })
+
   it("does not duplicate a lobby it already holds", () => {
     repo.insertMany(lobby(1, 30000))
     repo.insertMany(lobby(1, 30000))

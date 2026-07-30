@@ -1062,6 +1062,50 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
   ipcMain.handle("review:overview", () =>
     getReviewService(win).overview(withPuuid().puuid),
   )
+  ipcMain.handle("augments:owner-summary", (_event, rawAugmentId: unknown) =>
+    getParticipants().getOwnerAugmentSummaries(
+      withPuuid().puuid,
+      rawAugmentId === undefined || rawAugmentId === null
+        ? undefined
+        : integer(rawAugmentId, "Augment id"),
+    ),
+  )
+  ipcMain.handle("augments:cache-catalog", (_event, rawInput: unknown) => {
+    if (!rawInput || typeof rawInput !== "object") {
+      throw new Error("Augment catalog is invalid")
+    }
+    const input = rawInput as { dataVersion?: unknown; entries?: unknown }
+    const dataVersion = limitedString(input.dataVersion, "Data version", 40)
+    if (!dataVersion || !Array.isArray(input.entries) || input.entries.length > 1_000) {
+      throw new Error("Augment catalog is invalid")
+    }
+    const entries = input.entries.map((rawEntry) => {
+      if (!rawEntry || typeof rawEntry !== "object") {
+        throw new Error("Augment entry is invalid")
+      }
+      const entry = rawEntry as Record<string, unknown>
+      const optional = (value: unknown, label: string, maximum: number) =>
+        value === undefined || value === null || value === ""
+          ? undefined
+          : limitedString(value, label, maximum)
+      const iconPath = optional(entry.iconPath, "Augment icon", 500)
+      if (
+        iconPath &&
+        !iconPath.startsWith(
+          "https://raw.communitydragon.org/",
+        )
+      ) {
+        throw new Error("Augment icon is invalid")
+      }
+      return {
+        augmentId: integer(entry.augmentId, "Augment id"),
+        name: limitedString(entry.name, "Augment name", 120),
+        rarity: optional(entry.rarity, "Augment rarity", 32),
+        iconPath,
+      }
+    })
+    return getParticipants().cacheAugmentCatalog(dataVersion, entries)
+  })
   ipcMain.handle("review:match", (_event, rawGameId: unknown) =>
     getReviewService(win).match(
       integer(rawGameId, "Game id"),
@@ -1309,6 +1353,11 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
 
   ipcMain.handle("riot-history:retry", () => {
     void startRiotHistoryBackfill(win, false)
+    return true
+  })
+
+  ipcMain.handle("riot-history:reimport-details", () => {
+    void startRiotHistoryBackfill(win, true)
     return true
   })
 

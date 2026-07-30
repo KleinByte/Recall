@@ -265,6 +265,18 @@ export interface ParticipantRow {
   gradeScore?: number
   lane?: string
   role?: string
+  augments?: AugmentSelection[]
+  extendedMetrics?: Record<string, number | boolean | string>
+}
+
+export interface AugmentSelection {
+  slot: number
+  augmentId: number
+  selectedAtMs?: number
+  source: "league_client" | "match_v5" | "timeline"
+  name?: string
+  rarity?: string
+  iconPath?: string
 }
 
 export interface TeamRow {

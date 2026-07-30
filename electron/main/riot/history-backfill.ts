@@ -66,13 +66,13 @@ export class RiotHistoryBackfill {
     const persistedStart = typeof existing?.startTimeSeconds === "number"
       ? existing.startTimeSeconds
       : undefined
-    const incrementalFrom = existing?.status === "complete"
+    const incrementalFrom = !restart && existing?.status === "complete"
       ? Math.max(
         0,
         (existing.coverageThroughSeconds ?? existing.endTimeSeconds) -
           24 * 60 * 60,
       )
-      : persistedStart
+      : restart ? undefined : persistedStart
     let state = existing
     try {
       const matchPuuid = await this.resolveMatchPuuid(signal)
@@ -176,6 +176,14 @@ export class RiotHistoryBackfill {
           imported += this.matches.insertMany([mapped.match])
           this.participants.insertMany(mapped.participants)
           this.participants.insertTeams(mapped.teams)
+          this.participants.recordCapture(
+            mapped.match.gameId,
+            this.puuid,
+            "match_v5",
+            mapped.participants,
+            mapped.teams.length,
+            mapped.unknownParticipantFields,
+          )
 
           if (
             mapped.match.modeFamily === "aram" ||

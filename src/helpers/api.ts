@@ -41,6 +41,7 @@ import type {
   ExperimentOutcomeValue,
   MatchAnnotation,
   MatchReview,
+  OwnerAugmentSummary,
   PracticeExperiment,
   ReviewOverview,
   ReviewSession,
@@ -140,6 +141,10 @@ export const api = {
 
   retryRiotHistory(): Promise<boolean> {
     return invoke("riot-history:retry")
+  },
+
+  reimportRiotDetails(): Promise<boolean> {
+    return invoke("riot-history:reimport-details")
   },
 
   getSummary(filter: Partial<MatchQuery>): Promise<StatsSummary> {
@@ -329,6 +334,17 @@ export const api = {
 
   getMatchReview(gameId: number): Promise<MatchReview> {
     return invoke("review:match", gameId)
+  },
+
+  getOwnerAugmentSummaries(augmentId?: number): Promise<OwnerAugmentSummary[]> {
+    return invoke("augments:owner-summary", augmentId)
+  },
+
+  cacheAugmentCatalog(input: {
+    dataVersion: string
+    entries: { augmentId: number; name: string; rarity?: string; iconPath?: string }[]
+  }): Promise<number> {
+    return invoke("augments:cache-catalog", input)
   },
 
   getReviewSessions(page = 1, pageSize = 20): Promise<{

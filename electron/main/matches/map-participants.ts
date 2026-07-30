@@ -53,6 +53,39 @@ const bool = (value: number | boolean | string | undefined) => {
   return value ? 1 : 0
 }
 
+function augmentValues(stats: Record<string, number | boolean | undefined>) {
+  const entries = new Map(
+    Object.entries(stats).map(([key, value]) => [key.toLowerCase(), value]),
+  )
+  return Array.from({ length: 6 }, (_, index) =>
+    entries.get(`playeraugment${index + 1}`),
+  ).flatMap((value, index) =>
+    typeof value === "number" && value > 0
+      ? [{
+        slot: index + 1,
+        augmentId: Math.trunc(value),
+        source: "league_client" as const,
+      }]
+      : [],
+  )
+}
+
+function extendedMetrics(stats: Record<string, number | boolean | undefined>) {
+  const kept = new Set([
+    "totalDamageShieldedOnTeammates", "totalHealsOnTeammates",
+    "totalTimeSpentDead", "totalTimeCCDealt", "turretTakedowns",
+    "inhibitorTakedowns", "objectivesStolen", "objectivesStolenAssists",
+    "damageDealtToBuildings",
+    "summonerLevel", "championTransform", "placement", "subteamPlacement",
+    "playerSubteamId",
+  ])
+  return Object.fromEntries(
+    Object.entries(stats).filter(([key, value]) =>
+      kept.has(key) && (typeof value === "number" || typeof value === "boolean"),
+    ),
+  ) as Record<string, number | boolean>
+}
+
 /** A Riot ID reads as `Name#TAG`; older payloads carry only a summoner name. */
 function displayName(player?: {
   gameName?: string
@@ -169,6 +202,8 @@ export function mapParticipants(
       firstTower: bool(stats.firstTowerKill),
       lane: participant.timeline?.lane,
       role: participant.timeline?.role,
+      augments: augmentValues(stats),
+      extendedMetrics: extendedMetrics(stats),
     }
   })
 }

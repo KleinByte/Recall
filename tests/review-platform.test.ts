@@ -113,7 +113,17 @@ describe("timeline mapping", () => {
       },
     ], 1, new Map([[1, 100], [6, 200]]))
     expect(timeline.frames[0]).toMatchObject({ ownerGold: 1_000, ownerCs: 7 })
-    expect(timeline.events.map((event) => event.type)).toEqual(["ITEM_PURCHASED"])
+    expect(timeline.events.map((event) => event.type)).toEqual([
+      "ITEM_PURCHASED",
+      "WARD_PLACED",
+    ])
+    expect(timeline.events[0]).toMatchObject({
+      category: "item",
+      participantId: 1,
+      itemId: 1001,
+    })
+    expect(timeline.events[0].eventId).toContain("ITEM_PURCHASED")
+    expect(timeline.events[1].category).toBe("vision")
   })
 
   it("selects at most three separated two-minute gold swings", () => {

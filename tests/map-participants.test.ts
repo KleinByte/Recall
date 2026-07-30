@@ -152,6 +152,27 @@ describe("mapParticipants", () => {
     expect(row.perks).toEqual([8214, 8226, 8210, 8237, 8345, 8347])
   })
 
+  it("records ordered augments and extended fields for every participant", () => {
+    const payload = detail()
+    for (const [index, player] of payload.participants.entries()) {
+      Object.assign(player.stats, {
+        playerAugment1: 100 + index,
+        playerAugment2: 200 + index,
+        playerAugment3: 300 + index,
+        playerAugment4: 400 + index,
+        damageDealtToBuildings: 1234 + index,
+      })
+    }
+
+    const rows = mapParticipants(payload, PUUID)
+
+    expect(rows.every((row) => row.augments?.length === 4)).toBe(true)
+    expect(rows[6].augments?.map((augment) => augment.augmentId)).toEqual([
+      106, 206, 306, 406,
+    ])
+    expect(rows[6].extendedMetrics?.damageDealtToBuildings).toBe(1240)
+  })
+
   it("copies the whole statistical line", () => {
     const row = mapParticipants(detail(), PUUID)[2]
 

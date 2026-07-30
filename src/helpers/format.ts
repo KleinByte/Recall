@@ -1,7 +1,9 @@
 import type { Champion } from "../types/lol"
 
 export const championIconUrl = (championId: number) =>
-  `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-icons/${championId}.png`
+  championId > 0
+    ? `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-icons/${championId}.png`
+    : "/recall-icon.png"
 
 export function championNameById(
   champions: Champion[] | null,

@@ -51,6 +51,9 @@ export interface DataTrustReport {
     completeScoreboardPercent: number
     gradedPercent: number
     timelineCount: number
+    captureManifestPercent: number
+    augmentMatchCount: number
+    schemaDriftMatchCount: number
     lastIntegrityCheck?: number
     integrity: "ok" | "failed" | "unknown"
   }
@@ -154,6 +157,17 @@ export interface ReviewOverview {
   activeExperimentCount: number
 }
 
+export interface OwnerAugmentSummary {
+  augmentId: number
+  games: number
+  firstPlayedAt: number
+  lastPlayedAt: number
+  averageGrade?: number
+  kda: number
+  damagePerMinute: number
+  champions: { championId: number; games: number }[]
+}
+
 export type SessionBoundaryAction = "split" | "join" | null
 
 export interface ReviewSession {
@@ -233,8 +247,10 @@ export interface TimelineFrame {
 }
 
 export interface TimelineEvent {
+  eventId: string
   timestamp: number
   type: string
+  category: "kill" | "item" | "objective" | "level" | "vision" | "game"
   participantId?: number
   assistingParticipantIds?: number[]
   teamId?: number
@@ -245,6 +261,12 @@ export interface TimelineEvent {
   skillSlot?: number
   level?: number
   objective?: string
+  killType?: string
+  multiKillLength?: number
+  bounty?: number
+  shutdownBounty?: number
+  wardType?: string
+  laneType?: string
   position?: { x: number; y: number }
 }
 

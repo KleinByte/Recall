@@ -134,7 +134,17 @@ export class MatchSync {
     if (rows.length === 0) return false
 
     const stored = this.participants.insertMany(rows) > 0
-    this.participants.insertTeams(mapTeams(detail, this.puuid))
+    const teams = mapTeams(detail, this.puuid)
+    this.participants.insertTeams(teams)
+    if (detail.gameId) {
+      this.participants.recordCapture(
+        detail.gameId,
+        this.puuid,
+        "league_client",
+        rows,
+        teams.length,
+      )
+    }
     if ((family === "aram" || family === "sr") && detail.gameId) {
       this.participants.setGrades(detail.gameId, this.puuid, gradeLobby(this.gradeInputs(detail), family))
     }

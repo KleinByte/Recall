@@ -1,4 +1,12 @@
-export const TIMELINE_MAPPER_VERSION = 1
+export const TIMELINE_MAPPER_VERSION = 2
+
+export type TimelineEventCategory =
+  | "kill"
+  | "item"
+  | "objective"
+  | "level"
+  | "vision"
+  | "game"
 
 export interface CompactTimelineFrame {
   timestamp: number
@@ -11,8 +19,10 @@ export interface CompactTimelineFrame {
 }
 
 export interface CompactTimelineEvent {
+  eventId: string
   timestamp: number
   type: string
+  category: TimelineEventCategory
   participantId?: number
   assistingParticipantIds?: number[]
   teamId?: number
@@ -23,6 +33,12 @@ export interface CompactTimelineEvent {
   skillSlot?: number
   level?: number
   objective?: string
+  killType?: string
+  multiKillLength?: number
+  bounty?: number
+  shutdownBounty?: number
+  wardType?: string
+  laneType?: string
   position?: { x: number; y: number }
 }
 
@@ -51,6 +67,7 @@ interface RawEvent {
   type?: string
   participantId?: number
   killerId?: number
+  creatorId?: number
   victimId?: number
   assistingParticipantIds?: number[]
   teamId?: number
@@ -64,6 +81,12 @@ interface RawEvent {
   position?: { x?: number; y?: number }
   skillSlot?: number
   level?: number
+  killType?: string
+  multiKillLength?: number
+  bounty?: number
+  shutdownBounty?: number
+  wardType?: string
+  laneType?: string
 }
 
 interface RawFrame {
@@ -83,8 +106,24 @@ const KEPT_EVENTS = new Set([
   "SKILL_LEVEL_UP",
   "ELITE_MONSTER_KILL",
   "BUILDING_KILL",
+  "TURRET_PLATE_DESTROYED",
+  "WARD_PLACED",
+  "WARD_KILL",
   "GAME_END",
 ])
+
+function categoryFor(type: string): TimelineEventCategory {
+  if (type.includes("CHAMPION") && type.includes("KILL")) return "kill"
+  if (type.startsWith("ITEM_")) return "item"
+  if (
+    type === "ELITE_MONSTER_KILL" ||
+    type === "BUILDING_KILL" ||
+    type === "TURRET_PLATE_DESTROYED"
+  ) return "objective"
+  if (type.includes("LEVEL_UP")) return "level"
+  if (type.startsWith("WARD_")) return "vision"
+  return "game"
+}
 
 function numberOrZero(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0
@@ -124,15 +163,17 @@ export function mapTimeline(
         numberOrZero(owner?.jungleMinionsKilled),
     })
 
-    for (const event of frame.events ?? []) {
+    for (const [eventIndex, event] of (frame.events ?? []).entries()) {
       if (!event.type || !KEPT_EVENTS.has(event.type)) continue
-      const participantId = event.participantId ?? event.killerId
+      const participantId = event.participantId ?? event.killerId ?? event.creatorId
       const targetId = event.victimId
       const objective = event.monsterSubType ?? event.monsterType ??
         event.towerType ?? event.buildingType
       events.push({
+        eventId: `${numberOrZero(event.timestamp ?? timestamp)}:${event.type}:${eventIndex}:${participantId ?? 0}:${targetId ?? 0}`,
         timestamp: numberOrZero(event.timestamp ?? timestamp),
         type: event.type,
+        category: categoryFor(event.type),
         participantId,
         assistingParticipantIds: event.assistingParticipantIds,
         teamId: event.teamId ??
@@ -144,6 +185,12 @@ export function mapTimeline(
         skillSlot: event.skillSlot,
         level: event.level,
         objective,
+        killType: event.killType,
+        multiKillLength: event.multiKillLength,
+        bounty: event.bounty,
+        shutdownBounty: event.shutdownBounty,
+        wardType: event.wardType,
+        laneType: event.laneType,
         position: event.position &&
           typeof event.position.x === "number" &&
           typeof event.position.y === "number"

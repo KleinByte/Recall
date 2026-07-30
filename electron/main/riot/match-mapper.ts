@@ -17,6 +17,7 @@ interface RiotPerks {
 }
 
 export interface RiotMatchParticipant {
+  [key: string]: unknown
   participantId?: number
   puuid?: string
   riotIdGameName?: string
@@ -71,6 +72,26 @@ export interface RiotMatchParticipant {
   longestTimeSpentLiving?: number
   firstBloodKill?: boolean
   firstTowerKill?: boolean
+  playerAugment1?: number
+  playerAugment2?: number
+  playerAugment3?: number
+  playerAugment4?: number
+  playerAugment5?: number
+  playerAugment6?: number
+  totalDamageShieldedOnTeammates?: number
+  totalHealsOnTeammates?: number
+  totalTimeSpentDead?: number
+  totalTimeCCDealt?: number
+  turretTakedowns?: number
+  inhibitorTakedowns?: number
+  objectivesStolen?: number
+  objectivesStolenAssists?: number
+  summonerLevel?: number
+  championTransform?: number
+  placement?: number
+  subteamPlacement?: number
+  playerSubteamId?: number
+  challenges?: Record<string, number | boolean | undefined>
   gameEndedInSurrender?: boolean
   gameEndedInEarlySurrender?: boolean
   lane?: string
@@ -120,11 +141,55 @@ export interface MappedRiotMatch {
   participants: ParticipantRow[]
   teams: TeamRow[]
   gradeInputs: GradeInput[]
+  unknownParticipantFields: string[]
 }
 
 const int = (value: number | undefined) =>
   Number.isFinite(value) ? Math.trunc(value!) : 0
 const bool = (value: boolean | undefined) => (value ? 1 : 0)
+
+const KNOWN_PARTICIPANT_FIELDS = new Set([
+  "participantId", "puuid", "riotIdGameName", "riotIdTagline", "summonerName",
+  "profileIcon", "championId", "teamId", "win", "summoner1Id", "summoner2Id",
+  "item0", "item1", "item2", "item3", "item4", "item5", "item6", "perks",
+  "champLevel", "kills", "deaths", "assists", "goldEarned", "goldSpent",
+  "totalDamageDealtToChampions", "totalDamageDealt", "magicDamageDealtToChampions",
+  "physicalDamageDealtToChampions", "trueDamageDealtToChampions",
+  "totalDamageTaken", "damageSelfMitigated", "totalHeal", "totalUnitsHealed",
+  "timeCCingOthers", "largestKillingSpree", "largestMultiKill", "doubleKills",
+  "tripleKills", "quadraKills", "pentaKills", "totalMinionsKilled",
+  "neutralMinionsKilled", "visionScore", "wardsPlaced", "wardsKilled",
+  "visionWardsBoughtInGame", "damageDealtToObjectives", "damageDealtToTurrets",
+  "turretKills", "inhibitorKills", "longestTimeSpentLiving", "firstBloodKill",
+  "firstTowerKill", "gameEndedInSurrender", "gameEndedInEarlySurrender", "lane",
+  "role", "teamPosition", "individualPosition", "playerAugment1",
+  "playerAugment2", "playerAugment3", "playerAugment4", "playerAugment5",
+  "playerAugment6", "totalDamageShieldedOnTeammates", "totalHealsOnTeammates",
+  "totalTimeSpentDead", "totalTimeCCDealt", "turretTakedowns",
+  "inhibitorTakedowns", "objectivesStolen", "objectivesStolenAssists",
+  "summonerLevel", "championTransform", "placement", "subteamPlacement",
+  "playerSubteamId", "challenges",
+])
+
+function extendedMetrics(participant: RiotMatchParticipant) {
+  const metrics: Record<string, number | boolean | string> = {}
+  for (const key of [
+    "totalDamageShieldedOnTeammates", "totalHealsOnTeammates",
+    "totalTimeSpentDead", "totalTimeCCDealt", "turretTakedowns",
+    "inhibitorTakedowns", "objectivesStolen", "objectivesStolenAssists",
+    "summonerLevel", "championTransform", "placement", "subteamPlacement",
+    "playerSubteamId",
+  ]) {
+    const value = participant[key]
+    if (typeof value === "number" && Number.isFinite(value)) metrics[key] = value
+  }
+  for (const [key, value] of Object.entries(participant.challenges ?? {})) {
+    if (typeof value === "number" || typeof value === "boolean") {
+      metrics[`challenge.${key}`] = value
+    }
+  }
+  return metrics
+}
 
 function durationSeconds(info: NonNullable<RiotMatchDto["info"]>) {
   const duration = int(info.gameDuration)
@@ -302,6 +367,23 @@ export function mapRiotMatch(
       firstTower: bool(participant.firstTowerKill),
       lane: laneFor(participant),
       role: positionFor(participant),
+      augments: [
+        participant.playerAugment1,
+        participant.playerAugment2,
+        participant.playerAugment3,
+        participant.playerAugment4,
+        participant.playerAugment5,
+        participant.playerAugment6,
+      ].flatMap((augmentId, index) =>
+        typeof augmentId === "number" && augmentId > 0
+          ? [{
+            slot: index + 1,
+            augmentId: int(augmentId),
+            source: "match_v5" as const,
+          }]
+          : [],
+      ),
+      extendedMetrics: extendedMetrics(participant),
     } satisfies ParticipantRow
   })
 
@@ -343,5 +425,10 @@ export function mapRiotMatch(
     role: participant.role,
   }))
 
-  return { match, participants, teams, gradeInputs }
+  const unknownParticipantFields = [...new Set(
+    info.participants.flatMap((participant) =>
+      Object.keys(participant).filter((key) => !KNOWN_PARTICIPANT_FIELDS.has(key)),
+    ),
+  )]
+  return { match, participants, teams, gradeInputs, unknownParticipantFields }
 }

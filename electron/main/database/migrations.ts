@@ -498,6 +498,87 @@ export const migrations: Migration[] = [
       WHERE status = 'complete';
     `,
   },
+  {
+    // Match-fidelity v2. Augment selections are normalized so every
+    // participant can be rendered faithfully without creating cross-match
+    // profiles for teammates or opponents. The capture manifest makes schema
+    // drift and incomplete historical rows visible instead of silently
+    // discarding newly-added Riot fields.
+    version: 11,
+    up: `
+      ALTER TABLE match_participants
+        ADD COLUMN extended_metrics_json TEXT NOT NULL DEFAULT '{}';
+
+      CREATE TABLE participant_augments (
+        game_id           INTEGER NOT NULL,
+        puuid             TEXT    NOT NULL,
+        participant_id    INTEGER NOT NULL,
+        slot              INTEGER NOT NULL CHECK (slot BETWEEN 1 AND 6),
+        augment_id        INTEGER NOT NULL,
+        selected_at_ms    INTEGER,
+        source            TEXT    NOT NULL CHECK (
+          source IN ('league_client', 'match_v5', 'timeline')
+        ),
+        name_snapshot     TEXT,
+        rarity_snapshot   TEXT,
+        icon_path_snapshot TEXT,
+        capture_version   INTEGER NOT NULL,
+        captured_at       INTEGER NOT NULL,
+        PRIMARY KEY (game_id, puuid, participant_id, slot),
+        FOREIGN KEY (game_id, puuid, participant_id)
+          REFERENCES match_participants (game_id, puuid, participant_id)
+          ON DELETE CASCADE
+      );
+
+      CREATE TABLE augment_catalog (
+        augment_id    INTEGER NOT NULL,
+        data_version  TEXT    NOT NULL,
+        name          TEXT    NOT NULL,
+        internal_name TEXT,
+        rarity        TEXT,
+        icon_path     TEXT,
+        source        TEXT    NOT NULL,
+        fetched_at    INTEGER NOT NULL,
+        PRIMARY KEY (augment_id, data_version)
+      );
+
+      CREATE TABLE match_capture_manifests (
+        game_id                 INTEGER NOT NULL,
+        puuid                   TEXT    NOT NULL,
+        source                  TEXT    NOT NULL,
+        match_mapper_version    INTEGER NOT NULL,
+        participant_mapper_version INTEGER NOT NULL,
+        participant_count       INTEGER NOT NULL,
+        team_count              INTEGER NOT NULL,
+        augment_participant_count INTEGER NOT NULL,
+        captured_categories_json TEXT NOT NULL,
+        missing_categories_json  TEXT NOT NULL,
+        unknown_field_names_json TEXT NOT NULL,
+        captured_at             INTEGER NOT NULL,
+        PRIMARY KEY (game_id, puuid),
+        FOREIGN KEY (game_id, puuid) REFERENCES matches (game_id, puuid)
+          ON DELETE CASCADE
+      );
+
+      CREATE TABLE augment_enrichment_jobs (
+        puuid            TEXT PRIMARY KEY,
+        status           TEXT NOT NULL CHECK (
+          status IN ('idle', 'running', 'paused', 'complete', 'error')
+        ),
+        last_played_at   INTEGER,
+        scanned          INTEGER NOT NULL DEFAULT 0,
+        enriched         INTEGER NOT NULL DEFAULT 0,
+        unavailable      INTEGER NOT NULL DEFAULT 0,
+        last_error       TEXT,
+        updated_at       INTEGER NOT NULL
+      );
+
+      CREATE INDEX idx_participant_augments_owner
+        ON participant_augments (puuid, augment_id, game_id);
+      CREATE INDEX idx_capture_missing_augments
+        ON match_capture_manifests (puuid, augment_participant_count, captured_at);
+    `,
+  },
 ]
 
 export const latestSchemaVersion = migrations.at(-1)?.version ?? 0

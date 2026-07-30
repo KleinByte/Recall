@@ -33,6 +33,24 @@ export interface LobbyComparison {
   metrics: LobbyMetric[]
 }
 
+export interface OwnerAugmentSummary {
+  augmentId: number
+  games: number
+  firstPlayedAt: number
+  lastPlayedAt: number
+  averageGrade?: number
+  kda: number
+  damagePerMinute: number
+  champions: { championId: number; games: number }[]
+}
+
+export interface AugmentCatalogEntry {
+  augmentId: number
+  name: string
+  rarity?: string
+  iconPath?: string
+}
+
 const COLUMNS = [
   "game_id",
   "puuid",
@@ -98,6 +116,7 @@ const COLUMNS = [
   "lane",
   "role",
   "detail_version",
+  "extended_metrics_json",
 ] as const
 
 const TEAM_COLUMNS = [
@@ -125,7 +144,8 @@ const TEAM_COLUMNS = [
  * Raise this whenever the scoreboard gains fields worth going back for, and
  * games still inside the client's window will be read again to fill them in.
  */
-export const LOBBY_DETAIL_VERSION = 2
+export const LOBBY_DETAIL_VERSION = 3
+export const PARTICIPANT_CAPTURE_VERSION = 3
 
 /**
  * Replaces rather than ignores, so a lobby captured under an earlier, narrower
@@ -225,6 +245,7 @@ function toValues(row: ParticipantRow) {
     row.lane ?? null,
     row.role ?? null,
     LOBBY_DETAIL_VERSION,
+    JSON.stringify(row.extendedMetrics ?? {}),
   ]
 }
 
@@ -250,6 +271,12 @@ function toTeamValues(row: TeamRow) {
 }
 
 function toParticipantRow(row: Record<string, never>): ParticipantRow {
+  let extendedMetrics: Record<string, number | boolean | string> = {}
+  try {
+    extendedMetrics = JSON.parse(row.extended_metrics_json ?? "{}")
+  } catch {
+    extendedMetrics = {}
+  }
   return {
     gameId: row.game_id,
     puuid: row.puuid,
@@ -313,6 +340,7 @@ function toParticipantRow(row: Record<string, never>): ParticipantRow {
     gradeScore: row.grade_score ?? undefined,
     lane: row.lane ?? undefined,
     role: row.role ?? undefined,
+    extendedMetrics,
   }
 }
 
@@ -355,11 +383,98 @@ export class ParticipantsRepository {
       let inserted = 0
       for (const row of batch) {
         inserted += this.insertStatement.run(toValues(row)).changes
+        this.saveAugments(row)
       }
       return inserted
     })
 
     return insertAll(rows)
+  }
+
+  private saveAugments(row: ParticipantRow) {
+    if (!row.augments?.length) return
+    const statement = this.db.prepare(
+      `INSERT INTO participant_augments
+       (game_id, puuid, participant_id, slot, augment_id, selected_at_ms,
+        source, name_snapshot, rarity_snapshot, icon_path_snapshot,
+        capture_version, captured_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(game_id, puuid, participant_id, slot) DO UPDATE SET
+         augment_id = excluded.augment_id,
+         selected_at_ms = COALESCE(excluded.selected_at_ms, participant_augments.selected_at_ms),
+         source = excluded.source,
+         name_snapshot = COALESCE(excluded.name_snapshot, participant_augments.name_snapshot),
+         rarity_snapshot = COALESCE(excluded.rarity_snapshot, participant_augments.rarity_snapshot),
+         icon_path_snapshot = COALESCE(excluded.icon_path_snapshot, participant_augments.icon_path_snapshot),
+         capture_version = excluded.capture_version,
+         captured_at = excluded.captured_at`,
+    )
+    for (const augment of row.augments) {
+      if (!Number.isInteger(augment.augmentId) || augment.augmentId <= 0) continue
+      statement.run(
+        row.gameId,
+        row.puuid,
+        row.participantId,
+        augment.slot,
+        augment.augmentId,
+        augment.selectedAtMs ?? null,
+        augment.source,
+        augment.name ?? null,
+        augment.rarity ?? null,
+        augment.iconPath ?? null,
+        PARTICIPANT_CAPTURE_VERSION,
+        Date.now(),
+      )
+    }
+  }
+
+  recordCapture(
+    gameId: number,
+    puuid: string,
+    source: "league_client" | "match_v5",
+    rows: ParticipantRow[],
+    teamCount: number,
+    unknownFieldNames: string[] = [],
+  ) {
+    const augmentParticipants = rows.filter((row) => row.augments?.length).length
+    const captured = [
+      "scoreboard", "items", "spells", "runes", "extended_metrics",
+      ...(augmentParticipants ? ["augments"] : []),
+    ]
+    const missing = [
+      ...(rows.length < 10 ? ["complete_scoreboard"] : []),
+      ...(augmentParticipants === 0 ? ["augments"] : []),
+    ]
+    this.db.prepare(
+      `INSERT INTO match_capture_manifests
+       (game_id, puuid, source, match_mapper_version,
+        participant_mapper_version, participant_count, team_count,
+        augment_participant_count, captured_categories_json,
+        missing_categories_json, unknown_field_names_json, captured_at)
+       VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(game_id, puuid) DO UPDATE SET
+         source = excluded.source,
+         participant_mapper_version = excluded.participant_mapper_version,
+         participant_count = excluded.participant_count,
+         team_count = excluded.team_count,
+         augment_participant_count = excluded.augment_participant_count,
+         captured_categories_json = excluded.captured_categories_json,
+         missing_categories_json = excluded.missing_categories_json,
+         unknown_field_names_json = excluded.unknown_field_names_json,
+         captured_at = excluded.captured_at`,
+    ).run(
+      gameId,
+      puuid,
+      source,
+      PARTICIPANT_CAPTURE_VERSION,
+      rows.length,
+      teamCount,
+      augmentParticipants,
+      JSON.stringify(captured),
+      JSON.stringify(missing),
+      JSON.stringify([...new Set(unknownFieldNames)].sort()),
+      Date.now(),
+    )
   }
 
   insertTeams(rows: TeamRow[]): number {
@@ -429,7 +544,39 @@ export class ParticipantsRepository {
       )
       .all(gameId, puuid) as TeamRow[]
 
-    return { participants: participants.map(toParticipantRow), teams }
+    const mapped = participants.map(toParticipantRow)
+    const augments = this.db.prepare(
+      `SELECT participant_id AS participantId, slot,
+              augment_id AS augmentId, selected_at_ms AS selectedAtMs,
+              source, name_snapshot AS name, rarity_snapshot AS rarity,
+              icon_path_snapshot AS iconPath
+       FROM participant_augments
+       WHERE game_id = ? AND puuid = ?
+       ORDER BY participant_id, slot`,
+    ).all(gameId, puuid) as Array<{
+      participantId: number
+      slot: number
+      augmentId: number
+      selectedAtMs: number | null
+      source: "league_client" | "match_v5" | "timeline"
+      name: string | null
+      rarity: string | null
+      iconPath: string | null
+    }>
+    for (const participant of mapped) {
+      participant.augments = augments
+        .filter((augment) => augment.participantId === participant.participantId)
+        .map((augment) => ({
+          slot: augment.slot,
+          augmentId: augment.augmentId,
+          selectedAtMs: augment.selectedAtMs ?? undefined,
+          source: augment.source,
+          name: augment.name ?? undefined,
+          rarity: augment.rarity ?? undefined,
+          iconPath: augment.iconPath ?? undefined,
+        }))
+    }
+    return { participants: mapped, teams }
   }
 
   countGamesWithLobby(puuid: string): number {
@@ -440,6 +587,100 @@ export class ParticipantsRepository {
       .get(puuid) as { total: number }
 
     return row.total
+  }
+
+  /**
+   * Owner-only, post-game augment context. Deliberately excludes wins and
+   * losses: Riot policy prohibits displaying augment win rates.
+   */
+  getOwnerAugmentSummaries(
+    puuid: string,
+    augmentId?: number,
+  ): OwnerAugmentSummary[] {
+    const filter = augmentId === undefined ? "" : "AND a.augment_id = ?"
+    const params = augmentId === undefined ? [puuid] : [puuid, augmentId]
+    const rows = this.db.prepare(
+      `SELECT a.augment_id AS augmentId, COUNT(DISTINCT a.game_id) AS games,
+              MIN(m.played_at) AS firstPlayedAt,
+              MAX(m.played_at) AS lastPlayedAt,
+              AVG(p.grade_score) AS averageGrade,
+              SUM(p.kills + p.assists) * 1.0 / MAX(1, SUM(p.deaths)) AS kda,
+              AVG(p.damage_to_champions * 60.0 / MAX(1, m.duration_secs))
+                AS damagePerMinute
+       FROM participant_augments a
+       JOIN match_participants p
+         ON p.game_id = a.game_id AND p.puuid = a.puuid
+        AND p.participant_id = a.participant_id AND p.is_player = 1
+       JOIN matches m ON m.game_id = a.game_id AND m.puuid = a.puuid
+       WHERE a.puuid = ? ${filter}
+       GROUP BY a.augment_id
+       ORDER BY games DESC, a.augment_id`,
+    ).all(...params) as Array<Omit<OwnerAugmentSummary, "champions"> & {
+      averageGrade: number | null
+    }>
+    const championRows = this.db.prepare(
+      `SELECT a.augment_id AS augmentId, p.champion_id AS championId,
+              COUNT(DISTINCT a.game_id) AS games
+       FROM participant_augments a
+       JOIN match_participants p
+         ON p.game_id = a.game_id AND p.puuid = a.puuid
+        AND p.participant_id = a.participant_id AND p.is_player = 1
+       WHERE a.puuid = ? ${filter}
+       GROUP BY a.augment_id, p.champion_id
+       ORDER BY games DESC, p.champion_id`,
+    ).all(...params) as Array<{
+      augmentId: number
+      championId: number
+      games: number
+    }>
+    return rows.map((row) => ({
+      ...row,
+      averageGrade: row.averageGrade ?? undefined,
+      champions: championRows
+        .filter((entry) => entry.augmentId === row.augmentId)
+        .map(({ championId, games }) => ({ championId, games })),
+    }))
+  }
+
+  cacheAugmentCatalog(dataVersion: string, entries: AugmentCatalogEntry[]) {
+    const save = this.db.transaction(() => {
+      const catalog = this.db.prepare(
+        `INSERT INTO augment_catalog
+         (augment_id, data_version, name, rarity, icon_path, source, fetched_at)
+         VALUES (?, ?, ?, ?, ?, 'communitydragon', ?)
+         ON CONFLICT(augment_id, data_version) DO UPDATE SET
+           name = excluded.name,
+           rarity = excluded.rarity,
+           icon_path = excluded.icon_path,
+           fetched_at = excluded.fetched_at`,
+      )
+      const snapshots = this.db.prepare(
+        `UPDATE participant_augments SET
+           name_snapshot = ?,
+           rarity_snapshot = COALESCE(?, rarity_snapshot),
+           icon_path_snapshot = COALESCE(?, icon_path_snapshot)
+         WHERE augment_id = ?`,
+      )
+      const now = Date.now()
+      for (const entry of entries) {
+        catalog.run(
+          entry.augmentId,
+          dataVersion,
+          entry.name,
+          entry.rarity ?? null,
+          entry.iconPath ?? null,
+          now,
+        )
+        snapshots.run(
+          entry.name,
+          entry.rarity ?? null,
+          entry.iconPath ?? null,
+          entry.augmentId,
+        )
+      }
+    })
+    save()
+    return entries.length
   }
 
   deleteAll(puuid: string): number {
