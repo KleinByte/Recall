@@ -97,7 +97,9 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: var(--surface-1);
+  background:
+    linear-gradient(180deg, rgba(200, 170, 109, 0.035), transparent 24%),
+    var(--surface-1);
   border-right: 1px solid var(--border-subtle);
   padding: var(--space-5) var(--space-3) var(--space-3);
   box-sizing: border-box;
@@ -108,6 +110,8 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
   flex-direction: column;
   gap: 2px;
   padding: 0 var(--space-2) var(--space-5);
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: var(--space-3);
 }
 
 .brand-mark {
@@ -136,6 +140,10 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
   flex: 1;
 }
 
+.nav li:last-child {
+  margin-top: auto;
+}
+
 .nav-item {
   width: 100%;
   display: flex;
@@ -149,6 +157,7 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
   background: transparent;
   color: var(--text-secondary);
   border: none;
+  border: 1px solid transparent;
   border-left: 2px solid transparent;
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -163,7 +172,8 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
 }
 
 .nav-item.active {
-  background: var(--surface-2);
+  background: linear-gradient(90deg, var(--surface-3), var(--surface-2));
+  border-color: var(--border-subtle);
   border-left-color: var(--gold);
   color: var(--gold-bright);
 }
@@ -181,7 +191,7 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
   width: 100%;
   margin: var(--space-3) 0 var(--space-2);
   padding: var(--space-2);
-  background: var(--surface-2);
+  background: linear-gradient(145deg, var(--surface-3), var(--surface-2));
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   color: var(--gold-bright);

@@ -325,6 +325,7 @@ h1 {
   border-radius: var(--radius-md);
   background: var(--surface-1);
   padding-right: 0;
+  overflow: auto;
 }
 
 .champions {

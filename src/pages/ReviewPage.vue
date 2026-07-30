@@ -63,6 +63,50 @@ const timelinePoints = computed(() => {
     `${index * 100 / (differences.length - 1)},${50 - difference * 42 / max}`,
   ).join(" ")
 })
+const timelineMarkers = computed(() => {
+  const summary = review.value?.timeline.summary
+  if (!summary?.frames.length) return []
+  const frames = summary.frames
+  const maximumTimestamp = Math.max(1, frames.at(-1)?.timestamp ?? 1)
+  const differences = frames.map((frame) => frame.blueGold - frame.redGold)
+  const maximumDifference = Math.max(1_000, ...differences.map(Math.abs))
+  const ownerId = owner.value?.participantId
+  const source = timelineFilter.value === "all"
+    ? summary.events.filter((event) =>
+      event.category === "kill" ||
+      event.category === "objective" ||
+      event.category === "game" ||
+      (
+        event.category === "item" &&
+        event.participantId === ownerId &&
+        ["ITEM_PURCHASED", "ITEM_TRANSFORMED", "ITEM_DESTROYED"].includes(event.type)
+      ),
+    )
+    : filteredTimelineEvents.value
+  const laneByBucket = new Map<number, number>()
+
+  return source.slice(0, 90).map((event) => {
+    const x = Math.max(0, Math.min(100, 100 * event.timestamp / maximumTimestamp))
+    const closest = frames.reduce((best, frame) =>
+      Math.abs(frame.timestamp - event.timestamp) <
+        Math.abs(best.timestamp - event.timestamp)
+        ? frame
+        : best,
+    )
+    const difference = closest.blueGold - closest.redGold
+    const lineY = 50 - difference * 42 / maximumDifference
+    const bucket = Math.round(x / 2)
+    const lane = laneByBucket.get(bucket) ?? 0
+    laneByBucket.set(bucket, lane + 1)
+    const direction = lane % 2 === 0 ? -1 : 1
+    const distance = Math.ceil((lane + 1) / 2) * 7
+    return {
+      event,
+      x,
+      y: Math.max(7, Math.min(93, lineY + direction * distance)),
+    }
+  })
+})
 const filteredTimelineEvents = computed(() => {
   const events = review.value?.timeline.summary?.events ?? []
   if (timelineFilter.value === "all") return events
@@ -111,6 +155,36 @@ function itemName(event: TimelineEvent) {
 function itemIcon(event: TimelineEvent) {
   const id = itemId(event)
   return assets.value.items[id ?? 0]?.icon ?? itemIconUrl(id, assets.value.version)
+}
+
+function timelineMarkerIcon(event: TimelineEvent) {
+  if (event.category === "kill") {
+    return championIconUrl(participant(event.participantId)?.championId || 0)
+  }
+  if (event.category === "item") return itemIcon(event)
+  return undefined
+}
+
+function timelineMarkerGlyph(event: TimelineEvent) {
+  if (event.category === "objective") return "◆"
+  if (event.category === "level") return "↑"
+  if (event.category === "vision") return "◉"
+  if (event.category === "game") return "■"
+  return "•"
+}
+
+function timelineMarkerTitle(event: TimelineEvent) {
+  const time = eventTime(event.timestamp)
+  if (event.category === "kill") {
+    const killer = participant(event.participantId)?.summonerName ?? "Execution"
+    const victim = participant(event.targetId)?.summonerName ?? `Player ${event.targetId}`
+    return `${time} · ${killer} killed ${victim}`
+  }
+  if (event.category === "item") {
+    const player = participant(event.participantId)?.summonerName ?? `Player ${event.participantId}`
+    return `${time} · ${player} · ${itemName(event)}`
+  }
+  return `${time} · ${objectiveName(event.objective || event.type)}`
 }
 
 function augmentName(augmentId: number) {
@@ -480,11 +554,35 @@ onBeforeUnmount(() => {
           <span class="muted">Named events from Riot Match‑V5</span>
         </div>
         <div v-if="review.timeline.status === 'ready' && review.timeline.summary">
-          <svg class="gold-chart" viewBox="0 0 100 100" preserveAspectRatio="none"
-            aria-label="Team gold difference across the match">
-            <line x1="0" y1="50" x2="100" y2="50" />
-            <polyline :points="timelinePoints" />
-          </svg>
+          <div class="gold-chart-wrap">
+            <svg class="gold-chart" viewBox="0 0 100 100" preserveAspectRatio="none"
+              aria-label="Team gold difference across the match">
+              <line class="grid-line top" x1="0" y1="25" x2="100" y2="25" />
+              <line class="grid-line" x1="0" y1="50" x2="100" y2="50" />
+              <line class="grid-line bottom" x1="0" y1="75" x2="100" y2="75" />
+              <polyline :points="timelinePoints" />
+            </svg>
+            <span
+              v-for="marker in timelineMarkers"
+              :key="marker.event.eventId"
+              class="chart-marker"
+              :class="marker.event.category"
+              :style="{ left: `${marker.x}%`, top: `${marker.y}%` }"
+              :title="timelineMarkerTitle(marker.event)"
+              :aria-label="timelineMarkerTitle(marker.event)"
+              role="img"
+              tabindex="0"
+            >
+              <img
+                v-if="timelineMarkerIcon(marker.event)"
+                :src="timelineMarkerIcon(marker.event)"
+                alt=""
+              />
+              <span v-else>{{ timelineMarkerGlyph(marker.event) }}</span>
+            </span>
+            <span class="chart-label blue">Blue lead</span>
+            <span class="chart-label red">Red lead</span>
+          </div>
           <div class="timeline-filters">
             <button v-for="filter in (['all', 'you', 'kills', 'objectives', 'items', 'levels', 'vision'] as const)"
               :key="filter" class="league-button" :class="{ active: timelineFilter === filter }"
@@ -672,7 +770,10 @@ h2 { margin: 0; }
 textarea { width: 100%; box-sizing: border-box; min-height: 110px; resize: vertical; background: var(--surface-0); color: var(--text-primary); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: var(--space-3); font: 12px var(--font-body); }
 .tag-list, .inline, .experiment-outcome, .session-games { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-2); }.tag { border: 1px solid var(--border-subtle); background: var(--surface-2); color: var(--text-secondary); border-radius: 99px; padding: 4px 9px; }.tag.selected { color: var(--gold-bright); border-color: var(--gold); }
 .inline input { flex: 1; }.experiment-outcome { justify-content: space-between; align-items: center; }.outcome-note { flex-basis: 100%; }
-.gold-chart { width: 100%; height: 180px; background: var(--surface-0); border-radius: var(--radius-sm); }.gold-chart line { stroke: var(--border-strong); stroke-width: .5; }.gold-chart polyline { fill: none; stroke: var(--gold); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.gold-chart-wrap { position: relative; height: 220px; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: linear-gradient(180deg, color-mix(in srgb, var(--win-dim) 18%, var(--surface-0)) 0 50%, color-mix(in srgb, var(--loss-dim) 18%, var(--surface-0)) 50% 100%); }
+.gold-chart { display: block; width: 100%; height: 100%; }.gold-chart line { stroke: var(--border-strong); stroke-width: .35; stroke-dasharray: 2 2; }.gold-chart .grid-line.top, .gold-chart .grid-line.bottom { stroke: var(--border-subtle); }.gold-chart polyline { fill: none; stroke: var(--gold); stroke-width: 2; vector-effect: non-scaling-stroke; filter: drop-shadow(0 0 3px rgba(200, 170, 109, .35)); }
+.chart-marker { position: absolute; z-index: 2; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; transform: translate(-50%, -50%); border: 2px solid var(--surface-0); border-radius: 50%; background: var(--surface-3); color: var(--gold-bright); box-shadow: 0 2px 7px rgba(0, 0, 0, .5); cursor: help; transition: width .12s ease, height .12s ease, z-index .12s ease; }.chart-marker:hover, .chart-marker:focus-visible { z-index: 5; width: 30px; height: 30px; outline: 2px solid var(--gold); }.chart-marker img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }.chart-marker span { font: 10px var(--font-heading); }.chart-marker.objective { border-color: var(--gold); }.chart-marker.item { border-radius: var(--radius-sm); border-color: var(--win); }.chart-marker.game { border-color: var(--loss); }
+.chart-label { position: absolute; left: 8px; z-index: 1; padding: 2px 5px; border-radius: 999px; background: color-mix(in srgb, var(--surface-0) 82%, transparent); font-size: 8px; letter-spacing: .8px; text-transform: uppercase; pointer-events: none; }.chart-label.blue { top: 7px; color: var(--win); }.chart-label.red { bottom: 7px; color: var(--loss); }
 .timeline-filters { display: flex; gap: var(--space-2); margin-top: var(--space-2); flex-wrap: wrap; }.timeline-filters button { padding: 4px 8px; font-size: 10px; }
 .events { max-height: 430px; overflow: auto; margin-top: var(--space-3); padding-left: 18px; font-size: 11px; color: var(--text-secondary); border-left: 1px solid var(--border-strong); }.event-row { position: relative; display: grid; grid-template-columns: 42px 30px minmax(0, 1fr) 28px; align-items: center; gap: 8px; min-height: 44px; padding: 4px 8px; border-bottom: 1px solid var(--border-subtle); background: color-mix(in srgb, var(--surface-1) 92%, transparent); }.event-row::before { content: ""; position: absolute; left: -22px; width: 7px; height: 7px; border: 2px solid var(--gold); border-radius: 50%; background: var(--surface-0); }.event-row time { color: var(--gold); font-variant-numeric: tabular-nums; }.event-row img { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }.event-row .victim { filter: grayscale(.35); }.event-row > div { min-width: 0; display: flex; flex-direction: column; }.event-row > div span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.event-glyph { display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid var(--border-strong); border-radius: 50%; color: var(--gold); }.turning-points { margin-top: var(--space-3); font-size: 12px; }
 .purchase-path { display: flex; align-items: end; gap: 6px; flex-wrap: wrap; margin-top: var(--space-3); font-size: 10px; }.purchase-path strong { flex-basis: 100%; }.purchase-path figure { margin: 0; text-align: center; }.purchase-path img { display: block; width: 34px; height: 34px; border: 1px solid var(--border-strong); border-radius: 4px; }.purchase-path figcaption { margin-top: 2px; color: var(--text-muted); }

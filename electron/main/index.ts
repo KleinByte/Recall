@@ -56,6 +56,7 @@ import type { ModeFamily, TrackedMode } from "./matches/types.js"
 import { migrateLegacyUserData } from "./migrate-user-data.js"
 import { createSingleFlightRefresh } from "./full-refresh.js"
 import { readLiveSession, type LivePhase, type LiveSession } from "./live-session.js"
+import { GameClient, readLiveGameSnapshot } from "./game-client.js"
 import { fetchQueues } from "./matches/queues.js"
 import { RiotHistoryBackfill } from "./riot/history-backfill.js"
 import { canonicalPlatformId, regionalRouteFor } from "./riot/routing.js"
@@ -122,6 +123,7 @@ function getDatabaseBackupDir() {
 
 /** How long the client needs after a game before its history is readable. */
 const PERIODIC_SYNC_INTERVAL_MS = 5 * 60_000
+const LIVE_GAME_REFRESH_INTERVAL_MS = 2_000
 const SESSION_RETRY_DELAY_MS = 10_000
 
 interface Summoner {
@@ -143,6 +145,8 @@ interface Session {
   regionalRoute?: string
   platformId?: string
   timer: NodeJS.Timeout
+  liveTimer: NodeJS.Timeout
+  gameClient: GameClient
 }
 
 let session: Session | undefined
@@ -151,6 +155,7 @@ let tray: Tray | undefined
 let overlay: Overlay | undefined
 let overlayRevision = 0
 let liveRevision = 0
+let liveGameReading = false
 let liveSession: LiveSession = {
   phase: "Idle",
   benchChampionIds: [],
@@ -491,6 +496,7 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
   })
   events.start()
 
+  const gameClient = new GameClient()
   session = {
     client,
     events,
@@ -500,6 +506,11 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
     regionalRoute,
     platformId,
     timer: setInterval(() => void runSync(win), PERIODIC_SYNC_INTERVAL_MS),
+    liveTimer: setInterval(
+      () => void refreshLiveGameData(win),
+      LIVE_GAME_REFRESH_INTERVAL_MS,
+    ),
+    gameClient,
   }
 
   broadcast(win, "lcu:status", { connected: true, summoner })
@@ -520,8 +531,10 @@ function stopSession(win: BrowserWindow) {
   riotBackfillAbort?.abort()
   riotBackfillAbort = undefined
   clearInterval(session.timer)
+  clearInterval(session.liveTimer)
   session.events.stop()
   session.client.close()
+  session.gameClient.close()
   session = undefined
   championNames = undefined
   hideOverlay()
@@ -549,8 +562,40 @@ async function refreshLiveSession(win: BrowserWindow, phase: LivePhase) {
     if (revision !== liveRevision) return
     liveSession = next
     broadcast(win, "live:updated", liveSession)
+    if (phase === "InProgress") void refreshLiveGameData(win)
   } catch (error) {
     console.warn(`Could not refresh live game: ${(error as Error).message}`)
+  }
+}
+
+/**
+ * Adds the documented local game-client feed to the current live session.
+ * A short single-flight guard avoids overlapping reads when the client is
+ * briefly slow during loading or reconnecting.
+ */
+async function refreshLiveGameData(win: BrowserWindow) {
+  if (!session || liveSession.phase !== "InProgress" || liveGameReading) return
+  liveGameReading = true
+  const expectedGameId = liveSession.gameId
+
+  try {
+    const game = await readLiveGameSnapshot(session.gameClient)
+    if (
+      !session ||
+      liveSession.phase !== "InProgress" ||
+      liveSession.gameId !== expectedGameId
+    ) return
+    liveSession = {
+      ...liveSession,
+      game,
+      updatedAt: game.updatedAt,
+    }
+    broadcast(win, "live:updated", liveSession)
+  } catch {
+    // Port 2999 is unavailable during the loading transition and immediately
+    // after a game. Preserve the latest good snapshot and retry quietly.
+  } finally {
+    liveGameReading = false
   }
 }
 

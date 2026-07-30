@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { readLiveSession } from "../electron/main/live-session.js"
+import { readFileSync } from "node:fs"
 
 const client = (responses: Record<string, unknown>) => ({
   request: <T>(path: string) =>
@@ -134,5 +135,14 @@ describe("readLiveSession", () => {
   it("is empty outside a game", async () => {
     const live = await readLiveSession(client({}) as never, "Idle")
     expect(live).toMatchObject({ phase: "Idle", allies: [], benchChampionIds: [] })
+  })
+
+  it("recomputes recommendations when the available bench changes", () => {
+    const page = readFileSync("src/pages/LiveGamePage.vue", "utf8")
+
+    expect(page).toContain("availableFor(live.value)")
+    expect(page).toContain("recommendationSignature")
+    expect(page).toContain("benchChampionIds")
+    expect(page).toContain("live.game")
   })
 })

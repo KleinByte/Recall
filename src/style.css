@@ -26,6 +26,10 @@ body {
   margin: 0;
 }
 
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
 /* The overlay window is frameless and transparent, so nothing behind its own
    panel may paint a background. */
 body.overlay-window,
@@ -93,10 +97,17 @@ body.overlay-window #app {
   color: var(--gold);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
+  min-height: 34px;
+  padding-inline: var(--space-3);
   transition:
     background 0.12s ease,
     border-color 0.12s ease,
     color 0.12s ease;
+}
+
+.league-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
 }
 
 .league-button:hover {
@@ -130,6 +141,7 @@ body.overlay-window #app {
   color: var(--gold);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
+  min-height: 36px;
 }
 
 .league-select:hover {
@@ -164,6 +176,65 @@ body.overlay-window #app {
   color: var(--text-primary);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
+  min-height: 36px;
+}
+
+/* Shared page rhythm. Individual pages own their dense inner layouts, while
+   the shell keeps headings, width, and responsive spacing consistent. */
+.content > .page {
+  width: min(100%, 1440px);
+  min-height: 100%;
+  margin-inline: auto;
+  padding-bottom: var(--space-6);
+}
+
+.content > .page > .page-head {
+  padding: 2px 2px var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.content > .page h1 {
+  font-size: clamp(22px, 2vw, 28px);
+  line-height: 1.08;
+}
+
+.content table {
+  font-variant-numeric: tabular-nums;
+}
+
+button, select, input, textarea {
+  accent-color: var(--gold);
+}
+
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+@media (max-width: 900px) {
+  .content > .page {
+    padding-bottom: var(--space-5);
+  }
+}
+
+@media (max-width: 620px) {
+  .content > .page > .page-head {
+    padding-bottom: var(--space-3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 .league-input::placeholder {

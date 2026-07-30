@@ -1,9 +1,9 @@
 :root {
   /* Surfaces — deep navy, layered from back to front */
-  --surface-0: #0a1428;
-  --surface-1: #0f1c33;
-  --surface-2: #152540;
-  --surface-3: #1d3054;
+  --surface-0: #081323;
+  --surface-1: #0e1b30;
+  --surface-2: #14243d;
+  --surface-3: #1b3050;
 
   /* League gold ramp */
   --gold-bright: #f0e6d2;
@@ -36,10 +36,10 @@
   --space-5: 24px;
   --space-6: 32px;
 
-  --radius-sm: 2px;
-  --radius-md: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
 
-  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-card: 0 10px 28px rgba(0, 0, 0, 0.2);
 
   --font-display: "BeaufortforLOL Bold", "BeaufortforLOL", serif;
   --font-heading: "BeaufortforLOL Medium", "BeaufortforLOL", serif;
@@ -51,10 +51,13 @@
 /* ---------- Shared primitives ---------- */
 
 .card {
-  background: var(--surface-1);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.012), transparent 42%),
+    var(--surface-1);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   padding: var(--space-4);
+  box-shadow: var(--shadow-card);
 }
 
 .section-title {

@@ -1,4 +1,5 @@
 import type { LcuClient } from "./lcu-client.js"
+import type { LiveGameSnapshot } from "./game-client.js"
 import type { TrackedMode } from "./matches/types.js"
 
 export type LivePhase = "Idle" | "ChampSelect" | "InProgress"
@@ -26,6 +27,7 @@ export interface LiveSession {
   benchChampionIds: number[]
   allies: LivePlayer[]
   enemies: LivePlayer[]
+  game?: LiveGameSnapshot
   updatedAt: number
 }
 

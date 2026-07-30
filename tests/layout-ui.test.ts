@@ -35,4 +35,23 @@ describe("desktop page layout", () => {
     expect(skill).toMatch(/\.playstyle \{[\s\S]*align-items: start/)
     expect(progress).toMatch(/\.records \{[\s\S]*grid-auto-rows: 1fr/)
   })
+
+  it("uses distinct champion-select and in-game live layouts", () => {
+    const live = read("src/pages/LiveGamePage.vue")
+
+    expect(live).toContain("live.phase === 'ChampSelect'")
+    expect(live).toContain('class="choice-table"')
+    expect(live).toContain("composition-card")
+    expect(live).toContain("live-scoreboard")
+    expect(live).toContain("live.game.activePlayer")
+  })
+
+  it("places event icons directly on the timeline graph", () => {
+    const review = read("src/pages/ReviewPage.vue")
+
+    expect(review).toContain('class="gold-chart-wrap"')
+    expect(review).toContain('class="chart-marker"')
+    expect(review).toContain("timelineMarkerIcon")
+    expect(review).toContain("timelineMarkerTitle")
+  })
 })

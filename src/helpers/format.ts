@@ -26,8 +26,9 @@ export function formatCompact(value: number): string {
 }
 
 export function formatDuration(seconds: number): string {
-  const minutes = Math.floor(seconds / 60)
-  const rest = Math.round(seconds % 60)
+  const rounded = Math.max(0, Math.round(seconds))
+  const minutes = Math.floor(rounded / 60)
+  const rest = rounded % 60
   return `${minutes}:${rest.toString().padStart(2, "0")}`
 }
 

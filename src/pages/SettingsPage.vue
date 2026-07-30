@@ -201,7 +201,7 @@ const formatDate = (value?: number) =>
 
 <template>
   <div class="page">
-    <header>
+    <header class="page-head">
       <h1>Settings</h1>
     </header>
 
@@ -469,7 +469,7 @@ const formatDate = (value?: number) =>
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  max-width: 720px;
+  max-width: 1120px;
 }
 
 h1 {
@@ -478,6 +478,13 @@ h1 {
   letter-spacing: 1px;
   margin: 0;
   color: var(--gold-bright);
+}
+
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
 }
 
 .setting {

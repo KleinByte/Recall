@@ -174,6 +174,7 @@ onMounted(async () => {
       <LiveGamePage
         v-else-if="page === 'live'"
         :champions="allChampions"
+        :aram-stats="stats"
       />
 
       <ReviewPage
@@ -257,6 +258,16 @@ onMounted(async () => {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  padding: var(--space-5);
+  padding: 28px clamp(var(--space-4), 2.4vw, var(--space-6));
+  background:
+    radial-gradient(circle at 82% 0%, rgba(10, 203, 230, 0.045), transparent 32%),
+    radial-gradient(circle at 15% 0%, rgba(200, 170, 109, 0.055), transparent 28%),
+    var(--surface-0);
+}
+
+@media (max-width: 700px) {
+  .content {
+    padding: var(--space-4);
+  }
 }
 </style>
