@@ -12,6 +12,7 @@ export type ModeFamily = "sr" | "aram" | "other"
 
 export interface StatsFilter {
   mode?: TrackedMode
+  modes?: TrackedMode[]
   modeFamily?: ModeFamily
   sinceMs?: number
 }

@@ -115,6 +115,28 @@ describe("getSummary", () => {
     expect(repo.getSummary({ puuid: PUUID }).games).toBe(1)
   })
 
+  it("isolates ranked and normal Rift scopes from each other and from ARAM", () => {
+    repo.insertMany([
+      buildMatchRow({ gameId: 1, mode: "sr_ranked_solo" }),
+      buildMatchRow({ gameId: 2, mode: "sr_ranked_flex" }),
+      buildMatchRow({ gameId: 3, mode: "sr_normal" }),
+      buildMatchRow({ gameId: 4, mode: "sr_quickplay" }),
+      buildMatchRow({ gameId: 5, mode: "sr_swiftplay" }),
+      buildMatchRow({ gameId: 6, mode: "aram" }),
+      buildMatchRow({ gameId: 7, mode: "mayhem" }),
+    ])
+
+    expect(
+      repo.getSummary({ puuid: PUUID, modes: ["sr_ranked_solo", "sr_ranked_flex"] }).games,
+    ).toBe(2)
+    expect(
+      repo.getSummary({ puuid: PUUID, modes: ["sr_normal", "sr_quickplay", "sr_swiftplay"] }).games,
+    ).toBe(3)
+    expect(repo.getSummary({ puuid: PUUID, modes: ["sr_ranked_solo"] }).games).toBe(1)
+    expect(repo.getSummary({ puuid: PUUID, modes: ["aram"] }).games).toBe(1)
+    expect(repo.getSummary({ puuid: PUUID, modes: ["mayhem"] }).games).toBe(1)
+  })
+
   it("returns zeroes when nothing is recorded", () => {
     const summary = repo.getSummary({ puuid: PUUID })
 

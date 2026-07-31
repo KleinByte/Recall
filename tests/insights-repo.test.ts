@@ -109,6 +109,45 @@ describe("getDurationBuckets", () => {
     expect(buckets[1].games).toBe(1)
   })
 
+  it("isolates ranked and normal Rift scopes from each other and from ARAM", () => {
+    matches.insertMany([
+      buildMatchRow({ gameId: 1, mode: "sr_ranked_solo", modeFamily: "sr", durationSecs: 1200 }),
+      buildMatchRow({ gameId: 2, mode: "sr_ranked_flex", modeFamily: "sr", durationSecs: 1200 }),
+      buildMatchRow({ gameId: 3, mode: "sr_normal", modeFamily: "sr", durationSecs: 1200 }),
+      buildMatchRow({ gameId: 4, mode: "sr_quickplay", modeFamily: "sr", durationSecs: 1200 }),
+      buildMatchRow({ gameId: 5, mode: "sr_swiftplay", modeFamily: "sr", durationSecs: 1200 }),
+      buildMatchRow({ gameId: 6, mode: "aram", modeFamily: "aram", durationSecs: 900 }),
+      buildMatchRow({ gameId: 7, mode: "mayhem", modeFamily: "aram", durationSecs: 900 }),
+    ])
+
+    expect(
+      insights
+        .getDurationBuckets({ puuid: PUUID, modes: ["sr_ranked_solo", "sr_ranked_flex"] }, "sr")
+        .reduce((sum, row) => sum + row.games, 0),
+    ).toBe(2)
+    expect(
+      insights
+        .getDurationBuckets({ puuid: PUUID, modes: ["sr_normal", "sr_quickplay", "sr_swiftplay"] }, "sr")
+        .reduce((sum, row) => sum + row.games, 0),
+    ).toBe(3)
+    expect(
+      insights
+        .getDurationBuckets({ puuid: PUUID, modes: ["sr_ranked_solo"] }, "sr")
+        .reduce((sum, row) => sum + row.games, 0),
+    ).toBe(1)
+    expect(
+      insights
+        .getDurationBuckets({ puuid: PUUID, modes: ["aram"] }, "aram")
+        .reduce((sum, row) => sum + row.games, 0),
+    ).toBe(1)
+    // ARAM scope never includes Mayhem
+    expect(
+      insights
+        .getDurationBuckets({ puuid: PUUID, modes: ["mayhem"] }, "aram")
+        .reduce((sum, row) => sum + row.games, 0),
+    ).toBe(1)
+  })
+
   it("returns no rows when nothing is recorded", () => {
     expect(insights.getDurationBuckets({ puuid: PUUID }, "aram")).toEqual([])
   })

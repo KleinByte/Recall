@@ -72,6 +72,9 @@ function scope(filter: StatsFilter) {
   if (filter.mode) {
     conditions.push("mode = ?")
     params.push(filter.mode)
+  } else if (filter.modes?.length) {
+    conditions.push(`mode IN (${filter.modes.map(() => "?").join(", ")})`)
+    params.push(...filter.modes)
   }
 
   if (filter.modeFamily) {
@@ -95,6 +98,9 @@ function lobbyScope(filter: StatsFilter) {
   if (filter.mode) {
     conditions.push("m.mode = ?")
     params.push(filter.mode)
+  } else if (filter.modes?.length) {
+    conditions.push(`m.mode IN (${filter.modes.map(() => "?").join(", ")})`)
+    params.push(...filter.modes)
   }
 
   if (filter.modeFamily) {

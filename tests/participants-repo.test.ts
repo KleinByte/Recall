@@ -339,4 +339,34 @@ describe("lobby comparison", () => {
     expect(mayhem.games).toBe(1)
     expect(mayhem.metrics.find((m) => m.key === "damage")!.averageRank).toBe(1)
   })
+
+  it("isolates ranked and normal Rift scopes from each other and from ARAM", () => {
+    matches.insertMany([
+      buildMatchRow({ gameId: 1, mode: "sr_ranked_solo", modeFamily: "sr" }),
+      buildMatchRow({ gameId: 2, mode: "sr_ranked_flex", modeFamily: "sr" }),
+      buildMatchRow({ gameId: 3, mode: "sr_normal", modeFamily: "sr" }),
+      buildMatchRow({ gameId: 4, mode: "sr_quickplay", modeFamily: "sr" }),
+      buildMatchRow({ gameId: 5, mode: "sr_swiftplay", modeFamily: "sr" }),
+      buildMatchRow({ gameId: 6, mode: "aram", modeFamily: "aram" }),
+      buildMatchRow({ gameId: 7, mode: "mayhem", modeFamily: "aram" }),
+    ])
+    repo.insertMany(lobby(1, 10000))
+    repo.insertMany(lobby(2, 10000))
+    repo.insertMany(lobby(3, 10000))
+    repo.insertMany(lobby(4, 10000))
+    repo.insertMany(lobby(5, 10000))
+    repo.insertMany(lobby(6, 10000))
+    repo.insertMany(lobby(7, 10000))
+
+    expect(
+      repo.getLobbyComparison({ puuid: PUUID, modes: ["sr_ranked_solo", "sr_ranked_flex"] })!.games,
+    ).toBe(2)
+    expect(
+      repo.getLobbyComparison({ puuid: PUUID, modes: ["sr_normal", "sr_quickplay", "sr_swiftplay"] })!.games,
+    ).toBe(3)
+    expect(repo.getLobbyComparison({ puuid: PUUID, modes: ["sr_ranked_solo"] })!.games).toBe(1)
+    expect(repo.getLobbyComparison({ puuid: PUUID, modes: ["aram"] })!.games).toBe(1)
+    // ARAM scope never includes Mayhem
+    expect(repo.getLobbyComparison({ puuid: PUUID, modes: ["mayhem"] })!.games).toBe(1)
+  })
 })

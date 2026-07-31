@@ -5,6 +5,7 @@ import { GOLD_PER_MINION, type StyleAverages } from "../matches/style.js"
 export interface StatsFilter {
   puuid: string
   mode?: TrackedMode
+  modes?: TrackedMode[]
   modeFamily?: ModeFamily
   sinceMs?: number
 }
@@ -784,6 +785,9 @@ function buildFilter(filter: StatsFilter) {
   if (filter.mode) {
     conditions.push("mode = ?")
     params.push(filter.mode)
+  } else if (filter.modes?.length) {
+    conditions.push(`mode IN (${filter.modes.map(() => "?").join(", ")})`)
+    params.push(...filter.modes)
   }
 
   if (filter.modeFamily) {
