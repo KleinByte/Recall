@@ -6,12 +6,14 @@ export type UpdateStatus =
   | { kind: "downloaded"; version: string }
   | { kind: "error"; message: string }
 
+export const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1_000
+
 export interface UpdaterClient {
   autoDownload: boolean
   autoInstallOnAppQuit: boolean
   checkForUpdates(): Promise<unknown>
   downloadUpdate(): Promise<unknown>
-  quitAndInstall(): void
+  quitAndInstall(isSilent?: boolean, isForceRunAfter?: boolean): void
   on(
     event:
       | "checking-for-update"
@@ -26,6 +28,7 @@ export interface UpdaterClient {
 
 export interface UpdaterService {
   start(): Promise<void>
+  stop(): void
   status(): UpdateStatus
   retry(): Promise<void>
   install(): Promise<boolean>
@@ -48,6 +51,8 @@ export function createUpdaterService({
   beforeInstall = () => undefined,
 }: UpdaterServiceOptions): UpdaterService {
   let current: UpdateStatus = { kind: "up-to-date" }
+  let checkInProgress = false
+  let checkTimer: NodeJS.Timeout | undefined
 
   function set(next: UpdateStatus) {
     current = next
@@ -90,6 +95,18 @@ export function createUpdaterService({
     })
   }
 
+  async function checkForUpdates() {
+    if (checkInProgress) return
+
+    checkInProgress = true
+    set({ kind: "checking" })
+    try {
+      await updater.checkForUpdates().catch(() => undefined)
+    } finally {
+      checkInProgress = false
+    }
+  }
+
   return {
     async start() {
       if (!isPackaged) return
@@ -99,8 +116,14 @@ export function createUpdaterService({
       // ordinary app quit, bypassing our verified database snapshot.
       updater.autoInstallOnAppQuit = false
       registerListeners()
-      set({ kind: "checking" })
-      await updater.checkForUpdates().catch(() => undefined)
+      checkTimer = setInterval(() => void checkForUpdates(), UPDATE_CHECK_INTERVAL_MS)
+      await checkForUpdates()
+    },
+
+    stop() {
+      if (!checkTimer) return
+      clearInterval(checkTimer)
+      checkTimer = undefined
     },
 
     status() {
@@ -109,15 +132,14 @@ export function createUpdaterService({
 
     async retry() {
       if (current.kind !== "error") return
-      set({ kind: "checking" })
-      await updater.checkForUpdates().catch(() => undefined)
+      await checkForUpdates()
     },
 
     async install() {
       if (current.kind !== "downloaded") return false
       try {
         await beforeInstall()
-        updater.quitAndInstall()
+        updater.quitAndInstall(true, true)
         return true
       } catch (error) {
         console.error("[updater] could not prepare database for install:", error)

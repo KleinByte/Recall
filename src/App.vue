@@ -6,6 +6,7 @@ import ChampionDetail from "./components/ChampionDetail.vue"
 import MatchSheet from "./components/MatchSheet.vue"
 import PatchNotesModal from "./components/PatchNotesModal.vue"
 import PostGameBanner from "./components/PostGameBanner.vue"
+import UpdateReadyBanner from "./components/UpdateReadyBanner.vue"
 import ChallengesPage from "./pages/ChallengesPage.vue"
 import ChampionsPage from "./pages/ChampionsPage.vue"
 import DashboardPage from "./pages/DashboardPage.vue"
@@ -32,6 +33,7 @@ import type { AramStats, Champion, Summoner } from "./types/lol"
 import type { MatchRow } from "./types/stats"
 import type { StoredSettings } from "./types/app"
 import type { LiveSession } from "./types/live"
+import type { UpdateStatus } from "./types/update"
 
 const connected = ref(false)
 const summoner = ref<Summoner | null>(null)
@@ -41,6 +43,8 @@ const lastGame = ref<MatchRow | null>(null)
 const refreshing = ref(false)
 const refreshMessage = ref<string | null>(null)
 const showPatchNotes = ref(false)
+const updateStatus = ref<UpdateStatus>({ kind: "up-to-date" })
+const dismissedUpdateVersion = ref<string | null>(null)
 let hasFocusedLiveGame = false
 
 const isColoredWhenDone = ref(false)
@@ -155,6 +159,13 @@ onMounted(async () => {
     }
   })
 
+  api.onUpdateStatus((status) => {
+    updateStatus.value = status
+  })
+  void api.getUpdateStatus().then((status) => {
+    updateStatus.value = status
+  })
+
   // Shown wherever the user happens to be, and never steals focus.
   api.on("match:recorded", (match: MatchRow) => {
     lastGame.value = match
@@ -185,6 +196,12 @@ onMounted(async () => {
         :champions="allChampions"
         @dismiss="lastGame = null"
         @review="reviewMatch"
+      />
+
+      <UpdateReadyBanner
+        v-if="updateStatus.kind === 'downloaded' && dismissedUpdateVersion !== updateStatus.version"
+        :status="updateStatus"
+        @dismiss="dismissedUpdateVersion = updateStatus.version"
       />
 
       <DashboardPage

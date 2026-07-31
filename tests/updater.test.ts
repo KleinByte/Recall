@@ -29,6 +29,7 @@ describe("createUpdaterService", () => {
 
     expect(updater.checkForUpdates).not.toHaveBeenCalled()
     expect(service.status()).toEqual({ kind: "up-to-date" })
+    service.stop()
   })
 
   it("publishes progress and enables installation only after download", async () => {
@@ -54,7 +55,34 @@ describe("createUpdaterService", () => {
     })
     await expect(service.install()).resolves.toBe(true)
     expect(beforeInstall).toHaveBeenCalledOnce()
-    expect(updater.quitAndInstall).toHaveBeenCalledOnce()
+    expect(updater.quitAndInstall).toHaveBeenCalledWith(true, true)
+  })
+
+  it("checks for updates every six hours without overlapping a pending check", async () => {
+    vi.useFakeTimers()
+    const updater = client()
+    const service = createUpdaterService({
+      updater,
+      isPackaged: true,
+      publish: vi.fn(),
+    })
+
+    await service.start()
+    let finishCheck!: () => void
+    ;(updater.checkForUpdates as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise<void>((resolve) => { finishCheck = resolve }),
+    )
+
+    await vi.advanceTimersByTimeAsync(6 * 60 * 60 * 1_000)
+    expect(updater.checkForUpdates).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(6 * 60 * 60 * 1_000)
+    expect(updater.checkForUpdates).toHaveBeenCalledTimes(2)
+
+    finishCheck()
+    await Promise.resolve()
+    service.stop()
+    vi.useRealTimers()
   })
 
   it("refuses to install when the database cannot be safely closed", async () => {

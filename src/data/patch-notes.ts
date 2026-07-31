@@ -10,6 +10,23 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "1.1.9",
+    releasedAt: "2026-07-31",
+    title: "Updates that stay out of your way",
+    summary:
+      "Recall now keeps an eye on new releases while you play, then lets you install them from inside the app when they are ready.",
+    sections: [
+      {
+        title: "Background updates",
+        items: [
+          "Recall checks for new versions every six hours while it is running.",
+          "A ready-to-install update appears as a clear in-app notification on every page.",
+          "Restarting to update now installs quietly and relaunches Recall without the normal installer wizard.",
+        ],
+      },
+    ],
+  },
+  {
     version: "1.1.8",
     releasedAt: "2026-07-31",
     title: "Insights that explain themselves",

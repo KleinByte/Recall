@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { api } from "../src/helpers/api.js"
 import { updatePresentation } from "../src/helpers/update.js"
@@ -59,5 +60,20 @@ describe("update API", () => {
       "app:update-install",
     ])
     expect(on).toHaveBeenCalledWith("app:update-status", expect.any(Function))
+  })
+})
+
+describe("update-ready notification", () => {
+  it("shows a dismissible app-wide restart banner when an update is downloaded", () => {
+    const app = readFileSync("src/App.vue", "utf8")
+    const banner = readFileSync("src/components/UpdateReadyBanner.vue", "utf8")
+
+    expect(app).toContain("api.onUpdateStatus")
+    expect(app).toContain("UpdateReadyBanner")
+    expect(app).toContain(':status="updateStatus"')
+    expect(banner).toContain("status.kind === 'downloaded'")
+    expect(banner).toContain("Restart to update")
+    expect(banner).toContain("api.installUpdate")
+    expect(banner).toContain("emit('dismiss')")
   })
 })
