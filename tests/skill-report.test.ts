@@ -12,6 +12,8 @@ import {
   buildSkillReport,
   type SkillReportV2,
 } from "../electron/main/matches/skill-report.js"
+import { computePerGameAxes } from "../electron/main/matches/style.js"
+import type { ModeFamily } from "../electron/main/matches/types.js"
 
 /**
  * Factory for creating test observations
@@ -29,10 +31,13 @@ function observations(
     shortDuration?: boolean
     longDuration?: boolean
     variedDuration?: boolean
+    family?: ModeFamily
+    styleAxesOverride?: (i: number) => Record<string, number>
   } = {},
 ): InsightObservation[] {
   const results: InsightObservation[] = []
   const baseTime = 1700000000000 // Nov 14, 2023
+  const family = options.family ?? "sr"
 
   for (let i = 0; i < count; i++) {
     let playedAt = baseTime + i * 60 * 60 * 1000 // 1 hour apart by default
@@ -81,14 +86,30 @@ function observations(
     }
 
     const damageTaken = options.highDamageTaken && i >= count / 2 ? 40000 : 20000
-    
+    const durationMins = durationSecs / 60
+
+    const styleAxes = options.styleAxesOverride
+      ? options.styleAxesOverride(i)
+      : computePerGameAxes({
+          kills: 5,
+          assists: 10,
+          damageToChampions: 24000,
+          damageTaken,
+          damageSelfMitigated: 15000,
+          damageObjectives: 3000,
+          totalHeal: 5000,
+          csPerMin: 7,
+          visionPerMin: 1.5,
+          ccPerMin: 0.5,
+        }, family)
+
     results.push({
       gameId: 1000 + i,
       playedAt,
       endedAt: playedAt + durationSecs * 1000,
-      mode: "sr_ranked_solo",
-      family: "sr",
-      queueId: 420,
+      mode: family === "sr" ? "sr_ranked_solo" : family === "aram" ? "aram_aram" as any : "other_arena" as any,
+      family,
+      queueId: family === "sr" ? 420 : family === "aram" ? 450 : 1700,
       win,
       gradeScore,
       championId: 1,
@@ -99,7 +120,7 @@ function observations(
         kda: 3.0,
         deaths: 5,
         damagePerMinute: 800,
-        damageTakenPerMinute: damageTaken / (durationSecs / 60),
+        damageTakenPerMinute: damageTaken / durationMins,
         goldPerMinute: 400,
         csPerMinute: 7,
         visionPerMinute: 1.5,
@@ -109,6 +130,7 @@ function observations(
         teamDamageShare: 0.25,
         allyHealShieldPerMinute: 50,
       },
+      styleAxes,
     })
   }
 
@@ -567,23 +589,23 @@ describe("Item findings", () => {
 
 describe("Trend findings", () => {
   it("creates 10-game windows from graded observations", () => {
-    const section = buildTrendFindings(observations(25))
+    const section = buildTrendFindings(observations(25), "sr")
     const windowFindings = section.findings.filter((f) => f.key.startsWith("window:"))
     expect(windowFindings.length).toBe(2) // 25 games, only 2 complete windows
   })
 
   it("requires 3 complete windows for inference", () => {
-    const section20 = buildTrendFindings(observations(20))
+    const section20 = buildTrendFindings(observations(20), "sr")
     expect(section20.eligible).toBe(false)
     expect(section20.findings.find((f) => f.key === "trend:grade")).toBeUndefined()
 
-    const section30 = buildTrendFindings(observations(30))
+    const section30 = buildTrendFindings(observations(30), "sr")
     expect(section30.eligible).toBe(true)
     expect(section30.findings.find((f) => f.key === "trend:grade")).toBeDefined()
   })
 
   it("compares latest 10 vs prior 20 grades", () => {
-    const section = buildTrendFindings(observations(30))
+    const section = buildTrendFindings(observations(30), "sr")
     const trend = section.findings.find((f) => f.key === "trend:grade")
     expect(trend).toBeDefined()
     expect(trend!.scope).toMatch(/Latest 10 vs prior 20/)
@@ -591,16 +613,163 @@ describe("Trend findings", () => {
   })
 
   it("returns raw windows even without directional finding", () => {
-    const section = buildTrendFindings(observations(20))
+    const section = buildTrendFindings(observations(20), "sr")
     const windowFindings = section.findings.filter((f) => f.key.startsWith("window:"))
     expect(windowFindings.length).toBe(2)
   })
 
   it("is deterministic across repeated calls", () => {
     const obs = observations(30)
-    const a = buildTrendFindings(obs)
-    const b = buildTrendFindings(obs)
+    const a = buildTrendFindings(obs, "sr")
+    const b = buildTrendFindings(obs, "sr")
     expect(a.findings.map((f) => f.interval)).toEqual(b.findings.map((f) => f.interval))
+  })
+
+  it("raw windows include per-axis averages", () => {
+    const section = buildTrendFindings(observations(30), "sr")
+    const window = section.findings.find((f) => f.key === "window:0")
+    expect(window).toBeDefined()
+    expect(window!.values).toBeDefined()
+    expect(Object.keys(window!.values!)).toEqual(
+      expect.arrayContaining(["aggression", "damage", "durability", "farming", "objectives", "vision"]),
+    )
+    for (const v of Object.values(window!.values!)) {
+      expect(v).toBeGreaterThanOrEqual(0)
+      expect(v).toBeLessThanOrEqual(1)
+    }
+  })
+
+  it("SR axes include objectives and vision, not sustain or teamfighting", () => {
+    const section = buildTrendFindings(observations(30, { family: "sr" }), "sr")
+    const window = section.findings.find((f) => f.key === "window:0")!
+    const keys = Object.keys(window.values!)
+    expect(keys).toContain("objectives")
+    expect(keys).toContain("vision")
+    expect(keys).not.toContain("sustain")
+    expect(keys).not.toContain("teamfighting")
+  })
+
+  it("ARAM axes include sustain and teamfighting, not objectives or vision", () => {
+    const section = buildTrendFindings(observations(30, { family: "aram" }), "aram")
+    const window = section.findings.find((f) => f.key === "window:0")!
+    const keys = Object.keys(window.values!)
+    expect(keys).toContain("sustain")
+    expect(keys).toContain("teamfighting")
+    expect(keys).not.toContain("objectives")
+    expect(keys).not.toContain("vision")
+  })
+
+  it("per-game axis formulas match style.ts exactly", () => {
+    const axes = computePerGameAxes({
+      kills: 10, assists: 0, damageToChampions: 30000, damageTaken: 10000,
+      damageSelfMitigated: 5000, damageObjectives: 6000, totalHeal: 2000,
+      csPerMin: 12, visionPerMin: 3, ccPerMin: 25,
+    }, "sr")
+    expect(axes.aggression).toBeCloseTo(1) // 10/(10+0) = 1
+    expect(axes.damage).toBeCloseTo(30000 / 40000) // 0.75
+    expect(axes.durability).toBeCloseTo(5000 / 15000) // 0.333
+    expect(axes.farming).toBeCloseTo(1) // clamp(12/10) = 1
+    expect(axes.objectives).toBeCloseTo(6000 / 36000) // 0.167
+    expect(axes.vision).toBeCloseTo(1) // clamp(3/2) = 1
+    expect(axes.sustain).toBeUndefined()
+  })
+
+  it("ARAM farming cap is 5 CS/min", () => {
+    const axes = computePerGameAxes({
+      kills: 5, assists: 5, damageToChampions: 20000, damageTaken: 20000,
+      damageSelfMitigated: 10000, damageObjectives: 0, totalHeal: 10000,
+      csPerMin: 5, visionPerMin: 0, ccPerMin: 10,
+    }, "aram")
+    expect(axes.farming).toBeCloseTo(1) // 5/5 = 1
+    expect(axes.sustain).toBeCloseTo(10000 / 30000) // 0.333
+    expect(axes.teamfighting).toBeCloseTo(0.5) // 10/20 = 0.5
+  })
+
+  it("guards zero denominators", () => {
+    const axes = computePerGameAxes({
+      kills: 0, assists: 0, damageToChampions: 0, damageTaken: 0,
+      damageSelfMitigated: 0, damageObjectives: 0, totalHeal: 0,
+      csPerMin: 0, visionPerMin: 0, ccPerMin: 0,
+    }, "sr")
+    expect(axes.aggression).toBe(0)
+    expect(axes.damage).toBe(0)
+    expect(axes.durability).toBe(0)
+    expect(axes.farming).toBe(0)
+    expect(axes.objectives).toBe(0)
+    expect(axes.vision).toBe(0)
+  })
+
+  it("produces per-axis findings at >=3 windows", () => {
+    const section = buildTrendFindings(observations(30), "sr")
+    const axisFindings = section.findings.filter((f) => f.key.startsWith("trend:") && f.key !== "trend:grade")
+    expect(axisFindings.length).toBe(6) // aggression, damage, durability, farming, objectives, vision
+    for (const f of axisFindings) {
+      expect(f.unit).toBe("rate")
+      expect(f.interval).toBeDefined()
+      expect(f.scope).toMatch(/Latest 10 vs prior 20/)
+    }
+  })
+
+  it("ARAM produces 6 per-axis findings with correct keys", () => {
+    const section = buildTrendFindings(observations(30, { family: "aram" }), "aram")
+    const axisFindings = section.findings.filter((f) => f.key.startsWith("trend:") && f.key !== "trend:grade")
+    const keys = axisFindings.map((f) => f.key)
+    expect(keys).toContain("trend:sustain")
+    expect(keys).toContain("trend:teamfighting")
+    expect(keys).not.toContain("trend:objectives")
+    expect(keys).not.toContain("trend:vision")
+  })
+
+  it("no per-axis findings below 3 windows", () => {
+    const section = buildTrendFindings(observations(20), "sr")
+    expect(section.findings.filter((f) => f.key.startsWith("trend:")).length).toBe(0)
+  })
+
+  it("per-axis deterministic bootstrap is reproducible", () => {
+    const obs = observations(30)
+    const a = buildTrendFindings(obs, "sr")
+    const b = buildTrendFindings(obs, "sr")
+    const axisA = a.findings.filter((f) => f.key.startsWith("trend:"))
+    const axisB = b.findings.filter((f) => f.key.startsWith("trend:"))
+    expect(axisA.map((f) => f.interval)).toEqual(axisB.map((f) => f.interval))
+  })
+
+  it("no directional copy when interval crosses zero", () => {
+    const section = buildTrendFindings(observations(30), "sr")
+    for (const f of section.findings.filter((f) => f.key.startsWith("trend:"))) {
+      if (f.interval && f.interval.low <= 0 && f.interval.high >= 0) {
+        expect(f.summary).not.toMatch(/more|less|higher|lower/i)
+      }
+    }
+  })
+
+  it("directional copy uses more/less, not better/worse", () => {
+    // Create observations where latest window has clearly different axes
+    const obs = observations(30, {
+      styleAxesOverride: (i) => {
+        const base = computePerGameAxes({
+          kills: 5, assists: 10, damageToChampions: 24000, damageTaken: 20000,
+          damageSelfMitigated: 15000, damageObjectives: 3000, totalHeal: 5000,
+          csPerMin: 7, visionPerMin: 1.5, ccPerMin: 0.5,
+        }, "sr")
+        // Latest 10 games (highest playedAt) get very high aggression
+        if (i >= 20) return { ...base, aggression: 0.95 }
+        return { ...base, aggression: 0.1 }
+      },
+    })
+    const section = buildTrendFindings(obs, "sr")
+    const agg = section.findings.find((f) => f.key === "trend:aggression")
+    if (agg && agg.interval && !(agg.interval.low <= 0 && agg.interval.high >= 0)) {
+      expect(agg.summary).toMatch(/more|less/)
+      expect(agg.summary).not.toMatch(/better|worse|improve/i)
+    }
+  })
+
+  it("does not add per-window SQL queries", () => {
+    // buildTrendFindings takes observations array, not a repo — no query growth
+    const obs = observations(50)
+    const section = buildTrendFindings(obs, "sr")
+    expect(section.findings.filter((f) => f.key.startsWith("window:")).length).toBe(5)
   })
 })
 

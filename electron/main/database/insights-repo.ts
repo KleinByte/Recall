@@ -1,6 +1,7 @@
 import type { Database } from "better-sqlite3"
 import type { StatsFilter } from "./matches-repo.js"
 import { durationBucketsFor } from "../matches/insights.js"
+import { computePerGameAxes } from "../matches/style.js"
 import type { ModeFamily, TrackedMode } from "../matches/types.js"
 
 export interface BucketRow {
@@ -74,6 +75,7 @@ export interface InsightObservation {
   durationSecs: number
   completeLobby: boolean
   metrics: InsightMetrics
+  styleAxes: Record<string, number>
 }
 
 export interface FinalItemObservation {
@@ -439,7 +441,8 @@ export class InsightsRepository {
         `SELECT game_id, played_at, mode, mode_family, queue_id, win,
                 grade_score, champion_id, role, duration_secs,
                 kills, deaths, assists,
-                damage_to_champions, damage_taken, gold_earned,
+                damage_to_champions, damage_taken, damage_self_mitigated,
+                total_heal, gold_earned,
                 total_minions_killed, neutral_minions,
                 vision_score, damage_objectives, time_ccing_others
          FROM matches ${where}
@@ -461,6 +464,8 @@ export class InsightsRepository {
       assists: number
       damage_to_champions: number
       damage_taken: number
+      damage_self_mitigated: number
+      total_heal: number
       gold_earned: number
       total_minions_killed: number
       neutral_minions: number
@@ -548,6 +553,8 @@ export class InsightsRepository {
           ? ((healValue ?? 0) + (shieldValue ?? 0)) / durationMins
           : undefined
 
+      const csPerMin = (m.total_minions_killed + m.neutral_minions) / durationMins
+
       return {
         gameId: m.game_id,
         playedAt: m.played_at,
@@ -567,7 +574,7 @@ export class InsightsRepository {
           damagePerMinute: m.damage_to_champions / durationMins,
           damageTakenPerMinute: m.damage_taken / durationMins,
           goldPerMinute: m.gold_earned / durationMins,
-          csPerMinute: (m.total_minions_killed + m.neutral_minions) / durationMins,
+          csPerMinute: csPerMin,
           visionPerMinute: m.vision_score > 0 ? m.vision_score / durationMins : undefined,
           objectiveDamagePerMinute:
             m.damage_objectives > 0 ? m.damage_objectives / durationMins : undefined,
@@ -581,6 +588,18 @@ export class InsightsRepository {
           allyHealShieldPerMinute:
             completeLobby ? allyHealShieldPerMinute : undefined,
         },
+        styleAxes: computePerGameAxes({
+          kills: m.kills,
+          assists: m.assists,
+          damageToChampions: m.damage_to_champions,
+          damageTaken: m.damage_taken,
+          damageSelfMitigated: m.damage_self_mitigated,
+          damageObjectives: m.damage_objectives,
+          totalHeal: m.total_heal,
+          csPerMin,
+          visionPerMin: m.vision_score / durationMins,
+          ccPerMin: m.time_ccing_others / durationMins,
+        }, m.mode_family as ModeFamily),
       }
     })
   }

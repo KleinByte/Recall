@@ -20,6 +20,53 @@ export const CC_SECONDS_PER_MINUTE_FULL = 20
 /** CS/min that fills the farming ring per mode family. Display ring full at this value; not a population benchmark. */
 export const CS_PER_MINUTE_FULL: Record<ModeFamily, number> = { sr: 10, aram: 5, other: 10 }
 
+export const STYLE_AXIS_LABELS: Record<string, string> = {
+  aggression: "Kills vs assists",
+  damage: "Damage trade",
+  durability: "Mitigation share",
+  farming: "CS pace",
+  objectives: "Objective focus",
+  vision: "Vision pace",
+  sustain: "Healing activity",
+  teamfighting: "CC pace",
+}
+
+export interface PerGameAxisInput {
+  kills: number
+  assists: number
+  damageToChampions: number
+  damageTaken: number
+  damageSelfMitigated: number
+  damageObjectives: number
+  totalHeal: number
+  csPerMin: number
+  visionPerMin: number
+  ccPerMin: number
+}
+
+/** Per-game axis values using the same formulas as the career profile. */
+export function computePerGameAxes(input: PerGameAxisInput, family: ModeFamily): Record<string, number> {
+  const guard = (n: number, d: number) => (d > 0 ? n / d : 0)
+  const cl = (v: number) => Math.min(1, Math.max(0, v))
+
+  const axes: Record<string, number> = {
+    aggression: cl(guard(input.kills, input.kills + input.assists)),
+    damage: cl(guard(input.damageToChampions, input.damageToChampions + input.damageTaken)),
+    durability: cl(guard(input.damageSelfMitigated, input.damageSelfMitigated + input.damageTaken)),
+    farming: cl(input.csPerMin / CS_PER_MINUTE_FULL[family]),
+  }
+
+  if (family === "sr") {
+    axes.objectives = cl(guard(input.damageObjectives, input.damageObjectives + input.damageToChampions))
+    axes.vision = cl(input.visionPerMin / VISION_PER_MINUTE_FULL)
+  } else {
+    axes.sustain = cl(guard(input.totalHeal, input.totalHeal + input.damageTaken))
+    axes.teamfighting = cl(input.ccPerMin / CC_SECONDS_PER_MINUTE_FULL)
+  }
+
+  return axes
+}
+
 /**
  * Averages of per-game values.
  *

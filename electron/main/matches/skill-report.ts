@@ -9,12 +9,14 @@ import {
   bootstrapDifference,
   empiricalPercentile,
   quantile,
+  seededRandom,
   sessionize,
   shrinkRate,
   wilsonInterval,
   type Interval,
 } from "./analytics.js"
 import { durationBucketsFor, rankChampions } from "./insights.js"
+import { STYLE_AXIS_LABELS } from "./style.js"
 import type { StyleProfile } from "./style.js"
 import type { TrackedMode, ModeFamily } from "./types.js"
 import { buildPredictiveSection, type PredictiveSection, type PredictiveSignal } from "./predictive-insights.js"
@@ -37,6 +39,7 @@ export interface InsightFinding {
   rateInterval?: Interval
   scope: string
   caveat?: string
+  values?: Record<string, number>
 }
 
 export interface InsightSection {
@@ -634,13 +637,13 @@ function buildConditionFinding(
 function assessConfidence(
   games: number,
   interval: Interval | undefined,
-  unit: "grade" | "probability" | "percentile",
+  unit: "grade" | "probability" | "percentile" | "rate",
 ): EvidenceConfidence {
   if (!interval || games < 10) return "insufficient"
 
   const width = interval.high - interval.low
 
-  if (unit === "probability") {
+  if (unit === "probability" || unit === "rate") {
     if (games >= 50 && width < 0.15) return "high"
     if (games >= 30 && width < 0.25) return "medium"
     return "low"
@@ -770,19 +773,6 @@ export function buildChampionFindings(
 const ITEM_MIN_GAMES = 10
 const ITEM_CAVEAT =
   "Based on final inventory; item purchase order and game state at purchase are unknown. Correlation does not imply the item caused the outcome."
-
-function seededRandom(seed: string): () => number {
-  let hash = 2166136261
-  for (let i = 0; i < seed.length; i++) {
-    hash ^= seed.charCodeAt(i)
-    hash = Math.imul(hash, 16777619)
-  }
-  let state = hash >>> 0
-  return () => {
-    state = Math.imul(state, 1664525) + 1013904223
-    return (state >>> 0) / 0x100000000
-  }
-}
 
 function bootstrapStratifiedEffect(
   strata: Array<{ withGrades: number[]; withoutGrades: number[] }>,
@@ -945,23 +935,73 @@ export function buildItemFindings(
 const TREND_WINDOW_SIZE = 10
 const TREND_MIN_WINDOWS = 3
 
+function bootstrapMeanDifference(
+  left: number[],
+  right: number[],
+  seed: string,
+  resamples = 2_000,
+): Interval {
+  const rng = seededRandom(seed)
+  const diffs: number[] = []
+  for (let r = 0; r < resamples; r++) {
+    let lSum = 0
+    for (let j = 0; j < left.length; j++) lSum += left[Math.floor(rng() * left.length)]
+    let rSum = 0
+    for (let j = 0; j < right.length; j++) rSum += right[Math.floor(rng() * right.length)]
+    diffs.push(lSum / left.length - rSum / right.length)
+  }
+  const low = quantile(diffs, 0.025) ?? 0
+  const high = quantile(diffs, 0.975) ?? 0
+  return { low, high, level: 0.95 }
+}
+
+function axisKeysFor(family: ModeFamily): string[] {
+  return family === "sr"
+    ? ["aggression", "damage", "durability", "farming", "objectives", "vision"]
+    : ["aggression", "damage", "durability", "farming", "sustain", "teamfighting"]
+}
+
 export function buildTrendFindings(
   observations: InsightObservation[],
+  family: ModeFamily,
 ): InsightSection {
   const graded = observations.filter((o) => o.gradeScore !== undefined)
   const sorted = [...graded].sort((a, b) => b.playedAt - a.playedAt || b.gameId - a.gameId)
 
-  const windows: Array<{ index: number; grades: number[] }> = []
+  const axisKeys = axisKeysFor(family)
+
+  const windows: Array<{
+    index: number
+    grades: number[]
+    axisValues: Record<string, number[]>
+  }> = []
+
   for (let i = 0; i < sorted.length; i += TREND_WINDOW_SIZE) {
     const slice = sorted.slice(i, i + TREND_WINDOW_SIZE)
     if (slice.length < TREND_WINDOW_SIZE) break
-    windows.push({ index: windows.length, grades: slice.map((o) => o.gradeScore!) })
+
+    const axisValues: Record<string, number[]> = {}
+    for (const key of axisKeys) {
+      axisValues[key] = slice.map((o) => o.styleAxes[key] ?? 0)
+    }
+
+    windows.push({
+      index: windows.length,
+      grades: slice.map((o) => o.gradeScore!),
+      axisValues,
+    })
   }
 
   const findings: InsightFinding[] = []
 
   for (const w of windows) {
     const avg = w.grades.reduce((s, g) => s + g, 0) / w.grades.length
+    const values: Record<string, number> = {}
+    for (const key of axisKeys) {
+      const vals = w.axisValues[key]
+      values[key] = vals.reduce((s, v) => s + v, 0) / vals.length
+    }
+
     findings.push({
       key: `window:${w.index}`,
       title: `Games ${w.index * TREND_WINDOW_SIZE + 1}\u2013${(w.index + 1) * TREND_WINDOW_SIZE}`,
@@ -973,6 +1013,7 @@ export function buildTrendFindings(
       effect: avg,
       unit: "grade",
       scope: `${w.grades.length} games`,
+      values,
     })
   }
 
@@ -986,14 +1027,14 @@ export function buildTrendFindings(
     const delta = latestAvg - priorAvg
     const includesZero = interval.low <= 0 && interval.high >= 0
 
-    const summary = includesZero
+    const gradeSummary = includesZero
       ? "No clear trend in recent grades."
       : `Recent games associated with ${delta > 0 ? "higher" : "lower"} grades.`
 
     findings.push({
       key: "trend:grade",
       title: "Grade Trend",
-      summary,
+      summary: gradeSummary,
       evidenceLevel: "comparative",
       confidence: assessConfidence(latest.length + prior.length, interval, "grade"),
       games: latest.length,
@@ -1003,6 +1044,36 @@ export function buildTrendFindings(
       interval,
       scope: `Latest ${latest.length} vs prior ${prior.length} games`,
     })
+
+    for (const key of axisKeys) {
+      const latestAxis = windows[0].axisValues[key]
+      const priorAxis = [...windows[1].axisValues[key], ...windows[2].axisValues[key]]
+
+      const axisInterval = bootstrapMeanDifference(latestAxis, priorAxis, `trend:${key}`)
+      const latestMean = latestAxis.reduce((s, v) => s + v, 0) / latestAxis.length
+      const priorMean = priorAxis.reduce((s, v) => s + v, 0) / priorAxis.length
+      const axisDelta = latestMean - priorMean
+      const axisIncludesZero = axisInterval.low <= 0 && axisInterval.high >= 0
+
+      const axisLabel = STYLE_AXIS_LABELS[key] ?? key
+      const axisSummary = axisIncludesZero
+        ? `No clear trend in ${axisLabel}.`
+        : `Recent games show ${axisDelta > 0 ? "more" : "less"} ${axisLabel}.`
+
+      findings.push({
+        key: `trend:${key}`,
+        title: axisLabel,
+        summary: axisSummary,
+        evidenceLevel: "comparative",
+        confidence: assessConfidence(latestAxis.length + priorAxis.length, axisInterval, "rate"),
+        games: latestAxis.length,
+        eligibleGames: latestAxis.length + priorAxis.length,
+        effect: axisDelta,
+        unit: "rate",
+        interval: axisInterval,
+        scope: `Latest ${latestAxis.length} vs prior ${priorAxis.length} games`,
+      })
+    }
   }
 
   return {
@@ -1105,7 +1176,7 @@ export function buildSkillReport(input: SkillReportInput): SkillReportV2 {
       conditions,
       predictive: buildPredictiveSection(observations),
       duration: buildDurationInsights(observations),
-      trends: buildTrendFindings(observations),
+      trends: buildTrendFindings(observations, family),
       champions: buildChampionFindings(observations, championStats, baseline, family),
       items: buildItemFindings(itemObservations),
     },

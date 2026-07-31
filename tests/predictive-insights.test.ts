@@ -9,6 +9,13 @@ import {
   type PregameRow,
   type PredictiveSection,
 } from "../electron/main/matches/predictive-insights.js"
+import { computePerGameAxes } from "../electron/main/matches/style.js"
+
+const defaultStyleAxes = computePerGameAxes({
+  kills: 5, assists: 10, damageToChampions: 21000, damageTaken: 15000,
+  damageSelfMitigated: 10000, damageObjectives: 2000, totalHeal: 3000,
+  csPerMin: 7, visionPerMin: 1.5, ccPerMin: 0.4,
+}, "sr")
 
 // --- Helpers ---
 
@@ -41,6 +48,7 @@ function makeObservation(
       visionPerMinute: 1.5,
       ccPerMinute: 0.4,
     },
+    styleAxes: defaultStyleAxes,
     ...overrides,
   }
 }

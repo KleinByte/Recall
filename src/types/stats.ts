@@ -529,6 +529,7 @@ export interface InsightFinding {
   rateInterval?: Interval
   scope: string
   caveat?: string
+  values?: Record<string, number>
 }
 
 export interface InsightSection {

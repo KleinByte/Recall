@@ -113,7 +113,7 @@ export function sessionize<T extends SessionInput>(games: T[], breakMinutes = 90
 /**
  * Seeded pseudo-random number generator using FNV-1a hash
  */
-function seededRandom(seed: string): () => number {
+export function seededRandom(seed: string): () => number {
   // FNV-1a 32-bit hash
   let hash = 2166136261
   for (let i = 0; i < seed.length; i++) {
