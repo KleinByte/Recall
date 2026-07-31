@@ -34,6 +34,12 @@ const intervalLabel = computed(() => {
   return `95% interval ${formatSigned(interval.low * multiplier)} to ${formatSigned(interval.high * multiplier)}${suffix}`
 })
 
+const rateIntervalLabel = computed(() => {
+  const interval = props.finding.rateInterval
+  if (!interval) return undefined
+  return `Raw win rate 95% interval ${(interval.low * 100).toFixed(1)}% to ${(interval.high * 100).toFixed(1)}%`
+})
+
 const direction = computed(() => {
   if (!(["grade", "probability"] as const).includes(
     props.finding.unit as "grade" | "probability",
@@ -61,8 +67,9 @@ function formatSigned(value: number) {
     <div class="evidence-row">
       <span class="evidence">{{ evidenceLabel }}</span>
       <span>{{ confidenceLabel }}</span>
-      <span>{{ finding.eligibleGames }} eligible / {{ finding.games }} recorded games</span>
+      <span>{{ finding.games }} games · {{ finding.eligibleGames }} eligible in scope</span>
       <span v-if="intervalLabel" class="numeric">{{ intervalLabel }}</span>
+      <span v-if="rateIntervalLabel" class="numeric">{{ rateIntervalLabel }}</span>
     </div>
 
     <details>

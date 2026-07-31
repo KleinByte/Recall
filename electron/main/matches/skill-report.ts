@@ -7,7 +7,6 @@ import type { ChampionStatRow, StatsSummary, GradeCount } from "../database/matc
 import type { LobbyComparison } from "../database/participants-repo.js"
 import {
   bootstrapDifference,
-  empiricalPercentile,
   quantile,
   seededRandom,
   sessionize,
@@ -99,6 +98,12 @@ export function buildBestGamePattern(
   }
 
   const findings: InsightFinding[] = []
+  const observationsByRole = new Map<string | undefined, InsightObservation[]>()
+  for (const observation of graded) {
+    const roleObservations = observationsByRole.get(observation.role) ?? []
+    roleObservations.push(observation)
+    observationsByRole.set(observation.role, roleObservations)
+  }
 
   // Normalize metrics to percentiles and compare
   const metricKeys: Array<keyof InsightObservation["metrics"]> = [
@@ -116,33 +121,30 @@ export function buildBestGamePattern(
   ]
 
   for (const key of metricKeys) {
-    // Normalize each observation's metric using its own role's history when that role has >=20 graded
+    const allReferenceValues = sortedMetricValues(graded, key)
+    const referenceValuesByRole = new Map<string | undefined, number[]>()
+    for (const [role, roleObservations] of observationsByRole) {
+      if (roleObservations.length >= ROLE_MIN_GRADED) {
+        referenceValuesByRole.set(role, sortedMetricValues(roleObservations, key))
+      }
+    }
+
     const strongPercentiles: number[] = []
     const nonStrongPercentiles: number[] = []
 
     for (const obs of strong) {
-      const sameRoleGraded = graded.filter((o) => o.role === obs.role)
-      const reference = sameRoleGraded.length >= ROLE_MIN_GRADED ? sameRoleGraded : graded
-      const referenceValues = reference
-        .map((o) => o.metrics[key])
-        .filter((v): v is number => v !== undefined)
-
       const metricValue = obs.metrics[key]
+      const referenceValues = referenceValuesByRole.get(obs.role) ?? allReferenceValues
       if (metricValue !== undefined && referenceValues.length > 0) {
-        strongPercentiles.push(empiricalPercentile(referenceValues, metricValue))
+        strongPercentiles.push(empiricalPercentileSorted(referenceValues, metricValue))
       }
     }
 
     for (const obs of nonStrong) {
-      const sameRoleGraded = graded.filter((o) => o.role === obs.role)
-      const reference = sameRoleGraded.length >= ROLE_MIN_GRADED ? sameRoleGraded : graded
-      const referenceValues = reference
-        .map((o) => o.metrics[key])
-        .filter((v): v is number => v !== undefined)
-
       const metricValue = obs.metrics[key]
+      const referenceValues = referenceValuesByRole.get(obs.role) ?? allReferenceValues
       if (metricValue !== undefined && referenceValues.length > 0) {
-        nonStrongPercentiles.push(empiricalPercentile(referenceValues, metricValue))
+        nonStrongPercentiles.push(empiricalPercentileSorted(referenceValues, metricValue))
       }
     }
 
@@ -190,6 +192,36 @@ export function buildBestGamePattern(
     nonStrongGames: nonStrong.length,
     findings,
   }
+}
+
+function sortedMetricValues(
+  observations: InsightObservation[],
+  key: keyof InsightObservation["metrics"],
+): number[] {
+  return observations
+    .map((observation) => observation.metrics[key])
+    .filter((value): value is number => value !== undefined)
+    .sort((left, right) => left - right)
+}
+
+function empiricalPercentileSorted(values: number[], value: number): number {
+  let lowerStart = 0
+  let lowerEnd = values.length
+  while (lowerStart < lowerEnd) {
+    const middle = Math.floor((lowerStart + lowerEnd) / 2)
+    if (values[middle] < value) lowerStart = middle + 1
+    else lowerEnd = middle
+  }
+
+  let upperStart = lowerStart
+  let upperEnd = values.length
+  while (upperStart < upperEnd) {
+    const middle = Math.floor((upperStart + upperEnd) / 2)
+    if (values[middle] <= value) upperStart = middle + 1
+    else upperEnd = middle
+  }
+
+  return (lowerStart + (upperStart - lowerStart) / 2) / values.length
 }
 
 /**

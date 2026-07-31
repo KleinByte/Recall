@@ -129,32 +129,74 @@ export function seededRandom(seed: string): () => number {
   }
 }
 
+function sampleStandardNormal(rng: () => number): number {
+  const first = Math.max(Number.MIN_VALUE, rng())
+  return Math.sqrt(-2 * Math.log(first)) * Math.cos(2 * Math.PI * rng())
+}
+
+function sampleGamma(shape: number, rng: () => number): number {
+  const scale = shape - 1 / 3
+  const coefficient = 1 / Math.sqrt(9 * scale)
+
+  while (true) {
+    const normal = sampleStandardNormal(rng)
+    const base = 1 + coefficient * normal
+    if (base <= 0) continue
+
+    const candidate = base ** 3
+    const uniform = rng()
+    if (
+      uniform < 1 - 0.0331 * normal ** 4 ||
+      Math.log(uniform) < 0.5 * normal ** 2 + scale * (1 - candidate + Math.log(candidate))
+    ) {
+      return scale * candidate
+    }
+  }
+}
+
+function sampleBeta(leftShape: number, rightShape: number, rng: () => number): number {
+  const left = sampleGamma(leftShape, rng)
+  const right = sampleGamma(rightShape, rng)
+  return left / (left + right)
+}
+
+function valueAtUniformOrder(sorted: number[], uniform: number): number {
+  return sorted[Math.min(sorted.length - 1, Math.floor(uniform * sorted.length))]
+}
+
+function sampleBootstrapMedian(sorted: number[], rng: () => number): number {
+  const size = sorted.length
+  if (size === 0) return 0
+
+  if (size % 2 === 1) {
+    const rank = (size + 1) / 2
+    const uniform = sampleBeta(rank, size + 1 - rank, rng)
+    return valueAtUniformOrder(sorted, uniform)
+  }
+
+  const lowerRank = size / 2
+  const lowerUniform = sampleBeta(lowerRank, size + 1 - lowerRank, rng)
+  const nextSpacing = sampleBeta(1, size - lowerRank, rng)
+  const upperUniform = lowerUniform + (1 - lowerUniform) * nextSpacing
+  return (
+    valueAtUniformOrder(sorted, lowerUniform) +
+    valueAtUniformOrder(sorted, upperUniform)
+  ) / 2
+}
+
 /**
  * Bootstrap confidence interval for median difference
  */
 export function bootstrapDifference(left: number[], right: number[], seed: string, resamples = 2_000): Interval {
   const rng = seededRandom(seed)
   const differences: number[] = []
+  const sortedLeft = [...left].sort((a, b) => a - b)
+  const sortedRight = [...right].sort((a, b) => a - b)
   
   for (let i = 0; i < resamples; i++) {
-    // Resample left with replacement
-    const leftSample: number[] = []
-    for (let j = 0; j < left.length; j++) {
-      const index = Math.floor(rng() * left.length)
-      leftSample.push(left[index])
-    }
-    
-    // Resample right with replacement
-    const rightSample: number[] = []
-    for (let j = 0; j < right.length; j++) {
-      const index = Math.floor(rng() * right.length)
-      rightSample.push(right[index])
-    }
-    
-    // Compute median difference
-    const leftMedian = quantile(leftSample, 0.5) ?? 0
-    const rightMedian = quantile(rightSample, 0.5) ?? 0
-    differences.push(leftMedian - rightMedian)
+    differences.push(
+      sampleBootstrapMedian(sortedLeft, rng) - sampleBootstrapMedian(sortedRight, rng),
+    )
   }
   
   const low = quantile(differences, 0.025) ?? 0

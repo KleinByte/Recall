@@ -861,4 +861,26 @@ describe("SkillReportV2", () => {
     const json = JSON.stringify(report)
     expect(json).not.toMatch(/better|improve|causes|should|will make/i)
   })
+
+  it("builds a 2,000-observation report within the local budget", () => {
+    const input = {
+      ...baseInput(),
+      summary: {
+        ...baseInput().summary,
+        games: 2000,
+        wins: 1000,
+        losses: 1000,
+        gradedGames: 2000,
+      },
+      observations: observations(2000, { mixedRoles: true, variedDuration: true }),
+    }
+
+    buildSkillReport(input)
+    const startedAt = performance.now()
+    const report = buildSkillReport(input)
+    const elapsedMs = performance.now() - startedAt
+
+    expect(report.overview.summary.games).toBe(2000)
+    expect(elapsedMs).toBeLessThan(250)
+  })
 })
