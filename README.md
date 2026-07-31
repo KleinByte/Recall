@@ -1,163 +1,166 @@
 # Recall
 
-> A local League of Legends companion for permanent match history, challenge planning, champion progress, ranked goals, and playstyle analysis.
+Recall is a Windows desktop companion for League of Legends that keeps the
+history the client forgets. It records your matches in a local database, tracks
+challenge progress, follows ranked movement, grades your games, and gives you a
+useful place to review what actually happened after the post-game lobby is
+gone.
 
-![Recall dashboard](image.png)
+I built Recall because I wanted more than a rolling list of 20 games and a
+collection of challenge bars. If I am trying to finish a champion challenge,
+clean up a bad habit, or figure out which picks have been working lately, I
+want the answer in one place and I want the underlying games to still be there
+next month.
 
-## What Recall does
+[Download the latest Windows release](https://github.com/KleinByte/Recall/releases/latest)
 
-**Keeps your history** — Recall saves supported matches locally so the League
-client's rolling history window does not erase games you have already synced.
+![Recall dashboard with match history, ranked progress, playstyle, and recent form](docs/screenshots/recall-dashboard.png)
 
-**Turns challenges into a champion plan** — browse and filter every challenge,
-see champion-specific requirements, and pin what matters. While in champion
-select, Recall can show whether the champion you are hovering still advances a
-pinned challenge.
+## What it does
 
-**Shows the full game** — open a recorded match to compare both teams and
-expand a player for combat, economy, vision, objective, multikill, and setup
-statistics when the League client provided full game detail.
+- Saves supported matches locally so your useful history does not disappear
+  when it rolls out of the League client.
+- Tracks ARAM, ARAM: Mayhem, Ranked Solo/Duo, Ranked Flex, Normal, Quickplay,
+  and Swiftplay.
+- Turns challenge data into something you can plan around with search,
+  category and tier filters, completion filters, sorting, and pinned goals.
+- Shows whether the champion you are hovering in champion select still counts
+  toward a pinned champion challenge.
+- Grades complete scoreboards from S+ through D by comparing your performance
+  with the other players in that match.
+- Keeps ranked snapshots, personal records, champion results, mastery context,
+  playstyle trends, and lobby comparisons.
+- Provides a review journal with bookmarks, notes, tags, session boundaries,
+  timeline events, and reusable practice experiments.
+- Stores everything on your machine and includes integrity checks, verified
+  backups, and safe restoration in the Data Trust Center.
 
-**Connects champion results to mastery and challenges** — compare champion
-mastery, your results, ranked performance, and remaining champion-specific
-challenge requirements.
+## Challenges you can actually work with
 
-**Tracks progress over time** — review ranked LP snapshots, set rank and
-challenge goals, view personal records, and explore mode-specific playstyle
-trends and lobby comparisons.
+The client is good at telling you that a challenge exists. Recall is built to
+help you finish it. The challenge browser can sort by distance to the next
+tier, current tier, name, category, or last update. Completed challenges are
+hidden by default, and retired challenges stay available when you need them for
+reference.
 
-**Builds a personal review journal** — explain every grade, compare a game only
-with matches played before it, review sessions, bookmark important games, keep
-notes and tags, and run reusable practice experiments.
+Champion challenges show which champions are done and which are still needed.
+Pin the challenges you are chasing and Recall can surface the answer during
+champion select without making you dig through the client.
 
-## Connected to the League client
+![Challenge browser with sorting, filters, pinned goals, and progress](docs/screenshots/recall-challenges.png)
 
-Recall reads the locally running League Client on Windows. It syncs on launch,
-after a game, and periodically while the client is available. Use **Refresh**
-when you want to sync matches, challenges, ranked snapshots, and profile data
-immediately.
+Challenges shown on the dashboard open in place with the details that matter:
+the current and next tier, exact progress, points, percentile, supported modes,
+and champion completion count.
 
-Pinned champion challenges can also appear in a small, draggable overlay during
-champion select. It marks whether the champion you are hovering still advances
-each pinned challenge.
+![Challenge detail popup opened from the dashboard](docs/screenshots/recall-challenge-details.png)
 
-## Supported modes
+## Match history and review
 
-Recall records Ranked Solo/Duo, Ranked Flex, Normal, Quickplay, Swiftplay,
-ARAM, and ARAM: Mayhem. Arena and rotating modes are not currently tracked.
+Recall syncs when it starts, after a game, and periodically while the League
+client is available. Each complete match can include both teams, participant
+stats, performance grades, builds, augments, objectives, multikills, and the
+context needed to understand why a result looked good or bad.
 
-### Performance grades
+The history view is paged and can be filtered or sorted by mode, result,
+champion, grade, date, duration, KDA, damage, bookmarks, notes, tags, and
+experiments. The Review page explains the grading calculation, compares a game
+only with matches that happened before it, and groups games into sessions so a
+rough night does not get flattened into a lifetime average.
 
-Every complete scoreboard gets a letter grade from S+ down to D.
+Match timelines are opt-in. Use **Load timeline**, or bookmark a match, and
+Recall will fetch and cache a compact local summary with kills, assists, item
+transactions, levels, wards, objectives, team gold, and turning points. Raw
+timeline responses are not stored.
 
-Riot does not expose a grade through the local client API, so Recall derives one
-by comparing you against the other nine players in that same game. On Summoner's
-Rift, role-sensitive statistics like creep score are measured against others in
-your role — a support is not marked down for farming less than the mid laner. An
-average game lands on a B.
+## How history syncing works
 
-The Review page shows the lobby percentile, component weights, and weighted
-contributions produced by that same grading calculation. Imported Match-V5
-scoreboards can be graded retroactively; a game without a complete lobby keeps
-its existing grade and explains why no breakdown is available.
+There are two sources of match data, and they have different limits.
 
-## Local and Riot history
+The locally running League client exposes only its most recent 20 games across
+all modes. Recall checks that window often and permanently saves new games, but
+the client cannot provide a deeper local archive. For the best coverage, run
+Recall regularly instead of waiting months between syncs.
 
-The League client exposes only its **most recent 20 games**, shared across all
-modes. Requests for anything older are accepted and silently ignored, and no
-other local endpoint offers more. Recall still re-reads that window on launch,
-after each game, and periodically so new matches are captured without a web API
-key.
+You can optionally add a personal Riot API key in Settings. Recall uses
+Match-V5 to backfill the matches Riot makes available for the signed-in
+account, resumes long imports after restarts, and respects the rate limits
+reported by Riot. Developer keys expire on Riot's schedule, so a key that
+worked yesterday may need to be regenerated.
 
-Optionally, add a personal `RGAPI-…` Web API key in Settings. Recall encrypts it
-using operating-system secure storage and uses Match-V5 to import every match
-Riot still exposes for the signed-in account. Imports resume after restarts,
-share Riot's observed application and method rate limits, and refresh new
-history with a 24-hour overlap after the initial scan.
+Some rotating modes are not consistently exposed through Match-V5. ARAM:
+Mayhem games can still be recorded when they appear in the League client's
+recent-game window, but an API backfill cannot recover a match that Riot does
+not return. Recall reports those source limits instead of pretending a partial
+archive is complete.
 
-Match timelines are never fetched automatically just because a review opens.
-Use **Load timeline**, or bookmark the match, to fetch and permanently cache a
-compact local summary. Timeline v2 presents champion kills and deaths with
-assists, named item transactions with icons, levels, wards, objectives, the
-owner's purchase path, team-gold movement, and measured turning points. Raw
-Riot timeline responses are not stored.
+## Performance grades
 
-Recall records ordered augment selections for every participant present in the
-completed-game payload. The Review scoreboard displays those selections, while
-personal augment context is limited to the signed-in player's games, champions,
-average grade, KDA, and damage per minute. Recall deliberately does not publish
-augment win rates, rankings, or recommendations. **Enrich historical details**
-in Settings can replay accessible Match-V5 history through the durable,
-rate-limited importer to populate new fields on older matches.
+Riot does not provide a post-game letter grade through the local client API, so
+Recall calculates one from the full lobby. An average performance lands around
+a B. Strong games move into A and S territory, while weak games fall below the
+lobby baseline.
 
-Match history is paged, filterable, and sortable by mode, result, champion,
-grade, date, duration, KDA, damage, bookmark, notes, tags, and experiments, so
-a large archive stays usable.
+Summoner's Rift grading is role-aware. A support is not punished for farming
+less than a mid laner, and a tank is not expected to produce the same damage
+profile as a carry. The Review page shows the lobby percentile, component
+weights, and each weighted contribution. If a match does not include a complete
+scoreboard, Recall keeps the available data and explains why a detailed grade
+cannot be produced.
 
-Challenge progress is also snapshotted whenever a value changes, which lets
-Recall show progress over time — something the client, which only reports current
-values, cannot do.
+## Install
 
-The database lives in your user data folder and survives app updates. Settings
-includes a Data Trust Center for integrity checks, history coverage, sync
-health, verified backups, and safe restoration.
+Recall currently supports Windows.
 
-# Install (Windows only)
+1. Download the installer from the
+   [latest release](https://github.com/KleinByte/Recall/releases/latest).
+2. Run the installer.
+3. Start League and open Recall. The first sync begins automatically.
 
-Go to the [latest release](https://github.com/KleinByte/Recall/releases/latest)
+Windows may show a SmartScreen warning because the installer is not
+code-signed. The application and release workflow are available in this
+repository if you want to inspect exactly what is being installed.
 
-> Windows will warn you that this exe is not safe, because it's a pain to sign an exe. Feel free to look at the code to see what it does.
+Recall checks GitHub Releases for updates after the packaged app starts. New
+versions download in the background, then Settings offers **Restart to update**.
+Recall never restarts itself, and app updates preserve the local database.
 
-## Updates
+## Build from source
 
-Recall checks public GitHub Releases after a packaged app starts. A newer
-release downloads in the background; Settings shows its progress and offers
-**Restart to update** when it is ready. Recall never restarts itself and keeps
-its user data and local database through the update.
-
-To publish a release, set `package.json` to the release version, commit it,
-then create and push the matching `v<version>` tag. The Release workflow builds
-the Windows installer and publishes its installer, blockmap, and updater
-metadata to GitHub Releases.
-
-# Build
+You will need Node.js and pnpm.
 
 ```sh
 pnpm install
-```
-
-Try in dev mode
-
-```sh
 pnpm dev
 ```
 
-Run the tests
+Useful commands:
 
 ```sh
+pnpm typecheck
 pnpm test
-```
-
-Build for release
-
-```sh
 pnpm build
 ```
 
-## A note on SQLite
+`better-sqlite3` is a native dependency. The application copy is compiled for
+Electron, while `better-sqlite3-node` provides the regular Node ABI used by the
+test suite.
 
-The app uses `better-sqlite3`, a native module. It is compiled against the
-Electron runtime for the app itself, and a second copy (`better-sqlite3-node`)
-is kept at the plain Node ABI so the test suite can run outside Electron.
+## Data and privacy
 
-## Privacy
+Recall stores match history, challenge snapshots, review notes, and settings
+locally in its user data directory. The database survives application updates.
 
-Recall stores review data locally. If you configure a Riot Web API key, the main
-process sends authenticated account, match-history, and on-demand timeline
-requests directly to Riot; the key and full external PUUID never reach the
-renderer or logs. The challenge payload from the client includes a
-`friendsAtLevels` field listing your friends' identifiers; Recall deliberately
-discards it, and a test enforces that.
+If you configure a Riot API key, Recall encrypts it with operating-system
+secure storage. Authenticated account, match-history, and requested timeline
+calls go directly from the main process to Riot. The key and full external
+PUUID are not sent to the renderer or written to logs.
+
+The League client challenge payload includes a `friendsAtLevels` field with
+friend identifiers. Recall discards that field, and the test suite verifies
+that behavior.
+
+## Riot disclaimer
 
 Recall is not endorsed by Riot Games and does not reflect the views or opinions
 of Riot Games or anyone officially involved in producing or managing Riot Games
