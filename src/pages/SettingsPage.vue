@@ -17,6 +17,7 @@ const emit = defineEmits<{
   (event: "update:showChampionNames", value: boolean): void
   (event: "refetch"): void
   (event: "refetch-aram-stats"): void
+  (event: "view-patch-notes"): void
 }>()
 
 const meta = ref<StatsMeta | null>(null)
@@ -245,12 +246,20 @@ const formatDate = (value?: number) =>
     <section class="card">
       <h2 class="section-title">Application updates</h2>
       <p class="muted note">{{ update.message }}</p>
-      <div v-if="update.action" class="actions">
+      <div class="actions update-actions">
         <button
+          v-if="update.action"
           class="league-button action"
           @click="runUpdateAction(update.action!.command)"
         >
           {{ update.action!.label }}
+        </button>
+        <button
+          class="league-button action"
+          type="button"
+          @click="emit('view-patch-notes')"
+        >
+          View patch notes
         </button>
       </div>
     </section>
@@ -547,6 +556,10 @@ h1 {
   display: flex;
   gap: var(--space-2);
   flex-wrap: wrap;
+}
+
+.update-actions {
+  margin-top: var(--space-3);
 }
 
 .key-row {

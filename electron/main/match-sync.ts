@@ -82,7 +82,10 @@ export class MatchSync {
 
     const rows = games
       .map((game) => mapMatchRow(game, this.puuid, this.queues.get(game.queueId)))
-      .filter((row): row is MatchRow => row !== undefined)
+      .filter(
+        (row): row is MatchRow =>
+          row !== undefined && row.isMatched === 1,
+      )
 
     const inserted = this.repository.insertMany(rows)
     const graded = await this.gradePendingMatches()
@@ -103,7 +106,9 @@ export class MatchSync {
 
     const missing = this.participants.getGamesMissingLobby(
       this.puuid,
-      windowRows.map((row) => row.gameId),
+      windowRows
+        .filter((row) => row.isMatched === 1)
+        .map((row) => row.gameId),
       MAX_LOBBY_BACKFILL_PER_SYNC,
     )
 

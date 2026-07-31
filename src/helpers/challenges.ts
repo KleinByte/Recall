@@ -45,6 +45,19 @@ export function isChallengeCompleted(challenge: ChallengeRow): boolean {
   return challenge.nextLevel === null || challenge.nextThreshold === null
 }
 
+/**
+ * Legacy challenges stay out of the normal browser because they cannot be
+ * progressed. Selecting LEGACY explicitly makes them available for reference.
+ */
+export function challengeMatchesCategory(
+  challenge: ChallengeRow,
+  category: string,
+): boolean {
+  if (category === "LEGACY") return challenge.category === "LEGACY"
+  if (challenge.category === "LEGACY") return false
+  return category === "All" || challenge.category === category
+}
+
 function levelRank(level: string): number {
   const rank = LEVEL_ORDER.indexOf(level.toUpperCase())
   return rank < 0 ? 0 : rank

@@ -181,6 +181,7 @@ const nearlyThere = computed(() =>
   challenges.value
     .filter(
       (challenge) =>
+        challenge.category !== "LEGACY" &&
         challenge.isRetired === 0 &&
         challenge.nextThreshold !== null &&
         challenge.nextThreshold > challenge.currentValue,

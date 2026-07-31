@@ -4,6 +4,7 @@ import AppSidebar from "./components/AppSidebar.vue"
 import ChampSelectBanner from "./components/ChampSelectBanner.vue"
 import ChampionDetail from "./components/ChampionDetail.vue"
 import MatchSheet from "./components/MatchSheet.vue"
+import PatchNotesModal from "./components/PatchNotesModal.vue"
 import PostGameBanner from "./components/PostGameBanner.vue"
 import ChallengesPage from "./pages/ChallengesPage.vue"
 import ChampionsPage from "./pages/ChampionsPage.vue"
@@ -14,6 +15,10 @@ import ProgressPage from "./pages/ProgressPage.vue"
 import ReviewPage from "./pages/ReviewPage.vue"
 import SettingsPage from "./pages/SettingsPage.vue"
 import SkillPage from "./pages/SkillPage.vue"
+import {
+  currentAppVersion,
+  hasUnseenPatchNotes,
+} from "./data/patch-notes"
 import { api } from "./helpers/api"
 import { loadDataDragonVersion } from "./helpers/ddragon"
 import {
@@ -35,6 +40,7 @@ const stats = ref<AramStats | null>(null)
 const lastGame = ref<MatchRow | null>(null)
 const refreshing = ref(false)
 const refreshMessage = ref<string | null>(null)
+const showPatchNotes = ref(false)
 let hasFocusedLiveGame = false
 
 const isColoredWhenDone = ref(false)
@@ -81,6 +87,16 @@ function persistSettings() {
   )
 }
 
+async function showUnseenPatchNotes() {
+  const seenVersion = await api.getSetting<string>(
+    "last-seen-patch-notes-version",
+  )
+  if (!hasUnseenPatchNotes(seenVersion)) return
+
+  showPatchNotes.value = true
+  api.setSetting("last-seen-patch-notes-version", currentAppVersion)
+}
+
 async function refreshAll() {
   if (refreshing.value || !connected.value) return
 
@@ -102,6 +118,7 @@ async function refreshAll() {
 onMounted(async () => {
   api.notifyReady()
   void loadDataDragonVersion()
+  void showUnseenPatchNotes()
 
   const storedStats = await api.getSetting<string>("aram-stats")
   if (storedStats) {
@@ -229,6 +246,7 @@ onMounted(async () => {
         "
         @refetch="loadChampions"
         @refetch-aram-stats="fetchAramStats"
+        @view-patch-notes="showPatchNotes = true"
       />
     </main>
 
@@ -242,6 +260,11 @@ onMounted(async () => {
       v-if="detailMatch"
       :match="detailMatch"
       :champions="allChampions"
+    />
+
+    <PatchNotesModal
+      v-if="showPatchNotes"
+      @close="showPatchNotes = false"
     />
   </div>
 </template>

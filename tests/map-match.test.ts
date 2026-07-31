@@ -83,6 +83,28 @@ describe("mapMatchRow", () => {
     expect(row?.isMatched).toBe(0)
   })
 
+  it("flags Riot bot queues as unmatched even though Riot calls them matched games", () => {
+    const row = mapMatchRow(
+      riftGame({ queueId: 890, gameType: "MATCHED_GAME" }),
+      PUUID,
+    )
+
+    expect(row?.isMatched).toBe(0)
+  })
+
+  it("recognizes a newly named bot queue from client metadata", () => {
+    const row = mapMatchRow(riftGame({ queueId: 9999 }), PUUID, {
+      id: 9999,
+      name: "Co-op vs. AI Expert Bot",
+      shortName: "Expert Bot",
+      gameMode: "CLASSIC",
+      mapId: 11,
+      isRanked: false,
+    })
+
+    expect(row?.isMatched).toBe(0)
+  })
+
   it("defaults missing numeric stats to zero", () => {
     const game = mayhemGame()
     delete (game.participants[0].stats as Record<string, unknown>).visionScore

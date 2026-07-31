@@ -123,6 +123,38 @@ describe("RiotHistoryBackfill", () => {
     expect(updates).toEqual(["running", "running", "running", "complete"])
   })
 
+  it("counts bot games as skipped instead of importing them", async () => {
+    const api = {
+      get: vi.fn(async (path: string) => {
+        if (path.includes("/ids?")) return ["NA1_890"]
+        const bot = dto(890)
+        bot.info!.queueId = 890
+        bot.info!.gameMode = "CLASSIC"
+        bot.info!.mapId = 11
+        return bot
+      }),
+    }
+    const backfill = new RiotHistoryBackfill(
+      "key",
+      "americas",
+      PUUID,
+      matches,
+      participants,
+      new Map(),
+      progress,
+      { api: api as never },
+    )
+
+    const state = await backfill.run(true)
+
+    expect(state).toMatchObject({
+      matchesImported: 0,
+      matchesSkipped: 1,
+    })
+    expect(matches.countMatches(PUUID)).toBe(0)
+    expect(participants.countGamesWithLobby(PUUID)).toBe(0)
+  })
+
   it("resolves the Match-V5 PUUID from Riot ID but stores under the client identity", async () => {
     const api = {
       get: vi.fn(async (path: string) => {

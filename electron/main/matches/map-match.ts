@@ -1,4 +1,5 @@
 import { classifyMatch } from "./classify.js"
+import { isEligibleMatch } from "./eligibility.js"
 import type { QueueInfo } from "./queues.js"
 import type { LcuGame, MatchRow } from "./types.js"
 
@@ -38,7 +39,7 @@ export function mapMatchRow(
     mode: modeInfo.mode,
     modeFamily: modeInfo.family,
     isRanked: modeInfo.isRanked ? 1 : 0,
-    isMatched: game.gameType === "MATCHED_GAME" ? 1 : 0,
+    isMatched: isEligibleMatch(game, queue) ? 1 : 0,
     playedAt: int(game.gameCreation),
     durationSecs: int(game.gameDuration),
     gameVersion: game.gameVersion ?? "",

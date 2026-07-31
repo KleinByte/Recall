@@ -214,9 +214,12 @@ export class ReviewRepository {
     const rows = this.db.prepare(
       `SELECT e.id, e.name, e.hypothesis, e.champion_ids AS championIds,
               e.modes, e.status, e.started_at AS startedAt,
-              e.ended_at AS endedAt, COUNT(me.game_id) AS games
+              e.ended_at AS endedAt,
+              COUNT(CASE WHEN counted.is_matched = 1 THEN me.game_id END) AS games
        FROM practice_experiments e
        LEFT JOIN match_experiments me ON me.experiment_id = e.id
+       LEFT JOIN matches counted
+         ON counted.game_id = me.game_id AND counted.puuid = me.puuid
        WHERE e.puuid = ?
        GROUP BY e.id
        ORDER BY CASE e.status WHEN 'active' THEN 0 WHEN 'paused' THEN 1 ELSE 2 END,
@@ -232,7 +235,7 @@ export class ReviewRepository {
         `SELECT m.win, m.kills, m.deaths, m.assists, m.grade_score AS gradeScore
          FROM match_experiments me
          JOIN matches m ON m.game_id = me.game_id AND m.puuid = me.puuid
-         WHERE me.experiment_id = ? AND me.puuid = ?
+         WHERE me.experiment_id = ? AND me.puuid = ? AND m.is_matched = 1
          ORDER BY m.played_at DESC`,
       ).all(row.id, puuid) as Array<{
         win: number
@@ -241,7 +244,7 @@ export class ReviewRepository {
         assists: number
         gradeScore: number | null
       }>
-      const conditions = ["puuid = ?", "played_at < ?"]
+      const conditions = ["puuid = ?", "is_matched = 1", "played_at < ?"]
       const params: Array<string | number> = [puuid, row.startedAt]
       if (championIds.length) {
         conditions.push(`champion_id IN (${championIds.map(() => "?").join(", ")})`)
@@ -352,6 +355,8 @@ export class ReviewRepository {
   }
 
   attachMatchingExperiments(match: MatchRow): number {
+    if (match.isMatched !== 1) return 0
+
     const experiments = this.listExperiments(match.puuid).filter((experiment) =>
       experiment.status === "active" &&
       match.playedAt >= experiment.startedAt &&

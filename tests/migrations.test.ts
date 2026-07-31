@@ -8,6 +8,8 @@ import {
   latestSchemaVersion,
   migrations,
 } from "../electron/main/database/migrations.js"
+import { MatchesRepository } from "../electron/main/database/matches-repo.js"
+import { buildMatchRow } from "./fixtures/matches.js"
 
 describe("applyMigrations", () => {
   it("keeps migration versions unique, ordered, and contiguous", () => {
@@ -38,6 +40,29 @@ describe("applyMigrations", () => {
     const second = applyMigrations(db)
 
     expect(second).toBe(first)
+  })
+
+  it("marks already-recorded bot queues as ineligible without deleting them", () => {
+    const db = new Database(":memory:")
+    applyMigrations(db)
+    const repo = new MatchesRepository(db)
+    repo.insertMany([
+      buildMatchRow({ gameId: 1, queueId: 890, isMatched: 1 }),
+      buildMatchRow({ gameId: 2, queueId: 450, isMatched: 1 }),
+    ])
+
+    db.pragma("user_version = 11")
+    applyMigrations(db)
+
+    expect(
+      db.prepare(
+        `SELECT game_id AS gameId, is_matched AS isMatched
+         FROM matches ORDER BY game_id`,
+      ).all(),
+    ).toEqual([
+      { gameId: 1, isMatched: 0 },
+      { gameId: 2, isMatched: 1 },
+    ])
   })
 
   it("upgrades every historical schema version to the latest", () => {

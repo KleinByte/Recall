@@ -259,6 +259,19 @@ describe("MatchSync", () => {
     expect(repo.countMatches(PUUID)).toBe(2)
   })
 
+  it("does not store or grade bot games", async () => {
+    const bot = riftGame(1)
+    bot.queueId = 890
+    const client = new FakeClient([bot])
+    const sync = new MatchSync(client as never, repo, PUUID, participants)
+
+    const result = await sync.syncNow()
+
+    expect(result).toMatchObject({ fetched: 1, inserted: 0, graded: 0, lobbies: 0 })
+    expect(repo.countMatches(PUUID)).toBe(0)
+    expect(participants.countGamesWithLobby(PUUID)).toBe(0)
+  })
+
   it("grades a Rift game on the statistics that mode rewards", async () => {
     const client = new FakeClient([riftGame(1)])
     client.buildDetail = buildFarmLobby

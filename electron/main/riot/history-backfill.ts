@@ -173,6 +173,16 @@ export class RiotHistoryBackfill {
             continue
           }
 
+          if (mapped.match.isMatched !== 1) {
+            skipped += 1
+            state = this.advanceOne(state, {
+              downloaded,
+              imported,
+              skipped,
+            })
+            continue
+          }
+
           imported += this.matches.insertMany([mapped.match])
           this.participants.insertMany(mapped.participants)
           this.participants.insertTeams(mapped.teams)
@@ -186,8 +196,9 @@ export class RiotHistoryBackfill {
           )
 
           if (
-            mapped.match.modeFamily === "aram" ||
-            mapped.match.modeFamily === "sr"
+            mapped.match.isMatched === 1 &&
+            (mapped.match.modeFamily === "aram" ||
+              mapped.match.modeFamily === "sr")
           ) {
             const grades = gradeLobby(
               mapped.gradeInputs,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  challengeMatchesCategory,
   challengeTierProgress,
   isChallengeCompleted,
   sortChallenges,
@@ -72,5 +73,16 @@ describe("challenge presentation helpers", () => {
     expect(
       sortChallenges(rows, "level", "asc").map((row) => row.currentLevel),
     ).toEqual(["IRON", "GOLD", "MASTER"])
+  })
+
+  it("hides legacy challenges until LEGACY is selected", () => {
+    const active = challenge({ category: "EXPERTISE" })
+    const legacy = challenge({ category: "LEGACY" })
+
+    expect(challengeMatchesCategory(active, "All")).toBe(true)
+    expect(challengeMatchesCategory(legacy, "All")).toBe(false)
+    expect(challengeMatchesCategory(legacy, "EXPERTISE")).toBe(false)
+    expect(challengeMatchesCategory(legacy, "LEGACY")).toBe(true)
+    expect(challengeMatchesCategory(active, "LEGACY")).toBe(false)
   })
 })

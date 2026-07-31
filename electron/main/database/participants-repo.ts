@@ -612,7 +612,7 @@ export class ParticipantsRepository {
          ON p.game_id = a.game_id AND p.puuid = a.puuid
         AND p.participant_id = a.participant_id AND p.is_player = 1
        JOIN matches m ON m.game_id = a.game_id AND m.puuid = a.puuid
-       WHERE a.puuid = ? ${filter}
+       WHERE a.puuid = ? AND m.is_matched = 1 ${filter}
        GROUP BY a.augment_id
        ORDER BY games DESC, a.augment_id`,
     ).all(...params) as Array<Omit<OwnerAugmentSummary, "champions"> & {
@@ -625,7 +625,8 @@ export class ParticipantsRepository {
        JOIN match_participants p
          ON p.game_id = a.game_id AND p.puuid = a.puuid
         AND p.participant_id = a.participant_id AND p.is_player = 1
-       WHERE a.puuid = ? ${filter}
+       JOIN matches m ON m.game_id = a.game_id AND m.puuid = a.puuid
+       WHERE a.puuid = ? AND m.is_matched = 1 ${filter}
        GROUP BY a.augment_id, p.champion_id
        ORDER BY games DESC, p.champion_id`,
     ).all(...params) as Array<{
@@ -744,7 +745,11 @@ export class ParticipantsRepository {
    * than handing them all first place.
    */
   getLobbyComparison(filter: LobbyFilter): LobbyComparison | undefined {
-    const conditions = ["me.puuid = ?", "me.is_player = 1"]
+    const conditions = [
+      "me.puuid = ?",
+      "me.is_player = 1",
+      "COALESCE(m.is_matched, 1) = 1",
+    ]
     const params: (string | number)[] = [filter.puuid]
 
     if (filter.mode) {
@@ -757,13 +762,8 @@ export class ParticipantsRepository {
       params.push(filter.modeFamily)
     }
 
-    // The match row is only needed to filter by mode, so it is joined only
-    // then. Without it the comparison stands on the lobby data alone.
-    const join =
-      filter.mode || filter.modeFamily
-        ? `JOIN matches m
-             ON m.game_id = me.game_id AND m.puuid = me.puuid`
-        : ""
+    const join = `LEFT JOIN matches m
+                    ON m.game_id = me.game_id AND m.puuid = me.puuid`
 
     const where = conditions.join(" AND ")
 

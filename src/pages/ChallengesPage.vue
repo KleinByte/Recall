@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from "vue"
 import ChallengeRowView from "../components/ChallengeRow.vue"
 import { api } from "../helpers/api"
 import {
+  challengeMatchesCategory,
   isChallengeCompleted,
   sortChallenges,
   type ChallengeSortDirection,
@@ -152,9 +153,7 @@ const filtered = computed(() => {
       return false
     }
 
-    if (category.value !== "All" && challenge.category !== category.value) {
-      return false
-    }
+    if (!challengeMatchesCategory(challenge, category.value)) return false
     if (level.value !== "All" && challenge.currentLevel !== level.value) {
       return false
     }
@@ -178,6 +177,7 @@ const pinnedChallenges = computed(() =>
   challenges.value.filter(
     (challenge) =>
       pinned.value.includes(challenge.challengeId) &&
+      challengeMatchesCategory(challenge, category.value) &&
       (!hideCompleted.value || !isChallengeCompleted(challenge)),
   ),
 )

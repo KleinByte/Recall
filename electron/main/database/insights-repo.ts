@@ -89,7 +89,7 @@ function scope(filter: StatsFilter) {
 
 /** Conditions against the participant table, optionally narrowed by mode. */
 function lobbyScope(filter: StatsFilter) {
-  const conditions = ["p.puuid = ?"]
+  const conditions = ["p.puuid = ?", "COALESCE(m.is_matched, 1) = 1"]
   const params: (string | number)[] = [filter.puuid]
 
   if (filter.mode) {

@@ -1,4 +1,5 @@
 import type { Database } from "better-sqlite3"
+import { BOT_QUEUE_IDS } from "../matches/eligibility.js"
 
 interface Migration {
   version: number
@@ -577,6 +578,23 @@ export const migrations: Migration[] = [
         ON participant_augments (puuid, augment_id, game_id);
       CREATE INDEX idx_capture_missing_augments
         ON match_capture_manifests (puuid, augment_participant_count, captured_at);
+    `,
+  },
+  {
+    // Riot reports Co-op vs. AI and tutorial queues as MATCHED_GAME. Older
+    // versions treated that value as sufficient for statistics, so mark
+    // existing bot rows as ineligible without deleting the stored history.
+    version: 12,
+    up: `
+      UPDATE matches
+      SET is_matched = 0
+      WHERE queue_id IN (${BOT_QUEUE_IDS.join(", ")})
+         OR LOWER(COALESCE(queue_name, '')) LIKE '% bot%'
+         OR LOWER(COALESCE(queue_name, '')) LIKE 'bot%'
+         OR LOWER(COALESCE(queue_name, '')) LIKE '%bots%'
+         OR LOWER(COALESCE(queue_name, '')) LIKE '%co-op vs%'
+         OR LOWER(COALESCE(queue_name, '')) LIKE '%coop vs%'
+         OR LOWER(COALESCE(queue_name, '')) LIKE '%tutorial%';
     `,
   },
 ]

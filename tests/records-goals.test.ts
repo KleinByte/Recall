@@ -66,6 +66,29 @@ describe("getRecords", () => {
 
     expect(kills.value).toBe(5)
   })
+
+  it("does not let a bot game become a personal record", () => {
+    matches.insertMany([
+      buildMatchRow({
+        gameId: 1,
+        queueId: 890,
+        isMatched: 0,
+        damageToChampions: 200_000,
+      }),
+      buildMatchRow({
+        gameId: 2,
+        queueId: 450,
+        damageToChampions: 42_000,
+      }),
+    ])
+
+    const damage = matches
+      .getRecords({ puuid: PUUID })
+      .find((record) => record.key === "damage")!
+
+    expect(damage.gameId).toBe(2)
+    expect(damage.value).toBe(42_000)
+  })
 })
 
 describe("GoalsRepository", () => {

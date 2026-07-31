@@ -325,7 +325,7 @@ export class MatchesRepository {
     return this.db
       .prepare(
         `SELECT game_id AS gameId, mode_family AS modeFamily FROM matches
-         WHERE puuid = ? AND grade IS NULL
+         WHERE puuid = ? AND is_matched = 1 AND grade IS NULL
            AND mode_family IN ('sr', 'aram')
          ORDER BY played_at DESC
          LIMIT ?`,
@@ -558,7 +558,11 @@ export class MatchesRepository {
 
   getAllMatches(puuid: string): MatchRow[] {
     const rows = this.db
-      .prepare("SELECT * FROM matches WHERE puuid = ? ORDER BY played_at DESC")
+      .prepare(
+        `SELECT * FROM matches
+         WHERE puuid = ? AND is_matched = 1
+         ORDER BY played_at DESC`,
+      )
       .all(puuid) as Record<string, never>[]
 
     return rows.map(toMatchRow)
@@ -656,7 +660,8 @@ export class MatchesRepository {
   getPlayedChampionIds(puuid: string): number[] {
     const rows = this.db
       .prepare(
-        "SELECT DISTINCT champion_id AS id FROM matches WHERE puuid = ?",
+        `SELECT DISTINCT champion_id AS id FROM matches
+         WHERE puuid = ? AND is_matched = 1`,
       )
       .all(puuid) as { id: number }[]
 
