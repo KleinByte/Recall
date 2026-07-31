@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
+import SkillInsights from "../components/skill/SkillInsights.vue"
 import SkillOverview from "../components/skill/SkillOverview.vue"
 import { api } from "../helpers/api"
 import {
@@ -16,6 +17,7 @@ defineProps<{
 }>()
 
 type PrimaryMode = "rift" | "aram" | "mayhem"
+type SkillTab = "overview" | "insights"
 
 const PRIMARY_MODES: Array<{ id: PrimaryMode; label: string }> = [
   { id: "rift", label: "Summoner's Rift" },
@@ -25,6 +27,7 @@ const PRIMARY_MODES: Array<{ id: PrimaryMode; label: string }> = [
 
 const primary = ref<PrimaryMode>("rift")
 const scopeId = ref<SkillScopeId>("riftAll")
+const tab = ref<SkillTab>("overview")
 const counts = ref<Record<SkillScopeId, number>>(
   Object.fromEntries(SKILL_SCOPES.map((scope) => [scope.id, 0])) as Record<SkillScopeId, number>,
 )
@@ -40,6 +43,7 @@ const riftScopes = computed(() =>
 )
 const primaryCount = (mode: PrimaryMode) =>
   counts.value[mode === "rift" ? "riftAll" : mode]
+const timezoneLabel = Intl.DateTimeFormat().resolvedOptions().timeZone || "local time"
 
 async function loadCounts() {
   const summaries = await Promise.all(
@@ -137,6 +141,25 @@ onMounted(async () => {
       </div>
     </header>
 
+    <nav class="tab-row" aria-label="Skill view">
+      <button
+        class="tab-button"
+        :class="{ active: tab === 'overview' }"
+        :aria-pressed="tab === 'overview'"
+        @click="tab = 'overview'"
+      >
+        Overview
+      </button>
+      <button
+        class="tab-button"
+        :class="{ active: tab === 'insights' }"
+        :aria-pressed="tab === 'insights'"
+        @click="tab = 'insights'"
+      >
+        Insights
+      </button>
+    </nav>
+
     <div v-if="loading && !report" class="card notice muted">Loading Skill report…</div>
 
     <div v-else-if="failed" class="card notice">
@@ -153,9 +176,15 @@ onMounted(async () => {
     </div>
 
     <SkillOverview
-      v-else-if="report"
+      v-else-if="report && tab === 'overview'"
       :overview="report.overview"
       :family="report.scope.family"
+    />
+    <SkillInsights
+      v-else-if="report"
+      :insights="report.insights"
+      :family="report.scope.family"
+      :timezone-label="timezoneLabel"
     />
   </div>
 </template>
@@ -212,6 +241,34 @@ h1 {
 .scope-button.secondary {
   min-width: 92px;
   font-size: 11px;
+}
+
+.tab-row {
+  display: flex;
+  gap: var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.tab-button {
+  min-width: 88px;
+  min-height: 34px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-heading);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tab-button:hover,
+.tab-button.active {
+  color: var(--gold-bright);
+}
+
+.tab-button.active {
+  border-bottom-color: var(--gold);
 }
 
 .count {
