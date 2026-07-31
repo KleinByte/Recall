@@ -6,7 +6,7 @@
  */
 
 import type { InsightObservation } from "../database/insights-repo.js"
-import { quantile, sessionize, type SessionGame } from "./analytics.js"
+import { quantile, sessionize } from "./analytics.js"
 
 // --- Public types ---
 
@@ -70,20 +70,22 @@ const REST_CAP_MINUTES = 90
 // Reference categories (excluded from one-hot encoding)
 const WEEKDAY_REFERENCE = "sunday"
 const ROLE_REFERENCE = "UTILITY"
-const MODE_REFERENCE = "sr_ranked_solo"
+const QUEUE_REFERENCE = 420
 
 // Fixed vocabulary
 const WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
-const ROLES = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM"]
-const MODES = ["sr_ranked_flex", "sr_normal", "sr_quickplay", "sr_swiftplay", "aram", "other"]
+const KNOWN_ROLES = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM"]
+const KNOWN_QUEUE_IDS = [400, 430, 440, 450, 480, 490]
 
 // --- Feature extraction ---
 
 export function buildPregameRows(observations: InsightObservation[]): PregameRow[] {
   if (observations.length === 0) return []
 
-  // Sort chronologically
-  const sorted = [...observations].sort((a, b) => a.playedAt - b.playedAt)
+  // Sort chronologically with gameId as deterministic tiebreaker
+  const sorted = [...observations].sort(
+    (a, b) => a.playedAt - b.playedAt || a.gameId - b.gameId,
+  )
 
   // Sessionize for session context
   const sessionized = sessionize(
@@ -149,17 +151,21 @@ export function buildPregameRows(observations: InsightObservation[]): PregameRow
     features["previous_win"] = previousWin === true ? 1 : 0
     features["previous_missing"] = previousWin === undefined ? 1 : 0
 
-    // Role one-hot (reference: UTILITY)
-    const role = obs.role ?? "unknown"
-    for (const r of ROLES) {
+    // Role one-hot (reference: UTILITY) with unknown bucket
+    const role = obs.role
+    const isKnownRole = role !== undefined && (KNOWN_ROLES.includes(role) || role === "UTILITY")
+    for (const r of KNOWN_ROLES) {
       features[`role_${r}`] = role === r ? 1 : 0
     }
+    features["role_unknown"] = isKnownRole ? 0 : 1
 
-    // Mode one-hot (reference: sr_ranked_solo)
-    const mode = obs.mode ?? "other"
-    for (const m of MODES) {
-      features[`mode_${m}`] = mode === m ? 1 : 0
+    // Queue-ID one-hot (reference: 420) with unknown bucket
+    const queueId = obs.queueId
+    const isKnownQueue = queueId === QUEUE_REFERENCE || KNOWN_QUEUE_IDS.includes(queueId)
+    for (const qid of KNOWN_QUEUE_IDS) {
+      features[`queue_${qid}`] = queueId === qid ? 1 : 0
     }
+    features["queue_unknown"] = isKnownQueue ? 0 : 1
 
     // Log prior champion games
     features["log_prior_champion_games"] = Math.log1p(priorChampionGames)
@@ -391,10 +397,9 @@ function predict(X: number[][], model: RidgeResult): number[] {
   })
 }
 
-function interceptOnlyLogLoss(y: number[]): number {
-  const p = y.reduce((s, v) => s + v, 0) / y.length
+function interceptOnlyLogLoss(y: number[], baselineP: number): number {
   const eps = 1e-15
-  const pClamped = Math.max(eps, Math.min(1 - eps, p))
+  const pClamped = Math.max(eps, Math.min(1 - eps, baselineP))
   let sum = 0
   for (const yi of y) {
     sum -= yi * Math.log(pClamped) + (1 - yi) * Math.log(1 - pClamped)
@@ -402,11 +407,10 @@ function interceptOnlyLogLoss(y: number[]): number {
   return sum / y.length
 }
 
-function interceptOnlyBrier(y: number[]): number {
-  const p = y.reduce((s, v) => s + v, 0) / y.length
+function interceptOnlyBrier(y: number[], baselineP: number): number {
   let sum = 0
   for (const yi of y) {
-    sum += (p - yi) ** 2
+    sum += (baselineP - yi) ** 2
   }
   return sum / y.length
 }
@@ -421,20 +425,23 @@ export function validatePredictiveSignals(
 
   if (trainX.length === 0 || holdX.length === 0 || featureNames.length === 0) return null
 
-  const trainY = training.map((r) => (r.gradeScore >= threshold ? 1 : 0))
-  const holdY = holdout.map((r) => (r.gradeScore >= threshold ? 1 : 0))
+  const trainY = training.map((r) => (r.gradeScore >= threshold ? 1 : 0) as number)
+  const holdY = holdout.map((r) => (r.gradeScore >= threshold ? 1 : 0) as number)
+
+  // Baseline probability fitted from training labels only
+  const trainingPrevalence = trainY.reduce((s, v) => s + v, 0) / trainY.length
 
   // Check holdout class requirements
   const holdStrong = holdY.filter((y) => y === 1).length
   const holdWeak = holdY.filter((y) => y === 0).length
   if (holdStrong < MIN_HOLDOUT_EACH_CLASS || holdWeak < MIN_HOLDOUT_EACH_CLASS) return null
 
-  // Standardize using training data only
+  // Standardize final model using training data only
   const { X: trainXs, params: scaleParams } = standardize(trainX)
   const { X: holdXs } = standardize(holdX, scaleParams)
 
   // Forward-chaining cross-validation for lambda selection
-  const foldSize = Math.floor(trainXs.length / (N_FOLDS + 1))
+  const foldSize = Math.floor(trainX.length / (N_FOLDS + 1))
   if (foldSize < 10) return null
 
   // Track coefficient signs per fold for stability check
@@ -450,13 +457,17 @@ export function validatePredictiveSignals(
     for (let fold = 0; fold < N_FOLDS; fold++) {
       const trainEnd = foldSize * (fold + 1)
       const valStart = trainEnd
-      const valEnd = Math.min(valStart + foldSize, trainXs.length)
+      const valEnd = Math.min(valStart + foldSize, trainX.length)
 
       if (valEnd <= valStart) continue
 
-      const foldTrainX = trainXs.slice(0, trainEnd)
+      // Fit scaler on this fold's training partition only
+      const foldTrainRaw = trainX.slice(0, trainEnd)
+      const foldValRaw = trainX.slice(valStart, valEnd)
+      const { X: foldTrainX, params: foldScaleParams } = standardize(foldTrainRaw)
+      const { X: foldValX } = standardize(foldValRaw, foldScaleParams)
+
       const foldTrainY = trainY.slice(0, trainEnd)
-      const foldValX = trainXs.slice(valStart, valEnd)
       const foldValY = trainY.slice(valStart, valEnd)
 
       try {
@@ -487,14 +498,14 @@ export function validatePredictiveSignals(
     return null
   }
 
-  // Evaluate on holdout
+  // Evaluate on holdout using training-derived baseline
   const holdPreds = predict(holdXs, finalModel)
   const modelLogLoss = logLoss(holdY, holdPreds)
-  const baselineLogLoss = interceptOnlyLogLoss(holdY)
+  const baselineLogLoss = interceptOnlyLogLoss(holdY, trainingPrevalence)
   const logLossImprovement = (baselineLogLoss - modelLogLoss) / baselineLogLoss
 
   const modelBrier = brierScore(holdY, holdPreds)
-  const baselineBrier = interceptOnlyBrier(holdY)
+  const baselineBrier = interceptOnlyBrier(holdY, trainingPrevalence)
   const brierOk = modelBrier <= baselineBrier
 
   // Check gates
@@ -571,17 +582,11 @@ export function buildPredictiveSection(observations: InsightObservation[]): Pred
       }
     }
 
-    // Sort chronologically
-    const sorted = [...graded].sort((a, b) => a.playedAt - b.playedAt)
+    // Use centralized split helper (single source of chronological split + threshold)
+    const { training, holdout, threshold } = splitPredictiveHistory(graded)
 
-    // Compute threshold on training portion
-    const holdoutCount = Math.floor(sorted.length * HOLDOUT_FRACTION)
-    const trainingObs = sorted.slice(0, sorted.length - holdoutCount)
-    const trainingScores = trainingObs.map((o) => o.gradeScore!)
-    const threshold = quantile(trainingScores, 0.75) ?? 0
-
-    // Check class balance
-    const allScores = sorted.map((o) => o.gradeScore!)
+    // Check class balance on all rows
+    const allScores = [...training, ...holdout].map((r) => r.gradeScore)
     const strong = allScores.filter((s) => s >= threshold).length
     const nonStrong = allScores.filter((s) => s < threshold).length
 
@@ -592,12 +597,6 @@ export function buildPredictiveSection(observations: InsightObservation[]): Pred
         neededGames: Math.max(0, MIN_EACH_CLASS - Math.min(strong, nonStrong)),
       }
     }
-
-    // Build pregame rows and split
-    const rows = buildPregameRows(sorted)
-    const trainingCount = rows.length - Math.floor(rows.length * HOLDOUT_FRACTION)
-    const training = rows.slice(0, trainingCount)
-    const holdout = rows.slice(trainingCount)
 
     // Check holdout class balance
     const holdStrong = holdout.filter((r) => r.gradeScore >= threshold).length
