@@ -45,7 +45,10 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
 <template>
   <nav class="sidebar">
     <div class="brand">
-      <span class="brand-mark">RECALL</span>
+      <div class="brand-title" aria-label="Recall">
+        <img src="/favicon.ico" class="brand-logo" alt="" />
+        <span class="brand-mark">ECALL</span>
+      </div>
       <span class="brand-name">League companion</span>
     </div>
 
@@ -112,6 +115,19 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
   padding: 0 var(--space-2) var(--space-5);
   border-bottom: 1px solid var(--border-subtle);
   margin-bottom: var(--space-3);
+}
+
+.brand-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.brand-logo {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  object-fit: contain;
 }
 
 .brand-mark {

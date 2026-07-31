@@ -1,5 +1,6 @@
 import { ref } from "vue"
 import { api } from "./api"
+import { itemAsset } from "./items"
 
 /**
  * Item and spell art comes from Data Dragon, which is versioned by patch.
@@ -37,7 +38,7 @@ const base = () => `https://ddragon.leagueoflegends.com/cdn/${version.value}`
 
 /** An empty item slot is stored as 0 and has no art. */
 export const itemIconUrl = (itemId: number) =>
-  itemId > 0 ? `${base()}/img/item/${itemId}.png` : undefined
+  itemId > 0 ? itemAsset(itemId).iconUrl : undefined
 
 export const summonerSpellIconUrl = (spellId: number) => {
   const key = SUMMONER_SPELLS[spellId]

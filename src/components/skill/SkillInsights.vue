@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { computed } from "vue"
+import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
+import { faArrowDown, faArrowUp, faWandMagicSparkles } from "@fortawesome/free-solid-svg-icons"
+import EffectChart from "./EffectChart.vue"
 import InsightFinding from "./InsightFinding.vue"
 import type {
   InsightSection,
@@ -32,6 +35,49 @@ const sections = computed<Array<{
 const currentGames = (section: InsightSection) =>
   Math.max(0, ...section.findings.map((finding) => finding.eligibleGames))
 
+const sectionIntro = (section: InsightSection) => ({
+  bestGamePattern: "What tends to look different in your strongest games.",
+  conditions: "When and how you play can be associated with different results.",
+  duration: "How different game lengths line up with your recorded results.",
+  trends: "How your latest games compare with earlier games in this scope.",
+  champions: "How champion picks line up with your usual Recall grade.",
+  items: "How completed items line up with your recorded games.",
+})[section.key] ?? section.method
+
+function selectTakeaways(insights: SkillReportV2["insights"]) {
+  const findings = [
+    insights.bestGamePattern,
+    insights.conditions,
+    insights.duration,
+    insights.trends,
+    insights.champions,
+    insights.items,
+  ].flatMap((section) => section.findings)
+    .filter((finding) =>
+      finding.evidenceLevel === "comparative" &&
+      (finding.confidence === "medium" || finding.confidence === "high") &&
+      finding.interval && (finding.interval.low > 0 || finding.interval.high < 0),
+    )
+
+  return {
+    strength: findings.filter((finding) => finding.effect > 0)
+      .sort((left, right) => Math.abs(right.effect) - Math.abs(left.effect))[0],
+    caution: findings.filter((finding) => finding.effect < 0)
+      .sort((left, right) => Math.abs(right.effect) - Math.abs(left.effect))[0],
+  }
+}
+
+const takeaways = computed(() => selectTakeaways(props.insights))
+
+const takeawayEntries = computed(() => [takeaways.value.strength, takeaways.value.caution]
+  .filter((finding): finding is NonNullable<typeof finding> => Boolean(finding))
+  .map((finding) => ({ label: finding.title, value: finding.effect })))
+
+const predictiveEntries = computed(() => props.insights.predictive.signals?.map((signal) => ({
+  label: signal.feature,
+  value: signal.marginalEffect * 100,
+})) ?? [])
+
 const predictiveCopy = (predictive: PredictiveSection) => ({
   insufficient: {
     title: "Not enough graded history for predictive signals",
@@ -56,14 +102,62 @@ const signalEffect = (value: number) => `${value > 0 ? "+" : ""}${(value * 100).
 
 <template>
   <div class="insights">
+    <section
+      v-if="takeawayEntries.length || predictiveEntries.length"
+      class="takeaway-band"
+    >
+      <header class="section-head">
+        <div>
+          <h2>Top takeaways</h2>
+          <p class="method">The clearest associations in this scope. They describe your recorded games, not causes.</p>
+        </div>
+      </header>
+      <div class="takeaway-grid">
+        <div v-if="takeaways.strength" class="takeaway positive">
+          <FontAwesomeIcon :icon="faArrowUp" fixed-width />
+          <div>
+            <span>Stronger games</span>
+            <strong>{{ takeaways.strength.title }}</strong>
+            <p>{{ takeaways.strength.summary }}</p>
+          </div>
+        </div>
+        <div v-if="takeaways.caution" class="takeaway negative">
+          <FontAwesomeIcon :icon="faArrowDown" fixed-width />
+          <div>
+            <span>Weaker games</span>
+            <strong>{{ takeaways.caution.title }}</strong>
+            <p>{{ takeaways.caution.summary }}</p>
+          </div>
+        </div>
+        <div v-if="predictiveEntries.length" class="takeaway predictive">
+          <FontAwesomeIcon :icon="faWandMagicSparkles" fixed-width />
+          <div>
+            <span>Pregame signal</span>
+            <strong>{{ predictiveEntries[0].label }}</strong>
+            <p>Associated with an estimated {{ signalEffect(predictiveEntries[0].value / 100) }} win-chance movement.</p>
+          </div>
+        </div>
+      </div>
+      <EffectChart
+        v-if="takeawayEntries.length"
+        :entries="takeawayEntries"
+        unit="grade"
+      />
+      <EffectChart
+        v-if="predictiveEntries.length"
+        :entries="predictiveEntries"
+        unit="percentage-points"
+      />
+    </section>
+
     <section v-for="entry in sections" :key="entry.title" class="insight-band">
       <header class="section-head">
         <div>
           <h2>{{ entry.title }}</h2>
           <p v-if="entry.kind === 'predictive'" class="method">
-            Chronological ridge-logistic validation using pregame-known context only.
+            Signals available before a game starts, tested against later games.
           </p>
-          <p v-else-if="entry.section" class="method">{{ entry.section.method }}</p>
+          <p v-else-if="entry.section" class="method">{{ sectionIntro(entry.section) }}</p>
         </div>
         <span v-if="entry.time" class="timezone">
           Times use this device's current timezone: {{ timezoneLabel }}.
@@ -113,6 +207,65 @@ const signalEffect = (value: number) => `${value > 0 ? "+" : ""}${(value * 100).
   min-width: 0;
   padding-top: var(--space-2);
   border-top: 1px solid var(--border-subtle);
+}
+
+.takeaway-band {
+  padding: var(--space-4);
+  border: 1px solid rgba(200, 170, 109, 0.45);
+  background: var(--surface-1);
+}
+
+.takeaway-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.takeaway {
+  display: flex;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3);
+  border-left: 3px solid var(--gold);
+  background: var(--surface-2);
+  font-size: 12px;
+}
+
+.takeaway.positive {
+  border-color: var(--win);
+}
+
+.takeaway.negative {
+  border-color: var(--loss);
+}
+
+.takeaway.predictive {
+  border-color: var(--cyan);
+}
+
+.takeaway strong,
+.takeaway span,
+.takeaway p {
+  display: block;
+}
+
+.takeaway strong {
+  margin-top: 2px;
+  color: var(--text-primary);
+  font-family: var(--font-heading);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.takeaway span,
+.takeaway p {
+  color: var(--text-secondary);
+}
+
+.takeaway p {
+  margin: var(--space-1) 0 0;
+  line-height: 1.45;
 }
 
 .section-head {

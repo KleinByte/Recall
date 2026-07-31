@@ -21,14 +21,14 @@ export const CC_SECONDS_PER_MINUTE_FULL = 20
 export const CS_PER_MINUTE_FULL: Record<ModeFamily, number> = { sr: 10, aram: 5, other: 10 }
 
 export const STYLE_AXIS_LABELS: Record<string, string> = {
-  aggression: "Kills vs assists",
-  damage: "Damage trade",
-  durability: "Mitigation share",
-  farming: "CS pace",
-  objectives: "Objective focus",
-  vision: "Vision pace",
-  sustain: "Healing activity",
-  teamfighting: "CC pace",
+  aggression: "Aggression",
+  damage: "Damage",
+  durability: "Durability",
+  farming: "Economy",
+  objectives: "Objectives",
+  vision: "Vision",
+  sustain: "Sustain",
+  teamfighting: "Teamfighting",
 }
 
 export interface PerGameAxisInput {
@@ -136,28 +136,28 @@ function axesFor(averages: StyleAverages, family: ModeFamily): StyleAxis[] {
   const shared: StyleAxis[] = [
     {
       key: "aggression",
-      label: "Kills vs assists",
+      label: "Aggression",
       value: clamp(averages.aggression),
       description: "Share of your kill involvement that is kills, not assists",
       formula: "kills / (kills + assists)",
     },
     {
       key: "damage",
-      label: "Damage trade",
+      label: "Damage",
       value: clamp(averages.damage),
       description: "Damage dealt against damage taken",
       formula: "damageToChampions / (damageToChampions + damageTaken)",
     },
     {
       key: "durability",
-      label: "Mitigation share",
+      label: "Durability",
       value: clamp(averages.durability),
       description: "Damage you shrugged off against damage that landed",
       formula: "damageSelfMitigated / (damageSelfMitigated + damageTaken)",
     },
     {
       key: "farming",
-      label: "CS pace",
+      label: "Economy",
       value: rate(averages.csPerMin, CS_PER_MINUTE_FULL[family]),
       description: `Display ring full at ${CS_PER_MINUTE_FULL[family]} CS/min; not a population benchmark`,
       formula: "(totalMinionsKilled + neutralMinions) / minutes",
@@ -169,14 +169,14 @@ function axesFor(averages: StyleAverages, family: ModeFamily): StyleAxis[] {
       ...shared,
       {
         key: "objectives",
-        label: "Objective focus",
+        label: "Objectives",
         value: clamp(averages.objectives),
         description: "Damage into objectives against damage into champions",
         formula: "damageObjectives / (damageObjectives + damageToChampions)",
       },
       {
         key: "vision",
-        label: "Vision pace",
+        label: "Vision",
         value: rate(averages.visionPerMin, VISION_PER_MINUTE_FULL),
         description: `Vision score per minute, full at ${VISION_PER_MINUTE_FULL}`,
         formula: "visionScore / minutes",
@@ -188,14 +188,14 @@ function axesFor(averages: StyleAverages, family: ModeFamily): StyleAxis[] {
     ...shared,
     {
       key: "sustain",
-      label: "Healing activity",
+      label: "Sustain",
       value: clamp(averages.sustain),
       description: "Total heal against damage taken; includes all self-healing, not only teammate healing",
       formula: "totalHeal / (totalHeal + damageTaken)",
     },
     {
       key: "teamfighting",
-      label: "CC pace",
+      label: "Teamfighting",
       value: rate(averages.ccPerMin, CC_SECONDS_PER_MINUTE_FULL),
       description: `Crowd-control time per minute, full at ${CC_SECONDS_PER_MINUTE_FULL}s; counts only time enemies are CC'd`,
       formula: "timeCCingOthers / minutes",

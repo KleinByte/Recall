@@ -197,6 +197,13 @@ export interface StyleReport {
   earlier?: StyleProfile
 }
 
+export interface SkillStyleReport {
+  career: StyleProfile
+  recent?: StyleProfile
+  earlier?: StyleProfile
+  drift: Array<{ label: string; axes: StyleAxis[] }>
+}
+
 export interface LobbyMetric {
   key: string
   label: string
@@ -563,10 +570,11 @@ export interface SkillReportV2 {
   scope: { modes: TrackedMode[]; family: ModeFamily }
   overview: {
     summary: StatsSummary
-    style?: StyleProfile
+    style?: SkillStyleReport
     grades: GradeCount[]
     lobby?: LobbyComparison
     contribution?: ContributionShare
+    outcomes: { duration: BucketRow[]; hours: TimeBucketRow[] }
     pool?: { champions: number; games: number; coreShare: number }
     builds: Array<{ itemId: number; games: number }>
   }

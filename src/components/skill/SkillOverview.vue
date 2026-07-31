@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import GradeBadge from "../GradeBadge.vue"
+import DriftChart from "../DriftChart.vue"
 import StyleRadar from "../StyleRadar.vue"
+import StyleDeltaChart from "./StyleDeltaChart.vue"
+import OutcomeTrendChart from "./OutcomeTrendChart.vue"
 import MiniBar from "../ui/MiniBar.vue"
 import Panel from "../ui/Panel.vue"
 import StatTile from "../ui/StatTile.vue"
-import { itemIconUrl } from "../../helpers/ddragon"
+import { itemAsset } from "../../helpers/items"
 import {
   formatCompact,
   formatDecimal,
@@ -21,7 +24,7 @@ const props = defineProps<{
 }>()
 
 const summary = computed(() => props.overview.summary)
-const detail = computed(() => props.overview.style?.detail)
+const detail = computed(() => props.overview.style?.career.detail)
 const averageGrade = computed(() => gradeFromScore(summary.value.avgGradeScore))
 
 const gradeBars = computed(() => {
@@ -37,6 +40,12 @@ const gradeBars = computed(() => {
 
 const comparisonScope = (scope: "role" | "lobby") =>
   scope === "role" ? "Role opponent" : "Full lobby"
+
+const styleComparison = computed(() => {
+  const style = props.overview.style
+  if (!style?.earlier || !style.recent) return undefined
+  return { earlier: style.earlier, recent: style.recent }
+})
 </script>
 
 <template>
@@ -79,13 +88,24 @@ const comparisonScope = (scope: "role" | "lobby") =>
     <Panel
       v-if="overview.style"
       title="Playstyle"
-      :meta="`${overview.style.games} games`"
+      :meta="`${overview.style.career.games} games`"
     >
       <div class="playstyle">
-        <StyleRadar :axes="overview.style.axes" />
+        <div class="radar-side">
+          <StyleRadar
+            :axes="overview.style.career.axes"
+            :recent="styleComparison?.recent.axes"
+            primary-label="All games"
+            secondary-label="Last 10 games"
+          />
+          <div v-if="styleComparison" class="radar-legend">
+            <span class="legend-key career" /> <span>All games</span>
+            <span class="legend-key recent" /> <span>Last 10 games</span>
+          </div>
+        </div>
         <div class="axis-list">
           <div
-            v-for="axis in overview.style.axes"
+            v-for="axis in overview.style.career.axes"
             :key="axis.key"
             class="axis-row"
             :title="`${axis.description}. Formula: ${axis.formula}`"
@@ -103,6 +123,26 @@ const comparisonScope = (scope: "role" | "lobby") =>
           </p>
         </div>
       </div>
+      <section
+        v-if="styleComparison"
+        class="style-comparison"
+      >
+        <header>
+          <h3>Playstyle change</h3>
+          <p class="muted">Your last 10 games compared with the games before them.</p>
+        </header>
+        <StyleDeltaChart
+          :baseline="styleComparison.earlier.axes"
+          :recent="styleComparison.recent.axes"
+        />
+      </section>
+      <section v-if="overview.style.drift.length >= 2" class="style-drift">
+        <header>
+          <h3>Playstyle over time</h3>
+          <p class="muted">Rolling 10-game windows, oldest to newest.</p>
+        </header>
+        <DriftChart :windows="overview.style.drift" />
+      </section>
     </Panel>
 
     <Panel
@@ -127,6 +167,16 @@ const comparisonScope = (scope: "role" | "lobby") =>
     </Panel>
 
     <section class="overview-grid">
+      <Panel title="Game length">
+        <OutcomeTrendChart :rows="overview.outcomes.duration" />
+        <p class="muted footnote">Recorded win rate and game count in each duration band.</p>
+      </Panel>
+
+      <Panel title="Time of day">
+        <OutcomeTrendChart :rows="overview.outcomes.hours" />
+        <p class="muted footnote">Recorded win rate by local start-time block.</p>
+      </Panel>
+
       <Panel title="Share of your team">
         <template v-if="overview.contribution">
           <div class="rows">
@@ -166,7 +216,8 @@ const comparisonScope = (scope: "role" | "lobby") =>
       <Panel title="Most built items">
         <ul v-if="overview.builds.length" class="item-list">
           <li v-for="item in overview.builds" :key="item.itemId">
-            <img :src="itemIconUrl(item.itemId)" class="item" alt="" />
+            <img :src="itemAsset(item.itemId).iconUrl" class="item" :alt="itemAsset(item.itemId).name" />
+            <span>{{ itemAsset(item.itemId).name }}</span>
             <span class="muted numeric">{{ item.games }}×</span>
           </li>
         </ul>
@@ -215,9 +266,84 @@ const comparisonScope = (scope: "role" | "lobby") =>
 
 .playstyle {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.75fr);
+  grid-template-columns: minmax(420px, 1.6fr) minmax(260px, 0.7fr);
   gap: var(--space-5);
   align-items: start;
+}
+
+.radar-side {
+  min-width: 0;
+}
+
+.radar-legend {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.legend-key {
+  width: 12px;
+  height: 2px;
+}
+
+.legend-key.career {
+  background: var(--gold);
+}
+
+.legend-key.recent {
+  margin-left: var(--space-2);
+  background: var(--cyan);
+}
+
+.style-comparison {
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.style-drift {
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.style-drift h3,
+.style-drift p {
+  margin: 0;
+}
+
+.style-drift h3 {
+  color: var(--text-primary);
+  font-family: var(--font-heading);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.style-drift p {
+  margin-top: var(--space-1);
+  font-size: 11px;
+}
+
+.style-comparison h3,
+.style-comparison p {
+  margin: 0;
+}
+
+.style-comparison h3 {
+  color: var(--text-primary);
+  font-family: var(--font-heading);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.style-comparison p {
+  margin-top: var(--space-1);
+  font-size: 11px;
 }
 
 .axis-list,
@@ -325,6 +451,7 @@ const comparisonScope = (scope: "role" | "lobby") =>
   display: flex;
   align-items: center;
   gap: var(--space-1);
+  font-size: 12px;
 }
 
 .item {
@@ -367,7 +494,7 @@ const comparisonScope = (scope: "role" | "lobby") =>
   font-family: var(--font-numeric);
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1280px) {
   .playstyle {
     grid-template-columns: minmax(0, 1fr);
   }

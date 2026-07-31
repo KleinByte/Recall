@@ -2,7 +2,7 @@
  * Comparative and conditional skill insights from ordered observations
  */
 
-import type { InsightObservation, FinalItemObservation, ChampionPool, BuiltItem, ContributionShare } from "../database/insights-repo.js"
+import type { InsightObservation, FinalItemObservation, ChampionPool, BuiltItem, BucketRow, ContributionShare, TimeBucketRow } from "../database/insights-repo.js"
 import type { ChampionStatRow, StatsSummary, GradeCount } from "../database/matches-repo.js"
 import type { LobbyComparison } from "../database/participants-repo.js"
 import {
@@ -16,7 +16,7 @@ import {
 } from "./analytics.js"
 import { durationBucketsFor, rankChampions } from "./insights.js"
 import { STYLE_AXIS_LABELS } from "./style.js"
-import type { StyleProfile } from "./style.js"
+import type { StyleAxis, StyleProfile } from "./style.js"
 import type { TrackedMode, ModeFamily } from "./types.js"
 import { buildPredictiveSection, type PredictiveSection, type PredictiveSignal } from "./predictive-insights.js"
 export { buildPredictiveSection, type PredictiveSection, type PredictiveSignal }
@@ -1125,15 +1125,47 @@ export interface SkillReportInput {
   family: ModeFamily
   generatedAt: number
   summary: StatsSummary
-  style?: StyleProfile
+  style?: Omit<SkillStyleReport, "drift">
   grades: GradeCount[]
   lobby?: LobbyComparison
   contribution?: ContributionShare
+  duration: BucketRow[]
+  hours: TimeBucketRow[]
   pool?: ChampionPool
   builds: BuiltItem[]
   observations: InsightObservation[]
   championStats: ChampionStatRow[]
   itemObservations: FinalItemObservation[]
+}
+
+export interface SkillStyleReport {
+  career: StyleProfile
+  recent?: StyleProfile
+  earlier?: StyleProfile
+  drift: Array<{ label: string; axes: StyleAxis[] }>
+}
+
+function buildStyleDrift(
+  observations: InsightObservation[],
+  axes: StyleAxis[],
+): Array<{ label: string; axes: StyleAxis[] }> {
+  const ordered = observations
+    .filter((observation) => observation.gradeScore !== undefined)
+    .sort((left, right) => left.playedAt - right.playedAt || left.gameId - right.gameId)
+    .slice(-60)
+
+  const windows: Array<{ label: string; axes: StyleAxis[] }> = []
+  for (let start = 0; start + TREND_WINDOW_SIZE <= ordered.length; start += TREND_WINDOW_SIZE) {
+    const games = ordered.slice(start, start + TREND_WINDOW_SIZE)
+    windows.push({
+      label: `Games ${start + 1}-${start + games.length}`,
+      axes: axes.map((axis) => ({
+        ...axis,
+        value: games.reduce((total, game) => total + (game.styleAxes[axis.key] ?? 0), 0) / games.length,
+      })),
+    })
+  }
+  return windows
 }
 
 export interface SkillReportV2 {
@@ -1142,10 +1174,11 @@ export interface SkillReportV2 {
   scope: { modes: TrackedMode[]; family: ModeFamily }
   overview: {
     summary: StatsSummary
-    style?: StyleProfile
+    style?: SkillStyleReport
     grades: GradeCount[]
     lobby?: LobbyComparison
     contribution?: ContributionShare
+    outcomes: { duration: BucketRow[]; hours: TimeBucketRow[] }
     pool?: { champions: number; games: number; coreShare: number }
     builds: Array<{ itemId: number; games: number }>
   }
@@ -1163,7 +1196,7 @@ export interface SkillReportV2 {
 export function buildSkillReport(input: SkillReportInput): SkillReportV2 {
   const {
     modes, family, generatedAt, summary, style, grades, lobby, contribution,
-    pool, builds, observations, championStats, itemObservations,
+    pool, builds, observations, championStats, itemObservations, duration, hours,
   } = input
 
   const baseline = summary.avgGradeScore ?? 0
@@ -1188,16 +1221,23 @@ export function buildSkillReport(input: SkillReportInput): SkillReportV2 {
     findings: conds.sections.flatMap((s) => s.findings),
   }
 
+  const trends = buildTrendFindings(observations, family)
+  const overviewStyle = input.style && {
+    ...input.style,
+    drift: buildStyleDrift(observations, input.style.career.axes),
+  }
+
   return {
     version: 2,
     generatedAt,
     scope: { modes, family },
     overview: {
       summary,
-      style,
+      style: overviewStyle,
       grades,
       lobby,
       contribution,
+      outcomes: { duration, hours },
       pool: pool
         ? { champions: pool.champions, games: pool.games, coreShare: pool.coreShare }
         : undefined,
@@ -1208,7 +1248,7 @@ export function buildSkillReport(input: SkillReportInput): SkillReportV2 {
       conditions,
       predictive: buildPredictiveSection(observations),
       duration: buildDurationInsights(observations),
-      trends: buildTrendFindings(observations, family),
+      trends,
       champions: buildChampionFindings(observations, championStats, baseline, family),
       items: buildItemFindings(itemObservations),
     },

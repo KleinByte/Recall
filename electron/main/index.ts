@@ -101,7 +101,7 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
 if (os.release().startsWith("6.1")) app.disableHardwareAcceleration()
 
 // Set application name for Windows 10+ notifications
-if (process.platform === "win32") app.setAppUserModelId(app.getName())
+if (process.platform === "win32") app.setAppUserModelId("com.kleinbyte.recall")
 
 if (!app.requestSingleInstanceLock()) {
   app.quit()
@@ -1548,16 +1548,30 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
       const scoped = withPuuid(filter)
       const repo = getRepository()
       const insightsRepo = getInsights()
+      const timeOfDay = insightsRepo.getTimeOfDay(scoped)
+      const careerStyle = buildStyleProfile(repo.getStyleAverages(scoped), family)
+      const recentStyle = buildStyleProfile(
+        repo.getStyleAverages(scoped, { limit: 10 }),
+        family,
+      )
+      const earlierStyle = buildStyleProfile(
+        repo.getStyleAverages(scoped, { offset: 10 }),
+        family,
+      )
 
       return buildSkillReport({
         modes: filter.modes ?? (filter.mode ? [filter.mode] : []),
         family,
         generatedAt: Date.now(),
         summary: repo.getSummary(scoped),
-        style: buildStyleProfile(repo.getStyleAverages(scoped), family),
+        style: careerStyle
+          ? { career: careerStyle, recent: recentStyle, earlier: earlierStyle }
+          : undefined,
         grades: repo.getGradeDistribution(scoped),
         lobby: getParticipants().getLobbyComparison(scoped),
         contribution: insightsRepo.getTeamContribution(scoped),
+        duration: insightsRepo.getDurationBuckets(scoped, family),
+        hours: timeOfDay.hours,
         pool: insightsRepo.getChampionPool(scoped),
         builds: insightsRepo.getBuildPatterns(scoped, 8),
         observations: insightsRepo.getObservations(scoped),

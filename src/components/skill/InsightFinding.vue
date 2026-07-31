@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { computed } from "vue"
+import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
+import { faArrowDown, faArrowUp, faChartLine } from "@fortawesome/free-solid-svg-icons"
+import { itemAsset } from "../../helpers/items"
 import type { InsightFinding } from "../../types/stats"
 
 const props = defineProps<{
@@ -50,6 +53,25 @@ const direction = computed(() => {
   return props.finding.effect > 0 ? "positive" : props.finding.effect < 0 ? "negative" : "neutral"
 })
 
+const item = computed(() => {
+  const match = /^item:(\d+)$/.exec(props.finding.key)
+  return match ? itemAsset(Number(match[1])) : undefined
+})
+
+const displayTitle = computed(() => item.value?.name ?? props.finding.title)
+
+const playerLabel = computed(() => {
+  if (props.finding.unit === "probability") return "Estimated win chance"
+  if (direction.value === "positive") return "Stronger games"
+  if (direction.value === "negative") return "Weaker games"
+  return "No clear difference"
+})
+
+const effectWidth = computed(() => {
+  const scale = props.finding.unit === "grade" ? 2 : 0.2
+  return `${Math.min(100, Math.abs(props.finding.effect) / scale * 100)}%`
+})
+
 function formatSigned(value: number) {
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}`
 }
@@ -58,11 +80,25 @@ function formatSigned(value: number) {
 <template>
   <article class="finding">
     <header class="finding-head">
-      <h3>{{ finding.title }}</h3>
+      <div class="finding-title">
+        <img v-if="item" :src="item.iconUrl" :alt="item.name" class="item-icon" />
+        <FontAwesomeIcon
+          v-else
+          :icon="direction === 'positive' ? faArrowUp : direction === 'negative' ? faArrowDown : faChartLine"
+          class="finding-icon"
+          :class="direction"
+        />
+        <h3>{{ displayTitle }}</h3>
+      </div>
       <span class="effect numeric" :class="direction">{{ effectLabel }}</span>
     </header>
 
+    <p class="player-label" :class="direction">{{ playerLabel }}</p>
     <p class="summary">{{ finding.summary }}</p>
+
+    <div class="effect-meter" :class="direction" aria-hidden="true">
+      <span :style="{ width: effectWidth }" />
+    </div>
 
     <div class="evidence-row">
       <span class="evidence">{{ evidenceLabel }}</span>
@@ -96,6 +132,33 @@ function formatSigned(value: number) {
   gap: var(--space-3);
 }
 
+.finding-title {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: var(--space-2);
+}
+
+.finding-icon,
+.item-icon {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+}
+
+.finding-icon.positive {
+  color: var(--win);
+}
+
+.finding-icon.negative {
+  color: var(--loss);
+}
+
+.item-icon {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
 h3 {
   margin: 0;
   color: var(--text-primary);
@@ -124,6 +187,42 @@ h3 {
   font-size: 12px;
   line-height: 1.55;
   overflow-wrap: anywhere;
+}
+
+.player-label {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.player-label.positive {
+  color: var(--win);
+}
+
+.player-label.negative {
+  color: var(--loss);
+}
+
+.effect-meter {
+  height: 4px;
+  margin: 0 0 var(--space-3);
+  overflow: hidden;
+  background: var(--surface-3);
+}
+
+.effect-meter span {
+  display: block;
+  height: 100%;
+  background: var(--text-muted);
+}
+
+.effect-meter.positive span {
+  background: var(--win);
+}
+
+.effect-meter.negative span {
+  background: var(--loss);
 }
 
 .evidence-row {
