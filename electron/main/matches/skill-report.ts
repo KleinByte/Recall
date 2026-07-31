@@ -28,6 +28,7 @@ export interface InsightFinding {
   effect: number
   unit: "grade" | "probability" | "percentile" | "rate"
   interval?: Interval
+  rateInterval?: Interval
   scope: string
   caveat?: string
 }
@@ -55,8 +56,9 @@ export interface PlayingConditionsReport {
 
 export interface DurationInsightsReport extends InsightSection {}
 
-const STRONG_GAME_MIN_GRADED = 32
+const STRONG_GAME_MIN_GRADED = 30
 const STRONG_GAME_MIN_EACH_SIDE = 8
+const CONDITIONS_MIN_GRADED = 30
 const ROLE_MIN_GRADED = 20
 const BUCKET_MIN_GRADED = 8
 
@@ -105,31 +107,35 @@ export function buildBestGamePattern(
   ]
 
   for (const key of metricKeys) {
-    // Determine reference population: same-role if >=20 graded, otherwise all graded
-    const role = graded[0]?.role
-    const sameRoleGraded = role
-      ? graded.filter((obs) => obs.role === role)
-      : []
+    // Normalize each observation's metric using its own role's history when that role has >=20 graded
+    const strongPercentiles: number[] = []
+    const nonStrongPercentiles: number[] = []
 
-    const reference =
-      sameRoleGraded.length >= ROLE_MIN_GRADED ? sameRoleGraded : graded
+    for (const obs of strong) {
+      const sameRoleGraded = graded.filter((o) => o.role === obs.role)
+      const reference = sameRoleGraded.length >= ROLE_MIN_GRADED ? sameRoleGraded : graded
+      const referenceValues = reference
+        .map((o) => o.metrics[key])
+        .filter((v): v is number => v !== undefined)
 
-    const referenceValues = reference
-      .map((obs) => obs.metrics[key])
-      .filter((v): v is number => v !== undefined)
+      const metricValue = obs.metrics[key]
+      if (metricValue !== undefined && referenceValues.length > 0) {
+        strongPercentiles.push(empiricalPercentile(referenceValues, metricValue))
+      }
+    }
 
-    if (referenceValues.length === 0) continue
+    for (const obs of nonStrong) {
+      const sameRoleGraded = graded.filter((o) => o.role === obs.role)
+      const reference = sameRoleGraded.length >= ROLE_MIN_GRADED ? sameRoleGraded : graded
+      const referenceValues = reference
+        .map((o) => o.metrics[key])
+        .filter((v): v is number => v !== undefined)
 
-    // Convert to percentiles
-    const strongPercentiles = strong
-      .map((obs) => obs.metrics[key])
-      .filter((v): v is number => v !== undefined)
-      .map((v) => empiricalPercentile(referenceValues, v))
-
-    const nonStrongPercentiles = nonStrong
-      .map((obs) => obs.metrics[key])
-      .filter((v): v is number => v !== undefined)
-      .map((v) => empiricalPercentile(referenceValues, v))
+      const metricValue = obs.metrics[key]
+      if (metricValue !== undefined && referenceValues.length > 0) {
+        nonStrongPercentiles.push(empiricalPercentile(referenceValues, metricValue))
+      }
+    }
 
     if (strongPercentiles.length === 0 || nonStrongPercentiles.length === 0) {
       continue
@@ -194,24 +200,74 @@ export function buildPlayingConditions(
   )
 
   const graded = sessions.filter((s) => s.observation.gradeScore !== undefined)
-  const scopeWinRate = graded.filter((s) => s.observation.win).length / Math.max(1, graded.length)
+  
+  // Require at least 30 graded games overall
+  if (graded.length < CONDITIONS_MIN_GRADED) {
+    return {
+      sections: [
+        {
+          key: "timeOfDay",
+          title: "Time of Day (device local time)",
+          method: "Hour-based performance",
+          eligible: false,
+          neededGames: CONDITIONS_MIN_GRADED,
+          findings: [],
+        },
+        {
+          key: "dayOfWeek",
+          title: "Day of Week",
+          method: "Weekday performance",
+          eligible: false,
+          neededGames: CONDITIONS_MIN_GRADED,
+          findings: [],
+        },
+        {
+          key: "sessionGame",
+          title: "Session Position",
+          method: "Performance by game in session",
+          eligible: false,
+          neededGames: CONDITIONS_MIN_GRADED,
+          findings: [],
+        },
+        {
+          key: "previousResult",
+          title: "Previous Game Result",
+          method: "Performance after wins vs losses",
+          eligible: false,
+          neededGames: CONDITIONS_MIN_GRADED,
+          findings: [],
+        },
+        {
+          key: "restTime",
+          title: "Rest Between Games",
+          method: "Performance by break duration",
+          eligible: false,
+          neededGames: CONDITIONS_MIN_GRADED,
+          findings: [],
+        },
+      ],
+    }
+  }
+
+  const scopeGradeBaseline = graded.reduce((sum, s) => sum + s.observation.gradeScore!, 0) / graded.length
+  const scopeWinRate = graded.filter((s) => s.observation.win).length / graded.length
 
   const sections: InsightSection[] = []
 
-  // Time of day buckets
-  sections.push(buildTimeOfDaySection(graded, scopeWinRate))
+  // Time of day buckets (8 three-hour blocks)
+  sections.push(buildTimeOfDaySection(graded, scopeGradeBaseline, scopeWinRate))
 
   // Day of week buckets
-  sections.push(buildDayOfWeekSection(graded, scopeWinRate))
+  sections.push(buildDayOfWeekSection(graded, scopeGradeBaseline, scopeWinRate))
 
-  // Session game number buckets
-  sections.push(buildSessionGameSection(graded, scopeWinRate))
+  // Session game number buckets (1, 2, 3, 4+)
+  sections.push(buildSessionGameSection(graded, scopeGradeBaseline, scopeWinRate))
 
   // Previous result condition
-  sections.push(buildPreviousResultSection(graded, scopeWinRate))
+  sections.push(buildPreviousResultSection(graded, scopeGradeBaseline, scopeWinRate))
 
-  // Rest time buckets
-  sections.push(buildRestTimeSection(graded, scopeWinRate))
+  // Rest time buckets (<15, 15-45, 45-90, new session)
+  sections.push(buildRestTimeSection(graded, scopeGradeBaseline, scopeWinRate))
 
   return { sections }
 }
@@ -316,13 +372,19 @@ export function buildDurationInsights(
 
 function buildTimeOfDaySection(
   sessions: ReturnType<typeof sessionize<any>>,
+  scopeGradeBaseline: number,
   scopeWinRate: number,
 ): InsightSection {
+  // 8 three-hour blocks using device local time
   const buckets = [
-    { label: "Night (0-6)", hours: [0, 1, 2, 3, 4, 5] },
-    { label: "Morning (6-12)", hours: [6, 7, 8, 9, 10, 11] },
-    { label: "Afternoon (12-18)", hours: [12, 13, 14, 15, 16, 17] },
-    { label: "Evening (18-24)", hours: [18, 19, 20, 21, 22, 23] },
+    { label: "0-3", hours: [0, 1, 2] },
+    { label: "3-6", hours: [3, 4, 5] },
+    { label: "6-9", hours: [6, 7, 8] },
+    { label: "9-12", hours: [9, 10, 11] },
+    { label: "12-15", hours: [12, 13, 14] },
+    { label: "15-18", hours: [15, 16, 17] },
+    { label: "18-21", hours: [18, 19, 20] },
+    { label: "21-24", hours: [21, 22, 23] },
   ]
 
   const findings: InsightFinding[] = []
@@ -335,14 +397,14 @@ function buildTimeOfDaySection(
 
     if (games.length < BUCKET_MIN_GRADED) continue
 
-    const finding = buildConditionFinding(bucket.label, games, scopeWinRate, sessions.length)
+    const finding = buildConditionFinding(bucket.label, games, scopeGradeBaseline, scopeWinRate, sessions)
     findings.push(finding)
   }
 
   return {
     key: "timeOfDay",
-    title: "Time of Day",
-    method: "Hour-based performance",
+    title: "Time of Day (device local time)",
+    method: "Hour-based performance using device local time",
     eligible: findings.length > 0,
     neededGames: BUCKET_MIN_GRADED,
     findings,
@@ -351,6 +413,7 @@ function buildTimeOfDaySection(
 
 function buildDayOfWeekSection(
   sessions: ReturnType<typeof sessionize<any>>,
+  scopeGradeBaseline: number,
   scopeWinRate: number,
 ): InsightSection {
   const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
@@ -361,7 +424,7 @@ function buildDayOfWeekSection(
 
     if (games.length < BUCKET_MIN_GRADED) continue
 
-    const finding = buildConditionFinding(days[dayIndex], games, scopeWinRate, sessions.length)
+    const finding = buildConditionFinding(days[dayIndex], games, scopeGradeBaseline, scopeWinRate, sessions)
     findings.push(finding)
   }
 
@@ -377,12 +440,14 @@ function buildDayOfWeekSection(
 
 function buildSessionGameSection(
   sessions: ReturnType<typeof sessionize<any>>,
+  scopeGradeBaseline: number,
   scopeWinRate: number,
 ): InsightSection {
   const buckets = [
     { label: "First game", filter: (s: typeof sessions[0]) => s.sessionGame === 1 },
     { label: "Second game", filter: (s: typeof sessions[0]) => s.sessionGame === 2 },
-    { label: "Third+ game", filter: (s: typeof sessions[0]) => s.sessionGame >= 3 },
+    { label: "Third game", filter: (s: typeof sessions[0]) => s.sessionGame === 3 },
+    { label: "Fourth+ game", filter: (s: typeof sessions[0]) => s.sessionGame >= 4 },
   ]
 
   const findings: InsightFinding[] = []
@@ -392,7 +457,7 @@ function buildSessionGameSection(
 
     if (games.length < BUCKET_MIN_GRADED) continue
 
-    const finding = buildConditionFinding(bucket.label, games, scopeWinRate, sessions.length)
+    const finding = buildConditionFinding(bucket.label, games, scopeGradeBaseline, scopeWinRate, sessions)
     findings.push(finding)
   }
 
@@ -408,18 +473,19 @@ function buildSessionGameSection(
 
 function buildPreviousResultSection(
   sessions: ReturnType<typeof sessionize<any>>,
+  scopeGradeBaseline: number,
   scopeWinRate: number,
 ): InsightSection {
   const buckets = [
     {
       label: "After win",
       filter: (s: typeof sessions[0], index: number) =>
-        s.sessionGame > 1 && index > 0 && sessions[index - 1].observation.win,
+        s.sessionGame > 1 && index > 0 && sessions[index - 1].observation.win && sessions[index - 1].session === s.session,
     },
     {
       label: "After loss",
       filter: (s: typeof sessions[0], index: number) =>
-        s.sessionGame > 1 && index > 0 && !sessions[index - 1].observation.win,
+        s.sessionGame > 1 && index > 0 && !sessions[index - 1].observation.win && sessions[index - 1].session === s.session,
     },
   ]
 
@@ -430,14 +496,14 @@ function buildPreviousResultSection(
 
     if (games.length < BUCKET_MIN_GRADED) continue
 
-    const finding = buildConditionFinding(bucket.label, games, scopeWinRate, sessions.length)
+    const finding = buildConditionFinding(bucket.label, games, scopeGradeBaseline, scopeWinRate, sessions)
     findings.push(finding)
   }
 
   return {
     key: "previousResult",
     title: "Previous Game Result",
-    method: "Performance after wins vs losses",
+    method: "Performance after wins vs losses within same session",
     eligible: findings.length > 0,
     neededGames: BUCKET_MIN_GRADED,
     findings,
@@ -446,17 +512,22 @@ function buildPreviousResultSection(
 
 function buildRestTimeSection(
   sessions: ReturnType<typeof sessionize<any>>,
+  scopeGradeBaseline: number,
   scopeWinRate: number,
 ): InsightSection {
   const buckets = [
-    { label: "No break", filter: (s: typeof sessions[0]) => !s.restMinutes || s.restMinutes < 10 },
+    { label: "Rest <15 min", filter: (s: typeof sessions[0]) => s.restMinutes !== undefined && s.restMinutes < 15 },
     {
-      label: "Short break (10-30 min)",
-      filter: (s: typeof sessions[0]) => s.restMinutes && s.restMinutes >= 10 && s.restMinutes < 30,
+      label: "Rest 15-45 min",
+      filter: (s: typeof sessions[0]) => s.restMinutes !== undefined && s.restMinutes >= 15 && s.restMinutes < 45,
     },
     {
-      label: "Long break (30+ min)",
-      filter: (s: typeof sessions[0]) => s.restMinutes && s.restMinutes >= 30,
+      label: "Rest 45-90 min",
+      filter: (s: typeof sessions[0]) => s.restMinutes !== undefined && s.restMinutes >= 45 && s.restMinutes <= 90,
+    },
+    {
+      label: "New session",
+      filter: (s: typeof sessions[0]) => s.sessionGame === 1,
     },
   ]
 
@@ -467,14 +538,14 @@ function buildRestTimeSection(
 
     if (games.length < BUCKET_MIN_GRADED) continue
 
-    const finding = buildConditionFinding(bucket.label, games, scopeWinRate, sessions.length)
+    const finding = buildConditionFinding(bucket.label, games, scopeGradeBaseline, scopeWinRate, sessions)
     findings.push(finding)
   }
 
   return {
     key: "restTime",
     title: "Rest Between Games",
-    method: "Performance by break duration",
+    method: "Performance by break duration (>90 min or missing end time starts new session)",
     eligible: findings.length > 0,
     neededGames: BUCKET_MIN_GRADED,
     findings,
@@ -484,41 +555,59 @@ function buildRestTimeSection(
 function buildConditionFinding(
   label: string,
   games: Array<{ observation: InsightObservation }>,
+  scopeGradeBaseline: number,
   scopeWinRate: number,
-  totalGames: number,
+  allSessions: Array<{ observation: InsightObservation }>,
 ): InsightFinding {
   const wins = games.filter((g) => g.observation.win).length
   const count = games.length
   const rawRate = wins / count
-  const interval = wilsonInterval(wins, count)
+  const rateInterval = wilsonInterval(wins, count)
   const adjustedRate = shrinkRate(wins, count, scopeWinRate)
-  const adjustedDelta = adjustedRate - scopeWinRate
+  const adjustedRateDelta = adjustedRate - scopeWinRate
 
   const grades = games
     .filter((g) => g.observation.gradeScore !== undefined)
     .map((g) => g.observation.gradeScore!)
+  
+  const bucketMean = grades.length > 0 ? grades.reduce((sum, g) => sum + g, 0) / grades.length : scopeGradeBaseline
+  
+  // Adjusted grade formula: (n * bucketMean + 12 * scopeMean) / (n + 12)
+  const adjustedGrade = (grades.length * bucketMean + 12 * scopeGradeBaseline) / (grades.length + 12)
+  const adjustedGradeDelta = adjustedGrade - scopeGradeBaseline
 
-  const avgGrade = grades.length > 0 ? grades.reduce((sum, g) => sum + g, 0) / grades.length : 0
+  // Bootstrap grade delta against selected-scope graded history
+  const allGrades = allSessions
+    .filter((s) => s.observation.gradeScore !== undefined)
+    .map((s) => s.observation.gradeScore!)
+  
+  const gradeInterval = grades.length >= BUCKET_MIN_GRADED && allGrades.length > grades.length
+    ? bootstrapDifference(grades, allGrades, `condition:${label}`)
+    : undefined
 
-  // Bootstrap comparison would require reference bucket - simplified for conditions
-  const includesZero = interval.low <= scopeWinRate && interval.high >= scopeWinRate
+  // Directional copy only if bucket has >=8 graded games and grade interval excludes zero
+  const includesZero = !gradeInterval || (gradeInterval.low <= 0 && gradeInterval.high >= 0)
+  const hasEnoughGames = grades.length >= BUCKET_MIN_GRADED
+  
   const summary =
-    count < BUCKET_MIN_GRADED || includesZero
-      ? `${label}: ${count} games, no clear pattern.`
-      : `${label} associated with ${adjustedDelta > 0 ? "higher" : "lower"} win rate.`
+    !hasEnoughGames || includesZero
+      ? `${label}: ${count} games, insufficient data for grade comparison.`
+      : `${label} associated with ${adjustedGradeDelta > 0 ? "higher" : "lower"} grades.`
 
   return {
     key: label,
     title: label,
     summary,
     evidenceLevel: "descriptive",
-    confidence: assessConfidence(count, interval, "probability"),
+    confidence: assessConfidence(count, gradeInterval, "grade"),
     games: count,
-    eligibleGames: totalGames,
-    effect: adjustedRate,
-    unit: "probability",
-    interval,
-    scope: `${count} games`,
+    eligibleGames: allSessions.length,
+    effect: adjustedGradeDelta,
+    unit: "grade",
+    interval: gradeInterval,
+    rateInterval,
+    scope: `${count} games (raw rate ${(rawRate * 100).toFixed(1)}%, adjusted rate ${(adjustedRate * 100).toFixed(1)}%)`,
+    caveat: hasEnoughGames && includesZero ? "Grade difference may be due to chance" : undefined,
   }
 }
 
