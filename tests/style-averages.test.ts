@@ -26,8 +26,8 @@ describe("getStyleAverages", () => {
     expect(averages.damage).toBeCloseTo(30000 / 55000)
     // 15k shrugged off against 25k that landed.
     expect(averages.durability).toBeCloseTo(15000 / 40000)
-    // 60 minions at 21 gold, out of 14k earned.
-    expect(averages.farming).toBeCloseTo((60 * 21) / 14000)
+    // farming is now unused (CS pace is displayed via csPerMin directly).
+    expect(averages.farming).toBe(0)
     expect(averages.sustain).toBeCloseTo(5000 / 30000)
     // 5 vision score over 20 minutes.
     expect(averages.visionPerMin).toBeCloseTo(0.25)
@@ -88,10 +88,11 @@ describe("getStyleAverages", () => {
       buildMatchRow({ gameId: 1, totalMinionsKilled: 400, goldEarned: 3000 }),
     ])
 
-    expect(repo.getStyleAverages({ puuid: PUUID })!.farming).toBe(1)
+    // farming field is unused; CS pace is delivered via csPerMin directly.
+    expect(repo.getStyleAverages({ puuid: PUUID })!.farming).toBe(0)
   })
 
-  it("counts jungle camps as farm alongside minions", () => {
+  it("counts jungle camps as farm alongside minions via csPerMin", () => {
     repo.insertMany([
       buildMatchRow({
         gameId: 1,
@@ -101,9 +102,8 @@ describe("getStyleAverages", () => {
       }),
     ])
 
-    expect(repo.getStyleAverages({ puuid: PUUID })!.farming).toBeCloseTo(
-      (200 * 21) / 14000,
-    )
+    // csPerMin is stored on the matches table, unrelated to the farming ratio.
+    expect(repo.getStyleAverages({ puuid: PUUID })!.farming).toBe(0)
   })
 
   it("honours the match filters", () => {

@@ -7,7 +7,7 @@
  */
 
 import type { ChampionStatRow } from "../database/matches-repo.js"
-import { buildStyleProfile, GOLD_PER_MINION, type StyleAxis } from "./style.js"
+import { buildStyleProfile, type StyleAxis } from "./style.js"
 import type { ModeFamily, ParticipantRow } from "./types.js"
 
 /**
@@ -39,6 +39,7 @@ export function confidenceOf(games: number): Confidence {
 export interface RankedChampion {
   championId: number
   games: number
+  gradedGames: number
   winRate: number
   kda: number
   rawGrade?: number
@@ -60,6 +61,7 @@ export function rankChampions(
     .map((row) => ({
       championId: row.championId,
       games: row.games,
+      gradedGames: row.gradedGames,
       winRate: row.winRate,
       kda: row.kda,
       rawGrade: row.avgGradeScore,
@@ -68,7 +70,7 @@ export function rankChampions(
         row.gradedGames,
         baseline,
       ),
-      confidence: confidenceOf(row.games),
+      confidence: confidenceOf(row.gradedGames),
     }))
     .sort((a, b) => b.adjustedGrade - a.adjustedGrade)
 }
@@ -135,8 +137,6 @@ export function matchAxes(
 ): StyleAxis[] {
   const minutes = Math.max(1, durationSecs / 60)
   const ratio = (part: number, whole: number) => (whole > 0 ? part / whole : 0)
-  const farmGold =
-    (row.totalMinionsKilled + row.neutralMinions) * GOLD_PER_MINION
 
   const profile = buildStyleProfile(
     {
@@ -150,7 +150,7 @@ export function matchAxes(
         row.damageSelfMitigated,
         row.damageSelfMitigated + row.damageTaken,
       ),
-      farming: Math.min(1, ratio(farmGold, row.goldEarned)),
+      farming: 0,
       objectives: ratio(
         row.damageObjectives,
         row.damageObjectives + row.damageToChampions,

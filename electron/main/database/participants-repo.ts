@@ -27,6 +27,7 @@ export interface LobbyMetric {
   averageRank: number
   /** 1 means top of every lobby, 0 means bottom of every lobby. */
   percentile: number
+  scope: "role" | "lobby"
 }
 
 export interface LobbyComparison {
@@ -168,10 +169,10 @@ const INSERT_TEAM_SQL = `
  * These are raw totals rather than rates because every player in a game played
  * the same number of minutes, so the comparison is already fair.
  */
-const METRICS: { key: string; label: string; expression: string }[] = [
+const METRICS: { key: string; label: string; expression: string; roleScoped?: boolean }[] = [
   { key: "damage", label: "Damage dealt", expression: "damage_to_champions" },
   { key: "damageTaken", label: "Damage taken", expression: "damage_taken" },
-  { key: "gold", label: "Gold earned", expression: "gold_earned" },
+  { key: "gold", label: "Gold earned", expression: "gold_earned", roleScoped: true },
   {
     key: "kda",
     label: "KDA",
@@ -186,8 +187,9 @@ const METRICS: { key: string; label: string; expression: string }[] = [
     key: "cs",
     label: "Creep score",
     expression: "total_minions_killed + neutral_minions",
+    roleScoped: true,
   },
-  { key: "vision", label: "Vision score", expression: "vision_score" },
+  { key: "vision", label: "Vision score", expression: "vision_score", roleScoped: true },
   { key: "objectives", label: "Objective damage", expression: "damage_objectives" },
 ]
 
@@ -771,18 +773,59 @@ export class ParticipantsRepository {
 
     const where = conditions.join(" AND ")
 
+    const isSrFamily =
+      filter.modeFamily === "sr" ||
+      (filter.modes ?? []).every((mode) => mode.startsWith("sr_")) ||
+      (filter.mode?.startsWith("sr_") ?? false)
+
     const metrics = METRICS.map((metric) => {
       const mine = qualify(metric.expression, "me")
       const theirs = qualify(metric.expression, "other")
 
-      const row = this.db
-        .prepare(
-          `SELECT
+      const useRole = metric.roleScoped && isSrFamily
+
+      const roleJoinCondition = useRole
+        ? `AND ${resolvedRole("other")} = ${resolvedRole("me")}
+           AND other.team_id != me.team_id`
+        : ""
+
+      const roleCountCheck = useRole
+        ? `HAVING COUNT(*) = 1`
+        : ""
+
+      // When role-scoped with exactly one opponent, compare only against them.
+      // Otherwise fall back to the full lobby.
+      const sql = useRole
+        ? `SELECT
              AVG(placing) AS averageRank,
              AVG(CASE WHEN players > 1
                       THEN (players - placing) / (players - 1.0)
                       ELSE 0.5 END) AS percentile,
-             COUNT(*) AS games
+             COUNT(*) AS games,
+             1 AS roleScoped
+           FROM (
+             SELECT
+               COUNT(*) + 1 AS players,
+               1
+                 + SUM(CASE WHEN ${theirs} > ${mine} THEN 1 ELSE 0 END)
+                 + SUM(CASE WHEN ${theirs} = ${mine} THEN 1 ELSE 0 END) / 2.0
+                 AS placing
+             FROM match_participants me
+             JOIN match_participants other
+               ON other.game_id = me.game_id AND other.puuid = me.puuid
+               ${roleJoinCondition}
+             ${join}
+             WHERE ${where}
+             GROUP BY me.game_id
+             ${roleCountCheck}
+           )`
+        : `SELECT
+             AVG(placing) AS averageRank,
+             AVG(CASE WHEN players > 1
+                      THEN (players - placing) / (players - 1.0)
+                      ELSE 0.5 END) AS percentile,
+             COUNT(*) AS games,
+             0 AS roleScoped
            FROM (
              SELECT
                COUNT(*) AS players,
@@ -796,20 +839,75 @@ export class ParticipantsRepository {
              ${join}
              WHERE ${where}
              GROUP BY me.game_id
-           )`,
-        )
-        .get(...params) as {
+           )`
+
+      const roleRow = this.db.prepare(sql).get(...params) as {
         averageRank: number | null
         percentile: number | null
         games: number
+        roleScoped: number
+      }
+
+      // If role query returned results, use them; otherwise fall back to lobby.
+      if (useRole && roleRow.games > 0) {
+        return {
+          key: metric.key,
+          label: metric.label,
+          averageRank: roleRow.averageRank ?? 0,
+          percentile: roleRow.percentile ?? 0,
+          games: roleRow.games,
+          scope: "role" as const,
+        }
+      }
+
+      // Full-lobby fallback for role-scoped metrics that had no opponent peer.
+      if (useRole) {
+        const lobbyRow = this.db
+          .prepare(
+            `SELECT
+               AVG(placing) AS averageRank,
+               AVG(CASE WHEN players > 1
+                        THEN (players - placing) / (players - 1.0)
+                        ELSE 0.5 END) AS percentile,
+               COUNT(*) AS games
+             FROM (
+               SELECT
+                 COUNT(*) AS players,
+                 1
+                   + SUM(CASE WHEN ${theirs} > ${mine} THEN 1 ELSE 0 END)
+                   + (SUM(CASE WHEN ${theirs} = ${mine} THEN 1 ELSE 0 END) - 1) / 2.0
+                   AS placing
+               FROM match_participants me
+               JOIN match_participants other
+                 ON other.game_id = me.game_id AND other.puuid = me.puuid
+               ${join}
+               WHERE ${where}
+               GROUP BY me.game_id
+             )`,
+          )
+          .get(...params) as {
+          averageRank: number | null
+          percentile: number | null
+          games: number
+        }
+
+        return {
+          key: metric.key,
+          label: metric.label,
+          averageRank: lobbyRow.averageRank ?? 0,
+          percentile: lobbyRow.percentile ?? 0,
+          games: lobbyRow.games,
+          scope: "lobby" as const,
+        }
       }
 
       return {
         key: metric.key,
         label: metric.label,
-        averageRank: row.averageRank ?? 0,
-        percentile: row.percentile ?? 0,
-        games: row.games,
+        averageRank: roleRow.averageRank ?? 0,
+        percentile: roleRow.percentile ?? 0,
+        games: roleRow.games,
+        scope: "lobby" as const,
       }
     })
 
@@ -817,14 +915,27 @@ export class ParticipantsRepository {
 
     return {
       games: metrics[0].games,
-      metrics: metrics.map(({ key, label, averageRank, percentile }) => ({
+      metrics: metrics.map(({ key, label, averageRank, percentile, scope }) => ({
         key,
         label,
         averageRank,
         percentile,
+        scope,
       })),
     }
   }
+}
+
+/**
+ * Resolves a participant's normalized role from extended_metrics_json,
+ * falling back to the stored role column.
+ */
+function resolvedRole(alias: string): string {
+  return `COALESCE(
+    json_extract(${alias}.extended_metrics_json, '$.teamPosition'),
+    CASE WHEN typeof(${alias}.role) = 'text' AND LENGTH(${alias}.role) > 0
+         THEN ${alias}.role ELSE NULL END
+  )`
 }
 
 /**

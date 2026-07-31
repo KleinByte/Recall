@@ -369,4 +369,88 @@ describe("lobby comparison", () => {
     // ARAM scope never includes Mayhem
     expect(repo.getLobbyComparison({ puuid: PUUID, modes: ["mayhem"] })!.games).toBe(1)
   })
+
+  it("compares CS against the opposing role when exactly one peer exists", () => {
+    matches.insertMany([
+      buildMatchRow({ gameId: 1, mode: "sr_ranked_solo", modeFamily: "sr" }),
+    ])
+    // Player is MIDDLE with 150 CS — second-best mid but 8th in lobby.
+    const players = Array.from({ length: 10 }, (_, i) =>
+      participant({
+        gameId: 1,
+        participantId: i + 1,
+        teamId: i < 5 ? 100 : 200,
+        isPlayer: i === 0 ? 1 : 0,
+        totalMinionsKilled: i === 0 ? 150 : (i === 5 ? 200 : 300),
+        neutralMinions: 0,
+        goldEarned: i === 0 ? 10000 : (i === 5 ? 12000 : 15000),
+        visionScore: i === 0 ? 30 : (i === 5 ? 25 : 40),
+        role: i === 0 || i === 5 ? "MIDDLE" : "TOP",
+        extendedMetrics: { teamPosition: i === 0 || i === 5 ? "MIDDLE" : "TOP" },
+      }),
+    )
+    repo.insertMany(players)
+
+    const comparison = repo.getLobbyComparison({ puuid: PUUID, modes: ["sr_ranked_solo"] })!
+    const cs = comparison.metrics.find((m) => m.key === "cs")!
+    const gold = comparison.metrics.find((m) => m.key === "gold")!
+    const vision = comparison.metrics.find((m) => m.key === "vision")!
+
+    // Compared against one opposing mid (200 CS) → player is worse → rank 2 of 2.
+    expect(cs.scope).toBe("role")
+    expect(cs.averageRank).toBe(2)
+    expect(gold.scope).toBe("role")
+    expect(vision.scope).toBe("role")
+    // Damage stays lobby-scoped.
+    expect(comparison.metrics.find((m) => m.key === "damage")!.scope).toBe("lobby")
+  })
+
+  it("falls back to lobby when role labels are missing", () => {
+    matches.insertMany([
+      buildMatchRow({ gameId: 1, mode: "sr_ranked_solo", modeFamily: "sr" }),
+    ])
+    // No role data at all — force lobby fallback.
+    const players = Array.from({ length: 10 }, (_, i) =>
+      participant({
+        gameId: 1,
+        participantId: i + 1,
+        teamId: i < 5 ? 100 : 200,
+        isPlayer: i === 0 ? 1 : 0,
+        totalMinionsKilled: i === 0 ? 150 : 100,
+        neutralMinions: 0,
+        role: undefined,
+        lane: undefined,
+        extendedMetrics: {},
+      }),
+    )
+    repo.insertMany(players)
+
+    const comparison = repo.getLobbyComparison({ puuid: PUUID, modes: ["sr_ranked_solo"] })!
+    const cs = comparison.metrics.find((m) => m.key === "cs")!
+
+    expect(cs.scope).toBe("lobby")
+  })
+
+  it("ARAM lobbies are always lobby-scoped", () => {
+    matches.insertMany([
+      buildMatchRow({ gameId: 1, mode: "aram", modeFamily: "aram" }),
+    ])
+    const players = Array.from({ length: 10 }, (_, i) =>
+      participant({
+        gameId: 1,
+        participantId: i + 1,
+        teamId: i < 5 ? 100 : 200,
+        isPlayer: i === 0 ? 1 : 0,
+        totalMinionsKilled: i === 0 ? 200 : 100,
+        neutralMinions: 0,
+      }),
+    )
+    repo.insertMany(players)
+
+    const comparison = repo.getLobbyComparison({ puuid: PUUID, modes: ["aram"] })!
+
+    for (const metric of comparison.metrics) {
+      expect(metric.scope).toBe("lobby")
+    }
+  })
 })

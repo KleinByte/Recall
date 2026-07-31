@@ -155,4 +155,20 @@ describe("mapRiotMatch", () => {
   it("rejects payloads that do not contain the requested player", () => {
     expect(mapRiotMatch(match(), "missing")).toBeUndefined()
   })
+
+  it("prefers teamPosition over individualPosition for stored role", () => {
+    const dto = match({
+      participants: Array.from({ length: 10 }, (_, i) =>
+        participant(i + 1, {
+          teamPosition: "MIDDLE",
+          individualPosition: "UTILITY",
+        }),
+      ),
+    })
+
+    const result = mapRiotMatch(dto, PUUID)!
+
+    expect(result.participants[0].role).toBe("MIDDLE")
+    expect(result.match.role).toBe("MIDDLE")
+  })
 })

@@ -183,6 +183,10 @@ function extendedMetrics(participant: RiotMatchParticipant) {
     const value = participant[key]
     if (typeof value === "number" && Number.isFinite(value)) metrics[key] = value
   }
+  for (const posKey of ["teamPosition", "individualPosition"] as const) {
+    const value = participant[posKey]
+    if (typeof value === "string" && value.length > 0) metrics[posKey] = value
+  }
   for (const [key, value] of Object.entries(participant.challenges ?? {})) {
     if (typeof value === "number" || typeof value === "boolean") {
       metrics[`challenge.${key}`] = value
@@ -207,8 +211,8 @@ function laneFor(participant: RiotMatchParticipant) {
 
 function positionFor(participant: RiotMatchParticipant) {
   return (
-    participant.individualPosition ||
     participant.teamPosition ||
+    participant.individualPosition ||
     participant.lane ||
     participant.role ||
     undefined

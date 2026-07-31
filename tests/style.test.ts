@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   buildStyleProfile,
+  CS_PER_MINUTE_FULL,
   type StyleAverages,
 } from "../electron/main/matches/style.js"
 
@@ -36,6 +37,10 @@ describe("buildStyleProfile", () => {
   it("describes a Summoner's Rift game with the axes that mode rewards", () => {
     const profile = buildStyleProfile(averages(), "sr")!
 
+    expect(profile.axes.map((axis) => axis.label)).toEqual([
+      "Kills vs assists", "Damage trade", "Mitigation share",
+      "CS pace", "Objective focus", "Vision pace",
+    ])
     expect(profile.axes.map((axis) => axis.key)).toEqual([
       "aggression",
       "damage",
@@ -49,7 +54,8 @@ describe("buildStyleProfile", () => {
   it("swaps in the axes that exist on the Howling Abyss", () => {
     const profile = buildStyleProfile(averages(), "aram")!
 
-    // No wards and no objectives to speak of in ARAM.
+    expect(profile.axes.map((axis) => axis.label)).toContain("Healing activity")
+    expect(profile.axes.map((axis) => axis.label)).toContain("CC pace")
     expect(profile.axes.map((axis) => axis.key)).toEqual([
       "aggression",
       "damage",
@@ -60,10 +66,38 @@ describe("buildStyleProfile", () => {
     ])
   })
 
+  it("discloses that ARAM healing is total heal, not teammate healing", () => {
+    const profile = buildStyleProfile(averages(), "aram")!
+    const sustain = profile.axes.find((a) => a.key === "sustain")!
+    expect(sustain.description).toMatch(/not only teammate healing/)
+  })
+
+  it("discloses that CC is crowd-control time only", () => {
+    const profile = buildStyleProfile(averages(), "aram")!
+    const cc = profile.axes.find((a) => a.key === "teamfighting")!
+    expect(cc.description).toMatch(/time.*CC/)
+  })
+
+  it("every axis has a non-empty formula", () => {
+    for (const family of ["sr", "aram"] as const) {
+      for (const axis of buildStyleProfile(averages(), family)!.axes) {
+        expect(axis.formula.length).toBeGreaterThan(0)
+      }
+    }
+  })
+
   it("passes a ratio axis through unchanged", () => {
     const profile = buildStyleProfile(averages({ damage: 0.72 }), "sr")
 
     expect(axisValue(profile, "damage")).toBeCloseTo(0.72)
+  })
+
+  it("scales CS pace against the mode-specific cap", () => {
+    // SR cap is 10 CS/min, so 5 CS/min is half a ring.
+    expect(axisValue(buildStyleProfile(averages({ csPerMin: 5 }), "sr"), "farming")).toBeCloseTo(0.5)
+    // ARAM cap is 5 CS/min, so 5 CS/min is a full ring.
+    expect(axisValue(buildStyleProfile(averages({ csPerMin: 5 }), "aram"), "farming")).toBeCloseTo(1)
+    expect(axisValue(buildStyleProfile(averages({ csPerMin: 0 }), "sr"), "farming")).toBe(0)
   })
 
   it("scales vision against the value that fills the ring", () => {

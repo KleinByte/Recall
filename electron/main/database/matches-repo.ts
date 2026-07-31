@@ -1,6 +1,6 @@
 import type { Database, Statement } from "better-sqlite3"
 import type { MatchRow, ModeFamily, TrackedMode } from "../matches/types.js"
-import { GOLD_PER_MINION, type StyleAverages } from "../matches/style.js"
+import type { StyleAverages } from "../matches/style.js"
 
 export interface StatsFilter {
   puuid: string
@@ -494,10 +494,7 @@ export class MatchesRepository {
              "damage_self_mitigated",
              "damage_self_mitigated + damage_taken",
            )}), 0) AS durability,
-           COALESCE(AVG(MIN(1.0, ${ratio(
-             `(total_minions_killed + neutral_minions) * ${GOLD_PER_MINION}`,
-             "gold_earned",
-           )})), 0) AS farming,
+           0 AS farming,
            COALESCE(AVG(${ratio(
              "damage_objectives",
              "damage_objectives + damage_to_champions",

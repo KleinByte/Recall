@@ -83,6 +83,17 @@ describe("rankChampions", () => {
     expect(ranked[0].confidence).toBe("thin")
   })
 
+  it("uses gradedGames for confidence rather than total games", () => {
+    const ranked = rankChampions(
+      [champion({ games: 20, gradedGames: 3 })],
+      0,
+    )
+
+    // 20 total games but only 3 graded → "thin", not "solid".
+    expect(ranked[0].confidence).toBe("thin")
+    expect(ranked[0].gradedGames).toBe(3)
+  })
+
   it("treats an ungraded champion as average rather than best", () => {
     const ranked = rankChampions(
       [
@@ -237,6 +248,12 @@ describe("matchAxes", () => {
       "objectives",
       "vision",
     ])
+  })
+
+  it("every axis carries a non-empty formula", () => {
+    for (const axis of matchAxes(participant(), 1200, "sr")) {
+      expect(axis.formula.length).toBeGreaterThan(0)
+    }
   })
 
   it("reads aggression as the share of involvement that was a kill", () => {
