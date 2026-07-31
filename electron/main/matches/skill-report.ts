@@ -13,6 +13,7 @@ import {
   type Interval,
 } from "./analytics.js"
 import { durationBucketsFor } from "./insights.js"
+export { buildPredictiveSection, type PredictiveSection, type PredictiveSignal } from "./predictive-insights.js"
 
 export type EvidenceLevel = "descriptive" | "comparative" | "experimental"
 export type EvidenceConfidence = "insufficient" | "low" | "medium" | "high"

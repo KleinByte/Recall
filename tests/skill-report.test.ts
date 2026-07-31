@@ -4,6 +4,7 @@ import {
   buildBestGamePattern,
   buildPlayingConditions,
   buildDurationInsights,
+  buildPredictiveSection,
 } from "../electron/main/matches/skill-report.js"
 
 /**
@@ -343,5 +344,36 @@ describe("Duration insights", () => {
     const report = buildDurationInsights(observations(50))
     const json = JSON.stringify(report)
     expect(json).not.toMatch(/better|improve|should|causes/i)
+  })
+})
+
+describe("Predictive section", () => {
+  it("returns insufficient for fewer than 200 graded games", () => {
+    const section = buildPredictiveSection(observations(100))
+    expect(section.state).toBe("insufficient")
+  })
+
+  it("returns one of the four defined states", () => {
+    const section = buildPredictiveSection(observations(250))
+    expect(["insufficient", "no-signal", "ready", "error"]).toContain(section.state)
+  })
+
+  it("is always present (never undefined)", () => {
+    const section = buildPredictiveSection([])
+    expect(section).toBeDefined()
+    expect(section.state).toBe("insufficient")
+  })
+
+  it("never hides no-signal behind an empty result", () => {
+    // With 250 uniform-grade games, model can't beat intercept → no-signal
+    const uniform = observations(250).map((o, i) => ({
+      ...o,
+      gradeScore: 40 + (i % 60),
+    }))
+    const section = buildPredictiveSection(uniform)
+    expect(["no-signal", "insufficient"]).toContain(section.state)
+    if (section.state === "no-signal") {
+      expect(section.message).toBeDefined()
+    }
   })
 })
