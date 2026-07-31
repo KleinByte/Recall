@@ -10,6 +10,31 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.4",
+    releasedAt: "2026-07-31",
+    title: "Your playstyle has a name",
+    summary:
+      "Recall now turns each radar shape into a readable playstyle identity and gives your best-performing champions a fuller dashboard spotlight.",
+    sections: [
+      {
+        title: "Playstyle identities",
+        items: [
+          "Your strongest radar tendencies now combine into identities such as Duelist, Vanguard, Map Controller, Playmaker, and Battle Medic.",
+          "Summoner's Rift and ARAM use mode-specific identities that reflect the measurements available on each map.",
+          "Balanced profiles and small samples receive honest All-Rounder, Flexible, or Developing Identity readings instead of a forced archetype.",
+        ],
+      },
+      {
+        title: "A fuller dashboard",
+        items: [
+          "Playstyle now matches Rank over time in height, keeping the dashboard's main comparison row aligned.",
+          "Champions in form now shows sample confidence, games, win rate, KDA, and a larger Recall grade for each leading pick.",
+          "The richer champion cards remain contained and readable when the dashboard narrows.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.3",
     releasedAt: "2026-07-31",
     title: "A sharper Recall, inside and out",
