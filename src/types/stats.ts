@@ -168,6 +168,7 @@ export interface StyleAxis {
   /** Fraction of the ring, always between 0 and 1. */
   value: number
   description: string
+  formula: string
 }
 
 export interface StyleDetail {
@@ -203,6 +204,7 @@ export interface LobbyMetric {
   averageRank: number
   /** 1 means top of every lobby, 0 means bottom of every lobby. */
   percentile: number
+  scope: "role" | "lobby"
 }
 
 export interface LobbyComparison {
@@ -309,6 +311,7 @@ export type Confidence = "thin" | "fair" | "solid"
 export interface RankedChampion {
   championId: number
   games: number
+  gradedGames: number
   winRate: number
   kda: number
   rawGrade?: number

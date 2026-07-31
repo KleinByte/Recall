@@ -26,12 +26,12 @@ describe("desktop page layout", () => {
   })
 
   it("aligns variable-height analysis and progress cards", () => {
-    const skill = read("src/pages/SkillPage.vue")
+    const skill = read("src/components/skill/SkillOverview.vue")
     const progress = read("src/pages/ProgressPage.vue")
 
     expect(skill).toMatch(/\.kpis \{[\s\S]*grid-auto-rows: 1fr/)
     expect(skill).toMatch(/\.metric-grid \{[\s\S]*grid-auto-rows: 1fr/)
-    expect(skill).toMatch(/\.triple \{[\s\S]*align-items: stretch/)
+    expect(skill).toMatch(/\.overview-grid \{[\s\S]*align-items: stretch/)
     expect(skill).toMatch(/\.playstyle \{[\s\S]*align-items: start/)
     expect(progress).toMatch(/\.records \{[\s\S]*grid-auto-rows: 1fr/)
   })
