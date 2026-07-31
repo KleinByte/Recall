@@ -1,7 +1,7 @@
 import type { Database } from "better-sqlite3"
 import type { StatsFilter } from "./matches-repo.js"
 import { durationBucketsFor } from "../matches/insights.js"
-import type { ModeFamily } from "../matches/types.js"
+import type { ModeFamily, TrackedMode } from "../matches/types.js"
 
 export interface BucketRow {
   label: string
@@ -43,6 +43,45 @@ export interface BuiltItem {
   games: number
   wins: number
   winRate: number
+}
+
+export interface InsightMetrics {
+  kda: number
+  deaths: number
+  damagePerMinute: number
+  damageTakenPerMinute: number
+  goldPerMinute: number
+  csPerMinute: number
+  visionPerMinute?: number
+  objectiveDamagePerMinute?: number
+  ccPerMinute: number
+  killParticipation?: number
+  teamDamageShare?: number
+  allyHealShieldPerMinute?: number
+}
+
+export interface InsightObservation {
+  gameId: number
+  playedAt: number
+  endedAt?: number
+  mode: TrackedMode
+  family: ModeFamily
+  queueId: number
+  win: boolean
+  gradeScore?: number
+  championId: number
+  role?: string
+  durationSecs: number
+  completeLobby: boolean
+  metrics: InsightMetrics
+}
+
+export interface FinalItemObservation {
+  gameId: number
+  championId: number
+  role?: string
+  gradeScore?: number
+  itemIds: number[]
 }
 
 /** Three-hour blocks, which stay readable with a small history. */
@@ -383,5 +422,195 @@ export class InsightsRepository {
          LIMIT ?`,
       )
       .all(...slotParams, limit) as BuiltItem[]
+  }
+
+  /**
+   * Bounded observation set for all scoped matches.
+   *
+   * Returns local metrics from matches plus complete-lobby metrics from
+   * participants when available, using a constant number of SQL statements.
+   */
+  getObservations(filter: StatsFilter): InsightObservation[] {
+    const { where, params } = scope(filter)
+
+    // One query for all local metrics ordered by played_at, game_id
+    const matchRows = this.db
+      .prepare(
+        `SELECT game_id, played_at, mode, mode_family, queue_id, win,
+                grade_score, champion_id, role, duration_secs,
+                kills, deaths, assists,
+                damage_to_champions, damage_taken, gold_earned,
+                total_minions_killed, neutral_minions,
+                vision_score, damage_objectives, time_ccing_others
+         FROM matches ${where}
+         ORDER BY played_at ASC, game_id ASC`,
+      )
+      .all(...params) as {
+      game_id: number
+      played_at: number
+      mode: TrackedMode
+      mode_family: ModeFamily
+      queue_id: number
+      win: number
+      grade_score: number | null
+      champion_id: number
+      role: string | null
+      duration_secs: number
+      kills: number
+      deaths: number
+      assists: number
+      damage_to_champions: number
+      damage_taken: number
+      gold_earned: number
+      total_minions_killed: number
+      neutral_minions: number
+      vision_score: number
+      damage_objectives: number
+      time_ccing_others: number
+    }[]
+
+    if (matchRows.length === 0) return []
+
+    // One grouped query for complete-lobby totals (team kills, team damage, heal/shield)
+    const { conditions, params: lobbyParams } = lobbyScope(filter)
+    const lobbyRows = this.db
+      .prepare(
+        `SELECT p.game_id,
+                SUM(CASE WHEN p.is_player = 1 THEN p.kills ELSE 0 END) AS player_kills,
+                SUM(CASE WHEN p.is_player = 1 THEN p.assists ELSE 0 END) AS player_assists,
+                SUM(CASE WHEN p.is_player = 1 THEN p.damage_to_champions ELSE 0 END) AS player_damage,
+                SUM(p.kills) AS team_kills,
+                SUM(p.damage_to_champions) AS team_damage,
+                COUNT(*) AS participant_count,
+                MAX(CASE WHEN p.is_player = 1 THEN p.extended_metrics_json ELSE NULL END) AS player_extended_json
+         FROM match_participants p
+         LEFT JOIN matches m
+           ON m.game_id = p.game_id AND m.puuid = p.puuid
+         WHERE ${conditions.join(" AND ")}
+         GROUP BY p.game_id, p.team_id
+         HAVING SUM(p.is_player) = 1`,
+      )
+      .all(...lobbyParams) as {
+      game_id: number
+      player_kills: number
+      player_assists: number
+      player_damage: number
+      team_kills: number
+      team_damage: number
+      participant_count: number
+      player_extended_json: string | null
+    }[]
+
+    const lobbyMap = new Map(lobbyRows.map((row) => [row.game_id, row]))
+
+    return matchRows.map((m) => {
+      const lobby = lobbyMap.get(m.game_id)
+      const completeLobby = !!lobby && lobby.participant_count >= 5
+      const durationMins = Math.max(1, m.duration_secs) / 60
+
+      let extendedMetrics: Record<string, number | boolean | string> = {}
+      if (lobby?.player_extended_json) {
+        try {
+          extendedMetrics = JSON.parse(lobby.player_extended_json)
+        } catch {
+          // Defensive: leave empty if parse fails
+        }
+      }
+
+      const healValue =
+        typeof extendedMetrics.totalHealsOnTeammates === "number"
+          ? extendedMetrics.totalHealsOnTeammates
+          : undefined
+      const shieldValue =
+        typeof extendedMetrics.totalDamageShieldedOnTeammates === "number"
+          ? extendedMetrics.totalDamageShieldedOnTeammates
+          : undefined
+
+      const allyHealShieldPerMinute =
+        healValue !== undefined || shieldValue !== undefined
+          ? ((healValue ?? 0) + (shieldValue ?? 0)) / durationMins
+          : undefined
+
+      return {
+        gameId: m.game_id,
+        playedAt: m.played_at,
+        endedAt: m.duration_secs > 0 ? m.played_at + m.duration_secs * 1000 : undefined,
+        mode: m.mode,
+        family: m.mode_family,
+        queueId: m.queue_id,
+        win: m.win === 1,
+        gradeScore: m.grade_score ?? undefined,
+        championId: m.champion_id,
+        role: m.role ?? undefined,
+        durationSecs: m.duration_secs,
+        completeLobby,
+        metrics: {
+          kda: m.deaths === 0 ? m.kills + m.assists : (m.kills + m.assists) / m.deaths,
+          deaths: m.deaths,
+          damagePerMinute: m.damage_to_champions / durationMins,
+          damageTakenPerMinute: m.damage_taken / durationMins,
+          goldPerMinute: m.gold_earned / durationMins,
+          csPerMinute: (m.total_minions_killed + m.neutral_minions) / durationMins,
+          visionPerMinute: m.vision_score > 0 ? m.vision_score / durationMins : undefined,
+          objectiveDamagePerMinute:
+            m.damage_objectives > 0 ? m.damage_objectives / durationMins : undefined,
+          ccPerMinute: m.time_ccing_others / durationMins,
+          killParticipation:
+            completeLobby && lobby.team_kills > 0
+              ? (lobby.player_kills + lobby.player_assists) / lobby.team_kills
+              : undefined,
+          teamDamageShare:
+            completeLobby && lobby.team_damage > 0 ? lobby.player_damage / lobby.team_damage : undefined,
+          allyHealShieldPerMinute:
+            completeLobby ? allyHealShieldPerMinute : undefined,
+        },
+      }
+    })
+  }
+
+  /**
+   * Final item sets from scoped matches.
+   *
+   * Returns slots 0-5 only, omitting slot 6 (trinket), with zero IDs and
+   * duplicates removed.
+   */
+  getFinalItemObservations(filter: StatsFilter): FinalItemObservation[] {
+    const { conditions, params } = lobbyScope(filter)
+    const all = [...conditions, "p.is_player = 1"].join(" AND ")
+
+    const rows = this.db
+      .prepare(
+        `SELECT m.game_id, m.champion_id, m.role, m.grade_score,
+                p.item0, p.item1, p.item2, p.item3, p.item4, p.item5
+         FROM match_participants p
+         LEFT JOIN matches m
+           ON m.game_id = p.game_id AND m.puuid = p.puuid
+         WHERE ${all}`,
+      )
+      .all(...params) as {
+      game_id: number
+      champion_id: number
+      role: string | null
+      grade_score: number | null
+      item0: number
+      item1: number
+      item2: number
+      item3: number
+      item4: number
+      item5: number
+    }[]
+
+    return rows.map((row) => {
+      const slots = [row.item0, row.item1, row.item2, row.item3, row.item4, row.item5]
+      const itemIds = [...new Set(slots.filter((id) => id > 0))]
+
+      return {
+        gameId: row.game_id,
+        championId: row.champion_id,
+        role: row.role ?? undefined,
+        gradeScore: row.grade_score ?? undefined,
+        itemIds,
+      }
+    })
   }
 }

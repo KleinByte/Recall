@@ -22,59 +22,63 @@ beforeEach(() => {
 })
 
 /** A lobby member. Only the fields each test cares about are overridden. */
-const player = (overrides: Partial<ParticipantRow> = {}): ParticipantRow => ({
-  gameId: 1,
-  puuid: PUUID,
-  participantId: 1,
-  teamId: 100,
-  isPlayer: 0,
-  championId: 84,
-  win: 1,
-  summonerName: "Someone#NA1",
-  profileIcon: 0,
-  spell1Id: 4,
-  spell2Id: 14,
-  items: [0, 0, 0, 0, 0, 0, 0],
-  perkPrimaryStyle: 0,
-  perkSubStyle: 0,
-  perks: [0, 0, 0, 0, 0, 0],
-  champLevel: 18,
-  kills: 2,
-  deaths: 2,
-  assists: 2,
-  goldEarned: 10000,
-  goldSpent: 9000,
-  damageToChampions: 10000,
-  totalDamageDealt: 50000,
-  magicDamageToChampions: 0,
-  physicalDamageToChampions: 0,
-  trueDamageToChampions: 0,
-  damageTaken: 10000,
-  damageSelfMitigated: 5000,
-  totalHeal: 1000,
-  totalUnitsHealed: 1,
-  timeCcingOthers: 5,
-  largestKillingSpree: 1,
-  largestMultiKill: 1,
-  doubleKills: 0,
-  tripleKills: 0,
-  quadraKills: 0,
-  pentaKills: 0,
-  totalMinionsKilled: 50,
-  neutralMinions: 0,
-  visionScore: 10,
-  wardsPlaced: 1,
-  wardsKilled: 0,
-  controlWards: 0,
-  damageObjectives: 1000,
-  damageTurrets: 500,
-  turretKills: 0,
-  inhibitorKills: 0,
-  longestTimeLiving: 200,
-  firstBlood: 0,
-  firstTower: 0,
-  ...overrides,
-})
+const player = (overrides: Partial<ParticipantRow> & { extendedMetrics?: Record<string, number | boolean> } = {}): ParticipantRow => {
+  const { extendedMetrics, ...participantOverrides } = overrides
+  return {
+    gameId: 1,
+    puuid: PUUID,
+    participantId: 1,
+    teamId: 100,
+    isPlayer: 0,
+    championId: 84,
+    win: 1,
+    summonerName: "Someone#NA1",
+    profileIcon: 0,
+    spell1Id: 4,
+    spell2Id: 14,
+    items: [0, 0, 0, 0, 0, 0, 0],
+    perkPrimaryStyle: 0,
+    perkSubStyle: 0,
+    perks: [0, 0, 0, 0, 0, 0],
+    champLevel: 18,
+    kills: 2,
+    deaths: 2,
+    assists: 2,
+    goldEarned: 10000,
+    goldSpent: 9000,
+    damageToChampions: 10000,
+    totalDamageDealt: 50000,
+    magicDamageToChampions: 0,
+    physicalDamageToChampions: 0,
+    trueDamageToChampions: 0,
+    damageTaken: 10000,
+    damageSelfMitigated: 5000,
+    totalHeal: 1000,
+    totalUnitsHealed: 1,
+    timeCcingOthers: 5,
+    largestKillingSpree: 1,
+    largestMultiKill: 1,
+    doubleKills: 0,
+    tripleKills: 0,
+    quadraKills: 0,
+    pentaKills: 0,
+    totalMinionsKilled: 50,
+    neutralMinions: 0,
+    visionScore: 10,
+    wardsPlaced: 1,
+    wardsKilled: 0,
+    controlWards: 0,
+    damageObjectives: 1000,
+    damageTurrets: 500,
+    turretKills: 0,
+    inhibitorKills: 0,
+    longestTimeLiving: 200,
+    firstBlood: 0,
+    firstTower: 0,
+    extendedMetrics,
+    ...participantOverrides,
+  }
+}
 
 describe("getDurationBuckets", () => {
   it("groups games into the bands for their mode", () => {
@@ -323,5 +327,329 @@ describe("getBuildPatterns", () => {
     expect(items).toHaveLength(1)
     expect(items[0].itemId).toBe(3089)
     expect(items[0].games).toBe(2)
+  })
+})
+
+describe("getObservations", () => {
+  it("returns a bounded observation set for scoped matches", () => {
+    // Two graded Rift matches: one complete lobby, one local row only
+    matches.insertMany([
+      buildMatchRow({
+        gameId: 1,
+        mode: "sr_ranked_solo",
+        modeFamily: "sr",
+        queueId: 420,
+        role: "MIDDLE",
+        durationSecs: 1800,
+        playedAt: 1000,
+        win: 1,
+        kills: 8,
+        deaths: 4,
+        assists: 12,
+        damageToChampions: 20000,
+        damageTaken: 15000,
+        goldEarned: 12000,
+        totalMinionsKilled: 150,
+        neutralMinions: 30,
+        visionScore: 40,
+        damageObjectives: 3000,
+        timeCcingOthers: 60,
+      }),
+      buildMatchRow({
+        gameId: 2,
+        mode: "sr_ranked_solo",
+        modeFamily: "sr",
+        queueId: 420,
+        role: "JUNGLE",
+        durationSecs: 1200,
+        playedAt: 2000,
+        win: 0,
+        kills: 2,
+        deaths: 8,
+        assists: 6,
+        damageToChampions: 8000,
+        damageTaken: 20000,
+        goldEarned: 9000,
+        totalMinionsKilled: 30,
+        neutralMinions: 100,
+        visionScore: 0,
+        damageObjectives: 0,
+        timeCcingOthers: 20,
+      }),
+    ])
+
+    // Set grades separately
+    matches.setGrade(1, PUUID, "A", 0.5)
+    matches.setGrade(2, PUUID, "C", -0.3)
+
+    // Complete lobby for game 1
+    participants.insertMany([
+      player({
+        gameId: 1,
+        participantId: 1,
+        isPlayer: 1,
+        teamId: 100,
+        kills: 8,
+        deaths: 4,
+        assists: 12,
+        damageToChampions: 20000,
+        extendedMetrics: {
+          totalHealsOnTeammates: 2000,
+          totalDamageShieldedOnTeammates: 1500,
+        },
+      }),
+      player({ gameId: 1, participantId: 2, teamId: 100, kills: 4, damageToChampions: 0 }),
+      player({ gameId: 1, participantId: 3, teamId: 100, kills: 6, damageToChampions: 0 }),
+      player({ gameId: 1, participantId: 4, teamId: 100, kills: 2, damageToChampions: 0 }),
+      player({ gameId: 1, participantId: 5, teamId: 100, kills: 0, damageToChampions: 0 }),
+      player({ gameId: 1, participantId: 6, teamId: 200 }),
+    ])
+
+    // No lobby data for game 2
+
+    const rows = insights.getObservations({ puuid: PUUID, modes: ["sr_ranked_solo"] })
+
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toMatchObject({
+      gameId: 1,
+      playedAt: 1000,
+      mode: "sr_ranked_solo",
+      family: "sr",
+      queueId: 420,
+      win: true,
+      gradeScore: 0.5,
+      championId: 84,
+      role: "MIDDLE",
+      durationSecs: 1800,
+      completeLobby: true,
+    })
+    expect(rows[0].endedAt).toBe(1000 + 1800 * 1000)
+    expect(rows[0].metrics.kda).toBeCloseTo((8 + 12) / 4)
+    expect(rows[0].metrics.deaths).toBe(4)
+    expect(rows[0].metrics.damagePerMinute).toBeCloseTo(20000 / 30)
+    expect(rows[0].metrics.damageTakenPerMinute).toBeCloseTo(15000 / 30)
+    expect(rows[0].metrics.goldPerMinute).toBeCloseTo(12000 / 30)
+    expect(rows[0].metrics.csPerMinute).toBeCloseTo(180 / 30)
+    expect(rows[0].metrics.visionPerMinute).toBeCloseTo(40 / 30)
+    expect(rows[0].metrics.objectiveDamagePerMinute).toBeCloseTo(3000 / 30)
+    expect(rows[0].metrics.ccPerMinute).toBeCloseTo(60 / 30)
+    expect(rows[0].metrics.killParticipation).toBeCloseTo((8 + 12) / 20)
+    expect(rows[0].metrics.teamDamageShare).toBeCloseTo(20000 / 20000)
+    expect(rows[0].metrics.allyHealShieldPerMinute).toBeCloseTo((2000 + 1500) / 30)
+
+    expect(rows[1]).toMatchObject({
+      gameId: 2,
+      mode: "sr_ranked_solo",
+      family: "sr",
+      role: "JUNGLE",
+      completeLobby: false,
+    })
+    expect(rows[1].metrics.killParticipation).toBeUndefined()
+    expect(rows[1].metrics.teamDamageShare).toBeUndefined()
+    expect(rows[1].metrics.allyHealShieldPerMinute).toBeUndefined()
+  })
+
+  it("orders results by played_at ASC, game_id ASC", () => {
+    matches.insertMany([
+      buildMatchRow({
+        gameId: 3,
+        mode: "aram",
+        modeFamily: "aram",
+        playedAt: 1000,
+        durationSecs: 900,
+      }),
+      buildMatchRow({
+        gameId: 1,
+        mode: "aram",
+        modeFamily: "aram",
+        playedAt: 1000,
+        durationSecs: 900,
+      }),
+      buildMatchRow({
+        gameId: 2,
+        mode: "aram",
+        modeFamily: "aram",
+        playedAt: 500,
+        durationSecs: 900,
+      }),
+    ])
+
+    const rows = insights.getObservations({ puuid: PUUID, modes: ["aram"] })
+
+    expect(rows.map((r) => r.gameId)).toEqual([2, 1, 3])
+  })
+
+  it("uses a constant number of SQL statements as match count grows", () => {
+    const prepareCount = new Map<string, number>()
+    const originalPrepare = insights.db.prepare.bind(insights.db)
+    insights.db.prepare = (sql: string) => {
+      prepareCount.set(sql, (prepareCount.get(sql) ?? 0) + 1)
+      return originalPrepare(sql)
+    }
+
+    matches.insertMany([
+      buildMatchRow({ gameId: 1, mode: "aram", modeFamily: "aram", durationSecs: 900 }),
+    ])
+    insights.getObservations({ puuid: PUUID, modes: ["aram"] })
+    const countWithOne = prepareCount.size
+
+    prepareCount.clear()
+    matches.insertMany([
+      buildMatchRow({ gameId: 2, mode: "aram", modeFamily: "aram", durationSecs: 900 }),
+      buildMatchRow({ gameId: 3, mode: "aram", modeFamily: "aram", durationSecs: 900 }),
+      buildMatchRow({ gameId: 4, mode: "aram", modeFamily: "aram", durationSecs: 900 }),
+    ])
+    insights.getObservations({ puuid: PUUID, modes: ["aram"] })
+    const countWithFour = prepareCount.size
+
+    expect(countWithFour).toBe(countWithOne)
+  })
+
+  it("handles missing vision and objective damage gracefully", () => {
+    matches.insertMany([
+      buildMatchRow({
+        gameId: 1,
+        mode: "aram",
+        modeFamily: "aram",
+        durationSecs: 900,
+        visionScore: 0,
+        damageObjectives: 0,
+      }),
+    ])
+
+    const rows = insights.getObservations({ puuid: PUUID, modes: ["aram"] })
+
+    expect(rows[0].metrics.visionPerMinute).toBeUndefined()
+    expect(rows[0].metrics.objectiveDamagePerMinute).toBeUndefined()
+  })
+
+  it("parses extended JSON defensively for heal/shield metrics", () => {
+    matches.insertMany([
+      buildMatchRow({ gameId: 1, mode: "aram", modeFamily: "aram", durationSecs: 900 }),
+    ])
+    participants.insertMany([
+      player({
+        gameId: 1,
+        participantId: 1,
+        isPlayer: 1,
+        teamId: 100,
+        damageToChampions: 5000,
+        extendedMetrics: { totalHealsOnTeammates: 1200 },
+      }),
+      player({ gameId: 1, participantId: 2, teamId: 100, damageToChampions: 0 }),
+      player({ gameId: 1, participantId: 3, teamId: 100, damageToChampions: 0 }),
+      player({ gameId: 1, participantId: 4, teamId: 100, damageToChampions: 0 }),
+      player({ gameId: 1, participantId: 5, teamId: 100, damageToChampions: 0 }),
+    ])
+
+    const rows = insights.getObservations({ puuid: PUUID, modes: ["aram"] })
+
+    expect(rows[0].completeLobby).toBe(true)
+    expect(rows[0].metrics.allyHealShieldPerMinute).toBeCloseTo(1200 / 15)
+  })
+
+  it("uses MAX(1, duration_secs) for rate calculations", () => {
+    matches.insertMany([
+      buildMatchRow({
+        gameId: 1,
+        mode: "aram",
+        modeFamily: "aram",
+        durationSecs: 0,
+        damageToChampions: 5000,
+        goldEarned: 3000,
+      }),
+    ])
+
+    const rows = insights.getObservations({ puuid: PUUID, modes: ["aram"] })
+
+    expect(rows[0].metrics.damagePerMinute).toBeCloseTo(5000 * 60)
+    expect(rows[0].metrics.goldPerMinute).toBeCloseTo(3000 * 60)
+  })
+
+  it("sets endedAt to undefined when duration is zero", () => {
+    matches.insertMany([
+      buildMatchRow({
+        gameId: 1,
+        mode: "aram",
+        modeFamily: "aram",
+        playedAt: 1000,
+        durationSecs: 0,
+      }),
+    ])
+
+    const rows = insights.getObservations({ puuid: PUUID, modes: ["aram"] })
+
+    expect(rows[0].endedAt).toBeUndefined()
+  })
+})
+
+describe("getFinalItemObservations", () => {
+  it("returns final item sets using slots 0-5 only", () => {
+    matches.insertMany([
+      buildMatchRow({
+        gameId: 1,
+        mode: "sr_ranked_solo",
+        modeFamily: "sr",
+        role: "MIDDLE",
+      }),
+    ])
+    matches.setGrade(1, PUUID, "A", 0.5)
+    participants.insertMany([
+      player({
+        gameId: 1,
+        participantId: 1,
+        isPlayer: 1,
+        items: [3089, 3020, 3135, 3165, 3157, 0, 3340],
+      }),
+    ])
+
+    const rows = insights.getFinalItemObservations({ puuid: PUUID, modes: ["sr_ranked_solo"] })
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      gameId: 1,
+      championId: 84,
+      role: "MIDDLE",
+      gradeScore: 0.5,
+    })
+    expect(rows[0].itemIds).toEqual([3089, 3020, 3135, 3165, 3157])
+  })
+
+  it("omits slot 6 (trinket) from item sets", () => {
+    matches.insertMany([buildMatchRow({ gameId: 1, mode: "aram", modeFamily: "aram" })])
+    participants.insertMany([
+      player({
+        gameId: 1,
+        participantId: 1,
+        isPlayer: 1,
+        items: [3089, 0, 0, 0, 0, 0, 3340],
+      }),
+    ])
+
+    const rows = insights.getFinalItemObservations({ puuid: PUUID, modes: ["aram"] })
+
+    expect(rows[0].itemIds).toEqual([3089])
+  })
+
+  it("removes zero IDs and duplicates from item sets", () => {
+    matches.insertMany([buildMatchRow({ gameId: 1, mode: "aram", modeFamily: "aram" })])
+    participants.insertMany([
+      player({
+        gameId: 1,
+        participantId: 1,
+        isPlayer: 1,
+        items: [3089, 0, 3089, 3020, 0, 3020, 0],
+      }),
+    ])
+
+    const rows = insights.getFinalItemObservations({ puuid: PUUID, modes: ["aram"] })
+
+    expect(rows[0].itemIds.sort()).toEqual([3020, 3089])
+  })
+
+  it("returns an empty array when no matches exist", () => {
+    const rows = insights.getFinalItemObservations({ puuid: PUUID, modes: ["aram"] })
+
+    expect(rows).toEqual([])
   })
 })
