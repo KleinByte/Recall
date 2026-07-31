@@ -51,6 +51,11 @@ const chartData = computed(() => {
 const chartOptions = {
   responsive: true,
   maintainAspectRatio: false,
+  animation: {
+    duration: typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ? 0
+      : 520,
+  },
   interaction: { mode: "index" as const, intersect: false },
   scales: {
     x: {

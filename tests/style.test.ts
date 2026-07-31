@@ -38,8 +38,8 @@ describe("buildStyleProfile", () => {
     const profile = buildStyleProfile(averages(), "sr")!
 
     expect(profile.axes.map((axis) => axis.label)).toEqual([
-      "Kills vs assists", "Damage trade", "Mitigation share",
-      "CS pace", "Objective focus", "Vision pace",
+      "Aggression", "Damage", "Durability",
+      "Economy", "Objectives", "Vision",
     ])
     expect(profile.axes.map((axis) => axis.key)).toEqual([
       "aggression",
@@ -54,8 +54,8 @@ describe("buildStyleProfile", () => {
   it("swaps in the axes that exist on the Howling Abyss", () => {
     const profile = buildStyleProfile(averages(), "aram")!
 
-    expect(profile.axes.map((axis) => axis.label)).toContain("Healing activity")
-    expect(profile.axes.map((axis) => axis.label)).toContain("CC pace")
+    expect(profile.axes.map((axis) => axis.label)).toContain("Sustain")
+    expect(profile.axes.map((axis) => axis.label)).toContain("Teamfighting")
     expect(profile.axes.map((axis) => axis.key)).toEqual([
       "aggression",
       "damage",

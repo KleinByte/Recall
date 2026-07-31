@@ -28,6 +28,30 @@ describe("Skill Overview", () => {
     expect(overview).toContain("Recall grade")
     expect(overview).toContain("gradedGames")
   })
+
+  it("uses an animated diverging chart for playstyle changes", () => {
+    const overview = read("src/components/skill/SkillOverview.vue")
+    const deltaChart = read("src/components/skill/StyleDeltaChart.vue")
+
+    expect(overview).toContain("StyleDeltaChart")
+    expect(overview).toContain("overview.style.career")
+    expect(overview).toContain("styleComparison")
+    expect(overview).toContain("style?.earlier")
+    expect(overview).toContain("style.recent")
+    expect(deltaChart).toContain('indexAxis: "y"')
+    expect(deltaChart).toContain("prefers-reduced-motion")
+  })
+
+  it("restores the useful historical playstyle and outcome visuals", () => {
+    const overview = read("src/components/skill/SkillOverview.vue")
+
+    expect(overview).toContain(":recent=")
+    expect(overview).toContain("Last 10 games")
+    expect(overview).toContain("DriftChart")
+    expect(overview).toContain("OutcomeTrendChart")
+    expect(overview).toContain("Game length")
+    expect(overview).toContain("Time of day")
+  })
 })
 
 describe("Skill Insights", () => {
@@ -61,6 +85,22 @@ describe("Skill Insights", () => {
     expect(insights).toContain("No repeatable pregame signal yet")
     expect(insights).toContain("Repeatable pregame signals")
     expect(insights).toContain("Predictive analysis unavailable")
+  })
+
+  it("leads with visual takeaways and locally named items", () => {
+    const insights = read("src/components/skill/SkillInsights.vue")
+    const finding = read("src/components/skill/InsightFinding.vue")
+    const overview = read("src/components/skill/SkillOverview.vue")
+    const effectChart = read("src/components/skill/EffectChart.vue")
+
+    expect(insights).toContain("Top takeaways")
+    expect(insights).toContain("selectTakeaways")
+    expect(insights).toContain("EffectChart")
+    expect(finding).toContain("itemAsset")
+    expect(finding).toContain("Stronger games")
+    expect(overview).toContain("itemAsset")
+    expect(effectChart).toContain('indexAxis: "y"')
+    expect(effectChart).toContain("prefers-reduced-motion")
   })
 
   it("keeps generated report copy associative", () => {

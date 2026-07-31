@@ -787,9 +787,28 @@ describe("SkillReportV2", () => {
       avgDurationSecs: 1800, pentaKills: 0, currentStreak: 0,
       longestWinStreak: 3, avgGradeScore: 50, gradedGames: 50,
     },
+    style: {
+      career: {
+        games: 50,
+        axes: [{
+          key: "aggression",
+          label: "Kills vs assists",
+          value: 0.4,
+          description: "Kill involvement from kills",
+          formula: "kills / (kills + assists)",
+        }],
+        detail: {
+          damagePerMin: 800, goldPerMin: 400, csPerMin: 7, visionPerMin: 1.5,
+          avgDeaths: 4, avgLargestSpree: 2, doubleKills: 3, tripleKills: 1,
+          quadraKills: 0, pentaKills: 0,
+        },
+      },
+    },
     grades: [{ grade: "S", count: 5 }, { grade: "A", count: 20 }],
     lobby: { games: 50, metrics: [] },
     contribution: { games: 50, damageShare: 0.2, goldShare: 0.2, killShare: 0.2 },
+    duration: [{ label: "Under 25 min", games: 12, wins: 7, winRate: 7 / 12 }],
+    hours: [{ label: "18-21", games: 8, wins: 5, winRate: 5 / 8 }],
     pool: { champions: 10, games: 50, coreShare: 0.6, coreWinRate: 0.55, restWinRate: 0.45 },
     builds: [
       { itemId: 3001, games: 20, wins: 10, winRate: 0.5 },
@@ -849,6 +868,18 @@ describe("SkillReportV2", () => {
     expect(report.insights.trends).toBeDefined()
     expect(report.insights.champions).toBeDefined()
     expect(report.insights.items).toBeDefined()
+  })
+
+  it("keeps historical playstyle windows and scoped outcome rows for charts", () => {
+    const report = buildSkillReport(baseInput())
+
+    expect(report.overview.style?.drift).toHaveLength(5)
+    expect(report.overview.style?.drift[0].label).toBe("Games 1-10")
+    expect(report.overview.style?.drift[4].label).toBe("Games 41-50")
+    expect(report.overview.outcomes).toEqual({
+      duration: [{ label: "Under 25 min", games: 12, wins: 7, winRate: 7 / 12 }],
+      hours: [{ label: "18-21", games: 8, wins: 5, winRate: 5 / 8 }],
+    })
   })
 
   it("is renderer-serializable (structured clone compatible)", () => {

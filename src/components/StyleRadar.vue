@@ -61,9 +61,13 @@ const descriptions = computed(() =>
   Object.fromEntries(props.axes.map((axis) => [axis.label, axis.description])),
 )
 
+const reducedMotion = () =>
+  typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
+
 const chartOptions = computed(() => ({
   responsive: true,
   maintainAspectRatio: false,
+  animation: { duration: reducedMotion() ? 0 : 520 },
   // Chart.js reserves the container for point labels and draws the web inside
   // what is left, so trimming the padding is what actually makes it bigger.
   layout: { padding: 8 },
@@ -117,8 +121,8 @@ const chartOptions = computed(() => ({
 /* Chart.js sizes a radar by the smaller side, so height is what actually makes
    the web bigger. The cap stops it stranding itself in a very wide column. */
 .radar {
-  height: 520px;
-  max-width: 680px;
+  height: 640px;
+  max-width: 820px;
   margin: 0 auto;
   position: relative;
 }
