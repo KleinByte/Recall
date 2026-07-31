@@ -10,6 +10,31 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "1.1.7",
+    releasedAt: "2026-07-31",
+    title: "Clearer skill insights, anywhere",
+    summary:
+      "Recall now keeps its key game data readable without the League Client and makes your performance patterns far easier to scan.",
+    sections: [
+      {
+        title: "Offline-ready details",
+        items: [
+          "Item icons now load correctly in packaged Recall builds.",
+          "Champion names remain available from bundled data when the League Client is closed.",
+          "The champion pool now names and shows your five most-played champions.",
+        ],
+      },
+      {
+        title: "Skill visualizations",
+        items: [
+          "Game length, time of day, and weekday patterns now combine game volume with recorded win rate.",
+          "Playstyle radar labels and adjacent measurements are easier to read at a glance.",
+          "The Windows app icon has been rebuilt with tighter taskbar-focused framing.",
+        ],
+      },
+    ],
+  },
+  {
     version: "1.1.4",
     releasedAt: "2026-07-30",
     title: "Stats that reflect real games",
