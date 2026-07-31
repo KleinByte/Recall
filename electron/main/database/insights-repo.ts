@@ -472,25 +472,40 @@ export class InsightsRepository {
     if (matchRows.length === 0) return []
 
     // One grouped query for complete-lobby totals (team kills, team damage, heal/shield)
+    // Uses a CTE to compute game-wide stats (total participants, team count) for completeLobby detection
     const { conditions, params: lobbyParams } = lobbyScope(filter)
     const lobbyRows = this.db
       .prepare(
-        `SELECT p.game_id,
+        `WITH game_stats AS (
+           SELECT p.game_id,
+                  COUNT(*) AS total_participants,
+                  COUNT(DISTINCT p.team_id) AS team_count
+           FROM match_participants p
+           LEFT JOIN matches m
+             ON m.game_id = p.game_id AND m.puuid = p.puuid
+           WHERE ${conditions.join(" AND ")}
+           GROUP BY p.game_id
+         )
+         SELECT p.game_id,
                 SUM(CASE WHEN p.is_player = 1 THEN p.kills ELSE 0 END) AS player_kills,
                 SUM(CASE WHEN p.is_player = 1 THEN p.assists ELSE 0 END) AS player_assists,
                 SUM(CASE WHEN p.is_player = 1 THEN p.damage_to_champions ELSE 0 END) AS player_damage,
                 SUM(p.kills) AS team_kills,
                 SUM(p.damage_to_champions) AS team_damage,
                 COUNT(*) AS participant_count,
-                MAX(CASE WHEN p.is_player = 1 THEN p.extended_metrics_json ELSE NULL END) AS player_extended_json
+                MAX(CASE WHEN p.is_player = 1 THEN p.extended_metrics_json ELSE NULL END) AS player_extended_json,
+                gs.total_participants,
+                gs.team_count
          FROM match_participants p
          LEFT JOIN matches m
            ON m.game_id = p.game_id AND m.puuid = p.puuid
+         JOIN game_stats gs
+           ON gs.game_id = p.game_id
          WHERE ${conditions.join(" AND ")}
          GROUP BY p.game_id, p.team_id
          HAVING SUM(p.is_player) = 1`,
       )
-      .all(...lobbyParams) as {
+      .all(...lobbyParams, ...lobbyParams) as {
       game_id: number
       player_kills: number
       player_assists: number
@@ -499,13 +514,15 @@ export class InsightsRepository {
       team_damage: number
       participant_count: number
       player_extended_json: string | null
+      total_participants: number
+      team_count: number
     }[]
 
     const lobbyMap = new Map(lobbyRows.map((row) => [row.game_id, row]))
 
     return matchRows.map((m) => {
       const lobby = lobbyMap.get(m.game_id)
-      const completeLobby = !!lobby && lobby.participant_count >= 5
+      const completeLobby = !!lobby && lobby.total_participants >= 10 && lobby.team_count >= 2
       const durationMins = Math.max(1, m.duration_secs) / 60
 
       let extendedMetrics: Record<string, number | boolean | string> = {}

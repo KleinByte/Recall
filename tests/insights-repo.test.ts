@@ -331,6 +331,88 @@ describe("getBuildPatterns", () => {
 })
 
 describe("getObservations", () => {
+  it("requires both teams and at least 10 participants for completeLobby", () => {
+    matches.insertMany([
+      buildMatchRow({
+        gameId: 1,
+        mode: "sr_ranked_solo",
+        modeFamily: "sr",
+        durationSecs: 1800,
+        playedAt: 1000,
+        kills: 5,
+        assists: 3,
+        damageToChampions: 10000,
+      }),
+      buildMatchRow({
+        gameId: 2,
+        mode: "sr_ranked_solo",
+        modeFamily: "sr",
+        durationSecs: 1800,
+        playedAt: 2000,
+        kills: 6,
+        assists: 4,
+        damageToChampions: 12000,
+      }),
+    ])
+
+    // Game 1: 5 local team + 1 enemy = 6 participants (INCOMPLETE)
+    participants.insertMany([
+      player({
+        gameId: 1,
+        participantId: 1,
+        isPlayer: 1,
+        teamId: 100,
+        kills: 5,
+        assists: 3,
+        damageToChampions: 10000,
+      }),
+      player({ gameId: 1, participantId: 2, teamId: 100, kills: 2, damageToChampions: 5000 }),
+      player({ gameId: 1, participantId: 3, teamId: 100, kills: 1, damageToChampions: 3000 }),
+      player({ gameId: 1, participantId: 4, teamId: 100, kills: 0, damageToChampions: 2000 }),
+      player({ gameId: 1, participantId: 5, teamId: 100, kills: 0, damageToChampions: 1000 }),
+      player({ gameId: 1, participantId: 6, teamId: 200, kills: 0, damageToChampions: 500 }),
+    ])
+
+    // Game 2: 5 local team + 5 enemy = 10 participants (COMPLETE)
+    participants.insertMany([
+      player({
+        gameId: 2,
+        participantId: 1,
+        isPlayer: 1,
+        teamId: 100,
+        kills: 6,
+        assists: 4,
+        damageToChampions: 12000,
+      }),
+      player({ gameId: 2, participantId: 2, teamId: 100, kills: 3, damageToChampions: 8000 }),
+      player({ gameId: 2, participantId: 3, teamId: 100, kills: 2, damageToChampions: 6000 }),
+      player({ gameId: 2, participantId: 4, teamId: 100, kills: 1, damageToChampions: 4000 }),
+      player({ gameId: 2, participantId: 5, teamId: 100, kills: 0, damageToChampions: 2000 }),
+      player({ gameId: 2, participantId: 6, teamId: 200, kills: 1, damageToChampions: 5000 }),
+      player({ gameId: 2, participantId: 7, teamId: 200, kills: 0, damageToChampions: 3000 }),
+      player({ gameId: 2, participantId: 8, teamId: 200, kills: 0, damageToChampions: 2000 }),
+      player({ gameId: 2, participantId: 9, teamId: 200, kills: 0, damageToChampions: 1000 }),
+      player({ gameId: 2, participantId: 10, teamId: 200, kills: 0, damageToChampions: 500 }),
+    ])
+
+    const rows = insights.getObservations({ puuid: PUUID, modes: ["sr_ranked_solo"] })
+
+    expect(rows).toHaveLength(2)
+
+    // Game 1: incomplete lobby - no team-derived metrics
+    expect(rows[0].gameId).toBe(1)
+    expect(rows[0].completeLobby).toBe(false)
+    expect(rows[0].metrics.killParticipation).toBeUndefined()
+    expect(rows[0].metrics.teamDamageShare).toBeUndefined()
+    expect(rows[0].metrics.allyHealShieldPerMinute).toBeUndefined()
+
+    // Game 2: complete lobby - team-derived metrics present
+    expect(rows[1].gameId).toBe(2)
+    expect(rows[1].completeLobby).toBe(true)
+    expect(rows[1].metrics.killParticipation).toBeCloseTo((6 + 4) / 12)
+    expect(rows[1].metrics.teamDamageShare).toBeCloseTo(12000 / 32000)
+  })
+
   it("returns a bounded observation set for scoped matches", () => {
     // Two graded Rift matches: one complete lobby, one local row only
     matches.insertMany([
@@ -403,6 +485,10 @@ describe("getObservations", () => {
       player({ gameId: 1, participantId: 4, teamId: 100, kills: 2, damageToChampions: 0 }),
       player({ gameId: 1, participantId: 5, teamId: 100, kills: 0, damageToChampions: 0 }),
       player({ gameId: 1, participantId: 6, teamId: 200 }),
+      player({ gameId: 1, participantId: 7, teamId: 200 }),
+      player({ gameId: 1, participantId: 8, teamId: 200 }),
+      player({ gameId: 1, participantId: 9, teamId: 200 }),
+      player({ gameId: 1, participantId: 10, teamId: 200 }),
     ])
 
     // No lobby data for game 2
@@ -540,6 +626,11 @@ describe("getObservations", () => {
       player({ gameId: 1, participantId: 3, teamId: 100, damageToChampions: 0 }),
       player({ gameId: 1, participantId: 4, teamId: 100, damageToChampions: 0 }),
       player({ gameId: 1, participantId: 5, teamId: 100, damageToChampions: 0 }),
+      player({ gameId: 1, participantId: 6, teamId: 200, damageToChampions: 0 }),
+      player({ gameId: 1, participantId: 7, teamId: 200, damageToChampions: 0 }),
+      player({ gameId: 1, participantId: 8, teamId: 200, damageToChampions: 0 }),
+      player({ gameId: 1, participantId: 9, teamId: 200, damageToChampions: 0 }),
+      player({ gameId: 1, participantId: 10, teamId: 200, damageToChampions: 0 }),
     ])
 
     const rows = insights.getObservations({ puuid: PUUID, modes: ["aram"] })
