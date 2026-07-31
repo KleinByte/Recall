@@ -116,7 +116,7 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
 .sidebar {
   width: var(--sidebar-width);
   flex: 0 0 var(--sidebar-width);
-  height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
   background:
@@ -154,7 +154,7 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
 .brand-title {
   display: flex;
   align-items: center;
-  gap: 1px;
+  gap: 0;
   min-width: 0;
 }
 
@@ -162,13 +162,16 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
   width: 36px;
   height: 36px;
   flex: 0 0 36px;
-  filter: drop-shadow(0 0 8px rgba(10, 203, 230, 0.13));
+  margin-right: -5px;
+  filter:
+    drop-shadow(0 0 5px rgba(240, 211, 116, 0.18))
+    drop-shadow(0 0 7px rgba(10, 203, 230, 0.1));
 }
 
 .brand-mark {
   font-family: var(--font-display);
   font-size: 24px;
-  letter-spacing: 2.4px;
+  letter-spacing: 2.1px;
   color: var(--gold);
   line-height: 1;
 }

@@ -15,6 +15,7 @@ const frame = (timestamp: number, difference: number): TimelineFrame => ({
   ownerLevel: 1,
   ownerXp: 0,
   ownerCs: 0,
+  participants: [],
 })
 
 const event = (timestamp: number): TimelineEvent => ({

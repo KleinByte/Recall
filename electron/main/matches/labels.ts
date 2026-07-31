@@ -7,7 +7,7 @@ import type {
   TeamRow,
 } from "./types.js"
 
-export const LABEL_EVALUATOR_VERSION = 1
+export const LABEL_EVALUATOR_VERSION = 2
 export const MAX_LABELS_PER_GAME = 6
 
 interface LabelContext {
@@ -29,8 +29,30 @@ interface CandidateInput {
   group?: string
 }
 
-interface Candidate extends PerformanceLabel {
+export interface PrioritizablePerformanceLabel extends PerformanceLabel {
   group?: string
+}
+
+type Candidate = PrioritizablePerformanceLabel
+
+export function prioritizePerformanceLabels(
+  labels: PrioritizablePerformanceLabel[],
+  limit = MAX_LABELS_PER_GAME,
+): PerformanceLabel[] {
+  const usedIds = new Set<string>()
+  const usedGroups = new Set<string>()
+  return labels
+    .sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id))
+    .filter((candidate) => {
+      if (usedIds.has(candidate.id)) return false
+      usedIds.add(candidate.id)
+      if (!candidate.group) return true
+      if (usedGroups.has(candidate.group)) return false
+      usedGroups.add(candidate.group)
+      return true
+    })
+    .slice(0, limit)
+    .map(({ group: _group, ...label }) => label)
 }
 
 const pct = (value: number) => `${Math.round(value * 100)}%`
@@ -106,17 +128,17 @@ export function evaluateMatchLabels(context: LabelContext): PerformanceLabel[] {
     evidence: { quadraKills: player.quadraKills }, priority: 94, group: "multikill",
   })
   if (player.tripleKills > 0) add({
-    id: "triple_kill", name: "Triple Threat", category: "Kills", polarity: "positive",
+    id: "triple_kill", name: "Threefold", category: "Kills", polarity: "positive",
     tooltip: `You secured ${player.tripleKills} triple ${player.tripleKills === 1 ? "kill" : "kills"}.`,
     evidence: { tripleKills: player.tripleKills }, priority: 88, group: "multikill",
   })
   if (player.kills >= 10) add({
-    id: "rampage", name: "Bringer of Carnage", category: "Kills", polarity: "positive",
+    id: "rampage", name: "Double-Digit Menace", category: "Kills", polarity: "positive",
     tooltip: `You finished with ${player.kills} kills.`, evidence: { kills: player.kills },
     priority: 75, group: "kills",
   })
   if (player.largestKillingSpree >= 5) add({
-    id: "killing_spree", name: "Ready to Rumble", category: "Kills", polarity: "positive",
+    id: "killing_spree", name: "Unbroken Momentum", category: "Kills", polarity: "positive",
     tooltip: `Your longest killing spree reached ${player.largestKillingSpree}.`,
     evidence: { largestKillingSpree: player.largestKillingSpree }, priority: 72, group: "kills",
   })
@@ -144,7 +166,7 @@ export function evaluateMatchLabels(context: LabelContext): PerformanceLabel[] {
   })
 
   if (damageRank === 1 && player.damageToChampions >= 5_000) add({
-    id: "top_damage", name: "Ouch, You Hurt", category: "Damage", polarity: "positive",
+    id: "top_damage", name: "Damage Crown", category: "Damage", polarity: "positive",
     tooltip: `You led the lobby with ${compact(player.damageToChampions)} champion damage.`,
     evidence: { damage: player.damageToChampions, lobbyRank: 1 }, priority: 84, group: "damage",
   })
@@ -300,15 +322,5 @@ export function evaluateMatchLabels(context: LabelContext): PerformanceLabel[] {
 
   // One label per overlapping story keeps the result readable. Exact, rare
   // feats naturally outrank broader summaries inside the same group.
-  const usedGroups = new Set<string>()
-  return candidates
-    .sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id))
-    .filter((candidate) => {
-      if (!candidate.group) return true
-      if (usedGroups.has(candidate.group)) return false
-      usedGroups.add(candidate.group)
-      return true
-    })
-    .slice(0, MAX_LABELS_PER_GAME)
-    .map(({ group: _group, ...label }) => label)
+  return prioritizePerformanceLabels(candidates)
 }

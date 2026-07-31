@@ -371,13 +371,19 @@ export class MatchesRepository {
       this.db.prepare(
         `INSERT INTO match_label_evaluations
          (game_id, puuid, evaluator_version, source, status, evaluated_at)
-         VALUES (?, ?, ?, 'match_v5', 'ready', ?)
+         VALUES (?, ?, ?, ?, 'ready', ?)
          ON CONFLICT(game_id, puuid) DO UPDATE SET
            evaluator_version = excluded.evaluator_version,
            source = excluded.source,
            status = excluded.status,
            evaluated_at = excluded.evaluated_at`,
-      ).run(gameId, puuid, evaluatorVersion, now)
+      ).run(
+        gameId,
+        puuid,
+        evaluatorVersion,
+        labels.some((label) => label.source === "timeline") ? "timeline" : "match_v5",
+        now,
+      )
     })
     replace()
   }

@@ -71,6 +71,11 @@ import {
 } from "./database/review-repo.js"
 import { TimelineService } from "./riot/timeline-service.js"
 import { RecentMatchEnricher } from "./riot/recent-match-enricher.js"
+import {
+  evaluateMatchLabels,
+  prioritizePerformanceLabels,
+} from "./matches/labels.js"
+import { evaluateTimelineLabels } from "./matches/timeline-labels.js"
 import { ReviewService } from "./review/review-service.js"
 import {
   recommendChampions,
@@ -349,6 +354,29 @@ function getTimelineService(win: BrowserWindow) {
       getDatabase(),
       readRiotApiKey,
       (gameId) => broadcast(win, "timeline:updated", gameId),
+      async (gameId, puuid, timeline) => {
+        const match = getRepository().getMatch(gameId, puuid)
+        if (!match) return
+        const detail = getParticipants().getMatchDetail(gameId, puuid)
+        const player = detail.participants.find((entry) => entry.isPlayer === 1)
+        if (!player) return
+        const labels = prioritizePerformanceLabels([
+          ...evaluateMatchLabels({
+            match,
+            player,
+            participants: detail.participants,
+            teams: detail.teams,
+          }),
+          ...evaluateTimelineLabels({
+            match,
+            player,
+            participants: detail.participants,
+            timeline,
+          }),
+        ])
+        getRepository().replacePerformanceLabels(gameId, puuid, labels)
+        broadcast(win, "stats:updated", { inserted: 0, labelsUpdated: 1 })
+      },
     )
   }
   return timelineService
@@ -369,8 +397,9 @@ function getReviewService(win: BrowserWindow) {
 
 async function createWindow() {
   const win = new BrowserWindow({
-    title: "Recall",
+    title: `Recall v${app.getVersion()}`,
     icon: path.join(process.env.VITE_PUBLIC, "favicon.ico"),
+    frame: false,
     autoHideMenuBar: true,
     height: 940,
     width: VITE_DEV_SERVER_URL ? 1500 + 760 : 1500,
@@ -394,18 +423,16 @@ async function createWindow() {
     win.loadFile(indexHtml)
   }
 
-  // Closing and minimising both hide the window. Recall is only useful if it
-  // is running when a game ends, so the default has to be to stay running.
+  // Closing hides Recall so it can keep recording games. Minimising remains a
+  // normal taskbar action; the custom title bar should behave like Windows.
   win.on("close", (event) => {
     if (quitting) return
     event.preventDefault()
     win.hide()
   })
 
-  win.on("minimize", (event: Electron.Event) => {
-    event.preventDefault()
-    win.hide()
-  })
+  win.on("maximize", () => broadcast(win, "window:maximized", true))
+  win.on("unmaximize", () => broadcast(win, "window:maximized", false))
 
   // Make all links open with the browser, not with the application
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -758,6 +785,7 @@ async function startRiotHistoryBackfill(
           active.platformId ?? "",
         )
         getTimelineService(win).queuePendingBookmarks(active.summoner.puuid)
+        getTimelineService(win).queueRecentMatches(active.summoner.puuid)
       },
       onProgress: (state) => {
         if (revision !== riotBackfillRevision) return
@@ -864,6 +892,7 @@ async function afterSync(
     seen: result.inserted,
     written: result.inserted,
   })
+  getTimelineService(win).queueRecentMatches(session.summoner.puuid)
 
   // Challenges are synced after matches so a challenge failure can never cost
   // us a recorded game.
@@ -1107,6 +1136,14 @@ async function updateOverlay(championId: number | null) {
 
 function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
   ipcMain.on("app-ready", () => connectToLcu(win))
+
+  ipcMain.on("window:minimize", () => win.minimize())
+  ipcMain.on("window:toggle-maximize", () => {
+    if (win.isMaximized()) win.unmaximize()
+    else win.maximize()
+  })
+  ipcMain.on("window:close", () => win.close())
+  ipcMain.handle("window:is-maximized", () => win.isMaximized())
 
   registerUpdaterIpc(ipcMain, updaterService)
 
@@ -1444,7 +1481,10 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     store.set(RIOT_API_KEY_STORE, encrypted)
     void startRiotHistoryBackfill(win, true)
     const puuid = currentPuuid()
-    if (puuid) getTimelineService(win).queuePendingBookmarks(puuid)
+    if (puuid) {
+      getTimelineService(win).queuePendingBookmarks(puuid)
+      getTimelineService(win).queueRecentMatches(puuid)
+    }
     return { configured: true }
   })
 

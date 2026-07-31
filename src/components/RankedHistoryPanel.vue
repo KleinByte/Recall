@@ -1,0 +1,217 @@
+<script setup lang="ts">
+import { computed, ref, watch } from "vue"
+import Panel from "./ui/Panel.vue"
+import RankGraph from "./RankGraph.vue"
+import {
+  currentRankedSeason,
+  pointsForSeason,
+  seasonsWithRankedHistory,
+} from "../helpers/ranked-seasons"
+import type { RankedHistory } from "../types/stats"
+
+const props = withDefaults(defineProps<{
+  histories: RankedHistory[]
+  allowSeasonSelection?: boolean
+}>(), {
+  allowSeasonSelection: false,
+})
+
+const QUEUE_LABELS: Record<string, string> = {
+  RANKED_SOLO_5x5: "Solo/Duo",
+  RANKED_FLEX_SR: "Flex",
+  RANKED_PREMADE_5x5: "Ranked 5s",
+}
+
+const queueLabel = (queue: string) => QUEUE_LABELS[queue] ??
+  queue.replace(/^RANKED_/, "").replaceAll("_", " ")
+
+const queues = computed(() => props.histories
+  .filter((history) => history.points.length > 0)
+  .map((history) => ({ queue: history.queue, label: queueLabel(history.queue) }))
+  .sort((left, right) => {
+    if (left.queue === "RANKED_SOLO_5x5") return -1
+    if (right.queue === "RANKED_SOLO_5x5") return 1
+    return left.label.localeCompare(right.label)
+  }))
+
+const selectedQueue = ref("RANKED_SOLO_5x5")
+const selectedSeason = ref(props.allowSeasonSelection ? "all" : currentRankedSeason().id)
+let initializedQueue = false
+
+watch(queues, (available) => {
+  if (!initializedQueue || !available.some((entry) => entry.queue === selectedQueue.value)) {
+    const active = currentRankedSeason()
+    const hasCurrentPoints = (queue: string) => {
+      const history = props.histories.find((entry) => entry.queue === queue)
+      return pointsForSeason(history?.points ?? [], active).length > 0
+    }
+    const preferred = props.allowSeasonSelection
+      ? available.find((entry) => entry.queue === "RANKED_SOLO_5x5")
+      : available.find((entry) =>
+        entry.queue === "RANKED_SOLO_5x5" && hasCurrentPoints(entry.queue),
+      ) ?? available.find((entry) => hasCurrentPoints(entry.queue))
+    selectedQueue.value = preferred?.queue ?? available[0]?.queue ?? ""
+    initializedQueue = true
+  }
+}, { immediate: true })
+
+const activeSeason = computed(() => currentRankedSeason())
+const selectedHistory = computed(() =>
+  props.histories.find((history) => history.queue === selectedQueue.value),
+)
+const seasons = computed(() => seasonsWithRankedHistory(
+  selectedHistory.value ? [selectedHistory.value] : [],
+))
+watch(seasons, (available) => {
+  if (
+    selectedSeason.value !== "all" &&
+    !available.some((season) => season.id === selectedSeason.value)
+  ) selectedSeason.value = "all"
+})
+const selectedSeasonDefinition = computed(() =>
+  selectedSeason.value === "all"
+    ? undefined
+    : seasons.value.find((season) => season.id === selectedSeason.value) ??
+      (selectedSeason.value === activeSeason.value.id ? activeSeason.value : undefined),
+)
+const points = computed(() => {
+  const all = selectedHistory.value?.points ?? []
+  const season = props.allowSeasonSelection
+    ? selectedSeasonDefinition.value
+    : activeSeason.value
+  return season ? pointsForSeason(all, season) : all
+})
+const first = computed(() => points.value[0])
+const latest = computed(() => points.value.at(-1))
+const change = computed(() =>
+  first.value && latest.value ? latest.value.points - first.value.points : 0,
+)
+const periodLabel = computed(() => props.allowSeasonSelection
+  ? selectedSeasonDefinition.value?.label ?? "All seasons"
+  : activeSeason.value.label,
+)
+const historyMeta = computed(() => {
+  if (!first.value) return `${periodLabel.value} · no readings`
+  const start = new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(first.value.recordedAt))
+  return `${periodLabel.value} · since ${start}`
+})
+</script>
+
+<template>
+  <Panel title="Rank over time" :meta="periodLabel" class="ranked-history-panel">
+    <template #actions>
+      <div class="rank-controls">
+        <label class="sr-only" for="ranked-queue">Ranked queue</label>
+        <select id="ranked-queue" v-model="selectedQueue" class="league-select compact-select">
+          <option v-for="queue in queues" :key="queue.queue" :value="queue.queue">
+            {{ queue.label }}
+          </option>
+        </select>
+        <template v-if="allowSeasonSelection">
+          <label class="sr-only" for="ranked-season">Ranked season</label>
+          <select id="ranked-season" v-model="selectedSeason" class="league-select compact-select">
+            <option value="all">All seasons</option>
+            <option v-for="season in seasons" :key="season.id" :value="season.id">
+              {{ season.label }}
+            </option>
+          </select>
+        </template>
+      </div>
+    </template>
+
+    <template v-if="latest">
+      <div class="rank-summary">
+        <div>
+          <div class="queue-rank">{{ latest.label }}</div>
+          <span class="muted reading-meta">{{ historyMeta }}</span>
+        </div>
+        <div class="rank-current">
+          <span class="numeric queue-lp">{{ latest.leaguePoints }} LP</span>
+          <span
+            v-if="points.length > 1"
+            class="numeric rank-change"
+            :class="change > 0 ? 'up' : change < 0 ? 'down' : ''"
+          >
+            {{ change > 0 ? "+" : "" }}{{ change }} LP
+          </span>
+          <span class="muted queue-record">{{ latest.wins }}W {{ latest.losses }}L</span>
+        </div>
+      </div>
+      <RankGraph :points="points" />
+    </template>
+    <p v-else class="muted empty-period">
+      No {{ queueLabel(selectedQueue) }} readings were recorded during {{ periodLabel }}.
+    </p>
+  </Panel>
+</template>
+
+<style scoped>
+.rank-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.compact-select {
+  min-width: 112px;
+  max-width: 170px;
+  min-height: 30px;
+  padding-block: 4px;
+  font-size: 11px;
+}
+
+.rank-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-1);
+}
+
+.queue-rank {
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 18px;
+  letter-spacing: .4px;
+}
+
+.reading-meta,
+.queue-record,
+.rank-change {
+  font-size: 11px;
+}
+
+.rank-current {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.queue-lp {
+  color: var(--gold);
+  font-size: 14px;
+}
+
+.rank-change.up { color: var(--win); }
+.rank-change.down { color: var(--loss); }
+
+.empty-period {
+  min-height: 220px;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  text-align: center;
+  font-size: 12px;
+}
+
+@media (max-width: 620px) {
+  .rank-controls { justify-content: flex-start; width: 100%; }
+  .compact-select { flex: 1; max-width: none; }
+}
+</style>

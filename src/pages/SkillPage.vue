@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, ref } from "vue"
 import SkillOverview from "../components/skill/SkillOverview.vue"
+import RankedHistoryPanel from "../components/RankedHistoryPanel.vue"
 import { api } from "../helpers/api"
 import {
   filterForSkillScope,
@@ -8,7 +9,7 @@ import {
   type SkillScopeId,
 } from "../helpers/skill-scopes"
 import type { Champion } from "../types/lol"
-import type { SkillReportV2, StatsFilter } from "../types/stats"
+import type { RankedHistory, SkillReportV2, StatsFilter } from "../types/stats"
 
 const SkillInsights = defineAsyncComponent(() => import("../components/skill/SkillInsights.vue"))
 
@@ -36,6 +37,7 @@ const counts = ref<Record<SkillScopeId, number>>(
   Object.fromEntries(SKILL_SCOPES.map((scope) => [scope.id, 0])) as Record<SkillScopeId, number>,
 )
 const report = ref<SkillReportV2 | null>(null)
+const ranked = ref<RankedHistory[]>([])
 const loading = ref(true)
 const failed = ref(false)
 const oldestPlayedAt = ref<number | undefined>()
@@ -136,18 +138,23 @@ async function clearDetailFilters() {
 
 onMounted(async () => {
   try {
-    const [meta, championIds] = await Promise.all([
+    const [meta, championIds, rankedHistory] = await Promise.all([
       api.getStatsMeta(),
       api.getPlayedChampionIds(),
+      api.getRankedHistory(),
     ])
     oldestPlayedAt.value = meta.oldestPlayedAt
     playedChampionIds.value = championIds
+    ranked.value = rankedHistory
     await loadCounts()
   } catch {
     // The normal empty state handles an account without recorded matches.
   }
   await loadReport()
   api.on("stats:updated", () => void applyFilters())
+  api.on("ranked:updated", async () => {
+    ranked.value = await api.getRankedHistory()
+  })
   api.on("lcu:status", () => void loadReport())
 })
 </script>
@@ -221,6 +228,12 @@ onMounted(async () => {
         Every chart and finding below uses this exact selection.
       </p>
     </section>
+
+    <RankedHistoryPanel
+      v-if="ranked.length"
+      :histories="ranked"
+      allow-season-selection
+    />
 
     <nav class="tab-row" aria-label="Skill view">
       <button

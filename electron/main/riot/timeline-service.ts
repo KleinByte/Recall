@@ -15,10 +15,18 @@ interface TimelineDto {
 }
 
 export class TimelineService {
+  private rejectedKey?: string
+  private readonly drainingAccounts = new Set<string>()
+
   constructor(
     private readonly db: Database,
     private readonly apiKey: () => string | undefined,
     private readonly onUpdated: (gameId: number) => void,
+    private readonly onReady?: (
+      gameId: number,
+      puuid: string,
+      summary: CompactTimeline,
+    ) => void | Promise<void>,
   ) {}
 
   get(gameId: number, puuid: string) {
@@ -59,6 +67,7 @@ export class TimelineService {
       | { matchPuuid: string; regionalRoute: string; platformId: string }
       | undefined
     const key = this.apiKey()
+    if (key && key === this.rejectedKey && !manualRetry) return current
     if (!key || !account) {
       this.write(gameId, puuid, match.riotMatchId, "pending")
       this.onUpdated(gameId)
@@ -102,8 +111,16 @@ export class TimelineService {
         data: summary,
       })
       this.recordHealth(puuid, true)
+      try {
+        await this.onReady?.(gameId, puuid, summary)
+      } catch (error) {
+        console.warn(`Timeline labels could not be evaluated: ${(error as Error).message}`)
+      }
     } catch (error) {
       const unavailable = error instanceof RiotApiError && error.status === 404
+      if (error instanceof RiotApiError && (error.status === 401 || error.status === 403)) {
+        this.rejectedKey = key
+      }
       this.write(
         gameId,
         puuid,
@@ -130,6 +147,50 @@ export class TimelineService {
        ORDER BY m.played_at DESC`,
     ).all(puuid) as { gameId: number }[]
     for (const row of rows) void this.request(row.gameId, puuid)
+  }
+
+  /**
+   * Pulls timelines for the newest eligible Summoner's Rift games. Missing or
+   * rejected keys are normal no-ops, and a small sequential batch prevents a
+   * client refresh from bursting Riot's endpoint.
+   */
+  queueRecentMatches(puuid: string, limit = 4) {
+    const key = this.apiKey()
+    if (!key || key === this.rejectedKey || this.drainingAccounts.has(puuid)) return
+    const account = this.db.prepare(
+      "SELECT 1 FROM riot_accounts WHERE puuid = ?",
+    ).get(puuid)
+    if (!account) return
+
+    this.drainingAccounts.add(puuid)
+    void (async () => {
+      try {
+        const rows = this.db.prepare(
+          `SELECT m.game_id AS gameId
+           FROM matches m
+           LEFT JOIN match_timeline_cache t
+             ON t.game_id = m.game_id AND t.puuid = m.puuid
+           WHERE m.puuid = ? AND m.mode_family = 'sr' AND m.is_matched = 1
+             AND EXISTS (
+               SELECT 1 FROM match_participants p
+               WHERE p.game_id = m.game_id AND p.puuid = m.puuid
+                 AND p.is_player = 1
+             )
+             AND (
+               t.status IS NULL OR t.mapper_version <> ? OR
+               t.status IN ('not_requested', 'pending', 'error')
+             )
+           ORDER BY m.played_at DESC
+           LIMIT ?`,
+        ).all(puuid, TIMELINE_MAPPER_VERSION, limit) as { gameId: number }[]
+        for (const row of rows) {
+          if (this.apiKey() === this.rejectedKey) break
+          await this.request(row.gameId, puuid)
+        }
+      } finally {
+        this.drainingAccounts.delete(puuid)
+      }
+    })()
   }
 
   private write(

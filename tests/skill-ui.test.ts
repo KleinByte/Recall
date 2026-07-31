@@ -4,6 +4,18 @@ import { describe, expect, it } from "vitest"
 const read = (path: string) => readFileSync(path, "utf8")
 
 describe("Skill Overview", () => {
+  it("offers queue and season-selectable ranked growth history", () => {
+    const page = read("src/pages/SkillPage.vue")
+    const ranked = read("src/components/RankedHistoryPanel.vue")
+
+    expect(page).toContain("RankedHistoryPanel")
+    expect(page).toContain("allow-season-selection")
+    expect(ranked).toContain("All seasons")
+    expect(ranked).toContain('v-model="selectedQueue"')
+    expect(ranked).toContain('v-model="selectedSeason"')
+    expect(ranked).toContain("change")
+  })
+
   it("uses literal Recall and playstyle copy", () => {
     const overview = read("src/components/skill/SkillOverview.vue")
 

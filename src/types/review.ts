@@ -244,6 +244,19 @@ export interface TimelineFrame {
   ownerLevel: number
   ownerXp: number
   ownerCs: number
+  participants: TimelineParticipantFrame[]
+}
+
+export interface TimelineParticipantFrame {
+  participantId: number
+  teamId?: number
+  currentGold: number
+  totalGold: number
+  level: number
+  xp: number
+  minionsKilled: number
+  jungleMinionsKilled: number
+  position?: { x: number; y: number }
 }
 
 export interface TimelineEvent {

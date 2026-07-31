@@ -103,7 +103,7 @@ describe("timeline mapping", () => {
       {
         timestamp: 60_000,
         participantFrames: {
-          "1": { participantId: 1, totalGold: 1_000, level: 2, xp: 300, minionsKilled: 7 },
+          "1": { participantId: 1, currentGold: 450, totalGold: 1_000, level: 2, xp: 300, minionsKilled: 7, position: { x: 4_000, y: 8_000 } },
           "6": { participantId: 6, totalGold: 900 },
         },
         events: [
@@ -113,6 +113,12 @@ describe("timeline mapping", () => {
       },
     ], 1, new Map([[1, 100], [6, 200]]))
     expect(timeline.frames[0]).toMatchObject({ ownerGold: 1_000, ownerCs: 7 })
+    expect(timeline.frames[0].participants[0]).toMatchObject({
+      participantId: 1,
+      teamId: 100,
+      currentGold: 450,
+      position: { x: 4_000, y: 8_000 },
+    })
     expect(timeline.events.map((event) => event.type)).toEqual([
       "ITEM_PURCHASED",
       "WARD_PLACED",
@@ -135,6 +141,7 @@ describe("timeline mapping", () => {
       ownerLevel: 0,
       ownerXp: 0,
       ownerCs: 0,
+      participants: [],
     }))
     const points = findTurningPoints(frames)
     expect(points.length).toBeLessThanOrEqual(3)

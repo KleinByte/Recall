@@ -1,4 +1,4 @@
-export const TIMELINE_MAPPER_VERSION = 2
+export const TIMELINE_MAPPER_VERSION = 3
 
 export type TimelineEventCategory =
   | "kill"
@@ -16,6 +16,19 @@ export interface CompactTimelineFrame {
   ownerLevel: number
   ownerXp: number
   ownerCs: number
+  participants: CompactTimelineParticipantFrame[]
+}
+
+export interface CompactTimelineParticipantFrame {
+  participantId: number
+  teamId?: number
+  currentGold: number
+  totalGold: number
+  level: number
+  xp: number
+  minionsKilled: number
+  jungleMinionsKilled: number
+  position?: { x: number; y: number }
 }
 
 export interface CompactTimelineEvent {
@@ -55,11 +68,13 @@ export interface CompactTimeline {
 
 interface RawParticipantFrame {
   participantId?: number
+  currentGold?: number
   totalGold?: number
   level?: number
   xp?: number
   minionsKilled?: number
   jungleMinionsKilled?: number
+  position?: { x?: number; y?: number }
 }
 
 interface RawEvent {
@@ -161,6 +176,24 @@ export function mapTimeline(
       ownerCs:
         numberOrZero(owner?.minionsKilled) +
         numberOrZero(owner?.jungleMinionsKilled),
+      participants: participantFrames.map((participant) => {
+        const participantId = numberOrZero(participant.participantId)
+        return {
+          participantId,
+          teamId: participantTeams.get(participantId),
+          currentGold: numberOrZero(participant.currentGold),
+          totalGold: numberOrZero(participant.totalGold),
+          level: numberOrZero(participant.level),
+          xp: numberOrZero(participant.xp),
+          minionsKilled: numberOrZero(participant.minionsKilled),
+          jungleMinionsKilled: numberOrZero(participant.jungleMinionsKilled),
+          position: participant.position &&
+            typeof participant.position.x === "number" &&
+            typeof participant.position.y === "number"
+            ? { x: participant.position.x, y: participant.position.y }
+            : undefined,
+        }
+      }),
     })
 
     for (const [eventIndex, event] of (frame.events ?? []).entries()) {

@@ -10,6 +10,39 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.3",
+    releasedAt: "2026-07-31",
+    title: "A sharper Recall, inside and out",
+    summary:
+      "Recall gains deeper timeline-aware game stories, focused ranked progression views, and a polished desktop identity built around its new R.",
+    sections: [
+      {
+        title: "More meaningful game labels",
+        items: [
+          "Timeline position and event evidence now unlocks more specific labels, including early enemy-jungle invades.",
+          "Performance labels use original Recall names instead of terminology associated with other companion apps.",
+          "Supported recent games are enriched automatically when a valid Riot API key is available and remain fully usable without one.",
+        ],
+      },
+      {
+        title: "Ranked growth in context",
+        items: [
+          "Dashboard ranked history stays focused on the active season and switches queues from one compact panel.",
+          "Skill can compare individual seasons or all recorded seasons from the earliest known LP through today.",
+          "Dashboard columns now keep ranked history and recent games balanced against the more compact playstyle and champion panels.",
+        ],
+      },
+      {
+        title: "A new desktop identity",
+        items: [
+          "The supplied gold-and-cyan R now anchors Recall's wordmark, favicon, taskbar icon, and notification-area icon.",
+          "A frameless Recall title bar keeps native window behavior while adding branded controls and the running version number.",
+          "The Windows icon includes dedicated sizes from 16 through 256 pixels for crisp rendering across desktop surfaces.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.2",
     releasedAt: "2026-07-31",
     title: "Every standout game gets a story",
@@ -19,7 +52,7 @@ export const patchNotes: readonly PatchNoteRelease[] = [
       {
         title: "Evidence-backed game labels",
         items: [
-          "See up to six high-signal labels such as Pentakill, Ouch, You Hurt, Deathless, Visionary, and Objective Thief on supported games.",
+          "See up to six high-signal labels such as Pentakill, Damage Crown, Deathless, Visionary, and Objective Thief on supported games.",
           "Open a game to read the exact statistic or lobby comparison behind every awarded label.",
           "Overlapping labels are suppressed so one performance story does not crowd out the rest of the game.",
         ],

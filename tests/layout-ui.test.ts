@@ -9,12 +9,14 @@ describe("desktop page layout", () => {
 
     expect(dashboard).toContain('class="dashboard-columns"')
     expect(dashboard).toMatch(
-      /class="dashboard-column"[\s\S]*title="Rank over time"[\s\S]*title="Recent games"/,
+      /class="dashboard-column left-column"[\s\S]*RankedHistoryPanel[\s\S]*title="Recent games"/,
     )
     expect(dashboard).toMatch(
-      /class="dashboard-column"[\s\S]*title="Playstyle"[\s\S]*title="Champions in form"/,
+      /class="dashboard-column right-column"[\s\S]*title="Playstyle"[\s\S]*title="Champions in form"/,
     )
     expect(dashboard).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))")
+    expect(dashboard).toContain("grid-template-rows: auto minmax(0, 1fr)")
+    expect(dashboard).toContain('height="260px"')
   })
 
   it("makes repeated dashboard cards align within their rows", () => {
@@ -61,12 +63,14 @@ describe("desktop page layout", () => {
 
   it("shows ranked history from the first reading and plots it on a time axis", () => {
     const dashboard = read("src/pages/DashboardPage.vue")
+    const panel = read("src/components/RankedHistoryPanel.vue")
     const rankGraph = read("src/components/RankGraph.vue")
 
-    expect(dashboard).toContain('title="Rank over time"')
-    expect(dashboard).toContain('<RankGraph :points="queue.points" />')
-    expect(dashboard).not.toContain('v-if="queue.points.length > 1"')
-    expect(dashboard).toContain("rankHistoryMeta(queue.first.recordedAt")
+    expect(dashboard).toContain("RankedHistoryPanel")
+    expect(panel).toContain('title="Rank over time"')
+    expect(panel).toContain('<RankGraph :points="points" />')
+    expect(panel).toContain("currentRankedSeason")
+    expect(panel).toContain('v-model="selectedQueue"')
     expect(rankGraph).toContain('type: "time"')
     expect(rankGraph).toContain('step: "end"')
     expect(rankGraph).toContain("timestamps.length === 1")

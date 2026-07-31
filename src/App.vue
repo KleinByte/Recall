@@ -7,6 +7,7 @@ import MatchSheet from "./components/MatchSheet.vue"
 import PatchNotesModal from "./components/PatchNotesModal.vue"
 import PostGameBanner from "./components/PostGameBanner.vue"
 import UpdateReadyBanner from "./components/UpdateReadyBanner.vue"
+import WindowTitleBar from "./components/WindowTitleBar.vue"
 import ChallengesPage from "./pages/ChallengesPage.vue"
 import ChampionsPage from "./pages/ChampionsPage.vue"
 import DashboardPage from "./pages/DashboardPage.vue"
@@ -171,127 +172,141 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="app">
-    <AppSidebar
-      :page="page"
-      :connected="connected"
-      :summoner="summoner"
-      :refreshing="refreshing"
-      :refresh-message="refreshMessage"
-      :collapsed="sidebarCollapsed"
-      @update:page="page = $event"
-      @update:collapsed="sidebarCollapsed = $event; persistSettings()"
-      @refresh="refreshAll"
-    />
+  <div class="app-window">
+    <WindowTitleBar />
 
-    <main class="content">
-      <ChampSelectBanner :champions="allChampions" />
-
-      <PostGameBanner
-        v-if="lastGame"
-        :match="lastGame"
-        :champions="allChampions"
-        @dismiss="lastGame = null"
-        @review="reviewMatch"
-      />
-
-      <UpdateReadyBanner
-        v-if="updateStatus.kind === 'downloaded' && dismissedUpdateVersion !== updateStatus.version"
-        :status="updateStatus"
-        @dismiss="dismissedUpdateVersion = updateStatus.version"
-      />
-
-      <DashboardPage
-        v-if="page === 'dashboard'"
-        :champions="allChampions"
+    <div class="app">
+      <AppSidebar
+        :page="page"
         :connected="connected"
+        :summoner="summoner"
+        :refreshing="refreshing"
+        :refresh-message="refreshMessage"
+        :collapsed="sidebarCollapsed"
+        @update:page="page = $event"
+        @update:collapsed="sidebarCollapsed = $event; persistSettings()"
+        @refresh="refreshAll"
       />
 
-      <LiveGamePage
-        v-else-if="page === 'live'"
+      <main class="content">
+        <ChampSelectBanner :champions="allChampions" />
+
+        <PostGameBanner
+          v-if="lastGame"
+          :match="lastGame"
+          :champions="allChampions"
+          @dismiss="lastGame = null"
+          @review="reviewMatch"
+        />
+
+        <UpdateReadyBanner
+          v-if="updateStatus.kind === 'downloaded' && dismissedUpdateVersion !== updateStatus.version"
+          :status="updateStatus"
+          @dismiss="dismissedUpdateVersion = updateStatus.version"
+        />
+
+        <DashboardPage
+          v-if="page === 'dashboard'"
+          :champions="allChampions"
+          :connected="connected"
+        />
+
+        <LiveGamePage
+          v-else-if="page === 'live'"
+          :champions="allChampions"
+          :aram-stats="stats"
+        />
+
+        <ReviewPage
+          v-else-if="page === 'review'"
+          :champions="allChampions"
+        />
+
+        <ChallengesPage
+          v-else-if="page === 'challenges'"
+          :champions="allChampions"
+          :connected="connected"
+          :is-colored-when-done="isColoredWhenDone"
+          :show-champion-names="showChampionNames"
+        />
+
+        <MatchesPage
+          v-else-if="page === 'matches'"
+          :champions="allChampions"
+          :connected="connected"
+        />
+
+        <SkillPage
+          v-else-if="page === 'skill'"
+          :champions="allChampions"
+          :connected="connected"
+        />
+
+        <ProgressPage
+          v-else-if="page === 'progress'"
+          :champions="allChampions"
+          :connected="connected"
+        />
+
+        <ChampionsPage
+          v-else-if="page === 'champions'"
+          :champions="allChampions"
+          :connected="connected"
+        />
+
+        <SettingsPage
+          v-else-if="page === 'settings'"
+          :is-colored-when-done="isColoredWhenDone"
+          :show-champion-names="showChampionNames"
+          :connected="connected"
+          @update:is-colored-when-done="
+            isColoredWhenDone = $event;
+            persistSettings()
+          "
+          @update:show-champion-names="
+            showChampionNames = $event;
+            persistSettings()
+          "
+          @refetch="loadChampions"
+          @refetch-aram-stats="fetchAramStats"
+          @view-patch-notes="showPatchNotes = true"
+        />
+      </main>
+
+      <ChampionDetail
+        v-if="detailChampionId !== null"
+        :champion-id="detailChampionId"
         :champions="allChampions"
-        :aram-stats="stats"
       />
 
-      <ReviewPage
-        v-else-if="page === 'review'"
+      <MatchSheet
+        v-if="detailMatch"
+        :match="detailMatch"
         :champions="allChampions"
       />
 
-      <ChallengesPage
-        v-else-if="page === 'challenges'"
-        :champions="allChampions"
-        :connected="connected"
-        :is-colored-when-done="isColoredWhenDone"
-        :show-champion-names="showChampionNames"
+      <PatchNotesModal
+        v-if="showPatchNotes"
+        @close="showPatchNotes = false"
       />
-
-      <MatchesPage
-        v-else-if="page === 'matches'"
-        :champions="allChampions"
-        :connected="connected"
-      />
-
-      <SkillPage
-        v-else-if="page === 'skill'"
-        :champions="allChampions"
-        :connected="connected"
-      />
-
-      <ProgressPage
-        v-else-if="page === 'progress'"
-        :champions="allChampions"
-        :connected="connected"
-      />
-
-      <ChampionsPage
-        v-else-if="page === 'champions'"
-        :champions="allChampions"
-        :connected="connected"
-      />
-
-      <SettingsPage
-        v-else-if="page === 'settings'"
-        :is-colored-when-done="isColoredWhenDone"
-        :show-champion-names="showChampionNames"
-        :connected="connected"
-        @update:is-colored-when-done="
-          isColoredWhenDone = $event;
-          persistSettings()
-        "
-        @update:show-champion-names="
-          showChampionNames = $event;
-          persistSettings()
-        "
-        @refetch="loadChampions"
-        @refetch-aram-stats="fetchAramStats"
-        @view-patch-notes="showPatchNotes = true"
-      />
-    </main>
-
-    <ChampionDetail
-      v-if="detailChampionId !== null"
-      :champion-id="detailChampionId"
-      :champions="allChampions"
-    />
-
-    <MatchSheet
-      v-if="detailMatch"
-      :match="detailMatch"
-      :champions="allChampions"
-    />
-
-    <PatchNotesModal
-      v-if="showPatchNotes"
-      @close="showPatchNotes = false"
-    />
+    </div>
   </div>
 </template>
 
 <style>
+.app-window {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--surface-0);
+}
+
 .app {
   display: flex;
-  height: 100vh;
+  min-height: 0;
+  flex: 1;
   background: var(--surface-0);
   color: var(--text-primary);
 }

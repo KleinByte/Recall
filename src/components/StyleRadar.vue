@@ -11,6 +11,7 @@ const props = defineProps<{
   recent?: StyleAxis[]
   primaryLabel?: string
   secondaryLabel?: string
+  height?: string
 }>()
 
 const valueFor = (axis: StyleAxis) => Math.round(axis.value * 100)
@@ -88,7 +89,7 @@ const option = computed<EChartsCoreOption>(() => {
   <BaseEChart
     :option="option"
     ariaLabel="Playstyle fingerprint across the displayed axes."
-    height="640px"
+    :height="height ?? '640px'"
     class="radar"
   />
 </template>

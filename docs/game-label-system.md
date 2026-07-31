@@ -11,9 +11,11 @@ every matching rule. Labels are separate from user-authored review tags.
 - Match-V5 is optional enrichment. Recall makes no Riot request when no API key
   is configured. HTTP 401 or 403 quarantines that key for the current client
   session; the local match still records normally.
-- A successful Match-V5 match summary refreshes the full scoreboard and awards
-  labels. Every stored label includes its source, confidence, priority, exact
-  tooltip, and machine-readable evidence.
+- A successful Match-V5 match summary refreshes the full scoreboard. Recall
+  then fetches the timeline for a small sequential batch of recent valid
+  Summoner's Rift games and combines both sources' labels. Every stored label
+  includes its source, confidence, priority, exact tooltip, and machine-readable
+  evidence.
 - Evaluations are versioned and persisted even when no label is earned. Raising
   the evaluator version makes old games eligible for safe recomputation.
 - At most six labels survive priority sorting and suppression. Overlapping
@@ -34,30 +36,31 @@ is a Recall heuristic.
 
 | Evidence family | Labels | Confidence |
 | --- | --- | --- |
-| Multikills and kills | Pentakill, Quadra Threat, Triple Threat, Bringer of Carnage, Ready to Rumble, First Blood, Solo Advantage | Exact |
+| Multikills and kills | Pentakill, Quadra Threat, Threefold, Double-Digit Menace, Unbroken Momentum, First Blood, Solo Advantage | Exact |
 | Survival | Deathless, Hard to Kill, Gray Screen Regular | Exact |
-| Damage | Ouch, You Hurt, Heavy Hitter, Untouchable Artillery, Glass Cannon, Punching Up, Damage Sponge, Wet Noodle, True Damage Menace | Exact totals; share/efficiency interpretations are strong |
+| Damage | Damage Crown, Heavy Hitter, Untouchable Artillery, Glass Cannon, Punching Up, Damage Sponge, Wet Noodle, True Damage Menace | Exact totals; share/efficiency interpretations are strong |
 | Economy | Farm Machine, Low-Economy Hero, All Bark, No Bite | Exact totals; share interpretations are strong |
 | Vision | Visionary, Sweeper, Control Freak, No Pink Budget | Exact totals; “Visionary” is strong |
 | Objectives | Objective Force, Demolition Crew, Tower Taker, No Structure Damage, Plate Collector, Objective Thief, First Tower | Exact |
 | Teamplay and utility | Assist Machine, Always There, Out of the Action, Crowd Controller, Field Medic, Team Medic, Shield Wall | Exact totals; participation interpretation is strong |
 
-## Possible later with Match-V5 timeline
+## Enabled from the Match-V5 timeline
 
 Timeline frames normally provide coarse periodic participant positions, while
 some discrete events include timestamps and positions. These are implementable
 only with wording that matches the evidence quality.
 
-| Label concept | Required evidence | Safe wording |
+| Evidence family | Labels | Confidence |
 | --- | --- | --- |
-| Early Predator | Champion-kill events before 10:00 | Exact event count |
-| Plate Collector | Turret-plate events | Exact event count and timestamps |
-| Objective Presence | Nearest position frame plus objective event | “Near the objective at the nearest snapshot” |
-| Caught Out | Death event plus nearest teammate frames | “No teammate was nearby at the nearest snapshot” |
-| Overextended | Death event and coarse map-side geometry | Explicitly call it inferred |
-| Roam Reward | Assigned role, movement frames, early kill event | Explicitly call it inferred |
-| Comeback King / Lead Thrower | Team-gold frames and final result | State the largest observed frame deficit/lead |
-| Cross-Map Pressure | Structure/objective events and coarse positions | Explicitly call it inferred |
+| Kill events | First Blood Assist, Early Predator, Shutdown Collector, Bounty Hunter, Merciless, Marked Target, Late Bloomer | Exact |
+| Event positions | Invader, Gank Machine, Every Lane Wins, Camping Permit, Roam Reward | Strong; uses broad map zones |
+| Role-opponent frames | Lane Kingdom, Jungle Gap, Early Lead, Lead Lost, Comeback Lane, XP Gap, Level Lead, Level Down | Strong; nearest-minute snapshot disclosed |
+| Jungle-CS frames | Counter Jungler, Jungle Invaded | Inferred; counts jungle-CS gains observed in opposing jungle territory |
+| Ward events | Deep Vision | Strong; broad enemy-side geometry |
+| Objective events and positions | Objective Master, Dragon Slayer, Objective Presence | Exact participation or inferred proximity, as shown in the tooltip |
+| Team-gold frames | Comeback King, Lead Thrower | Exact observed frame lead/deficit |
+| Structure events | Plate Collector, Tower Taker, First Tower Pressure, Inhibitor Breaker, Splitpush Threat | Exact participation; Splitpush Threat uses broad side-lane geometry |
+| Death events and frames | Caught Out, Overextended, Shopping With a Fortune | Inferred; nearest-snapshot limitation disclosed |
 
 Timeline labels should use `source = timeline`, never replace exact summary
 labels with a lower-confidence duplicate, and must disclose snapshot distance
@@ -73,7 +76,7 @@ a correlated aggregate happens to be present.
 | --- | --- |
 | Ability casts and hit results | Skillshot Sniper, Ultimate Whiff, Combo Breaker |
 | Summoner-spell casts and cooldown state | Flash Down, Died With Flash Available, Cleanse Unused |
-| Recall start/completion and unspent gold at the moment | Bad Recall, Reset Master, Shopping With a Fortune |
+| Recall start/completion | Bad Recall, Reset Master |
 | Continuous movement, brush entry, and full vision state | Facecheck Fatality, Successful Flank, Blind Wanderer, Seen Coming |
 | Minion positions, health, and last-hit opportunities | Freeze Frame, Wave Crash, Missed Free CS, Cannon Criminal |
 | Continuous health and damage events | Low-Health Escape, Melted Instantly, Target Confusion, Focus Fire |

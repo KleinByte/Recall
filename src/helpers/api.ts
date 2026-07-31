@@ -88,6 +88,22 @@ export const api = {
     send("app-ready")
   },
 
+  minimizeWindow() {
+    send("window:minimize")
+  },
+
+  toggleMaximizeWindow() {
+    send("window:toggle-maximize")
+  },
+
+  closeWindow() {
+    send("window:close")
+  },
+
+  isWindowMaximized(): Promise<boolean> {
+    return invoke("window:is-maximized")
+  },
+
   getStatus(): Promise<{ connected: boolean; summoner: Summoner | null }> {
     return invoke("lcu:status")
   },

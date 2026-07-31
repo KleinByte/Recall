@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from "vue"
 import ChallengeDetailModal from "../components/ChallengeDetailModal.vue"
 import FormStrip from "../components/FormStrip.vue"
 import GradeBadge from "../components/GradeBadge.vue"
-import RankGraph from "../components/RankGraph.vue"
+import RankedHistoryPanel from "../components/RankedHistoryPanel.vue"
 import StyleRadar from "../components/StyleRadar.vue"
 import MiniBar from "../components/ui/MiniBar.vue"
 import Panel from "../components/ui/Panel.vue"
@@ -39,12 +39,6 @@ const props = defineProps<{
   champions: Champion[] | null
   connected: boolean
 }>()
-
-const QUEUE_LABELS: Record<string, string> = {
-  RANKED_SOLO_5x5: "Solo/Duo",
-  RANKED_FLEX_SR: "Flex",
-  RANKED_PREMADE_5x5: "Flex",
-}
 
 /** Midnight this morning, in the player's own timezone. */
 function startOfToday(): number {
@@ -151,26 +145,6 @@ const sessionTime = computed(() => {
   const seconds = (session.value?.avgDurationSecs ?? 0) * playedToday.value
   return seconds > 0 ? formatDuration(seconds) : "–"
 })
-
-const rankedQueues = computed(() =>
-  ranked.value
-    .filter((entry) => QUEUE_LABELS[entry.queue] && entry.points.length > 0)
-    .map((entry) => ({
-      ...entry,
-      label: QUEUE_LABELS[entry.queue],
-      first: entry.points[0],
-      latest: entry.points[entry.points.length - 1],
-    })),
-)
-
-const rankHistoryMeta = (recordedAt: number, readings: number) => {
-  const since = new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(new Date(recordedAt))
-  return `${readings} ${readings === 1 ? "reading" : "readings"} · since ${since}`
-}
 
 const categories = computed<CategoryProgress[]>(() => {
   const raw = profile.value?.challenges?.categoryJson
@@ -279,33 +253,14 @@ const championName = (id: number) => championNameById(props.champions, id)
       </Panel>
 
       <section class="dashboard-columns">
-        <div class="dashboard-column">
-          <Panel
-            v-if="rankedQueues.length"
-            title="Rank over time"
-            :meta="rankedQueues[0].latest.label"
-          >
-            <div v-for="queue in rankedQueues" :key="queue.queue" class="queue">
-              <div class="queue-head">
-                <div>
-                  <span class="muted queue-label">{{ queue.label }}</span>
-                  <div class="queue-rank">{{ queue.latest.label }}</div>
-                </div>
-                <div class="queue-current">
-                  <span class="numeric queue-lp">{{ queue.latest.leaguePoints }} LP</span>
-                  <span class="muted queue-record">
-                    {{ queue.latest.wins }}W {{ queue.latest.losses }}L
-                  </span>
-                </div>
-              </div>
-              <RankGraph :points="queue.points" />
-              <p class="muted queue-foot">
-                {{ rankHistoryMeta(queue.first.recordedAt, queue.points.length) }}
-              </p>
-            </div>
-          </Panel>
+        <div class="dashboard-column left-column">
+          <RankedHistoryPanel
+            v-if="ranked.length"
+            :histories="ranked"
+            class="rank-panel"
+          />
 
-          <Panel v-if="recent.length" title="Recent games">
+          <Panel v-if="recent.length" title="Recent games" class="recent-panel">
             <ul class="game-list">
               <li
                 v-for="game in recent"
@@ -338,19 +293,21 @@ const championName = (id: number) => championNameById(props.champions, id)
           </Panel>
         </div>
 
-        <div class="dashboard-column">
+        <div class="dashboard-column right-column">
           <Panel
             v-if="style"
             title="Playstyle"
             :meta="styleFamily === 'sr' ? `Summoner's Rift` : 'ARAM'"
+            class="playstyle-panel"
           >
-            <StyleRadar :axes="style.axes" />
+            <StyleRadar :axes="style.axes" height="260px" />
           </Panel>
 
           <Panel
             v-if="ranking?.best.length"
             title="Champions in form"
             meta="Weighted by how much you have played them"
+            class="champions-panel"
           >
             <ul class="champion-list">
               <li
@@ -479,63 +436,19 @@ h1 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-4);
-  align-items: start;
+  align-items: stretch;
 }
 
 .dashboard-column {
-  display: flex;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
-  flex-direction: column;
   gap: var(--space-4);
 }
 
-.queue + .queue {
-  margin-top: var(--space-4);
-}
-
-.queue-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: end;
-  font-size: 12px;
-  margin-bottom: var(--space-1);
-}
-
-.queue-label {
-  display: block;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 1.2px;
-}
-
-.queue-rank {
-  margin-top: 2px;
-  color: var(--text-primary);
-  font-family: var(--font-display);
-  font-size: 18px;
-  letter-spacing: 0.4px;
-}
-
-.queue-current {
-  display: flex;
-  flex-direction: column;
-  align-items: end;
-  gap: 2px;
-}
-
-.queue-lp {
-  color: var(--gold);
-  font-size: 14px;
-}
-
-.queue-record,
-.queue-foot {
-  font-size: 11px;
-}
-
-.queue-foot {
-  margin: 0;
-  text-align: right;
+.recent-panel,
+.champions-panel {
+  height: 100%;
 }
 
 .game-list,
@@ -688,6 +601,10 @@ h1 {
 @media (max-width: 820px) {
   .dashboard-columns {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dashboard-column {
+    grid-template-rows: auto;
   }
 }
 </style>
