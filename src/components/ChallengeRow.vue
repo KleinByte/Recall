@@ -3,6 +3,7 @@ import { computed } from "vue"
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
 import { faThumbtack } from "@fortawesome/free-solid-svg-icons"
 import type { ChallengeRow } from "../types/stats"
+import { challengeTierProgress } from "../helpers/challenges"
 import { formatDecimal } from "../helpers/format"
 
 const props = defineProps<{
@@ -15,11 +16,7 @@ const emit = defineEmits<{
   (event: "pin"): void
 }>()
 
-const progress = computed(() => {
-  const next = props.challenge.nextThreshold
-  if (!next || next <= 0) return 1
-  return Math.min(1, props.challenge.currentValue / next)
-})
+const progress = computed(() => challengeTierProgress(props.challenge))
 
 const tierClass = computed(() =>
   props.challenge.currentLevel.slice(0, 1).toLowerCase(),

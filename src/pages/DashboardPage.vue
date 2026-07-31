@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
+import ChallengeDetailModal from "../components/ChallengeDetailModal.vue"
 import FormStrip from "../components/FormStrip.vue"
 import GradeBadge from "../components/GradeBadge.vue"
 import RankGraph from "../components/RankGraph.vue"
@@ -8,7 +9,8 @@ import MiniBar from "../components/ui/MiniBar.vue"
 import Panel from "../components/ui/Panel.vue"
 import StatTile from "../components/ui/StatTile.vue"
 import { api } from "../helpers/api"
-import { openChallenge, openChampion, openMatch } from "../helpers/navigation"
+import { challengeTierProgress } from "../helpers/challenges"
+import { openChampion, openMatch } from "../helpers/navigation"
 import {
   championIconUrl,
   championNameById,
@@ -60,6 +62,7 @@ const ranked = ref<RankedHistory[]>([])
 const ranking = ref<ChampionRanking | null>(null)
 const style = ref<StyleProfile | undefined>(undefined)
 const styleFamily = ref<ModeFamily>("aram")
+const selectedChallenge = ref<ChallengeRow | null>(null)
 
 async function load() {
   try {
@@ -185,10 +188,7 @@ const nearlyThere = computed(() =>
     .map((challenge) => ({
       ...challenge,
       remaining: challenge.nextThreshold! - challenge.currentValue,
-      progress:
-        challenge.nextThreshold! === 0
-          ? 0
-          : challenge.currentValue / challenge.nextThreshold!,
+      progress: challengeTierProgress(challenge),
     }))
     .sort((a, b) => b.progress - a.progress)
     .slice(0, 6),
@@ -382,8 +382,8 @@ const championName = (id: number) => championNameById(props.champions, id)
           v-for="entry in nearlyThere"
           :key="entry.challengeId"
           class="near"
-          :title="`Open ${entry.name}`"
-          @click="openChallenge(entry.challengeId)"
+          :title="`View details for ${entry.name}`"
+          @click="selectedChallenge = entry"
         >
           <GradeBadge :grade="entry.currentLevel.slice(0, 1)" />
           <div class="near-body">
@@ -396,6 +396,12 @@ const championName = (id: number) => championNameById(props.champions, id)
         </button>
       </div>
     </Panel>
+
+    <ChallengeDetailModal
+      v-if="selectedChallenge"
+      :challenge="selectedChallenge"
+      @close="selectedChallenge = null"
+    />
   </div>
 </template>
 

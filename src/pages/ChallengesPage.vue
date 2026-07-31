@@ -2,6 +2,12 @@
 import { computed, nextTick, onMounted, ref, watch } from "vue"
 import ChallengeRowView from "../components/ChallengeRow.vue"
 import { api } from "../helpers/api"
+import {
+  isChallengeCompleted,
+  sortChallenges,
+  type ChallengeSortDirection,
+  type ChallengeSortKey,
+} from "../helpers/challenges"
 import { championIconUrl } from "../helpers/format"
 import { focusChallengeId, openChampion } from "../helpers/navigation"
 import type { Champion } from "../types/lol"
@@ -34,6 +40,16 @@ const LEVELS = [
   "PLATINUM",
   "DIAMOND",
   "MASTER",
+  "GRANDMASTER",
+  "CHALLENGER",
+]
+
+const SORTS: { value: ChallengeSortKey; label: string }[] = [
+  { value: "closest", label: "Closest to next tier" },
+  { value: "level", label: "Current tier" },
+  { value: "name", label: "Name" },
+  { value: "category", label: "Category" },
+  { value: "updated", label: "Recently updated" },
 ]
 
 const challenges = ref<ChallengeRow[]>([])
@@ -43,6 +59,9 @@ const category = ref("All")
 const level = ref("All")
 const championOnly = ref(false)
 const showRetired = ref(false)
+const hideCompleted = ref(true)
+const sortBy = ref<ChallengeSortKey>("closest")
+const sortDirection = ref<ChallengeSortDirection>("desc")
 const expandedId = ref<number | null>(null)
 /** Rendering all 399 rows at once is slow and pointless; more load on demand. */
 const visibleCount = ref(40)
@@ -94,6 +113,7 @@ async function focusOn(challengeId: number) {
   level.value = "All"
   championOnly.value = false
   showRetired.value = challenge.isRetired === 1
+  if (isChallengeCompleted(challenge)) hideCompleted.value = false
 
   // Make sure the row is inside the rendered window before scrolling to it.
   const index = filtered.value.findIndex(
@@ -121,9 +141,16 @@ watch(
 const filtered = computed(() => {
   const needle = search.value.toLowerCase()
 
-  return challenges.value.filter((challenge) => {
+  const matches = challenges.value.filter((challenge) => {
     const retired = challenge.isRetired === 1
     if (showRetired.value !== retired) return false
+    if (
+      hideCompleted.value &&
+      !retired &&
+      isChallengeCompleted(challenge)
+    ) {
+      return false
+    }
 
     if (category.value !== "All" && challenge.category !== category.value) {
       return false
@@ -141,19 +168,40 @@ const filtered = computed(() => {
     }
     return true
   })
+
+  return sortChallenges(matches, sortBy.value, sortDirection.value)
 })
 
 const visible = computed(() => filtered.value.slice(0, visibleCount.value))
 
 const pinnedChallenges = computed(() =>
-  challenges.value.filter((challenge) =>
-    pinned.value.includes(challenge.challengeId),
+  challenges.value.filter(
+    (challenge) =>
+      pinned.value.includes(challenge.challengeId) &&
+      (!hideCompleted.value || !isChallengeCompleted(challenge)),
   ),
 )
 
-watch([search, category, level, championOnly, showRetired], () => {
-  visibleCount.value = 40
-  expandedId.value = null
+watch(
+  [
+    search,
+    category,
+    level,
+    championOnly,
+    showRetired,
+    hideCompleted,
+    sortBy,
+    sortDirection,
+  ],
+  () => {
+    visibleCount.value = 40
+    expandedId.value = null
+  },
+)
+
+watch(sortBy, (key) => {
+  sortDirection.value =
+    key === "name" || key === "category" ? "asc" : "desc"
 })
 
 const toggle = (challengeId: number) => {
@@ -219,9 +267,39 @@ const splitChampions = (challenge: ChallengeRow) => {
         </select>
       </label>
 
+      <label class="field">
+        <span class="muted field-label">Sort</span>
+        <select v-model="sortBy" class="league-select">
+          <option
+            v-for="option in SORTS"
+            :key="option.value"
+            :value="option.value"
+          >
+            {{ option.label }}
+          </option>
+        </select>
+      </label>
+
+      <button
+        class="league-button direction"
+        type="button"
+        :title="sortDirection === 'desc' ? 'Sort descending' : 'Sort ascending'"
+        :aria-label="
+          sortDirection === 'desc' ? 'Sort descending' : 'Sort ascending'
+        "
+        @click="sortDirection = sortDirection === 'desc' ? 'asc' : 'desc'"
+      >
+        {{ sortDirection === "desc" ? "↓" : "↑" }}
+      </button>
+
       <label class="toggle">
         <input type="checkbox" v-model="championOnly" />
         <span>Champion challenges only</span>
+      </label>
+
+      <label class="toggle">
+        <input type="checkbox" v-model="hideCompleted" />
+        <span>Hide completed challenges</span>
       </label>
 
       <label class="toggle">
@@ -410,6 +488,12 @@ h1 {
 
 .toggle input {
   accent-color: var(--gold);
+}
+
+.direction {
+  width: 38px;
+  padding-inline: 0;
+  font-size: 17px;
 }
 
 .list {
