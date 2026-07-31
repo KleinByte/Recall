@@ -2,7 +2,11 @@
 import { computed } from "vue"
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
 import { faArrowDown, faArrowUp, faChartLine } from "@fortawesome/free-solid-svg-icons"
-import { itemAsset } from "../../helpers/items"
+import {
+  findingItemAsset,
+  findingLabel,
+  findingSummary,
+} from "../../helpers/insight-findings"
 import type { InsightFinding } from "../../types/stats"
 
 const props = defineProps<{
@@ -53,12 +57,10 @@ const direction = computed(() => {
   return props.finding.effect > 0 ? "positive" : props.finding.effect < 0 ? "negative" : "neutral"
 })
 
-const item = computed(() => {
-  const match = /^item:(\d+)$/.exec(props.finding.key)
-  return match ? itemAsset(Number(match[1])) : undefined
-})
+const item = computed(() => findingItemAsset(props.finding))
 
-const displayTitle = computed(() => item.value?.name ?? props.finding.title)
+const displayTitle = computed(() => findingLabel(props.finding))
+const displaySummary = computed(() => findingSummary(props.finding))
 
 const playerLabel = computed(() => {
   if (props.finding.unit === "probability") return "Estimated win chance"
@@ -94,7 +96,7 @@ function formatSigned(value: number) {
     </header>
 
     <p class="player-label" :class="direction">{{ playerLabel }}</p>
-    <p class="summary">{{ finding.summary }}</p>
+    <p class="summary">{{ displaySummary }}</p>
 
     <div class="effect-meter" :class="direction" aria-hidden="true">
       <span :style="{ width: effectWidth }" />

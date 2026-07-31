@@ -32,6 +32,7 @@ const chartData = computed(() => ({
 }))
 
 const suffix = computed(() => props.unit === "grade" ? " Recall grade" : " pp")
+const chartHeight = computed(() => `${Math.max(190, props.entries.length * 38 + 56)}px`)
 
 const chartOptions = computed<ChartOptions<"bar">>(() => ({
   responsive: true,
@@ -75,14 +76,13 @@ const chartOptions = computed<ChartOptions<"bar">>(() => ({
 </script>
 
 <template>
-  <div class="effect-chart">
+  <div class="effect-chart" :style="{ height: chartHeight }">
     <Bar :data="chartData" :options="chartOptions" />
   </div>
 </template>
 
 <style scoped>
 .effect-chart {
-  height: 190px;
   position: relative;
 }
 </style>

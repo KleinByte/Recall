@@ -10,6 +10,30 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "1.1.8",
+    releasedAt: "2026-07-31",
+    title: "Insights that explain themselves",
+    summary:
+      "Recall makes your strongest performance patterns easier to compare, while its navigation now gives the main view more room when you need it.",
+    sections: [
+      {
+        title: "Clearer performance signals",
+        items: [
+          "Item-based findings now show the item's real name and icon everywhere in Skill Insights.",
+          "Comparable findings across each Insights section now include relative-effect charts.",
+          "Effect charts grow to fit their labels, keeping larger finding groups readable.",
+        ],
+      },
+      {
+        title: "A roomier Recall",
+        items: [
+          "The Recall mark is larger and easier to spot in the app sidebar.",
+          "Collapse the sidebar into a tooltip-backed icon rail and Recall will remember your choice.",
+        ],
+      },
+    ],
+  },
+  {
     version: "1.1.7",
     releasedAt: "2026-07-31",
     title: "Clearer skill insights, anywhere",

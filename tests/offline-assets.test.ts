@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { championNameById } from "../src/helpers/format"
+import { findingLabel, findingSummary } from "../src/helpers/insight-findings"
 import { itemAsset } from "../src/helpers/items"
 
 describe("offline renderer assets", () => {
@@ -17,5 +18,16 @@ describe("offline renderer assets", () => {
 
   it("prefers the live-client catalog when it is available", () => {
     expect(championNameById([{ id: 103, name: "Live Ahri" }], 103)).toBe("Live Ahri")
+  })
+
+  it("uses bundled names for item findings in labels and summary copy", () => {
+    const finding = {
+      key: "item:3020",
+      title: "Item 3020",
+      summary: "Item 3020 associated with higher grades.",
+    }
+
+    expect(findingLabel(finding)).toBe("Sorcerer's Shoes")
+    expect(findingSummary(finding)).toBe("Sorcerer's Shoes associated with higher grades.")
   })
 })

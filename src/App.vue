@@ -45,6 +45,7 @@ let hasFocusedLiveGame = false
 
 const isColoredWhenDone = ref(false)
 const showChampionNames = ref(false)
+const sidebarCollapsed = ref(false)
 
 async function fetchAramStats() {
   const response = await fetch(
@@ -74,6 +75,7 @@ async function loadSettings() {
     const parsed: StoredSettings = JSON.parse(storedSettings)
     isColoredWhenDone.value = parsed.isColoredWhenDone
     showChampionNames.value = parsed.showChampionNames
+    sidebarCollapsed.value = parsed.sidebarCollapsed ?? false
   }
 }
 
@@ -83,6 +85,7 @@ function persistSettings() {
     JSON.stringify({
       isColoredWhenDone: isColoredWhenDone.value,
       showChampionNames: showChampionNames.value,
+      sidebarCollapsed: sidebarCollapsed.value,
     }),
   )
 }
@@ -167,7 +170,9 @@ onMounted(async () => {
       :summoner="summoner"
       :refreshing="refreshing"
       :refresh-message="refreshMessage"
+      :collapsed="sidebarCollapsed"
       @update:page="page = $event"
+      @update:collapsed="sidebarCollapsed = $event; persistSettings()"
       @refresh="refreshAll"
     />
 

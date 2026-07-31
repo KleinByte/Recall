@@ -5,6 +5,7 @@ import { faArrowDown, faArrowUp, faWandMagicSparkles } from "@fortawesome/free-s
 import EffectChart from "./EffectChart.vue"
 import InsightFinding from "./InsightFinding.vue"
 import OutcomeTrendChart from "./OutcomeTrendChart.vue"
+import { findingLabel, findingSummary } from "../../helpers/insight-findings"
 import type {
   InsightSection,
   ModeFamily,
@@ -73,7 +74,7 @@ const takeaways = computed(() => selectTakeaways(props.insights))
 
 const takeawayEntries = computed(() => [takeaways.value.strength, takeaways.value.caution]
   .filter((finding): finding is NonNullable<typeof finding> => Boolean(finding))
-  .map((finding) => ({ label: finding.title, value: finding.effect })))
+  .map((finding) => ({ label: findingLabel(finding), value: finding.effect })))
 
 const predictiveEntries = computed(() => props.insights.predictive.signals?.map((signal) => ({
   label: signal.feature,
@@ -110,6 +111,27 @@ const displayedFindings = (section: InsightSection) =>
   section.key === "conditions"
     ? section.findings.filter((finding) => !visualConditionLabels.has(finding.key))
     : section.findings
+
+type EffectChartUnit = "grade" | "percentage-points"
+
+const effectChartUnit = (finding: InsightSection["findings"][number]): EffectChartUnit =>
+  finding.unit === "grade" ? "grade" : "percentage-points"
+
+const sectionEffectGroups = (section: InsightSection) => {
+  const entriesByUnit = new Map<EffectChartUnit, Array<{ label: string; value: number }>>()
+
+  for (const finding of displayedFindings(section)) {
+    const unit = effectChartUnit(finding)
+    const entries = entriesByUnit.get(unit) ?? []
+    entries.push({
+      label: findingLabel(finding),
+      value: unit === "grade" ? finding.effect : finding.effect * 100,
+    })
+    entriesByUnit.set(unit, entries)
+  }
+
+  return [...entriesByUnit].map(([unit, entries]) => ({ unit, entries }))
+}
 </script>
 
 <template>
@@ -129,16 +151,16 @@ const displayedFindings = (section: InsightSection) =>
           <FontAwesomeIcon :icon="faArrowUp" fixed-width />
           <div>
             <span>Stronger games</span>
-            <strong>{{ takeaways.strength.title }}</strong>
-            <p>{{ takeaways.strength.summary }}</p>
+            <strong>{{ findingLabel(takeaways.strength) }}</strong>
+            <p>{{ findingSummary(takeaways.strength) }}</p>
           </div>
         </div>
         <div v-if="takeaways.caution" class="takeaway negative">
           <FontAwesomeIcon :icon="faArrowDown" fixed-width />
           <div>
             <span>Weaker games</span>
-            <strong>{{ takeaways.caution.title }}</strong>
-            <p>{{ takeaways.caution.summary }}</p>
+            <strong>{{ findingLabel(takeaways.caution) }}</strong>
+            <p>{{ findingSummary(takeaways.caution) }}</p>
           </div>
         </div>
         <div v-if="predictiveEntries.length" class="takeaway predictive">
@@ -154,11 +176,6 @@ const displayedFindings = (section: InsightSection) =>
         v-if="takeawayEntries.length"
         :entries="takeawayEntries"
         unit="grade"
-      />
-      <EffectChart
-        v-if="predictiveEntries.length"
-        :entries="predictiveEntries"
-        unit="percentage-points"
       />
     </section>
 
@@ -185,6 +202,11 @@ const displayedFindings = (section: InsightSection) =>
             <span class="numeric" :class="signal.direction">{{ signalEffect(signal.marginalEffect) }}</span>
           </li>
         </ul>
+        <EffectChart
+          v-if="predictiveEntries.length"
+          :entries="predictiveEntries"
+          unit="percentage-points"
+        />
       </div>
 
       <template v-else-if="entry.section">
@@ -205,6 +227,14 @@ const displayedFindings = (section: InsightSection) =>
           <p class="method">The match lengths you have recorded, with volume next to win rate.</p>
           <OutcomeTrendChart :rows="outcomes.duration" />
         </section>
+        <div
+          v-for="group in sectionEffectGroups(entry.section)"
+          :key="group.unit"
+          class="effect-panel"
+        >
+          <h3>{{ group.unit === "grade" ? "Recall grade difference" : "Relative difference" }}</h3>
+          <EffectChart :entries="group.entries" :unit="group.unit" />
+        </div>
         <div v-if="displayedFindings(entry.section).length" class="finding-grid">
           <InsightFinding
             v-for="finding in displayedFindings(entry.section)"
@@ -367,6 +397,22 @@ h2 {
 
 .duration-chart {
   margin-bottom: var(--space-3);
+}
+
+.effect-panel {
+  min-width: 0;
+  margin: 0 0 var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-1);
+}
+
+.effect-panel h3 {
+  margin: 0 0 var(--space-3);
+  color: var(--text-primary);
+  font-family: var(--font-heading);
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .sparse {

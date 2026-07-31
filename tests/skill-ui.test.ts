@@ -96,11 +96,23 @@ describe("Skill Insights", () => {
     expect(insights).toContain("Top takeaways")
     expect(insights).toContain("selectTakeaways")
     expect(insights).toContain("EffectChart")
-    expect(finding).toContain("itemAsset")
+    expect(finding).toContain("findingItemAsset")
+    expect(finding).toContain("findingSummary")
     expect(finding).toContain("Stronger games")
     expect(overview).toContain("itemAsset")
     expect(effectChart).toContain('indexAxis: "y"')
     expect(effectChart).toContain("prefers-reduced-motion")
+  })
+
+  it("resolves item finding labels and charts every comparable section", () => {
+    const insights = read("src/components/skill/SkillInsights.vue")
+
+    expect(insights).toContain("findingLabel")
+    expect(insights).toContain("findingSummary")
+    expect(insights).toContain("takeawayEntries")
+    expect(insights).toContain("sectionEffectGroups")
+    expect(insights).toContain("group.entries")
+    expect(insights).toContain(":entries=\"predictiveEntries\"")
   })
 
   it("keeps generated report copy associative", () => {

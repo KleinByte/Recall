@@ -12,6 +12,21 @@ describe("Recall branding", () => {
     expect(sidebar).toContain("ECALL")
   })
 
+  it("supports a persistent collapsible icon rail with accessible controls", () => {
+    const sidebar = read("src/components/AppSidebar.vue")
+    const app = read("src/App.vue")
+
+    expect(sidebar).toContain("collapsed: boolean")
+    expect(sidebar).toContain("update:collapsed")
+    expect(sidebar).toContain("faAnglesLeft")
+    expect(sidebar).toContain("faAnglesRight")
+    expect(sidebar).toContain(':class="{ collapsed }"')
+    expect(sidebar).toContain("aria-label")
+    expect(app).toContain("sidebarCollapsed")
+    expect(app).toContain("@update:collapsed")
+    expect(app).toContain("sidebarCollapsed: sidebarCollapsed.value")
+  })
+
   it("uses one stable Windows taskbar identity for the app and package", () => {
     const main = read("electron/main/index.ts")
     const builder = read("electron-builder.json")

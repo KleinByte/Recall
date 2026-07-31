@@ -7,6 +7,8 @@ import {
   faListUl,
   faTowerBroadcast,
   faBookOpen,
+  faAnglesLeft,
+  faAnglesRight,
   faRadiation,
   faRotate,
   faSeedling,
@@ -22,10 +24,12 @@ defineProps<{
   summoner: Summoner | null
   refreshing: boolean
   refreshMessage: string | null
+  collapsed: boolean
 }>()
 
 const emit = defineEmits<{
   (event: "update:page", value: PageId): void
+  (event: "update:collapsed", value: boolean): void
   (event: "refresh"): void
 }>()
 
@@ -43,13 +47,23 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
 </script>
 
 <template>
-  <nav class="sidebar">
+  <nav class="sidebar" :class="{ collapsed }">
     <div class="brand">
       <div class="brand-title" aria-label="Recall">
         <img src="/favicon.ico" class="brand-logo" alt="" />
-        <span class="brand-mark">ECALL</span>
+        <span v-if="!collapsed" class="brand-mark">ECALL</span>
       </div>
-      <span class="brand-name">League companion</span>
+      <button
+        class="collapse-toggle"
+        type="button"
+        :aria-label="collapsed ? 'Expand navigation' : 'Collapse navigation'"
+        :aria-expanded="!collapsed"
+        :title="collapsed ? 'Expand navigation' : 'Collapse navigation'"
+        @click="emit('update:collapsed', !collapsed)"
+      >
+        <FontAwesomeIcon :icon="collapsed ? faAnglesRight : faAnglesLeft" fixed-width />
+      </button>
+      <span v-if="!collapsed" class="brand-name">League companion</span>
     </div>
 
     <ul class="nav">
@@ -57,10 +71,11 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
         <button
           class="nav-item"
           :class="{ active: page === item.id }"
+          :title="collapsed ? item.label : undefined"
           @click="emit('update:page', item.id)"
         >
           <FontAwesomeIcon :icon="item.icon" class="nav-icon" fixed-width />
-          <span>{{ item.label }}</span>
+          <span v-if="!collapsed">{{ item.label }}</span>
         </button>
       </li>
     </ul>
@@ -69,23 +84,24 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
       class="refresh"
       :disabled="refreshing || !connected"
       :title="connected ? 'Refresh matches, challenges, profile, and ranked data' : 'Start League before refreshing'"
+      :aria-label="refreshing ? 'Refreshing' : 'Refresh'"
       @click="emit('refresh')"
     >
       <FontAwesomeIcon :icon="faRotate" :class="{ spinning: refreshing }" fixed-width />
-      <span>{{ refreshing ? "Refreshing…" : "Refresh" }}</span>
+      <span v-if="!collapsed">{{ refreshing ? "Refreshing…" : "Refresh" }}</span>
     </button>
-    <p v-if="refreshMessage" class="refresh-message" role="status">
+    <p v-if="refreshMessage && !collapsed" class="refresh-message" role="status">
       {{ refreshMessage }}
     </p>
 
     <div class="status">
       <div class="status-row">
         <span class="dot" :class="{ online: connected }" />
-        <span class="status-text">
+        <span v-if="!collapsed" class="status-text">
           {{ connected ? "Client connected" : "Client not detected" }}
         </span>
       </div>
-      <div v-if="summoner" class="summoner">
+      <div v-if="summoner && !collapsed" class="summoner">
         {{ summoner.gameName }}
         <span class="tag">#{{ summoner.tagLine }}</span>
       </div>
@@ -106,9 +122,17 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
   border-right: 1px solid var(--border-subtle);
   padding: var(--space-5) var(--space-3) var(--space-3);
   box-sizing: border-box;
+  transition: width 0.18s ease, flex-basis 0.18s ease, padding 0.18s ease;
+}
+
+.sidebar.collapsed {
+  width: 68px;
+  flex-basis: 68px;
+  padding-inline: var(--space-2);
 }
 
 .brand {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -120,19 +144,19 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
 .brand-title {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
 .brand-logo {
-  width: 24px;
-  height: 24px;
-  flex: 0 0 24px;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
   object-fit: contain;
 }
 
 .brand-mark {
   font-family: var(--font-display);
-  font-size: 22px;
+  font-size: 25px;
   letter-spacing: 3px;
   color: var(--gold);
   line-height: 1;
@@ -144,6 +168,38 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
   letter-spacing: 1.6px;
   text-transform: uppercase;
   color: var(--text-secondary);
+}
+
+.collapse-toggle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.collapse-toggle:hover {
+  border-color: var(--gold);
+  color: var(--gold-bright);
+}
+
+.sidebar.collapsed .brand {
+  align-items: center;
+  padding-inline: 0;
+}
+
+.sidebar.collapsed .collapse-toggle {
+  top: 36px;
+  right: 50%;
+  transform: translateX(50%);
 }
 
 .nav {
@@ -180,6 +236,11 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
   transition:
     background 0.12s ease,
     color 0.12s ease;
+}
+
+.sidebar.collapsed .nav-item {
+  justify-content: center;
+  padding-inline: 0;
 }
 
 .nav-item:hover {
@@ -220,6 +281,10 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
   border-color: var(--gold);
 }
 
+.sidebar.collapsed .refresh {
+  padding-inline: 0;
+}
+
 .refresh:disabled {
   cursor: not-allowed;
   color: var(--text-muted);
@@ -250,6 +315,10 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
   display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+.sidebar.collapsed .status-row {
+  justify-content: center;
 }
 
 .dot {
