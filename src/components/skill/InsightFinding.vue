@@ -4,13 +4,17 @@ import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
 import { faArrowDown, faArrowUp, faChartLine } from "@fortawesome/free-solid-svg-icons"
 import {
   findingItemAsset,
+  findingChampionId,
   findingLabel,
   findingSummary,
 } from "../../helpers/insight-findings"
+import { championIconUrl } from "../../helpers/format"
+import type { Champion } from "../../types/lol"
 import type { InsightFinding } from "../../types/stats"
 
 const props = defineProps<{
   finding: InsightFinding
+  champions: Champion[] | null
 }>()
 
 const evidenceLabel = computed(() => ({
@@ -58,9 +62,10 @@ const direction = computed(() => {
 })
 
 const item = computed(() => findingItemAsset(props.finding))
+const championId = computed(() => findingChampionId(props.finding))
 
-const displayTitle = computed(() => findingLabel(props.finding))
-const displaySummary = computed(() => findingSummary(props.finding))
+const displayTitle = computed(() => findingLabel(props.finding, props.champions))
+const displaySummary = computed(() => findingSummary(props.finding, props.champions))
 
 const playerLabel = computed(() => {
   if (props.finding.unit === "probability") return "Estimated win chance"
@@ -84,6 +89,12 @@ function formatSigned(value: number) {
     <header class="finding-head">
       <div class="finding-title">
         <img v-if="item" :src="item.iconUrl" :alt="item.name" class="item-icon" />
+        <img
+          v-else-if="championId !== undefined"
+          :src="championIconUrl(championId)"
+          :alt="displayTitle"
+          class="item-icon champion-icon"
+        />
         <FontAwesomeIcon
           v-else
           :icon="direction === 'positive' ? faArrowUp : direction === 'negative' ? faArrowDown : faChartLine"

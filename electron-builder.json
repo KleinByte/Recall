@@ -25,6 +25,7 @@
     "artifactName": "${productName}-Windows-${version}-Setup.${ext}"
   },
   "nsis": {
+    "guid": "f055652a-03fc-5862-8fe3-2be04dffe9f6",
     "oneClick": false,
     "perMachine": false,
     "allowToChangeInstallationDirectory": true,

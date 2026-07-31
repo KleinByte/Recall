@@ -8,26 +8,29 @@ import {
   type SkillScopeId,
 } from "../helpers/skill-scopes"
 import type { Champion } from "../types/lol"
-import type { SkillReportV2 } from "../types/stats"
+import type { SkillReportV2, StatsFilter } from "../types/stats"
 
 const SkillInsights = defineAsyncComponent(() => import("../components/skill/SkillInsights.vue"))
 
-defineProps<{
+const props = defineProps<{
   champions: Champion[] | null
   connected: boolean
 }>()
 
-type PrimaryMode = "rift" | "aram" | "mayhem"
 type SkillTab = "overview" | "insights"
 
-const PRIMARY_MODES: Array<{ id: PrimaryMode; label: string }> = [
-  { id: "rift", label: "Summoner's Rift" },
-  { id: "aram", label: "ARAM" },
-  { id: "mayhem", label: "Mayhem" },
+const ROLES = [
+  { value: "TOP", label: "Top" },
+  { value: "JUNGLE", label: "Jungle" },
+  { value: "MIDDLE", label: "Mid" },
+  { value: "BOTTOM", label: "Bot" },
+  { value: "UTILITY", label: "Support" },
 ]
 
-const primary = ref<PrimaryMode>("rift")
 const scopeId = ref<SkillScopeId>("riftAll")
+const season = ref<number | undefined>(undefined)
+const role = ref<string | undefined>(undefined)
+const championId = ref<number | undefined>(undefined)
 const tab = ref<SkillTab>("overview")
 const counts = ref<Record<SkillScopeId, number>>(
   Object.fromEntries(SKILL_SCOPES.map((scope) => [scope.id, 0])) as Record<SkillScopeId, number>,
@@ -35,6 +38,9 @@ const counts = ref<Record<SkillScopeId, number>>(
 const report = ref<SkillReportV2 | null>(null)
 const loading = ref(true)
 const failed = ref(false)
+const oldestPlayedAt = ref<number | undefined>()
+const playedChampionIds = ref<number[]>([])
+let choseInitialScope = false
 
 const selectedScope = computed(() =>
   SKILL_SCOPES.find((scope) => scope.id === scopeId.value)!,
@@ -42,24 +48,60 @@ const selectedScope = computed(() =>
 const riftScopes = computed(() =>
   SKILL_SCOPES.filter((scope) => scope.primary === "rift"),
 )
-const primaryCount = (mode: PrimaryMode) =>
-  counts.value[mode === "rift" ? "riftAll" : mode]
+const otherScopes = computed(() =>
+  SKILL_SCOPES.filter((scope) => scope.primary !== "rift"),
+)
+const seasonOptions = computed(() => {
+  const newest = new Date().getFullYear()
+  const oldest = oldestPlayedAt.value
+    ? new Date(oldestPlayedAt.value).getFullYear()
+    : newest
+  return Array.from({ length: newest - oldest + 1 }, (_, index) => newest - index)
+})
+const championOptions = computed(() => {
+  const played = new Set(playedChampionIds.value)
+  return (props.champions ?? [])
+    .filter((champion) => played.has(champion.id))
+    .sort((left, right) => left.name.localeCompare(right.name))
+})
+const hasDetailFilters = computed(() =>
+  season.value !== undefined || role.value !== undefined || championId.value !== undefined,
+)
 const timezoneLabel = Intl.DateTimeFormat().resolvedOptions().timeZone || "local time"
+
+function detailFilter(): StatsFilter {
+  const filter: StatsFilter = {}
+  if (season.value !== undefined) {
+    filter.sinceMs = new Date(season.value, 0, 1).getTime()
+    filter.untilMs = new Date(season.value + 1, 0, 1).getTime() - 1
+  }
+  if (role.value !== undefined && selectedScope.value.family === "sr") {
+    filter.roles = [role.value]
+  }
+  if (championId.value !== undefined) filter.championIds = [championId.value]
+  return filter
+}
+
+function currentFilter(scope: SkillScopeId = scopeId.value): StatsFilter {
+  return { ...filterForSkillScope(scope), ...detailFilter() }
+}
 
 async function loadCounts() {
   const summaries = await Promise.all(
-    SKILL_SCOPES.map((scope) => api.getSummary(filterForSkillScope(scope.id))),
+    SKILL_SCOPES.map((scope) => api.getSummary(currentFilter(scope.id))),
   )
 
   counts.value = Object.fromEntries(
     SKILL_SCOPES.map((scope, index) => [scope.id, summaries[index].games]),
   ) as Record<SkillScopeId, number>
 
-  const busiest = PRIMARY_MODES.reduce((best, mode) =>
-    primaryCount(mode.id) > primaryCount(best.id) ? mode : best,
-  )
-  primary.value = busiest.id
-  scopeId.value = busiest.id === "rift" ? "riftAll" : busiest.id
+  if (!choseInitialScope) {
+    const candidates: SkillScopeId[] = ["riftAll", "aram", "mayhem"]
+    scopeId.value = candidates.reduce((best, id) =>
+      counts.value[id] > counts.value[best] ? id : best,
+    )
+    choseInitialScope = true
+  }
 }
 
 async function loadReport() {
@@ -68,7 +110,7 @@ async function loadReport() {
   try {
     const scope = selectedScope.value
     report.value = await api.getSkillReport(
-      filterForSkillScope(scope.id),
+      currentFilter(scope.id),
       scope.family,
     )
   } catch (error) {
@@ -80,27 +122,32 @@ async function loadReport() {
   }
 }
 
-async function selectPrimary(mode: PrimaryMode) {
-  if (primary.value === mode) return
-  primary.value = mode
-  scopeId.value = mode === "rift" ? "riftAll" : mode
-  await loadReport()
+async function applyFilters() {
+  if (selectedScope.value.family !== "sr") role.value = undefined
+  await Promise.all([loadCounts(), loadReport()])
 }
 
-async function selectScope(nextScopeId: SkillScopeId) {
-  if (scopeId.value === nextScopeId) return
-  scopeId.value = nextScopeId
-  await loadReport()
+async function clearDetailFilters() {
+  season.value = undefined
+  role.value = undefined
+  championId.value = undefined
+  await applyFilters()
 }
 
 onMounted(async () => {
   try {
+    const [meta, championIds] = await Promise.all([
+      api.getStatsMeta(),
+      api.getPlayedChampionIds(),
+    ])
+    oldestPlayedAt.value = meta.oldestPlayedAt
+    playedChampionIds.value = championIds
     await loadCounts()
   } catch {
     // The normal empty state handles an account without recorded matches.
   }
   await loadReport()
-  api.on("stats:updated", () => void loadReport())
+  api.on("stats:updated", () => void applyFilters())
   api.on("lcu:status", () => void loadReport())
 })
 </script>
@@ -113,34 +160,67 @@ onMounted(async () => {
         <p class="muted subtitle">Measurements and evidence from your recorded games.</p>
       </div>
 
-      <div class="scope-picker" aria-label="Game mode scope">
-        <div class="scope-row primary-row">
-          <button
-            v-for="mode in PRIMARY_MODES"
-            :key="mode.id"
-            class="league-button scope-button"
-            :class="{ active: primary === mode.id }"
-            @click="selectPrimary(mode.id)"
-          >
-            <span>{{ mode.label }}</span>
-            <span class="muted count">{{ primaryCount(mode.id) }}</span>
-          </button>
-        </div>
-
-        <div v-if="primary === 'rift'" class="scope-row secondary-row">
-          <button
-            v-for="scope in riftScopes"
-            :key="scope.id"
-            class="league-button scope-button secondary"
-            :class="{ active: scopeId === scope.id }"
-            @click="selectScope(scope.id)"
-          >
-            <span>{{ scope.label }}</span>
-            <span class="muted count">{{ counts[scope.id] }}</span>
-          </button>
-        </div>
-      </div>
     </header>
+
+    <section class="filters card" aria-label="Skill report filters">
+      <div class="control-row">
+        <label class="field">
+          <span class="muted field-label">Game mode</span>
+          <select v-model="scopeId" class="league-select" @change="applyFilters">
+            <optgroup label="Summoner's Rift">
+              <option v-for="scope in riftScopes" :key="scope.id" :value="scope.id">
+                {{ scope.label }} · {{ counts[scope.id] }}
+              </option>
+            </optgroup>
+            <optgroup label="Howling Abyss">
+              <option v-for="scope in otherScopes" :key="scope.id" :value="scope.id">
+                {{ scope.label }} · {{ counts[scope.id] }}
+              </option>
+            </optgroup>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="muted field-label">Season</span>
+          <select v-model="season" class="league-select" @change="applyFilters">
+            <option :value="undefined">All seasons</option>
+            <option v-for="year in seasonOptions" :key="year" :value="year">{{ year }} season</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="muted field-label">Role</span>
+          <select
+            v-model="role"
+            class="league-select"
+            :disabled="selectedScope.family !== 'sr'"
+            @change="applyFilters"
+          >
+            <option :value="undefined">Any role</option>
+            <option v-for="option in ROLES" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
+
+        <label class="field champion-field">
+          <span class="muted field-label">Champion</span>
+          <select v-model="championId" class="league-select" @change="applyFilters">
+            <option :value="undefined">Any champion</option>
+            <option v-for="champion in championOptions" :key="champion.id" :value="champion.id">
+              {{ champion.name }}
+            </option>
+          </select>
+        </label>
+
+        <button v-if="hasDetailFilters" class="league-button clear" @click="clearDetailFilters">
+          Clear filters
+        </button>
+      </div>
+      <p class="filter-note muted">
+        Every chart and finding below uses this exact selection.
+      </p>
+    </section>
 
     <nav class="tab-row" aria-label="Skill view">
       <button
@@ -180,11 +260,13 @@ onMounted(async () => {
       v-else-if="report && tab === 'overview'"
       :overview="report.overview"
       :family="report.scope.family"
+      :champions="champions"
     />
     <SkillInsights
       v-else-if="report"
       :report="report"
       :timezone-label="timezoneLabel"
+      :champions="champions"
     />
   </div>
 </template>
@@ -217,31 +299,15 @@ h1 {
   font-size: 12px;
 }
 
-.scope-picker {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: var(--space-1);
-  max-width: min(100%, 760px);
-}
-
-.scope-row {
-  display: flex;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-}
-
-.scope-button {
-  min-height: 34px;
-  padding: var(--space-2) var(--space-3);
-  white-space: normal;
-}
-
-.scope-button.secondary {
-  min-width: 92px;
-  font-size: 11px;
-}
+.filters { padding: var(--space-3) var(--space-4); }
+.control-row { display: flex; align-items: end; flex-wrap: wrap; gap: var(--space-3); }
+.field { display: grid; flex: 1 1 160px; gap: var(--space-1); min-width: 150px; }
+.champion-field { flex-grow: 1.2; min-width: 190px; }
+.field-label { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+.field .league-select { width: 100%; }
+.field .league-select:disabled { cursor: not-allowed; opacity: .55; }
+.clear { min-height: 34px; }
+.filter-note { margin: var(--space-2) 0 0; font-size: 11px; }
 
 .tab-row {
   display: flex;
@@ -271,11 +337,6 @@ h1 {
   border-bottom-color: var(--gold);
 }
 
-.count {
-  margin-left: var(--space-2);
-  font-size: 10px;
-}
-
 .notice {
   padding: var(--space-5);
 }
@@ -285,19 +346,7 @@ h1 {
 }
 
 @media (max-width: 760px) {
-  .scope-picker,
-  .scope-row {
-    align-items: stretch;
-    justify-content: flex-start;
-    width: 100%;
-  }
-
-  .primary-row .scope-button {
-    flex: 1 1 140px;
-  }
-
-  .secondary-row .scope-button {
-    flex: 1 1 100px;
-  }
+  .field { flex-basis: 150px; }
+  .champion-field { flex-basis: 190px; }
 }
 </style>

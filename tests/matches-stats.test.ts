@@ -69,6 +69,35 @@ describe("getSummary", () => {
     expect(repo.getSummary({ puuid: PUUID, sinceMs: 5_000 }).games).toBe(1)
   })
 
+  it("combines season, role, and champion filters", () => {
+    repo.insertMany([
+      buildMatchRow({ gameId: 1, playedAt: 1_000, championId: 84, role: "MIDDLE" }),
+      buildMatchRow({ gameId: 2, playedAt: 6_000, championId: 84, role: "MIDDLE" }),
+      buildMatchRow({ gameId: 3, playedAt: 7_000, championId: 22, role: "MIDDLE" }),
+      buildMatchRow({ gameId: 4, playedAt: 8_000, championId: 84, role: "JUNGLE" }),
+    ])
+
+    const summary = repo.getSummary({
+      puuid: PUUID,
+      sinceMs: 5_000,
+      untilMs: 7_500,
+      championIds: [84],
+      roles: ["MIDDLE"],
+    })
+
+    expect(summary.games).toBe(1)
+  })
+
+  it("normalizes legacy carry and support role labels", () => {
+    repo.insertMany([
+      buildMatchRow({ gameId: 1, role: "CARRY", lane: "BOTTOM" }),
+      buildMatchRow({ gameId: 2, role: "SUPPORT", lane: "NONE" }),
+    ])
+
+    expect(repo.getSummary({ puuid: PUUID, roles: ["BOTTOM"] }).games).toBe(1)
+    expect(repo.getSummary({ puuid: PUUID, roles: ["UTILITY"] }).games).toBe(1)
+  })
+
   // The Matches page shows these totals directly above the games they
   // describe, so it summarises exactly the same query.
   it("describes only the matches a full match query selects", () => {
@@ -217,6 +246,19 @@ describe("getRecentMatches", () => {
     expect(recent).toHaveLength(3)
     expect(recent[0].gameId).toBe(5)
     expect(recent[2].gameId).toBe(3)
+  })
+
+  it("can leave rotating Classic-ish matches out of a feed", () => {
+    repo.insertMany([
+      buildMatchRow({ gameId: 1, playedAt: 1_000, queueId: 450 }),
+      buildMatchRow({ gameId: 2, playedAt: 2_000, queueId: 2450 }),
+      buildMatchRow({ gameId: 3, playedAt: 3_000, queueId: 420 }),
+    ])
+
+    expect(
+      repo.getRecentMatches({ puuid: PUUID, excludeQueueIds: [2450] }, 6)
+        .map((match) => match.gameId),
+    ).toEqual([3, 1])
   })
 })
 

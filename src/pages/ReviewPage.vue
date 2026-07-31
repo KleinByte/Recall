@@ -13,6 +13,14 @@ import {
   type GameAssetCatalog,
 } from "../helpers/game-assets"
 import { focusReviewGameId } from "../helpers/navigation"
+import {
+  timelineChartDomain,
+  timelineChartPoints,
+  timelineChartX,
+  timelineChartY,
+  timelineGoldDifferenceAt,
+  sampleTimelineEvents,
+} from "../helpers/timeline-chart"
 import GradeBadge from "../components/GradeBadge.vue"
 import type { Champion } from "../types/lol"
 import type { MatchRow } from "../types/stats"
@@ -54,22 +62,19 @@ const teams = computed(() => [100, 200].map((teamId) => ({
   teamId,
   players: review.value?.scoreboard.filter((player) => player.teamId === teamId) ?? [],
 })))
+const timelineDomain = computed(() => {
+  const summary = review.value?.timeline.summary
+  return timelineChartDomain(summary?.frames ?? [], summary?.events ?? [])
+})
 const timelinePoints = computed(() => {
   const frames = review.value?.timeline.summary?.frames ?? []
   if (frames.length < 2) return ""
-  const differences = frames.map((frame) => frame.blueGold - frame.redGold)
-  const max = Math.max(1_000, ...differences.map(Math.abs))
-  return differences.map((difference, index) =>
-    `${index * 100 / (differences.length - 1)},${50 - difference * 42 / max}`,
-  ).join(" ")
+  return timelineChartPoints(frames, timelineDomain.value)
 })
 const timelineMarkers = computed(() => {
   const summary = review.value?.timeline.summary
   if (!summary?.frames.length) return []
   const frames = summary.frames
-  const maximumTimestamp = Math.max(1, frames.at(-1)?.timestamp ?? 1)
-  const differences = frames.map((frame) => frame.blueGold - frame.redGold)
-  const maximumDifference = Math.max(1_000, ...differences.map(Math.abs))
   const ownerId = owner.value?.participantId
   const source = timelineFilter.value === "all"
     ? summary.events.filter((event) =>
@@ -85,16 +90,10 @@ const timelineMarkers = computed(() => {
     : filteredTimelineEvents.value
   const laneByBucket = new Map<number, number>()
 
-  return source.slice(0, 90).map((event) => {
-    const x = Math.max(0, Math.min(100, 100 * event.timestamp / maximumTimestamp))
-    const closest = frames.reduce((best, frame) =>
-      Math.abs(frame.timestamp - event.timestamp) <
-        Math.abs(best.timestamp - event.timestamp)
-        ? frame
-        : best,
-    )
-    const difference = closest.blueGold - closest.redGold
-    const lineY = 50 - difference * 42 / maximumDifference
+  return sampleTimelineEvents(source, 90).map((event) => {
+    const x = timelineChartX(event.timestamp, timelineDomain.value)
+    const difference = timelineGoldDifferenceAt(event.timestamp, frames)
+    const lineY = timelineChartY(difference, timelineDomain.value)
     const bucket = Math.round(x / 2)
     const lane = laneByBucket.get(bucket) ?? 0
     laneByBucket.set(bucket, lane + 1)

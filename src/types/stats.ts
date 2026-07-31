@@ -15,15 +15,17 @@ export interface StatsFilter {
   modes?: TrackedMode[]
   modeFamily?: ModeFamily
   sinceMs?: number
+  untilMs?: number
+  championIds?: number[]
+  roles?: string[]
+  excludeQueueIds?: number[]
 }
 
 export interface MatchQuery extends StatsFilter {
   modes?: TrackedMode[]
   rankedOnly?: boolean
   result?: "win" | "loss"
-  championIds?: number[]
   minGradeScore?: number
-  untilMs?: number
   minDurationSecs?: number
   sortBy?: "played_at" | "kda" | "damage" | "grade" | "duration"
   sortDir?: "asc" | "desc"
@@ -212,6 +214,8 @@ export interface LobbyMetric {
   /** 1 means top of every lobby, 0 means bottom of every lobby. */
   percentile: number
   scope: "role" | "lobby"
+  /** Games with enough comparison data for this metric. */
+  games: number
 }
 
 export interface LobbyComparison {

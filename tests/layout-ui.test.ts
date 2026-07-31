@@ -33,6 +33,9 @@ describe("desktop page layout", () => {
     expect(skill).toMatch(/\.metric-grid \{[\s\S]*grid-auto-rows: 1fr/)
     expect(skill).toMatch(/\.overview-grid \{[\s\S]*align-items: stretch/)
     expect(skill).toMatch(/\.playstyle \{[\s\S]*align-items: start/)
+    expect(skill).toContain('class="context-grid"')
+    expect(skill).toContain('class="contribution-layout"')
+    expect(skill).toMatch(/\.context-grid \{[\s\S]*grid-template-columns: repeat\(2/)
     expect(progress).toMatch(/\.records \{[\s\S]*grid-auto-rows: 1fr/)
   })
 
@@ -53,6 +56,35 @@ describe("desktop page layout", () => {
     expect(review).toContain('class="chart-marker"')
     expect(review).toContain("timelineMarkerIcon")
     expect(review).toContain("timelineMarkerTitle")
+    expect(review).toContain("sampleTimelineEvents(source, 90)")
+  })
+
+  it("keeps Classic-ish matches out of the dashboard feed while retaining their queue tag", () => {
+    const dashboard = read("src/pages/DashboardPage.vue")
+    const matches = read("src/components/MatchList.vue")
+
+    expect(dashboard).toContain("DASHBOARD_EXCLUDED_QUEUE_IDS")
+    expect(dashboard).toContain("excludeQueueIds: DASHBOARD_EXCLUDED_QUEUE_IDS")
+    expect(matches).toContain("match.queueName ?? modeLabel(match.mode)")
+  })
+
+  it("sorts champions from their table headers instead of separate buttons", () => {
+    const champions = read("src/pages/ChampionsPage.vue")
+
+    expect(champions).not.toContain('class="sort-row"')
+    expect(champions).toContain('@click="setSort(\'rank\')"')
+    expect(champions).toContain('@click="setSort(\'games\')"')
+    expect(champions).toContain('@click="setSort(\'needs\')"')
+    expect(champions).toContain(":aria-sort=\"ariaSort('winRate')\"")
+  })
+
+  it("offers challenge filters for both game mode and map", () => {
+    const challenges = read("src/pages/ChallengesPage.vue")
+
+    expect(challenges).toContain('v-model="gameMode"')
+    expect(challenges).toContain('v-model="challengeMap"')
+    expect(challenges).toContain("challengeMatchesGameMode")
+    expect(challenges).toContain("challengeMatchesMap")
   })
 
   it("uses visual performance charts in insights and names the top champion pool", () => {

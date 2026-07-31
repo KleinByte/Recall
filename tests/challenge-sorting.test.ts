@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest"
 import {
+  challengeGameModeLabel,
+  challengeGameModes,
+  challengeMatchesGameMode,
+  challengeMatchesMap,
   challengeMatchesCategory,
   challengeTierProgress,
   isChallengeCompleted,
@@ -84,5 +88,31 @@ describe("challenge presentation helpers", () => {
     expect(challengeMatchesCategory(legacy, "EXPERTISE")).toBe(false)
     expect(challengeMatchesCategory(legacy, "LEGACY")).toBe(true)
     expect(challengeMatchesCategory(active, "LEGACY")).toBe(false)
+  })
+
+  it("de-duplicates client game modes and labels them for people", () => {
+    const row = challenge({ gameModes: '["ARAM","ARAM","KIWI"]' })
+
+    expect(challengeGameModes(row)).toEqual(["ARAM", "KIWI"])
+    expect(challengeGameModeLabel("KIWI")).toBe("ARAM: Mayhem")
+  })
+
+  it("filters challenges by game mode while keeping global challenges", () => {
+    const aram = challenge({ gameModes: '["ARAM"]' })
+    const classic = challenge({ gameModes: '["CLASSIC"]' })
+    const global = challenge({ gameModes: "[]" })
+
+    expect(challengeMatchesGameMode(aram, "ARAM")).toBe(true)
+    expect(challengeMatchesGameMode(classic, "ARAM")).toBe(false)
+    expect(challengeMatchesGameMode(global, "ARAM")).toBe(true)
+  })
+
+  it("groups modes into their maps for map filtering", () => {
+    const swiftplay = challenge({ gameModes: '["SWIFTPLAY"]' })
+    const mayhem = challenge({ gameModes: '["KIWI_JADE"]' })
+
+    expect(challengeMatchesMap(swiftplay, "Summoner's Rift")).toBe(true)
+    expect(challengeMatchesMap(swiftplay, "Howling Abyss")).toBe(false)
+    expect(challengeMatchesMap(mayhem, "Howling Abyss")).toBe(true)
   })
 })

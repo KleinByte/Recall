@@ -18,11 +18,13 @@ import {
   GRADE_ORDER,
   gradeFromScore,
 } from "../../helpers/format"
-import type { ModeFamily, SkillReportV2 } from "../../types/stats"
+import type { LobbyMetric, ModeFamily, SkillReportV2 } from "../../types/stats"
+import type { Champion } from "../../types/lol"
 
 const props = defineProps<{
   overview: SkillReportV2["overview"]
   family: ModeFamily
+  champions: Champion[] | null
 }>()
 
 const summary = computed(() => props.overview.summary)
@@ -41,7 +43,15 @@ const gradeBars = computed(() => {
 })
 
 const comparisonScope = (scope: "role" | "lobby") =>
-  scope === "role" ? "Role opponent" : "Full lobby"
+  scope === "role" ? "Head-to-head · role opponent" : "Average lobby place"
+
+const comparisonValue = (metric: LobbyMetric) =>
+  metric.scope === "role"
+    ? formatPercent(metric.percentile)
+    : metric.averageRank.toFixed(1)
+
+const comparisonUnit = (scope: "role" | "lobby") =>
+  scope === "role" ? "score" : "/10"
 
 const styleComparison = computed(() => {
   const style = props.overview.style
@@ -160,15 +170,24 @@ const styleComparison = computed(() => {
               <span class="muted metric-scope">{{ comparisonScope(metric.scope) }}</span>
             </div>
             <span class="numeric metric-rank">
-              {{ metric.averageRank.toFixed(1) }}<span class="muted">/10</span>
+              {{ comparisonValue(metric) }}<span class="muted"> {{ comparisonUnit(metric.scope) }}</span>
             </span>
           </div>
           <MiniBar :value="metric.percentile" />
+          <div class="metric-scale muted">
+            <span>{{ metric.scope === "role" ? "Behind" : "10th" }}</span>
+            <span>{{ metric.games }} games</span>
+            <span>{{ metric.scope === "role" ? "Ahead" : "1st" }}</span>
+          </div>
         </div>
       </div>
+      <p class="muted footnote">
+        Lobby metrics show average place out of ten. Role metrics compare only with the opposing
+        player in that role, where 50% is even and ties split the result.
+      </p>
     </Panel>
 
-    <section class="overview-grid">
+    <section class="context-grid">
       <Panel title="Game length">
         <OutcomeTrendChart :rows="overview.outcomes.duration" />
         <p class="muted footnote">Recorded win rate and game count in each duration band.</p>
@@ -178,28 +197,31 @@ const styleComparison = computed(() => {
         <OutcomeTrendChart :rows="overview.outcomes.hours" />
         <p class="muted footnote">Recorded win rate by local start-time block.</p>
       </Panel>
+    </section>
 
-      <Panel title="Share of your team">
-        <template v-if="overview.contribution">
-          <div class="rows">
+    <Panel title="Share of your team" class="contribution-panel">
+      <template v-if="overview.contribution">
+        <div class="contribution-layout">
+          <p class="muted contribution-copy">
+            Per-game team share across {{ overview.contribution.games }} complete lobbies.
+            The 20% marker is arithmetic context, not a role expectation.
+          </p>
+          <div class="contribution-metrics">
             <div v-for="row in [
               { label: 'Damage', value: overview.contribution.damageShare },
               { label: 'Gold', value: overview.contribution.goldShare },
               { label: 'Kills', value: overview.contribution.killShare },
-            ]" :key="row.label" class="bar-row">
-              <span>{{ row.label }}</span>
+            ]" :key="row.label" class="contribution-metric">
+              <div><span>{{ row.label }}</span><strong class="numeric">{{ formatPercent(row.value) }}</strong></div>
               <MiniBar :value="row.value" />
-              <span class="numeric small">{{ formatPercent(row.value) }}</span>
             </div>
           </div>
-          <p class="muted footnote">
-            Per-game team share across {{ overview.contribution.games }} complete lobbies.
-            An even split is 20% arithmetic context, not a role expectation.
-          </p>
-        </template>
-        <p v-else class="muted empty">No complete team scoreboards recorded.</p>
-      </Panel>
+        </div>
+      </template>
+      <p v-else class="muted empty">No complete team scoreboards recorded.</p>
+    </Panel>
 
+    <section class="overview-grid">
       <Panel title="Champion pool">
         <template v-if="overview.pool">
           <div class="pool-count">
@@ -215,10 +237,10 @@ const styleComparison = computed(() => {
             <li v-for="champion in overview.pool.top" :key="champion.championId">
               <img
                 :src="championIconUrl(champion.championId)"
-                :alt="championNameById(null, champion.championId)"
+                :alt="championNameById(champions, champion.championId)"
                 class="champion-icon"
               />
-              <span>{{ championNameById(null, champion.championId) }}</span>
+              <span>{{ championNameById(champions, champion.championId) }}</span>
               <span class="muted numeric">{{ champion.games }} games</span>
             </li>
           </ul>
@@ -418,6 +440,58 @@ const styleComparison = computed(() => {
   font-size: 12px;
 }
 
+.metric-scale {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: 4px;
+  font-size: 9px;
+}
+
+.context-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.contribution-layout {
+  display: grid;
+  grid-template-columns: minmax(180px, .55fr) minmax(0, 1.45fr);
+  align-items: center;
+  gap: var(--space-5);
+}
+
+.contribution-copy {
+  max-width: 430px;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.contribution-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: var(--space-4);
+}
+
+.contribution-metric {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.contribution-metric > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: 12px;
+}
+
+.contribution-metric strong {
+  color: var(--gold-bright);
+  font-size: 14px;
+}
+
 .overview-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -544,6 +618,17 @@ const styleComparison = computed(() => {
 @media (max-width: 1280px) {
   .playstyle {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 800px) {
+  .context-grid,
+  .contribution-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .contribution-metrics {
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   }
 }
 </style>

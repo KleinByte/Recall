@@ -7,10 +7,11 @@ import { escapeTooltip } from "../../charts/formatters"
 import { championNameById } from "../../helpers/format"
 import { recallGradeFromScore } from "../../shared/recall-grade"
 import type { SkillChampionPoint } from "../../types/stats"
+import type { Champion } from "../../types/lol"
 
 registerInsightCharts()
 
-const props = defineProps<{ champions: SkillChampionPoint[] }>()
+const props = defineProps<{ champions: SkillChampionPoint[]; catalog: Champion[] | null }>()
 
 function colorFor(score?: number) {
   if (score === undefined) return "#3c4659"
@@ -24,7 +25,7 @@ const nodes = computed(() => props.champions
   .filter((champion) => champion.games > 0)
   .sort((left, right) => right.games - left.games)
   .map((champion) => ({
-    name: championNameById(null, champion.championId),
+    name: championNameById(props.catalog, champion.championId),
     value: champion.games,
     itemStyle: { color: colorFor(champion.avgGradeScore), borderColor: "#091426", borderWidth: 2 },
     recall: champion,

@@ -118,6 +118,19 @@ const CORE_POOL_SIZE = 5
 /** Slots 0–5 are the build; slot 6 is the trinket, which is not a purchase. */
 const BUILD_SLOTS = ["item0", "item1", "item2", "item3", "item4", "item5"]
 
+function normalizedRole(alias = ""): string {
+  const prefix = alias ? `${alias}.` : ""
+  return `CASE
+    WHEN UPPER(COALESCE(${prefix}role, '')) IN ('TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY')
+      THEN UPPER(${prefix}role)
+    WHEN UPPER(COALESCE(${prefix}role, '')) IN ('SUPPORT', 'DUO_SUPPORT') THEN 'UTILITY'
+    WHEN UPPER(COALESCE(${prefix}role, '')) IN ('CARRY', 'DUO_CARRY') THEN 'BOTTOM'
+    WHEN UPPER(COALESCE(${prefix}lane, '')) IN ('TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM')
+      THEN UPPER(${prefix}lane)
+    ELSE NULL
+  END`
+}
+
 function scope(filter: StatsFilter) {
   const conditions = ["puuid = ?", "is_matched = 1"]
   const params: (string | number)[] = [filter.puuid]
@@ -140,6 +153,21 @@ function scope(filter: StatsFilter) {
     params.push(filter.sinceMs)
   }
 
+  if (filter.untilMs !== undefined) {
+    conditions.push("played_at <= ?")
+    params.push(filter.untilMs)
+  }
+
+  if (filter.championIds?.length) {
+    conditions.push(`champion_id IN (${filter.championIds.map(() => "?").join(", ")})`)
+    params.push(...filter.championIds)
+  }
+
+  if (filter.roles?.length) {
+    conditions.push(`${normalizedRole()} IN (${filter.roles.map(() => "?").join(", ")})`)
+    params.push(...filter.roles)
+  }
+
   return { where: `WHERE ${conditions.join(" AND ")}`, params }
 }
 
@@ -159,6 +187,26 @@ function lobbyScope(filter: StatsFilter) {
   if (filter.modeFamily) {
     conditions.push("m.mode_family = ?")
     params.push(filter.modeFamily)
+  }
+
+  if (filter.sinceMs !== undefined) {
+    conditions.push("m.played_at >= ?")
+    params.push(filter.sinceMs)
+  }
+
+  if (filter.untilMs !== undefined) {
+    conditions.push("m.played_at <= ?")
+    params.push(filter.untilMs)
+  }
+
+  if (filter.championIds?.length) {
+    conditions.push(`m.champion_id IN (${filter.championIds.map(() => "?").join(", ")})`)
+    params.push(...filter.championIds)
+  }
+
+  if (filter.roles?.length) {
+    conditions.push(`${normalizedRole("m")} IN (${filter.roles.map(() => "?").join(", ")})`)
+    params.push(...filter.roles)
   }
 
   return { conditions, params }
@@ -640,6 +688,21 @@ export class InsightsRepository {
     if (filter.sinceMs !== undefined) {
       conditions.push("m.played_at >= ?")
       params.push(filter.sinceMs)
+    }
+
+    if (filter.untilMs !== undefined) {
+      conditions.push("m.played_at <= ?")
+      params.push(filter.untilMs)
+    }
+
+    if (filter.championIds?.length) {
+      conditions.push(`m.champion_id IN (${filter.championIds.map(() => "?").join(", ")})`)
+      params.push(...filter.championIds)
+    }
+
+    if (filter.roles?.length) {
+      conditions.push(`${normalizedRole("m")} IN (${filter.roles.map(() => "?").join(", ")})`)
+      params.push(...filter.roles)
     }
 
     const rows = this.db.prepare(

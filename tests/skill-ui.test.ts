@@ -157,13 +157,16 @@ describe("Skill page coordination", () => {
     expect(page).not.toMatch(/@click="[^\"]*loadReport[^\"]*"[^>]*>\s*Insights/)
   })
 
-  it("shows persistent counted primary and Rift scope rows", () => {
+  it("uses match-style selects for mode, season, role, and champion filters", () => {
     const page = read("src/pages/SkillPage.vue")
 
-    expect(page).toContain("PRIMARY_MODES")
     expect(page).toContain("riftScopes")
+    expect(page).toContain("otherScopes")
     expect(page).toContain("counts[scope.id]")
-    expect(page).toMatch(/\.scope-row \{[\s\S]*flex-wrap: wrap/)
-    expect(page).toMatch(/\.scope-button \{[\s\S]*min-height: 34px/)
+    expect(page).toContain('v-model="season"')
+    expect(page).toContain('v-model="role"')
+    expect(page).toContain('v-model="championId"')
+    expect(page).toContain('class="league-select"')
+    expect(page).not.toContain('class="scope-button')
   })
 })

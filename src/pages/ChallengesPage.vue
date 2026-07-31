@@ -3,7 +3,12 @@ import { computed, nextTick, onMounted, ref, watch } from "vue"
 import ChallengeRowView from "../components/ChallengeRow.vue"
 import { api } from "../helpers/api"
 import {
+  challengeGameModeLabel,
+  challengeGameModes,
+  challengeMapForGameMode,
   challengeMatchesCategory,
+  challengeMatchesGameMode,
+  challengeMatchesMap,
   isChallengeCompleted,
   sortChallenges,
   type ChallengeSortDirection,
@@ -58,6 +63,8 @@ const pinned = ref<number[]>([])
 const search = ref("")
 const category = ref("All")
 const level = ref("All")
+const gameMode = ref("")
+const challengeMap = ref("")
 const championOnly = ref(false)
 const showRetired = ref(false)
 const hideCompleted = ref(true)
@@ -112,6 +119,8 @@ async function focusOn(challengeId: number) {
   search.value = ""
   category.value = "All"
   level.value = "All"
+  gameMode.value = ""
+  challengeMap.value = ""
   championOnly.value = false
   showRetired.value = challenge.isRetired === 1
   if (isChallengeCompleted(challenge)) hideCompleted.value = false
@@ -157,6 +166,8 @@ const filtered = computed(() => {
     if (level.value !== "All" && challenge.currentLevel !== level.value) {
       return false
     }
+    if (!challengeMatchesGameMode(challenge, gameMode.value)) return false
+    if (!challengeMatchesMap(challenge, challengeMap.value)) return false
     if (championOnly.value && challenge.idListType !== "CHAMPION") return false
 
     if (needle) {
@@ -173,6 +184,18 @@ const filtered = computed(() => {
 
 const visible = computed(() => filtered.value.slice(0, visibleCount.value))
 
+const gameModeOptions = computed(() => {
+  const modes = new Set(challenges.value.flatMap(challengeGameModes))
+  return [...modes].sort((left, right) =>
+    challengeGameModeLabel(left).localeCompare(challengeGameModeLabel(right)),
+  )
+})
+
+const mapOptions = computed(() => {
+  const maps = new Set(gameModeOptions.value.map(challengeMapForGameMode))
+  return [...maps].sort((left, right) => left.localeCompare(right))
+})
+
 const pinnedChallenges = computed(() =>
   challenges.value.filter(
     (challenge) =>
@@ -187,6 +210,8 @@ watch(
     search,
     category,
     level,
+    gameMode,
+    challengeMap,
     championOnly,
     showRetired,
     hideCompleted,
@@ -263,6 +288,26 @@ const splitChampions = (challenge: ChallengeRow) => {
         <select v-model="level" class="league-select">
           <option v-for="option in LEVELS" :key="option" :value="option">
             {{ option === "All" ? "All tiers" : option }}
+          </option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span class="muted field-label">Game mode</span>
+        <select v-model="gameMode" class="league-select">
+          <option value="">All game modes</option>
+          <option v-for="mode in gameModeOptions" :key="mode" :value="mode">
+            {{ challengeGameModeLabel(mode) }}
+          </option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span class="muted field-label">Map</span>
+        <select v-model="challengeMap" class="league-select">
+          <option value="">All maps</option>
+          <option v-for="map in mapOptions" :key="map" :value="map">
+            {{ map }}
           </option>
         </select>
       </label>

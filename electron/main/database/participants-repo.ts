@@ -12,6 +12,10 @@ export interface LobbyFilter {
   mode?: TrackedMode
   modes?: TrackedMode[]
   modeFamily?: ModeFamily
+  sinceMs?: number
+  untilMs?: number
+  championIds?: number[]
+  roles?: string[]
 }
 
 /** The whole scoreboard for one recorded game. */
@@ -28,6 +32,7 @@ export interface LobbyMetric {
   /** 1 means top of every lobby, 0 means bottom of every lobby. */
   percentile: number
   scope: "role" | "lobby"
+  games: number
 }
 
 export interface LobbyComparison {
@@ -768,6 +773,26 @@ export class ParticipantsRepository {
       params.push(filter.modeFamily)
     }
 
+    if (filter.sinceMs !== undefined) {
+      conditions.push("m.played_at >= ?")
+      params.push(filter.sinceMs)
+    }
+
+    if (filter.untilMs !== undefined) {
+      conditions.push("m.played_at <= ?")
+      params.push(filter.untilMs)
+    }
+
+    if (filter.championIds?.length) {
+      conditions.push(`m.champion_id IN (${filter.championIds.map(() => "?").join(", ")})`)
+      params.push(...filter.championIds)
+    }
+
+    if (filter.roles?.length) {
+      conditions.push(`${normalizedRole("me")} IN (${filter.roles.map(() => "?").join(", ")})`)
+      params.push(...filter.roles)
+    }
+
     const join = `LEFT JOIN matches m
                     ON m.game_id = me.game_id AND m.puuid = me.puuid`
 
@@ -785,7 +810,7 @@ export class ParticipantsRepository {
       const useRole = metric.roleScoped && isSrFamily
 
       const roleJoinCondition = useRole
-        ? `AND ${resolvedRole("other")} = ${resolvedRole("me")}
+        ? `AND ${normalizedRole("other")} = ${normalizedRole("me")}
            AND other.team_id != me.team_id`
         : ""
 
@@ -915,12 +940,13 @@ export class ParticipantsRepository {
 
     return {
       games: metrics[0].games,
-      metrics: metrics.map(({ key, label, averageRank, percentile, scope }) => ({
+      metrics: metrics.map(({ key, label, averageRank, percentile, scope, games }) => ({
         key,
         label,
         averageRank,
         percentile,
         scope,
+        games,
       })),
     }
   }
@@ -938,6 +964,19 @@ function resolvedRole(alias: string): string {
     CASE WHEN typeof(${alias}.role) = 'text' AND LENGTH(${alias}.role) > 0
          THEN ${alias}.role ELSE NULL END
   )`
+}
+
+function normalizedRole(alias: string): string {
+  const role = resolvedRole(alias)
+  return `CASE
+    WHEN UPPER(COALESCE(${role}, '')) IN ('TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY')
+      THEN UPPER(${role})
+    WHEN UPPER(COALESCE(${role}, '')) IN ('SUPPORT', 'DUO_SUPPORT') THEN 'UTILITY'
+    WHEN UPPER(COALESCE(${role}, '')) IN ('CARRY', 'DUO_CARRY') THEN 'BOTTOM'
+    WHEN UPPER(COALESCE(${alias}.lane, '')) IN ('TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM')
+      THEN UPPER(${alias}.lane)
+    ELSE NULL
+  END`
 }
 
 /**

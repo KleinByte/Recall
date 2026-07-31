@@ -13,10 +13,12 @@ import WeekdayGradeBoxplot from "./WeekdayGradeBoxplot.vue"
 import { findingLabel } from "../../helpers/insight-findings"
 import { formatPercent, gradeFromScore } from "../../helpers/format"
 import type { InsightFinding as InsightFindingType, InsightSection, SkillReportV2 } from "../../types/stats"
+import type { Champion } from "../../types/lol"
 
 const props = defineProps<{
   report: SkillReportV2
   timezoneLabel: string
+  champions: Champion[] | null
 }>()
 
 const summary = computed(() => props.report.overview.summary)
@@ -78,7 +80,7 @@ const confidentFindings = computed(() => sections.value.flatMap((section) => sec
   .sort((left, right) => Math.abs(right.effect) - Math.abs(left.effect)))
 
 const evidenceEntries = computed(() => confidentFindings.value.slice(0, 8).map((finding) => ({
-  label: findingLabel(finding),
+  label: findingLabel(finding, props.champions),
   value: finding.effect,
 })))
 
@@ -228,11 +230,11 @@ const shortDate = (timestamp: number) => new Date(timestamp).toLocaleDateString(
         </div>
         <span class="sample">{{ report.visuals.champions.length }} champions</span>
       </header>
-      <ChampionPoolTreemap :champions="report.visuals.champions" />
+      <ChampionPoolTreemap :champions="report.visuals.champions" :catalog="champions" />
       <details class="detail-pane">
         <summary>Show champion findings and caveats</summary>
         <div class="finding-list">
-          <InsightFinding v-for="finding in report.insights.champions.findings" :key="finding.key" :finding="finding" />
+          <InsightFinding v-for="finding in report.insights.champions.findings" :key="finding.key" :finding="finding" :champions="champions" />
         </div>
         <p v-if="report.scope.family === 'aram'" class="detail-note">Random assignment limits control over champion pool breadth in ARAM and Mayhem.</p>
       </details>
@@ -262,7 +264,7 @@ const shortDate = (timestamp: number) => new Date(timestamp).toLocaleDateString(
         </summary>
         <p class="detail-note">{{ section.method }}</p>
         <div v-if="allFindings(section).length" class="finding-list">
-          <InsightFinding v-for="finding in allFindings(section)" :key="finding.key" :finding="finding" />
+          <InsightFinding v-for="finding in allFindings(section)" :key="finding.key" :finding="finding" :champions="champions" />
         </div>
         <p v-else class="learning-state">Not enough eligible history in this scope yet.</p>
       </details>

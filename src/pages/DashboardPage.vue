@@ -46,6 +46,9 @@ const QUEUE_LABELS: Record<string, string> = {
   RANKED_PREMADE_5x5: "Flex",
 }
 
+/** The rotating Classic-ish Mayhem queue is retained in history, but not in the dashboard feed. */
+const DASHBOARD_EXCLUDED_QUEUE_IDS = [2450]
+
 /** Midnight this morning, in the player's own timezone. */
 function startOfToday(): number {
   const now = new Date()
@@ -83,7 +86,7 @@ async function load() {
       api.getSummary({ sinceMs: since }),
       api.getForm({}, 20),
       api.listChallenges({}),
-      api.getMatches({}, 6),
+      api.getMatches({ excludeQueueIds: DASHBOARD_EXCLUDED_QUEUE_IDS }, 6),
       api.getRankedHistory(),
       api.getRankedChampions({}),
     ])

@@ -9,6 +9,26 @@ export type ChallengeSortKey =
 
 export type ChallengeSortDirection = "asc" | "desc"
 
+const GAME_MODE_LABELS: Record<string, string> = {
+  ARAM: "ARAM",
+  CHERRY: "Arena",
+  CLASSIC: "Classic",
+  KIWI: "ARAM: Mayhem",
+  KIWI_JADE: "ARAM: Mayhem (Jade)",
+  STRAWBERRY: "Swarm",
+  SWIFTPLAY: "Swiftplay",
+}
+
+const MAP_BY_GAME_MODE: Record<string, string> = {
+  ARAM: "Howling Abyss",
+  CHERRY: "Arena maps",
+  CLASSIC: "Summoner's Rift",
+  KIWI: "Howling Abyss",
+  KIWI_JADE: "Howling Abyss",
+  STRAWBERRY: "The Final City",
+  SWIFTPLAY: "Summoner's Rift",
+}
+
 const LEVEL_ORDER = [
   "NONE",
   "IRON",
@@ -56,6 +76,64 @@ export function challengeMatchesCategory(
   if (category === "LEGACY") return challenge.category === "LEGACY"
   if (challenge.category === "LEGACY") return false
   return category === "All" || challenge.category === category
+}
+
+/**
+ * The client currently repeats a mode once for every applicable queue. Turn
+ * the stored payload into a stable, de-duplicated list for filtering.
+ */
+export function challengeGameModes(challenge: ChallengeRow): string[] {
+  try {
+    const parsed = JSON.parse(challenge.gameModes) as unknown
+    if (!Array.isArray(parsed)) return []
+    return [
+      ...new Set(
+        parsed
+          .filter((mode): mode is string => typeof mode === "string")
+          .map((mode) => mode.trim().toUpperCase())
+          .filter(Boolean),
+      ),
+    ]
+  } catch {
+    return []
+  }
+}
+
+export function challengeGameModeLabel(mode: string): string {
+  return (
+    GAME_MODE_LABELS[mode] ?? mode
+      .toLowerCase()
+      .split("_")
+      .map((part) => part[0]?.toUpperCase() + part.slice(1))
+      .join(" ")
+  )
+}
+
+export function challengeMapForGameMode(mode: string): string {
+  return MAP_BY_GAME_MODE[mode] ?? "Other maps"
+}
+
+/** Empty game-mode lists are global challenges and apply to every mode. */
+export function challengeMatchesGameMode(
+  challenge: ChallengeRow,
+  mode: string,
+): boolean {
+  if (!mode) return true
+  const modes = challengeGameModes(challenge)
+  return modes.length === 0 || modes.includes(mode)
+}
+
+/** Empty game-mode lists are also valid on every map family. */
+export function challengeMatchesMap(
+  challenge: ChallengeRow,
+  map: string,
+): boolean {
+  if (!map) return true
+  const modes = challengeGameModes(challenge)
+  return (
+    modes.length === 0 ||
+    modes.some((mode) => challengeMapForGameMode(mode) === map)
+  )
 }
 
 function levelRank(level: string): number {

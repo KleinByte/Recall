@@ -24,7 +24,25 @@ const props = defineProps<{
   connected: boolean
 }>()
 
-type SortKey = "rank" | "needs" | "mastery" | "games" | "winRate"
+type SortKey =
+  | "name"
+  | "rank"
+  | "mastery"
+  | "riotGrade"
+  | "games"
+  | "winRate"
+  | "kda"
+  | "needs"
+
+type SortDirection = "asc" | "desc"
+
+const RIOT_GRADE_ORDER = [
+  "D-", "D", "D+",
+  "C-", "C", "C+",
+  "B-", "B", "B+",
+  "A-", "A", "A+",
+  "S-", "S", "S+",
+]
 
 /** How much play stands behind a champion's grade. */
 const CONFIDENCE_LABEL: Record<Confidence, string> = {
@@ -38,7 +56,25 @@ const profile = ref<ProfileSummary | null>(null)
 const needs = ref<Record<number, ChampionNeed[]>>({})
 const ranking = ref<ChampionRanking | null>(null)
 const sortKey = ref<SortKey>("rank")
+const sortDirection = ref<SortDirection>("desc")
 const search = ref("")
+
+function setSort(key: SortKey) {
+  if (sortKey.value === key) {
+    sortDirection.value = sortDirection.value === "desc" ? "asc" : "desc"
+    return
+  }
+
+  sortKey.value = key
+  sortDirection.value = key === "name" ? "asc" : "desc"
+}
+
+function ariaSort(key: SortKey) {
+  if (sortKey.value !== key) return "none" as const
+  return sortDirection.value === "asc"
+    ? "ascending" as const
+    : "descending" as const
+}
 
 async function load() {
   if (!props.champions) return
@@ -119,23 +155,44 @@ const rows = computed(() => {
       }
     })
 
+  const direction = sortDirection.value === "asc" ? 1 : -1
+
   return combined.sort((a, b) => {
+    let comparison: number
     switch (sortKey.value) {
+      case "name":
+        comparison = a.champion.name.localeCompare(b.champion.name)
+        break
       case "rank":
         // Champions never played have no ranking and sink to the bottom.
-        return (
-          (b.adjustedGrade ?? -Infinity) - (a.adjustedGrade ?? -Infinity) ||
-          b.games - a.games
-        )
+        comparison =
+          (a.adjustedGrade ?? -Infinity) - (b.adjustedGrade ?? -Infinity)
+        break
       case "mastery":
-        return b.masteryPoints - a.masteryPoints
+        comparison = a.masteryPoints - b.masteryPoints
+        break
+      case "riotGrade":
+        comparison = RIOT_GRADE_ORDER.indexOf(a.riotGrade ?? "") -
+          RIOT_GRADE_ORDER.indexOf(b.riotGrade ?? "")
+        break
       case "games":
-        return b.games - a.games
+        comparison = a.games - b.games
+        break
       case "winRate":
-        return b.winRate - a.winRate
-      default:
-        return b.needCount - a.needCount || b.masteryPoints - a.masteryPoints
+        comparison = a.winRate - b.winRate
+        break
+      case "kda":
+        comparison = a.kda - b.kda
+        break
+      case "needs":
+        comparison = a.needCount - b.needCount
+        break
     }
+
+    return (
+      comparison * direction ||
+      a.champion.name.localeCompare(b.champion.name)
+    )
   })
 })
 </script>
@@ -159,24 +216,6 @@ const rows = computed(() => {
       />
     </header>
 
-    <div class="sort-row">
-      <button
-        v-for="option in [
-          { key: 'rank', label: 'How well you play them' },
-          { key: 'needs', label: 'Challenges remaining' },
-          { key: 'mastery', label: 'Mastery' },
-          { key: 'games', label: 'Games played' },
-          { key: 'winRate', label: 'Win rate' },
-        ]"
-        :key="option.key"
-        class="league-button chip"
-        :class="{ active: sortKey === option.key }"
-        @click="sortKey = option.key as SortKey"
-      >
-        {{ option.label }}
-      </button>
-    </div>
-
     <div v-if="!champions" class="card notice">
       <h2 class="section-title">Champion list unavailable</h2>
       <p class="muted">
@@ -188,14 +227,70 @@ const rows = computed(() => {
       <table class="champions">
         <thead>
           <tr>
-            <th class="champ-col">Champion</th>
-            <th>Your grade</th>
-            <th>Mastery</th>
-            <th>Riot grade</th>
-            <th>Games</th>
-            <th>Win rate</th>
-            <th>KDA</th>
-            <th class="needs-col">Challenges remaining</th>
+            <th class="champ-col sortable" :aria-sort="ariaSort('name')">
+              <button type="button" @click="setSort('name')">
+                Champion
+                <span v-if="sortKey === 'name'">
+                  {{ sortDirection === "asc" ? "↑" : "↓" }}
+                </span>
+              </button>
+            </th>
+            <th class="sortable" :aria-sort="ariaSort('rank')">
+              <button type="button" @click="setSort('rank')">
+                Your grade
+                <span v-if="sortKey === 'rank'">
+                  {{ sortDirection === "asc" ? "↑" : "↓" }}
+                </span>
+              </button>
+            </th>
+            <th class="sortable" :aria-sort="ariaSort('mastery')">
+              <button type="button" @click="setSort('mastery')">
+                Mastery
+                <span v-if="sortKey === 'mastery'">
+                  {{ sortDirection === "asc" ? "↑" : "↓" }}
+                </span>
+              </button>
+            </th>
+            <th class="sortable" :aria-sort="ariaSort('riotGrade')">
+              <button type="button" @click="setSort('riotGrade')">
+                Riot grade
+                <span v-if="sortKey === 'riotGrade'">
+                  {{ sortDirection === "asc" ? "↑" : "↓" }}
+                </span>
+              </button>
+            </th>
+            <th class="sortable" :aria-sort="ariaSort('games')">
+              <button type="button" @click="setSort('games')">
+                Games
+                <span v-if="sortKey === 'games'">
+                  {{ sortDirection === "asc" ? "↑" : "↓" }}
+                </span>
+              </button>
+            </th>
+            <th class="sortable" :aria-sort="ariaSort('winRate')">
+              <button type="button" @click="setSort('winRate')">
+                Win rate
+                <span v-if="sortKey === 'winRate'">
+                  {{ sortDirection === "asc" ? "↑" : "↓" }}
+                </span>
+              </button>
+            </th>
+            <th class="sortable" :aria-sort="ariaSort('kda')">
+              <button type="button" @click="setSort('kda')">
+                KDA
+                <span v-if="sortKey === 'kda'">
+                  {{ sortDirection === "asc" ? "↑" : "↓" }}
+                </span>
+              </button>
+            </th>
+            <th class="needs-col sortable" :aria-sort="ariaSort('needs')">
+              <button type="button" @click="setSort('needs')">
+                Challenges remaining
+                <span v-if="sortKey === 'needs'">
+                  {{ sortDirection === "asc" ? "↑" : "↓" }}
+                </span>
+              </button>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -308,16 +403,6 @@ h1 {
   width: 220px;
 }
 
-.sort-row {
-  display: flex;
-  gap: var(--space-1);
-  flex-wrap: wrap;
-}
-
-.chip {
-  padding: var(--space-2) var(--space-3);
-}
-
 /* The table is contained rather than left to run the length of the page, so
    its header has to travel with the rows. */
 .table-scroll {
@@ -349,6 +434,25 @@ h1 {
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--border-subtle);
   white-space: nowrap;
+}
+
+.champions th.sortable button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  padding: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.champions th.sortable button:hover,
+.champions th.sortable button:focus-visible,
+.champions th[aria-sort]:not([aria-sort="none"]) button {
+  color: var(--gold-bright);
 }
 
 .own-grade {

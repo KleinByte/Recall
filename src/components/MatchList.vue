@@ -49,7 +49,7 @@ const kda = (match: MatchRow) =>
             {{ championNameById(champions, match.championId) }}
           </div>
           <div class="meta muted">
-            <span class="mode-tag">{{ modeLabel(match.mode) }}</span>
+            <span class="mode-tag">{{ match.queueName ?? modeLabel(match.mode) }}</span>
             <span>{{ formatDuration(match.durationSecs) }}</span>
             <span v-if="match.bookmarked" title="Bookmarked">★</span>
             <span v-if="match.hasNote" title="Has note">Note</span>

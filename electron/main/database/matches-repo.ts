@@ -8,6 +8,10 @@ export interface StatsFilter {
   modes?: TrackedMode[]
   modeFamily?: ModeFamily
   sinceMs?: number
+  untilMs?: number
+  championIds?: number[]
+  roles?: string[]
+  excludeQueueIds?: number[]
 }
 
 export interface StatsSummary {
@@ -94,9 +98,7 @@ export interface MatchQuery extends StatsFilter {
   modes?: TrackedMode[]
   rankedOnly?: boolean
   result?: "win" | "loss"
-  championIds?: number[]
   minGradeScore?: number
-  untilMs?: number
   minDurationSecs?: number
   sortBy?: "played_at" | "kda" | "damage" | "grade" | "duration"
   sortDir?: "asc" | "desc"
@@ -708,21 +710,9 @@ function buildQuery(query: MatchQuery) {
   if (query.result === "win") conditions.push("win = 1")
   if (query.result === "loss") conditions.push("win = 0")
 
-  if (query.championIds?.length) {
-    conditions.push(
-      `champion_id IN (${query.championIds.map(() => "?").join(", ")})`,
-    )
-    params.push(...query.championIds)
-  }
-
   if (query.minGradeScore !== undefined) {
     conditions.push("grade_score >= ?")
     params.push(query.minGradeScore)
-  }
-
-  if (query.untilMs !== undefined) {
-    conditions.push("played_at <= ?")
-    params.push(query.untilMs)
   }
 
   if (query.minDurationSecs !== undefined) {
@@ -797,7 +787,47 @@ function buildFilter(filter: StatsFilter) {
     params.push(filter.sinceMs)
   }
 
+  if (filter.untilMs !== undefined) {
+    conditions.push("played_at <= ?")
+    params.push(filter.untilMs)
+  }
+
+  if (filter.championIds?.length) {
+    conditions.push(
+      `champion_id IN (${filter.championIds.map(() => "?").join(", ")})`,
+    )
+    params.push(...filter.championIds)
+  }
+
+  if (filter.roles?.length) {
+    conditions.push(
+      `${normalizedRole()} IN (${filter.roles.map(() => "?").join(", ")})`,
+    )
+    params.push(...filter.roles)
+  }
+
+  if (filter.excludeQueueIds?.length) {
+    conditions.push(
+      `queue_id NOT IN (${filter.excludeQueueIds.map(() => "?").join(", ")})`,
+    )
+    params.push(...filter.excludeQueueIds)
+  }
+
   return { clause: `WHERE ${conditions.join(" AND ")}`, params }
+}
+
+/** Normalizes Match-V5 positions and older LCU lane/role pairs. */
+function normalizedRole(alias = ""): string {
+  const prefix = alias ? `${alias}.` : ""
+  return `CASE
+    WHEN UPPER(COALESCE(${prefix}role, '')) IN ('TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY')
+      THEN UPPER(${prefix}role)
+    WHEN UPPER(COALESCE(${prefix}role, '')) IN ('SUPPORT', 'DUO_SUPPORT') THEN 'UTILITY'
+    WHEN UPPER(COALESCE(${prefix}role, '')) IN ('CARRY', 'DUO_CARRY') THEN 'BOTTOM'
+    WHEN UPPER(COALESCE(${prefix}lane, '')) IN ('TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM')
+      THEN UPPER(${prefix}lane)
+    ELSE NULL
+  END`
 }
 
 /**
