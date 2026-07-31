@@ -775,7 +775,7 @@ export class ParticipantsRepository {
 
     const isSrFamily =
       filter.modeFamily === "sr" ||
-      (filter.modes ?? []).every((mode) => mode.startsWith("sr_")) ||
+      (filter.modes?.length && filter.modes.every((mode) => mode.startsWith("sr_"))) ||
       (filter.mode?.startsWith("sr_") ?? false)
 
     const metrics = METRICS.map((metric) => {
@@ -932,7 +932,9 @@ export class ParticipantsRepository {
  */
 function resolvedRole(alias: string): string {
   return `COALESCE(
-    json_extract(${alias}.extended_metrics_json, '$.teamPosition'),
+    CASE WHEN json_valid(${alias}.extended_metrics_json) THEN
+      json_extract(${alias}.extended_metrics_json, '$.teamPosition')
+    ELSE NULL END,
     CASE WHEN typeof(${alias}.role) = 'text' AND LENGTH(${alias}.role) > 0
          THEN ${alias}.role ELSE NULL END
   )`

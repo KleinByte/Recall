@@ -453,4 +453,78 @@ describe("lobby comparison", () => {
       expect(metric.scope).toBe("lobby")
     }
   })
+
+  it("treats absent modes filter as lobby scope over mixed data", () => {
+    matches.insertMany([
+      buildMatchRow({ gameId: 1, mode: "sr_ranked_solo", modeFamily: "sr" }),
+      buildMatchRow({ gameId: 2, mode: "aram", modeFamily: "aram" }),
+    ])
+    // Game 1: SR with roles
+    repo.insertMany(
+      Array.from({ length: 10 }, (_, i) =>
+        participant({
+          gameId: 1,
+          participantId: i + 1,
+          teamId: i < 5 ? 100 : 200,
+          isPlayer: i === 0 ? 1 : 0,
+          totalMinionsKilled: i === 0 ? 150 : 100,
+          neutralMinions: 0,
+          role: i === 0 || i === 5 ? "MIDDLE" : "TOP",
+          extendedMetrics: { teamPosition: i === 0 || i === 5 ? "MIDDLE" : "TOP" },
+        }),
+      ),
+    )
+    // Game 2: ARAM
+    repo.insertMany(
+      Array.from({ length: 10 }, (_, i) =>
+        participant({
+          gameId: 2,
+          participantId: i + 1,
+          teamId: i < 5 ? 100 : 200,
+          isPlayer: i === 0 ? 1 : 0,
+          totalMinionsKilled: i === 0 ? 200 : 100,
+          neutralMinions: 0,
+        }),
+      ),
+    )
+
+    // No mode filter → should use lobby scope despite having SR data
+    const comparison = repo.getLobbyComparison({ puuid: PUUID })!
+
+    expect(comparison.games).toBe(2)
+    for (const metric of comparison.metrics) {
+      expect(metric.scope).toBe("lobby")
+    }
+  })
+
+  it("handles malformed extended_metrics_json gracefully", () => {
+    matches.insertMany([
+      buildMatchRow({ gameId: 1, mode: "sr_ranked_solo", modeFamily: "sr" }),
+    ])
+    // Create participants with one having malformed JSON
+    const players = Array.from({ length: 10 }, (_, i) =>
+      participant({
+        gameId: 1,
+        participantId: i + 1,
+        teamId: i < 5 ? 100 : 200,
+        isPlayer: i === 0 ? 1 : 0,
+        totalMinionsKilled: i === 0 ? 150 : (i === 5 ? 200 : 100),
+        neutralMinions: 0,
+        role: i === 0 || i === 5 ? "MIDDLE" : "TOP",
+        extendedMetrics: { teamPosition: i === 0 || i === 5 ? "MIDDLE" : "TOP" },
+      }),
+    )
+    repo.insertMany(players)
+
+    // Corrupt the extended_metrics_json for one participant
+    db.prepare(
+      "UPDATE match_participants SET extended_metrics_json = ? WHERE game_id = 1 AND participant_id = 6",
+    ).run("{malformed json")
+
+    // Should not throw and should fall back to stored role
+    const comparison = repo.getLobbyComparison({ puuid: PUUID, modes: ["sr_ranked_solo"] })
+
+    expect(comparison).toBeDefined()
+    expect(comparison!.games).toBe(1)
+  })
 })
