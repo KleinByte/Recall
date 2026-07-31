@@ -11,6 +11,7 @@ import StatTile from "../components/ui/StatTile.vue"
 import { api } from "../helpers/api"
 import { challengeTierProgress } from "../helpers/challenges"
 import { openChampion, openMatch } from "../helpers/navigation"
+import { classifyPlaystyle } from "../helpers/playstyle"
 import {
   championIconUrl,
   championNameById,
@@ -124,6 +125,15 @@ onMounted(() => {
 
 const hasGames = computed(() => (summary.value?.games ?? 0) > 0)
 const averageGrade = computed(() => gradeFromScore(summary.value?.avgGradeScore))
+const styleIdentity = computed(() =>
+  style.value ? classifyPlaystyle(style.value.axes, style.value.games) : undefined,
+)
+
+const confidenceLabel = (games: number) => {
+  if (games >= 12) return "Strong read"
+  if (games >= 5) return "Fair read"
+  return "Early read"
+}
 
 const playedToday = computed(() => session.value?.games ?? 0)
 
@@ -300,36 +310,67 @@ const championName = (id: number) => championNameById(props.champions, id)
             :meta="styleFamily === 'sr' ? `Summoner's Rift` : 'ARAM'"
             class="playstyle-panel"
           >
-            <StyleRadar :axes="style.axes" height="260px" />
+            <div v-if="styleIdentity" class="style-reading">
+              <div>
+                <span class="style-kicker">Your identity</span>
+                <strong class="style-name">{{ styleIdentity.label }}</strong>
+              </div>
+              <p class="muted style-description">{{ styleIdentity.description }}</p>
+            </div>
+            <StyleRadar :axes="style.axes" height="215px" />
           </Panel>
 
           <Panel
             v-if="ranking?.best.length"
             title="Champions in form"
-            meta="Weighted by how much you have played them"
+            meta="Performance adjusted for sample size"
             class="champions-panel"
           >
-            <ul class="champion-list">
-              <li
-                v-for="row in ranking.best"
-                :key="row.championId"
-                class="champion"
-                @click="openChampion(row.championId)"
-              >
-                <img
-                  :src="championIconUrl(row.championId)"
-                  :alt="championName(row.championId)"
-                  class="portrait"
-                />
-                <span class="champion-name">
-                  {{ championName(row.championId) }}
-                </span>
-                <span class="muted numeric small">
-                  {{ row.games }} games · {{ formatPercent(row.winRate) }}
-                </span>
-                <GradeBadge :grade="gradeFromScore(row.adjustedGrade)" />
+            <p class="muted champion-intro">
+              Your strongest Recall grades, with one-game standouts pulled
+              back toward your usual performance.
+            </p>
+            <ol class="champion-list">
+              <li v-for="(row, index) in ranking.best" :key="row.championId">
+                <button
+                  type="button"
+                  class="champion"
+                  @click="openChampion(row.championId)"
+                >
+                  <span class="numeric champion-rank">{{ index + 1 }}</span>
+                  <img
+                    :src="championIconUrl(row.championId)"
+                    :alt="championName(row.championId)"
+                    class="portrait"
+                  />
+                  <span class="champion-copy">
+                    <strong class="champion-name">{{ championName(row.championId) }}</strong>
+                    <span class="muted champion-evidence">
+                      {{ confidenceLabel(row.gradedGames) }} · {{ row.gradedGames }} graded
+                    </span>
+                  </span>
+                  <span class="champion-stats">
+                    <span>
+                      <strong class="numeric">{{ row.games }}</strong>
+                      <small>games</small>
+                    </span>
+                    <span>
+                      <strong
+                        class="numeric"
+                        :class="row.winRate >= 0.5 ? 'win-text' : 'loss-text'"
+                      >{{ formatPercent(row.winRate) }}</strong>
+                      <small>win rate</small>
+                    </span>
+                    <span>
+                      <strong class="numeric">{{ formatDecimal(row.kda, 2) }}</strong>
+                      <small>KDA</small>
+                    </span>
+                  </span>
+                  <GradeBadge :grade="gradeFromScore(row.adjustedGrade)" size="lg" />
+                </button>
               </li>
-            </ul>
+            </ol>
+            <p class="muted champion-footnote">Open a champion for its full breakdown.</p>
           </Panel>
         </div>
       </section>
@@ -446,6 +487,11 @@ h1 {
   gap: var(--space-4);
 }
 
+.rank-panel,
+.playstyle-panel {
+  height: 340px;
+}
+
 .recent-panel,
 .champions-panel {
   height: 100%;
@@ -459,6 +505,43 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+}
+
+.style-reading {
+  display: grid;
+  grid-template-columns: minmax(130px, .7fr) minmax(0, 1.3fr);
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 48px;
+  margin-bottom: -4px;
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--gold);
+  background: linear-gradient(90deg, rgba(200, 170, 109, .1), transparent);
+}
+
+.style-kicker,
+.style-name {
+  display: block;
+}
+
+.style-kicker {
+  color: var(--text-muted);
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+
+.style-name {
+  color: var(--gold-bright);
+  font-family: var(--font-display);
+  font-size: 19px;
+  letter-spacing: .4px;
+}
+
+.style-description {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .game {
@@ -504,17 +587,24 @@ h1 {
 
 .champion {
   display: grid;
-  grid-template-columns: 26px 1fr auto auto;
+  grid-template-columns: 18px 42px minmax(84px, 1fr) minmax(168px, 1.2fr) 54px;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-1) var(--space-2);
+  width: 100%;
+  padding: var(--space-2);
+  background: linear-gradient(105deg, var(--surface-2), rgba(20, 36, 61, .45));
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
   font-size: 13px;
 }
 
 .champion:hover {
-  background: var(--surface-2);
+  border-color: var(--border-strong);
+  background: linear-gradient(105deg, var(--surface-3), var(--surface-2));
 }
 
 .champion:hover .champion-name {
@@ -522,9 +612,83 @@ h1 {
 }
 
 .champion-name {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.champion-list {
+  gap: var(--space-2);
+}
+
+.champion-list > li {
+  min-width: 0;
+}
+
+.champion-intro,
+.champion-footnote {
+  font-size: 11px;
+}
+
+.champion-intro {
+  margin: 0 0 var(--space-3);
+  max-width: 66ch;
+}
+
+.champion-footnote {
+  margin: var(--space-3) 0 0;
+  text-align: right;
+}
+
+.champion-rank {
+  color: var(--gold);
+  font-size: 14px;
+  text-align: center;
+}
+
+.champion-copy {
+  min-width: 0;
+}
+
+.champion-evidence {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+}
+
+.champion-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(54px, 1fr));
+  gap: var(--space-1);
+}
+
+.champion-stats > span {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding-right: var(--space-2);
+  border-right: 1px solid var(--border-subtle);
+}
+
+.champion-stats strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.champion-stats strong.win-text {
+  color: var(--win);
+}
+
+.champion-stats strong.loss-text {
+  color: var(--loss);
+}
+
+.champion-stats small {
+  color: var(--text-muted);
+  font-size: 9px;
+  letter-spacing: .5px;
+  text-transform: uppercase;
 }
 
 .portrait {
@@ -532,6 +696,11 @@ h1 {
   height: 26px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-subtle);
+}
+
+.champion .portrait {
+  width: 42px;
+  height: 42px;
 }
 
 .small {
@@ -605,6 +774,26 @@ h1 {
 
   .dashboard-column {
     grid-template-rows: auto;
+  }
+
+  .rank-panel,
+  .playstyle-panel {
+    height: auto;
+    min-height: 340px;
+  }
+}
+
+@media (max-width: 620px) {
+  .style-reading {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .champion {
+    grid-template-columns: 18px 42px minmax(0, 1fr) 54px;
+  }
+
+  .champion-stats {
+    grid-column: 2 / -1;
   }
 }
 </style>

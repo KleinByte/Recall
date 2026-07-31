@@ -16,7 +16,10 @@ describe("desktop page layout", () => {
     )
     expect(dashboard).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))")
     expect(dashboard).toContain("grid-template-rows: auto minmax(0, 1fr)")
-    expect(dashboard).toContain('height="260px"')
+    expect(dashboard).toContain('height="215px"')
+    expect(dashboard).toContain("classifyPlaystyle")
+    expect(dashboard).toContain("styleIdentity.label")
+    expect(dashboard).toMatch(/\.rank-panel,[\s\S]*\.playstyle-panel \{[\s\S]*height: 340px/)
   })
 
   it("makes repeated dashboard cards align within their rows", () => {
@@ -59,6 +62,15 @@ describe("desktop page layout", () => {
     expect(review).toContain("timelineMarkerIcon")
     expect(review).toContain("timelineMarkerTitle")
     expect(review).toContain("sampleTimelineEvents(source, 90)")
+  })
+
+  it("fills champion form cards with performance and evidence", () => {
+    const dashboard = read("src/pages/DashboardPage.vue")
+
+    expect(dashboard).toContain("confidenceLabel(row.gradedGames)")
+    expect(dashboard).toContain("formatDecimal(row.kda, 2)")
+    expect(dashboard).toContain("formatPercent(row.winRate)")
+    expect(dashboard).toContain("Open a champion for its full breakdown")
   })
 
   it("shows ranked history from the first reading and plots it on a time axis", () => {
