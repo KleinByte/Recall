@@ -37,6 +37,7 @@ export interface ChampionPool {
   coreShare: number
   coreWinRate: number
   restWinRate: number
+  top: Array<{ championId: number; games: number; wins: number }>
 }
 
 export interface BuiltItem {
@@ -388,6 +389,7 @@ export class InsightsRepository {
       coreShare: games === 0 ? 0 : sum(core, "games") / games,
       coreWinRate: rate(sum(core, "wins"), sum(core, "games")),
       restWinRate: rate(sum(rest, "wins"), sum(rest, "games")),
+      top: core,
     }
   }
 

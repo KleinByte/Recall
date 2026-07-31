@@ -1131,6 +1131,7 @@ export interface SkillReportInput {
   contribution?: ContributionShare
   duration: BucketRow[]
   hours: TimeBucketRow[]
+  weekdays: TimeBucketRow[]
   pool?: ChampionPool
   builds: BuiltItem[]
   observations: InsightObservation[]
@@ -1178,7 +1179,7 @@ export interface SkillReportV2 {
     grades: GradeCount[]
     lobby?: LobbyComparison
     contribution?: ContributionShare
-    outcomes: { duration: BucketRow[]; hours: TimeBucketRow[] }
+    outcomes: { duration: BucketRow[]; hours: TimeBucketRow[]; weekdays: TimeBucketRow[] }
     pool?: { champions: number; games: number; coreShare: number }
     builds: Array<{ itemId: number; games: number }>
   }
@@ -1196,7 +1197,7 @@ export interface SkillReportV2 {
 export function buildSkillReport(input: SkillReportInput): SkillReportV2 {
   const {
     modes, family, generatedAt, summary, style, grades, lobby, contribution,
-    pool, builds, observations, championStats, itemObservations, duration, hours,
+    pool, builds, observations, championStats, itemObservations, duration, hours, weekdays,
   } = input
 
   const baseline = summary.avgGradeScore ?? 0
@@ -1237,7 +1238,7 @@ export function buildSkillReport(input: SkillReportInput): SkillReportV2 {
       grades,
       lobby,
       contribution,
-      outcomes: { duration, hours },
+      outcomes: { duration, hours, weekdays },
       pool: pool
         ? { champions: pool.champions, games: pool.games, coreShare: pool.coreShare }
         : undefined,

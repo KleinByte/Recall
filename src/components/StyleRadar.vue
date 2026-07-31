@@ -80,7 +80,7 @@ const chartOptions = computed(() => ({
       pointLabels: {
         color: "#f0e6d2",
         padding: 4,
-        font: { family: "BeaufortforLOL Medium, serif", size: 11 },
+        font: { family: "BeaufortforLOL Medium, serif", size: 13 },
       },
       ticks: {
         display: false,

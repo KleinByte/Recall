@@ -183,6 +183,7 @@ onMounted(async () => {
     <SkillInsights
       v-else-if="report"
       :insights="report.insights"
+      :outcomes="report.overview.outcomes"
       :family="report.scope.family"
       :timezone-label="timezoneLabel"
     />

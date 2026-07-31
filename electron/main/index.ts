@@ -1572,6 +1572,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
         contribution: insightsRepo.getTeamContribution(scoped),
         duration: insightsRepo.getDurationBuckets(scoped, family),
         hours: timeOfDay.hours,
+        weekdays: timeOfDay.weekdays,
         pool: insightsRepo.getChampionPool(scoped),
         builds: insightsRepo.getBuildPatterns(scoped, 8),
         observations: insightsRepo.getObservations(scoped),

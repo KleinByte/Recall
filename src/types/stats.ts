@@ -574,8 +574,13 @@ export interface SkillReportV2 {
     grades: GradeCount[]
     lobby?: LobbyComparison
     contribution?: ContributionShare
-    outcomes: { duration: BucketRow[]; hours: TimeBucketRow[] }
-    pool?: { champions: number; games: number; coreShare: number }
+    outcomes: { duration: BucketRow[]; hours: TimeBucketRow[]; weekdays: TimeBucketRow[] }
+    pool?: {
+      champions: number
+      games: number
+      coreShare: number
+      top: Array<{ championId: number; games: number; wins: number }>
+    }
     builds: Array<{ itemId: number; games: number }>
   }
   insights: {

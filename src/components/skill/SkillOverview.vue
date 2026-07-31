@@ -10,6 +10,8 @@ import Panel from "../ui/Panel.vue"
 import StatTile from "../ui/StatTile.vue"
 import { itemAsset } from "../../helpers/items"
 import {
+  championIconUrl,
+  championNameById,
   formatCompact,
   formatDecimal,
   formatPercent,
@@ -209,6 +211,17 @@ const styleComparison = computed(() => {
             <MiniBar :value="overview.pool.coreShare" />
             <span class="numeric small">{{ formatPercent(overview.pool.coreShare) }}</span>
           </div>
+          <ul class="pool-roster">
+            <li v-for="champion in overview.pool.top" :key="champion.championId">
+              <img
+                :src="championIconUrl(champion.championId)"
+                :alt="championNameById(null, champion.championId)"
+                class="champion-icon"
+              />
+              <span>{{ championNameById(null, champion.championId) }}</span>
+              <span class="muted numeric">{{ champion.games }} games</span>
+            </li>
+          </ul>
         </template>
         <p v-else class="muted empty">No champion history in this scope.</p>
       </Panel>
@@ -365,18 +378,19 @@ const styleComparison = computed(() => {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  font-size: 12px;
+  color: var(--text-primary);
+  font-size: 14px;
 }
 
 .formula {
-  font-size: 10px;
+  font-size: 11px;
   overflow-wrap: anywhere;
 }
 
 .axis-value,
 .small {
   text-align: right;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .metric-grid {
@@ -431,6 +445,39 @@ const styleComparison = computed(() => {
   align-items: baseline;
   gap: var(--space-2);
   margin-bottom: var(--space-3);
+}
+
+.pool-roster {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-2) var(--space-3);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pool-roster li {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.pool-roster li > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.champion-icon {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  object-fit: cover;
 }
 
 .big {

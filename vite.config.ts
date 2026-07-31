@@ -14,6 +14,7 @@ export default defineConfig(({ command }) => {
   const sourcemap = isServe || !!process.env.VSCODE_DEBUG
 
   return {
+    base: isServe ? "/" : "./",
     plugins: [
       vue(),
       nodePolyfills({

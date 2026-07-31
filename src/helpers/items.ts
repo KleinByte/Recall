@@ -1,4 +1,5 @@
 import catalog from "../data/items.json"
+import { publicAssetUrl } from "./assets"
 
 interface ItemCatalogEntry {
   name: string
@@ -17,14 +18,14 @@ export function itemAsset(itemId: number): ItemAsset {
   if (item) {
     return {
       name: item.name,
-      iconUrl: `/items/${itemId}.png`,
+      iconUrl: publicAssetUrl(`items/${itemId}.png`),
       fallback: false,
     }
   }
 
   return {
     name: `Item ${itemId}`,
-    iconUrl: "/recall-icon.png",
+    iconUrl: publicAssetUrl("recall-icon.png"),
     fallback: true,
   }
 }

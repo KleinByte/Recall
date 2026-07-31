@@ -4,6 +4,7 @@ import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
 import { faArrowDown, faArrowUp, faWandMagicSparkles } from "@fortawesome/free-solid-svg-icons"
 import EffectChart from "./EffectChart.vue"
 import InsightFinding from "./InsightFinding.vue"
+import OutcomeTrendChart from "./OutcomeTrendChart.vue"
 import type {
   InsightSection,
   ModeFamily,
@@ -13,6 +14,7 @@ import type {
 
 const props = defineProps<{
   insights: SkillReportV2["insights"]
+  outcomes: SkillReportV2["overview"]["outcomes"]
   family: ModeFamily
   timezoneLabel: string
 }>()
@@ -98,6 +100,16 @@ const predictiveCopy = (predictive: PredictiveSection) => ({
 })[predictive.state]
 
 const signalEffect = (value: number) => `${value > 0 ? "+" : ""}${(value * 100).toFixed(1)} pp`
+
+const visualConditionLabels = new Set([
+  "0-3", "3-6", "6-9", "9-12", "12-15", "15-18", "18-21", "21-24",
+  "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+])
+
+const displayedFindings = (section: InsightSection) =>
+  section.key === "conditions"
+    ? section.findings.filter((finding) => !visualConditionLabels.has(finding.key))
+    : section.findings
 </script>
 
 <template>
@@ -175,16 +187,35 @@ const signalEffect = (value: number) => `${value > 0 ? "+" : ""}${(value * 100).
         </ul>
       </div>
 
-      <div v-else-if="entry.section?.findings.length" class="finding-grid">
-        <InsightFinding
-          v-for="finding in entry.section.findings"
-          :key="finding.key"
-          :finding="finding"
-        />
-      </div>
-      <p v-else-if="entry.section" class="sparse">
-        {{ currentGames(entry.section) }} current; {{ entry.section.neededGames }} more eligible games required.
-      </p>
+      <template v-else-if="entry.section">
+        <div v-if="entry.section.key === 'conditions'" class="timing-grid">
+          <section class="timing-chart">
+            <h3>Daily rhythm</h3>
+            <p class="method">Game volume and recorded win rate by local start-time block.</p>
+            <OutcomeTrendChart :rows="outcomes.hours" />
+          </section>
+          <section class="timing-chart">
+            <h3>Weekday pattern</h3>
+            <p class="method">Game volume and recorded win rate across the week.</p>
+            <OutcomeTrendChart :rows="outcomes.weekdays" />
+          </section>
+        </div>
+        <section v-if="entry.section.key === 'duration'" class="timing-chart duration-chart">
+          <h3>Game-length profile</h3>
+          <p class="method">The match lengths you have recorded, with volume next to win rate.</p>
+          <OutcomeTrendChart :rows="outcomes.duration" />
+        </section>
+        <div v-if="displayedFindings(entry.section).length" class="finding-grid">
+          <InsightFinding
+            v-for="finding in displayedFindings(entry.section)"
+            :key="finding.key"
+            :finding="finding"
+          />
+        </div>
+        <p v-else-if="entry.section.key !== 'conditions' && entry.section.key !== 'duration'" class="sparse">
+          {{ currentGames(entry.section) }} current; {{ entry.section.neededGames }} more eligible games required.
+        </p>
+      </template>
       <p v-if="entry.section?.key === 'champions' && family === 'aram'" class="context-note">
         Champion assignment limits control over pool breadth in ARAM and Mayhem.
       </p>
@@ -307,6 +338,35 @@ h2 {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: var(--space-3);
   align-items: stretch;
+}
+
+.timing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--space-4);
+}
+
+.timing-chart {
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-1);
+}
+
+.timing-chart h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-family: var(--font-heading);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.timing-chart .method {
+  margin-bottom: var(--space-3);
+}
+
+.duration-chart {
+  margin-bottom: var(--space-3);
 }
 
 .sparse {

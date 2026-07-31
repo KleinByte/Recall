@@ -1,9 +1,13 @@
 import type { Champion } from "../types/lol"
+import championCatalog from "../data/champions.json"
+import { publicAssetUrl } from "./assets"
+
+const offlineChampionNames = championCatalog as Record<string, string>
 
 export const championIconUrl = (championId: number) =>
   championId > 0
     ? `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-icons/${championId}.png`
-    : "/recall-icon.png"
+    : publicAssetUrl("recall-icon.png")
 
 export function championNameById(
   champions: Champion[] | null,
@@ -11,6 +15,7 @@ export function championNameById(
 ): string {
   return (
     champions?.find((champion) => champion.id === championId)?.name ??
+    offlineChampionNames[String(championId)] ??
     `Champion ${championId}`
   )
 }

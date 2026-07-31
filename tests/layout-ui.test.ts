@@ -54,4 +54,17 @@ describe("desktop page layout", () => {
     expect(review).toContain("timelineMarkerIcon")
     expect(review).toContain("timelineMarkerTitle")
   })
+
+  it("uses visual performance charts in insights and names the top champion pool", () => {
+    const overview = read("src/components/skill/SkillOverview.vue")
+    const insights = read("src/components/skill/SkillInsights.vue")
+
+    expect(overview).toContain("overview.pool.top")
+    expect(overview).toContain("championNameById")
+    expect(overview).toContain("championIconUrl")
+    expect(insights).toContain("OutcomeTrendChart")
+    expect(insights).toContain(':rows="outcomes.hours"')
+    expect(insights).toContain(':rows="outcomes.weekdays"')
+    expect(insights).toContain(':rows="outcomes.duration"')
+  })
 })

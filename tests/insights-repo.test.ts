@@ -261,6 +261,13 @@ describe("getChampionPool", () => {
     // The five most played champions cover nine of the ten games.
     expect(pool.coreShare).toBeCloseTo(0.9)
     expect(pool.coreWinRate).toBeGreaterThan(pool.restWinRate)
+    expect(pool.top).toEqual([
+      { championId: 84, games: 5, wins: 5 },
+      { championId: 6, games: 1, wins: 0 },
+      { championId: 7, games: 1, wins: 0 },
+      { championId: 8, games: 1, wins: 0 },
+      { championId: 9, games: 1, wins: 0 },
+    ])
   })
 
   it("reports nothing when no games are recorded", () => {
