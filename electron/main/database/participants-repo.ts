@@ -10,6 +10,7 @@ import type { GradeResult } from "../matches/grade.js"
 export interface LobbyFilter {
   puuid: string
   mode?: TrackedMode
+  modes?: TrackedMode[]
   modeFamily?: ModeFamily
 }
 
