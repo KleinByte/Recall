@@ -43,6 +43,7 @@ import {
   pickBestAndWorst,
   rankChampions,
 } from "./matches/insights.js"
+import { buildSkillReport } from "./matches/skill-report.js"
 import { championsNeededFor } from "./challenges/champion-needs.js"
 import { championStatusFor, overlayContentFor } from "./challenges/pinned.js"
 import { Overlay, type OverlayPosition } from "./overlay.js"
@@ -1540,6 +1541,31 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
 
     return { ranked, ...pickBestAndWorst(ranked, 3) }
   })
+
+  ipcMain.handle(
+    "stats:skill-report",
+    (_event, filter: Partial<StatsFilter>, family: ModeFamily) => {
+      const scoped = withPuuid(filter)
+      const repo = getRepository()
+      const insightsRepo = getInsights()
+
+      return buildSkillReport({
+        modes: filter.modes ?? (filter.mode ? [filter.mode] : []),
+        family,
+        generatedAt: Date.now(),
+        summary: repo.getSummary(scoped),
+        style: buildStyleProfile(repo.getStyleAverages(scoped), family),
+        grades: repo.getGradeDistribution(scoped),
+        lobby: getParticipants().getLobbyComparison(scoped),
+        contribution: insightsRepo.getTeamContribution(scoped),
+        pool: insightsRepo.getChampionPool(scoped),
+        builds: insightsRepo.getBuildPatterns(scoped, 8),
+        observations: insightsRepo.getObservations(scoped),
+        championStats: repo.getChampionStats(scoped),
+        itemObservations: insightsRepo.getFinalItemObservations(scoped),
+      })
+    },
+  )
 
   ipcMain.handle(
     "matches:axes",

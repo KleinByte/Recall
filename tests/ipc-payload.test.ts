@@ -82,3 +82,22 @@ describe("toPlainPayload", () => {
     expect(payload).toEqual({ filters: { championIds: [84, 22] } })
   })
 })
+
+describe("getSkillReport", () => {
+  it("invokes the stats:skill-report IPC endpoint with plain payload", async () => {
+    const invoke = vi.fn().mockResolvedValue({ version: 2 })
+    vi.stubGlobal("window", { ipcRenderer: { invoke } })
+
+    const reactiveModes = ref(["sr_ranked_solo", "sr_ranked_flex"])
+
+    await api.getSkillReport(
+      { modes: reactiveModes.value },
+      "sr",
+    )
+    expect(invoke).toHaveBeenCalledWith(
+      "stats:skill-report",
+      { modes: ["sr_ranked_solo", "sr_ranked_flex"] },
+      "sr",
+    )
+  })
+})

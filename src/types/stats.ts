@@ -505,3 +505,74 @@ export interface SyncResult {
   fetched: number
   inserted: number
 }
+
+export interface Interval {
+  low: number
+  high: number
+  level: 0.95
+}
+
+export type EvidenceLevel = "descriptive" | "comparative" | "experimental"
+export type EvidenceConfidence = "insufficient" | "low" | "medium" | "high"
+
+export interface InsightFinding {
+  key: string
+  title: string
+  summary: string
+  evidenceLevel: EvidenceLevel
+  confidence: EvidenceConfidence
+  games: number
+  eligibleGames: number
+  effect: number
+  unit: "grade" | "probability" | "percentile" | "rate"
+  interval?: Interval
+  rateInterval?: Interval
+  scope: string
+  caveat?: string
+}
+
+export interface InsightSection {
+  key: string
+  title: string
+  method: string
+  eligible: boolean
+  neededGames: number
+  findings: InsightFinding[]
+}
+
+export interface PredictiveSignal {
+  feature: string
+  direction: "positive" | "negative"
+  marginalEffect: number
+}
+
+export interface PredictiveSection {
+  state: "insufficient" | "no-signal" | "ready" | "error"
+  message?: string
+  neededGames?: number
+  signals?: PredictiveSignal[]
+}
+
+export interface SkillReportV2 {
+  version: 2
+  generatedAt: number
+  scope: { modes: TrackedMode[]; family: ModeFamily }
+  overview: {
+    summary: StatsSummary
+    style?: StyleProfile
+    grades: GradeCount[]
+    lobby?: LobbyComparison
+    contribution?: ContributionShare
+    pool?: { champions: number; games: number; coreShare: number }
+    builds: Array<{ itemId: number; games: number }>
+  }
+  insights: {
+    bestGamePattern: InsightSection
+    conditions: InsightSection
+    predictive: PredictiveSection
+    duration: InsightSection
+    trends: InsightSection
+    champions: InsightSection
+    items: InsightSection
+  }
+}

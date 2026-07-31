@@ -2,7 +2,9 @@
  * Comparative and conditional skill insights from ordered observations
  */
 
-import type { InsightObservation } from "../database/insights-repo.js"
+import type { InsightObservation, FinalItemObservation, ChampionPool, BuiltItem, ContributionShare } from "../database/insights-repo.js"
+import type { ChampionStatRow, StatsSummary, GradeCount } from "../database/matches-repo.js"
+import type { LobbyComparison } from "../database/participants-repo.js"
 import {
   bootstrapDifference,
   empiricalPercentile,
@@ -12,8 +14,11 @@ import {
   wilsonInterval,
   type Interval,
 } from "./analytics.js"
-import { durationBucketsFor } from "./insights.js"
-export { buildPredictiveSection, type PredictiveSection, type PredictiveSignal } from "./predictive-insights.js"
+import { durationBucketsFor, rankChampions } from "./insights.js"
+import type { StyleProfile } from "./style.js"
+import type { TrackedMode, ModeFamily } from "./types.js"
+import { buildPredictiveSection, type PredictiveSection, type PredictiveSignal } from "./predictive-insights.js"
+export { buildPredictiveSection, type PredictiveSection, type PredictiveSignal }
 
 export type EvidenceLevel = "descriptive" | "comparative" | "experimental"
 export type EvidenceConfidence = "insufficient" | "low" | "medium" | "high"
@@ -666,4 +671,443 @@ function formatMetricName(key: string): string {
     kda: "KDA",
   }
   return names[key] ?? key
+}
+
+// --- Champion findings ---
+
+const CHAMP_MIN_GRADED = 8
+const RANDOM_CHAMPION_CAVEAT =
+  "Champions are randomly assigned in this mode; performance reflects games played, not choice."
+const CORE_POOL_SIZE = 5
+
+export function buildChampionFindings(
+  observations: InsightObservation[],
+  championStats: ChampionStatRow[],
+  baseline: number,
+  family: ModeFamily,
+): InsightSection {
+  const graded = observations.filter((o) => o.gradeScore !== undefined)
+  const ranked = rankChampions(championStats, baseline)
+  const eligible = ranked.filter((c) => c.gradedGames >= CHAMP_MIN_GRADED)
+  const isRandom = family === "aram" || family === "other"
+
+  if (eligible.length === 0) {
+    return {
+      key: "champions",
+      title: "Champion Performance",
+      method: "Adjusted grade with bootstrap interval",
+      eligible: false,
+      neededGames: CHAMP_MIN_GRADED,
+      findings: [],
+    }
+  }
+
+  const totalGames = championStats.reduce((s, c) => s + c.games, 0)
+  const coreIds = new Set(
+    [...championStats]
+      .sort((a, b) => b.games - a.games)
+      .slice(0, CORE_POOL_SIZE)
+      .map((c) => c.championId),
+  )
+
+  const findings: InsightFinding[] = []
+
+  for (const champ of eligible) {
+    const champGrades = graded
+      .filter((o) => o.championId === champ.championId)
+      .map((o) => o.gradeScore!)
+
+    if (champGrades.length < CHAMP_MIN_GRADED) continue
+
+    const otherGrades = graded
+      .filter((o) => o.championId !== champ.championId && o.gradeScore !== undefined)
+      .map((o) => o.gradeScore!)
+
+    if (otherGrades.length === 0) continue
+
+    const interval = bootstrapDifference(champGrades, otherGrades, `champion:${champ.championId}`)
+    const includesZero = interval.low <= 0 && interval.high >= 0
+    const isCore = coreIds.has(champ.championId)
+    const share = totalGames > 0 ? champ.games / totalGames : 0
+
+    let summary: string
+    if (!includesZero && interval.low > 0) {
+      summary = `Champion ${champ.championId} associated with higher grades.`
+    } else if (!includesZero && interval.high < 0) {
+      summary = `Champion ${champ.championId} associated with lower grades.`
+    } else {
+      summary = `No clear grade association for champion ${champ.championId}.`
+    }
+
+    findings.push({
+      key: `champion:${champ.championId}`,
+      title: `Champion ${champ.championId}`,
+      summary,
+      evidenceLevel: "comparative",
+      confidence: assessConfidence(champGrades.length, interval, "grade"),
+      games: champ.games,
+      eligibleGames: graded.length,
+      effect: champ.adjustedGrade - baseline,
+      unit: "grade",
+      interval,
+      scope: `${champGrades.length} graded games, ${(share * 100).toFixed(0)}% of pool${isCore ? " (core)" : ""}`,
+      caveat: isRandom ? RANDOM_CHAMPION_CAVEAT : undefined,
+    })
+  }
+
+  return {
+    key: "champions",
+    title: "Champion Performance",
+    method: "Adjusted grade with bootstrap interval",
+    eligible: true,
+    neededGames: 0,
+    findings,
+  }
+}
+
+// --- Item findings ---
+
+const ITEM_MIN_GAMES = 10
+const ITEM_CAVEAT =
+  "Based on final inventory; item purchase order and game state at purchase are unknown. Correlation does not imply the item caused the outcome."
+
+function seededRandom(seed: string): () => number {
+  let hash = 2166136261
+  for (let i = 0; i < seed.length; i++) {
+    hash ^= seed.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  let state = hash >>> 0
+  return () => {
+    state = Math.imul(state, 1664525) + 1013904223
+    return (state >>> 0) / 0x100000000
+  }
+}
+
+function bootstrapStratifiedEffect(
+  strata: Array<{ withGrades: number[]; withoutGrades: number[] }>,
+  seed: string,
+  resamples = 2_000,
+): Interval {
+  const rng = seededRandom(seed)
+  const effects: number[] = []
+
+  for (let r = 0; r < resamples; r++) {
+    let totalWeight = 0
+    let weightedSum = 0
+
+    for (const s of strata) {
+      const resampledWith: number[] = []
+      for (let j = 0; j < s.withGrades.length; j++) {
+        resampledWith.push(s.withGrades[Math.floor(rng() * s.withGrades.length)])
+      }
+      const resampledWithout: number[] = []
+      for (let j = 0; j < s.withoutGrades.length; j++) {
+        resampledWithout.push(s.withoutGrades[Math.floor(rng() * s.withoutGrades.length)])
+      }
+
+      const wMean = resampledWith.reduce((a, b) => a + b, 0) / resampledWith.length
+      const woMean = resampledWithout.reduce((a, b) => a + b, 0) / resampledWithout.length
+      const weight = Math.min(s.withGrades.length, s.withoutGrades.length)
+      weightedSum += weight * (wMean - woMean)
+      totalWeight += weight
+    }
+
+    effects.push(totalWeight > 0 ? weightedSum / totalWeight : 0)
+  }
+
+  const low = quantile(effects, 0.025) ?? 0
+  const high = quantile(effects, 0.975) ?? 0
+  return { low, high, level: 0.95 }
+}
+
+export function buildItemFindings(
+  itemObservations: FinalItemObservation[],
+): InsightSection {
+  const graded = itemObservations.filter((o) => o.gradeScore !== undefined)
+
+  if (graded.length === 0) {
+    return {
+      key: "items",
+      title: "Item Associations",
+      method: "Stratified weighted bootstrap by champion and role",
+      eligible: false,
+      neededGames: ITEM_MIN_GAMES,
+      findings: [],
+    }
+  }
+
+  const itemCounts = new Map<number, number>()
+  for (const obs of graded) {
+    for (const id of obs.itemIds) {
+      itemCounts.set(id, (itemCounts.get(id) ?? 0) + 1)
+    }
+  }
+
+  const candidates = [...itemCounts.entries()]
+    .filter(([, count]) => count >= ITEM_MIN_GAMES)
+    .sort((a, b) => b[1] - a[1])
+
+  if (candidates.length === 0) {
+    return {
+      key: "items",
+      title: "Item Associations",
+      method: "Stratified weighted bootstrap by champion and role",
+      eligible: false,
+      neededGames: ITEM_MIN_GAMES,
+      findings: [],
+    }
+  }
+
+  const findings: InsightFinding[] = []
+
+  for (const [itemId, totalGames] of candidates) {
+    const strataMap = new Map<string, { withGrades: number[]; withoutGrades: number[] }>()
+
+    for (const obs of graded) {
+      const key = `${obs.championId}:${obs.role ?? "unknown"}`
+      if (!strataMap.has(key)) strataMap.set(key, { withGrades: [], withoutGrades: [] })
+      const s = strataMap.get(key)!
+      if (obs.itemIds.includes(itemId)) {
+        s.withGrades.push(obs.gradeScore!)
+      } else {
+        s.withoutGrades.push(obs.gradeScore!)
+      }
+    }
+
+    const validStrata = [...strataMap.values()].filter(
+      (s) => s.withGrades.length > 0 && s.withoutGrades.length > 0,
+    )
+
+    if (validStrata.length === 0) {
+      findings.push({
+        key: `item:${itemId}`,
+        title: `Item ${itemId}`,
+        summary: `Item ${itemId} found in ${totalGames} games; insufficient stratified data.`,
+        evidenceLevel: "comparative",
+        confidence: "insufficient",
+        games: totalGames,
+        eligibleGames: graded.length,
+        effect: 0,
+        unit: "grade",
+        scope: `${totalGames} games`,
+        caveat: ITEM_CAVEAT,
+      })
+      continue
+    }
+
+    let totalWeight = 0
+    let weightedSum = 0
+    for (const s of validStrata) {
+      const wMean = s.withGrades.reduce((a, b) => a + b, 0) / s.withGrades.length
+      const woMean = s.withoutGrades.reduce((a, b) => a + b, 0) / s.withoutGrades.length
+      const w = Math.min(s.withGrades.length, s.withoutGrades.length)
+      weightedSum += w * (wMean - woMean)
+      totalWeight += w
+    }
+    const effect = totalWeight > 0 ? weightedSum / totalWeight : 0
+
+    const interval = bootstrapStratifiedEffect(validStrata, `item:${itemId}`)
+    const includesZero = interval.low <= 0 && interval.high >= 0
+
+    const summary = includesZero
+      ? `No clear grade association for item ${itemId}.`
+      : `Item ${itemId} associated with ${effect > 0 ? "higher" : "lower"} grades.`
+
+    findings.push({
+      key: `item:${itemId}`,
+      title: `Item ${itemId}`,
+      summary,
+      evidenceLevel: "comparative",
+      confidence: assessConfidence(totalGames, interval, "grade"),
+      games: totalGames,
+      eligibleGames: graded.length,
+      effect,
+      unit: "grade",
+      interval,
+      scope: `${totalGames} games across ${validStrata.length} champion-role strata`,
+      caveat: ITEM_CAVEAT,
+    })
+  }
+
+  return {
+    key: "items",
+    title: "Item Associations",
+    method: "Stratified weighted bootstrap by champion and role",
+    eligible: true,
+    neededGames: 0,
+    findings,
+  }
+}
+
+// --- Trend findings ---
+
+const TREND_WINDOW_SIZE = 10
+const TREND_MIN_WINDOWS = 3
+
+export function buildTrendFindings(
+  observations: InsightObservation[],
+): InsightSection {
+  const graded = observations.filter((o) => o.gradeScore !== undefined)
+  const sorted = [...graded].sort((a, b) => b.playedAt - a.playedAt || b.gameId - a.gameId)
+
+  const windows: Array<{ index: number; grades: number[] }> = []
+  for (let i = 0; i < sorted.length; i += TREND_WINDOW_SIZE) {
+    const slice = sorted.slice(i, i + TREND_WINDOW_SIZE)
+    if (slice.length < TREND_WINDOW_SIZE) break
+    windows.push({ index: windows.length, grades: slice.map((o) => o.gradeScore!) })
+  }
+
+  const findings: InsightFinding[] = []
+
+  for (const w of windows) {
+    const avg = w.grades.reduce((s, g) => s + g, 0) / w.grades.length
+    findings.push({
+      key: `window:${w.index}`,
+      title: `Games ${w.index * TREND_WINDOW_SIZE + 1}\u2013${(w.index + 1) * TREND_WINDOW_SIZE}`,
+      summary: `Average grade: ${avg.toFixed(1)}`,
+      evidenceLevel: "descriptive",
+      confidence: "insufficient",
+      games: w.grades.length,
+      eligibleGames: graded.length,
+      effect: avg,
+      unit: "grade",
+      scope: `${w.grades.length} games`,
+    })
+  }
+
+  if (windows.length >= TREND_MIN_WINDOWS) {
+    const latest = windows[0].grades
+    const prior = [...windows[1].grades, ...windows[2].grades]
+
+    const interval = bootstrapDifference(latest, prior, "trend:grade")
+    const latestAvg = latest.reduce((s, g) => s + g, 0) / latest.length
+    const priorAvg = prior.reduce((s, g) => s + g, 0) / prior.length
+    const delta = latestAvg - priorAvg
+    const includesZero = interval.low <= 0 && interval.high >= 0
+
+    const summary = includesZero
+      ? "No clear trend in recent grades."
+      : `Recent games associated with ${delta > 0 ? "higher" : "lower"} grades.`
+
+    findings.push({
+      key: "trend:grade",
+      title: "Grade Trend",
+      summary,
+      evidenceLevel: "comparative",
+      confidence: assessConfidence(latest.length + prior.length, interval, "grade"),
+      games: latest.length,
+      eligibleGames: latest.length + prior.length,
+      effect: delta,
+      unit: "grade",
+      interval,
+      scope: `Latest ${latest.length} vs prior ${prior.length} games`,
+    })
+  }
+
+  return {
+    key: "trends",
+    title: "Performance Trends",
+    method: "10-game window comparison with bootstrap",
+    eligible: windows.length >= TREND_MIN_WINDOWS,
+    neededGames: TREND_WINDOW_SIZE * TREND_MIN_WINDOWS,
+    findings,
+  }
+}
+
+// --- Report composition ---
+
+export interface SkillReportInput {
+  modes: TrackedMode[]
+  family: ModeFamily
+  generatedAt: number
+  summary: StatsSummary
+  style?: StyleProfile
+  grades: GradeCount[]
+  lobby?: LobbyComparison
+  contribution?: ContributionShare
+  pool?: ChampionPool
+  builds: BuiltItem[]
+  observations: InsightObservation[]
+  championStats: ChampionStatRow[]
+  itemObservations: FinalItemObservation[]
+}
+
+export interface SkillReportV2 {
+  version: 2
+  generatedAt: number
+  scope: { modes: TrackedMode[]; family: ModeFamily }
+  overview: {
+    summary: StatsSummary
+    style?: StyleProfile
+    grades: GradeCount[]
+    lobby?: LobbyComparison
+    contribution?: ContributionShare
+    pool?: { champions: number; games: number; coreShare: number }
+    builds: Array<{ itemId: number; games: number }>
+  }
+  insights: {
+    bestGamePattern: InsightSection
+    conditions: InsightSection
+    predictive: PredictiveSection
+    duration: InsightSection
+    trends: InsightSection
+    champions: InsightSection
+    items: InsightSection
+  }
+}
+
+export function buildSkillReport(input: SkillReportInput): SkillReportV2 {
+  const {
+    modes, family, generatedAt, summary, style, grades, lobby, contribution,
+    pool, builds, observations, championStats, itemObservations,
+  } = input
+
+  const baseline = summary.avgGradeScore ?? 0
+
+  const bgp = buildBestGamePattern(observations)
+  const bestGamePattern: InsightSection = {
+    key: "bestGamePattern",
+    title: "Strong Game Pattern",
+    method: "Top quartile comparison with bootstrap",
+    eligible: bgp.eligible,
+    neededGames: bgp.eligible ? 0 : STRONG_GAME_MIN_GRADED,
+    findings: bgp.findings,
+  }
+
+  const conds = buildPlayingConditions(observations)
+  const conditions: InsightSection = {
+    key: "conditions",
+    title: "Playing Conditions",
+    method: "Condition-based grade comparison",
+    eligible: conds.sections.some((s) => s.eligible),
+    neededGames: conds.sections.some((s) => s.eligible) ? 0 : CONDITIONS_MIN_GRADED,
+    findings: conds.sections.flatMap((s) => s.findings),
+  }
+
+  return {
+    version: 2,
+    generatedAt,
+    scope: { modes, family },
+    overview: {
+      summary,
+      style,
+      grades,
+      lobby,
+      contribution,
+      pool: pool
+        ? { champions: pool.champions, games: pool.games, coreShare: pool.coreShare }
+        : undefined,
+      builds: builds.map((b) => ({ itemId: b.itemId, games: b.games })),
+    },
+    insights: {
+      bestGamePattern,
+      conditions,
+      predictive: buildPredictiveSection(observations),
+      duration: buildDurationInsights(observations),
+      trends: buildTrendFindings(observations),
+      champions: buildChampionFindings(observations, championStats, baseline, family),
+      items: buildItemFindings(itemObservations),
+    },
+  }
 }

@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest"
-import type { InsightObservation } from "../electron/main/database/insights-repo.js"
+import type { InsightObservation, FinalItemObservation } from "../electron/main/database/insights-repo.js"
+import type { ChampionStatRow } from "../electron/main/database/matches-repo.js"
 import {
   buildBestGamePattern,
   buildPlayingConditions,
   buildDurationInsights,
   buildPredictiveSection,
+  buildChampionFindings,
+  buildItemFindings,
+  buildTrendFindings,
+  buildSkillReport,
+  type SkillReportV2,
 } from "../electron/main/matches/skill-report.js"
 
 /**
@@ -375,5 +381,315 @@ describe("Predictive section", () => {
     if (section.state === "no-signal") {
       expect(section.message).toBeDefined()
     }
+  })
+})
+
+// --- Champion findings ---
+
+function champStats(
+  count: number,
+  gradedPerChamp = 10,
+): ChampionStatRow[] {
+  const rows: ChampionStatRow[] = []
+  for (let i = 0; i < count; i++) {
+    rows.push({
+      championId: 100 + i,
+      games: gradedPerChamp + 2,
+      wins: Math.floor((gradedPerChamp + 2) / 2),
+      winRate: 0.5,
+      avgKills: 5,
+      avgDeaths: 4,
+      avgAssists: 7,
+      kda: 3,
+      avgDamageToChampions: 15000,
+      avgGradeScore: 50 + i * 3,
+      gradedGames: gradedPerChamp,
+    })
+  }
+  return rows
+}
+
+function champObservations(count: number, championIds: number[]): InsightObservation[] {
+  const results: InsightObservation[] = []
+  const baseTime = 1700000000000
+  for (let i = 0; i < count; i++) {
+    const champId = championIds[i % championIds.length]
+    results.push({
+      gameId: 2000 + i,
+      playedAt: baseTime + i * 3600000,
+      endedAt: baseTime + i * 3600000 + 1800000,
+      mode: "sr_ranked_solo",
+      family: "sr",
+      queueId: 420,
+      win: i % 2 === 0,
+      gradeScore: champId === 100 ? 70 : champId === 101 ? 30 : 50,
+      championId: champId,
+      role: "MIDDLE",
+      durationSecs: 1800,
+      completeLobby: true,
+      metrics: {
+        kda: 3, deaths: 5, damagePerMinute: 800, damageTakenPerMinute: 600,
+        goldPerMinute: 400, csPerMinute: 7, ccPerMinute: 0.5,
+      },
+    })
+  }
+  return results
+}
+
+describe("Champion findings", () => {
+  it("requires at least 8 graded games per champion", () => {
+    const stats = champStats(3, 5) // only 5 graded each
+    const obs = champObservations(15, [100, 101, 102])
+    const section = buildChampionFindings(obs, stats, 50, "sr")
+    expect(section.findings).toHaveLength(0)
+    expect(section.eligible).toBe(false)
+  })
+
+  it("produces findings for champions with >=8 graded games", () => {
+    const stats = champStats(3, 10)
+    const obs = champObservations(30, [100, 101, 102])
+    const section = buildChampionFindings(obs, stats, 50, "sr")
+    expect(section.eligible).toBe(true)
+    expect(section.findings.length).toBeGreaterThan(0)
+  })
+
+  it("uses bootstrap interval wholly above/below zero for directional copy", () => {
+    const stats = champStats(3, 10)
+    const obs = champObservations(60, [100, 101, 102])
+    const section = buildChampionFindings(obs, stats, 50, "sr")
+
+    for (const f of section.findings) {
+      if (f.interval && f.interval.low > 0) {
+        expect(f.summary).toMatch(/higher/i)
+      } else if (f.interval && f.interval.high < 0) {
+        expect(f.summary).toMatch(/lower/i)
+      } else {
+        expect(f.summary).toMatch(/no clear/i)
+      }
+    }
+  })
+
+  it("adds random-champion caveat for ARAM family", () => {
+    const stats = champStats(2, 10)
+    const obs = champObservations(20, [100, 101]).map((o) => ({
+      ...o, mode: "aram" as const, family: "aram" as const,
+    }))
+    const section = buildChampionFindings(obs, stats, 50, "aram")
+    for (const f of section.findings) {
+      expect(f.caveat).toMatch(/randomly assigned/i)
+    }
+  })
+
+  it("is deterministic across repeated calls", () => {
+    const stats = champStats(3, 10)
+    const obs = champObservations(30, [100, 101, 102])
+    const a = buildChampionFindings(obs, stats, 50, "sr")
+    const b = buildChampionFindings(obs, stats, 50, "sr")
+    expect(a.findings.map((f) => f.interval)).toEqual(b.findings.map((f) => f.interval))
+  })
+
+  it("uses association language only", () => {
+    const stats = champStats(3, 10)
+    const obs = champObservations(30, [100, 101, 102])
+    const section = buildChampionFindings(obs, stats, 50, "sr")
+    const json = JSON.stringify(section)
+    expect(json).not.toMatch(/better|improve|causes|should/i)
+  })
+})
+
+// --- Item findings ---
+
+function itemObservations(count: number): FinalItemObservation[] {
+  const results: FinalItemObservation[] = []
+  for (let i = 0; i < count; i++) {
+    const hasItem = i % 2 === 0
+    results.push({
+      gameId: 3000 + i,
+      championId: 100 + (i % 3),
+      role: i < count / 2 ? "MIDDLE" : "BOTTOM",
+      gradeScore: hasItem ? 55 + (i % 10) : 45 + (i % 10),
+      itemIds: hasItem ? [3001, 3006, 3089] : [3006, 3089, 3100],
+    })
+  }
+  return results
+}
+
+describe("Item findings", () => {
+  it("requires at least 10 games containing the item", () => {
+    const obs: FinalItemObservation[] = []
+    for (let i = 0; i < 9; i++) {
+      obs.push({
+        gameId: i, championId: 100, role: "MIDDLE",
+        gradeScore: 50, itemIds: [3001],
+      })
+    }
+    const section = buildItemFindings(obs)
+    expect(section.eligible).toBe(false)
+  })
+
+  it("groups by champion and role strata", () => {
+    const section = buildItemFindings(itemObservations(30))
+    expect(section.eligible).toBe(true)
+    const finding = section.findings.find((f) => f.key === "item:3001")
+    expect(finding).toBeDefined()
+    expect(finding!.scope).toMatch(/strata/)
+  })
+
+  it("includes final-inventory caveat on every finding", () => {
+    const section = buildItemFindings(itemObservations(30))
+    for (const f of section.findings) {
+      expect(f.caveat).toMatch(/final inventory/i)
+    }
+  })
+
+  it("includes confounding caveat on every finding", () => {
+    const section = buildItemFindings(itemObservations(30))
+    for (const f of section.findings) {
+      expect(f.caveat).toMatch(/correlation/i)
+    }
+  })
+
+  it("is deterministic across repeated calls", () => {
+    const obs = itemObservations(30)
+    const a = buildItemFindings(obs)
+    const b = buildItemFindings(obs)
+    expect(a.findings.map((f) => f.interval)).toEqual(b.findings.map((f) => f.interval))
+  })
+
+  it("uses association language only", () => {
+    const section = buildItemFindings(itemObservations(30))
+    const json = JSON.stringify(section)
+    expect(json).not.toMatch(/better|improve|causes|should/i)
+  })
+})
+
+// --- Trend findings ---
+
+describe("Trend findings", () => {
+  it("creates 10-game windows from graded observations", () => {
+    const section = buildTrendFindings(observations(25))
+    const windowFindings = section.findings.filter((f) => f.key.startsWith("window:"))
+    expect(windowFindings.length).toBe(2) // 25 games, only 2 complete windows
+  })
+
+  it("requires 3 complete windows for inference", () => {
+    const section20 = buildTrendFindings(observations(20))
+    expect(section20.eligible).toBe(false)
+    expect(section20.findings.find((f) => f.key === "trend:grade")).toBeUndefined()
+
+    const section30 = buildTrendFindings(observations(30))
+    expect(section30.eligible).toBe(true)
+    expect(section30.findings.find((f) => f.key === "trend:grade")).toBeDefined()
+  })
+
+  it("compares latest 10 vs prior 20 grades", () => {
+    const section = buildTrendFindings(observations(30))
+    const trend = section.findings.find((f) => f.key === "trend:grade")
+    expect(trend).toBeDefined()
+    expect(trend!.scope).toMatch(/Latest 10 vs prior 20/)
+    expect(trend!.interval).toBeDefined()
+  })
+
+  it("returns raw windows even without directional finding", () => {
+    const section = buildTrendFindings(observations(20))
+    const windowFindings = section.findings.filter((f) => f.key.startsWith("window:"))
+    expect(windowFindings.length).toBe(2)
+  })
+
+  it("is deterministic across repeated calls", () => {
+    const obs = observations(30)
+    const a = buildTrendFindings(obs)
+    const b = buildTrendFindings(obs)
+    expect(a.findings.map((f) => f.interval)).toEqual(b.findings.map((f) => f.interval))
+  })
+})
+
+// --- Report composition ---
+
+describe("SkillReportV2", () => {
+  const baseInput = () => ({
+    modes: ["sr_ranked_solo" as const, "sr_ranked_flex" as const],
+    family: "sr" as const,
+    generatedAt: 1700000000000,
+    summary: {
+      games: 50, wins: 25, losses: 25, winRate: 0.5,
+      avgKills: 5, avgDeaths: 4, avgAssists: 7, kda: 3,
+      avgDamageToChampions: 15000, avgDamageTaken: 12000, avgGold: 12000,
+      avgDurationSecs: 1800, pentaKills: 0, currentStreak: 0,
+      longestWinStreak: 3, avgGradeScore: 50, gradedGames: 50,
+    },
+    grades: [{ grade: "S", count: 5 }, { grade: "A", count: 20 }],
+    lobby: { games: 50, metrics: [] },
+    contribution: { games: 50, damageShare: 0.2, goldShare: 0.2, killShare: 0.2 },
+    pool: { champions: 10, games: 50, coreShare: 0.6, coreWinRate: 0.55, restWinRate: 0.45 },
+    builds: [
+      { itemId: 3001, games: 20, wins: 10, winRate: 0.5 },
+      { itemId: 3006, games: 15, wins: 8, winRate: 0.53 },
+    ],
+    observations: observations(50),
+    championStats: champStats(5, 10),
+    itemObservations: itemObservations(50),
+  })
+
+  it("has exact top-level shape with version 2", () => {
+    const report = buildSkillReport(baseInput())
+    expect(report.version).toBe(2)
+    expect(report.generatedAt).toBe(1700000000000)
+    expect(report.scope).toEqual({
+      modes: ["sr_ranked_solo", "sr_ranked_flex"],
+      family: "sr",
+    })
+    expect(report.overview).toBeDefined()
+    expect(report.insights).toBeDefined()
+  })
+
+  it("uses the explicit generatedAt parameter", () => {
+    const a = buildSkillReport({ ...baseInput(), generatedAt: 111 })
+    const b = buildSkillReport({ ...baseInput(), generatedAt: 222 })
+    expect(a.generatedAt).toBe(111)
+    expect(b.generatedAt).toBe(222)
+  })
+
+  it("overview builds have no win rate", () => {
+    const report = buildSkillReport(baseInput())
+    for (const build of report.overview.builds) {
+      expect(build).toEqual({ itemId: expect.any(Number), games: expect.any(Number) })
+      expect("winRate" in build).toBe(false)
+      expect("wins" in build).toBe(false)
+    }
+  })
+
+  it("overview pool has no core/rest win rate", () => {
+    const report = buildSkillReport(baseInput())
+    const pool = report.overview.pool!
+    expect(pool).toEqual({
+      champions: expect.any(Number),
+      games: expect.any(Number),
+      coreShare: expect.any(Number),
+    })
+    expect("coreWinRate" in pool).toBe(false)
+    expect("restWinRate" in pool).toBe(false)
+  })
+
+  it("has all seven insight sections plus predictive", () => {
+    const report = buildSkillReport(baseInput())
+    expect(report.insights.bestGamePattern).toBeDefined()
+    expect(report.insights.conditions).toBeDefined()
+    expect(report.insights.predictive).toBeDefined()
+    expect(report.insights.duration).toBeDefined()
+    expect(report.insights.trends).toBeDefined()
+    expect(report.insights.champions).toBeDefined()
+    expect(report.insights.items).toBeDefined()
+  })
+
+  it("is renderer-serializable (structured clone compatible)", () => {
+    const report = buildSkillReport(baseInput())
+    expect(() => structuredClone(report)).not.toThrow()
+  })
+
+  it("contains no causal language", () => {
+    const report = buildSkillReport(baseInput())
+    const json = JSON.stringify(report)
+    expect(json).not.toMatch(/better|improve|causes|should|will make/i)
   })
 })

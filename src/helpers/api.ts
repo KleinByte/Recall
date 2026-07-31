@@ -23,6 +23,7 @@ import type {
   ProfileSummary,
   RankedHistory,
   RiotHistoryBackfillState,
+  SkillReportV2,
   StatsFilter,
   StatsMeta,
   StatsSummary,
@@ -208,6 +209,13 @@ export const api = {
     family: ModeFamily,
   ): Promise<InsightsReport> {
     return invoke("insights:all", filter, family)
+  },
+
+  getSkillReport(
+    filter: Partial<StatsFilter>,
+    family: ModeFamily,
+  ): Promise<SkillReportV2> {
+    return invoke("stats:skill-report", filter, family)
   },
 
   getDrift(
