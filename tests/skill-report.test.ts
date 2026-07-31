@@ -279,6 +279,44 @@ describe("Playing conditions", () => {
     const json = JSON.stringify(report)
     expect(json).not.toMatch(/better|improve|should|must|will make/i)
   })
+
+  it("retains sparse buckets with raw values and insufficient confidence", () => {
+    // Create 32 games (>=30 threshold) but concentrated in few time buckets
+    // so some fixed buckets remain sparse (<8 games)
+    const obs = observations(32, { fixedHour: 10 }) // All games at hour 10 (9-12 block)
+    // Add a few sparse games in another bucket
+    const sparse1 = observations(3, { fixedHour: 2 }) // 3 games in 0-3 block
+    const sparse2 = observations(2, { fixedHour: 15 }) // 2 games in 15-18 block
+    const combined = [...obs, ...sparse1, ...sparse2]
+    
+    const report = buildPlayingConditions(combined)
+    const timeSection = report.sections.find((s) => s.key === "timeOfDay")
+    
+    expect(timeSection?.eligible).toBe(true) // >=1 bucket has >=8 games
+    
+    // Should find sparse buckets in findings
+    const sparseFinding1 = timeSection?.findings.find((f) => f.games === 3)
+    const sparseFinding2 = timeSection?.findings.find((f) => f.games === 2)
+    
+    expect(sparseFinding1).toBeDefined()
+    expect(sparseFinding2).toBeDefined()
+    
+    // Sparse findings must have:
+    if (sparseFinding1) {
+      expect(sparseFinding1.games).toBe(3)
+      expect(sparseFinding1.rateInterval).toBeDefined() // Wilson interval
+      expect(sparseFinding1.confidence).toBe("insufficient")
+      expect(sparseFinding1.summary).not.toMatch(/higher|lower|associated with.*grade/i)
+      expect(sparseFinding1.scope).toMatch(/raw rate|adjusted rate/i)
+    }
+    
+    if (sparseFinding2) {
+      expect(sparseFinding2.games).toBe(2)
+      expect(sparseFinding2.rateInterval).toBeDefined()
+      expect(sparseFinding2.confidence).toBe("insufficient")
+      expect(sparseFinding2.summary).not.toMatch(/higher|lower|associated with.*grade/i)
+    }
+  })
 })
 
 describe("Duration insights", () => {
