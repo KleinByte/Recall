@@ -1,5 +1,6 @@
 import type { QueueInfo } from "./queues.js"
 import type { LcuGame, ModeInfo, TrackedMode } from "./types.js"
+import { isLeagueClassicQueue } from "./eligibility.js"
 
 const RIFT_MAP_ID = 11
 const HOWLING_ABYSS_MAP_ID = 12
@@ -40,6 +41,15 @@ export function classifyMatch(
   const mapId = queue?.mapId || game.mapId
   const gameMode = queue?.gameMode || game.gameMode
   const queueName = queue?.name
+
+  if (isLeagueClassicQueue(game, queue)) {
+    return {
+      mode: "other",
+      family: "other",
+      isRanked: false,
+      queueName: "League Classic",
+    }
+  }
 
   if (mapId === RIFT_MAP_ID) {
     // An unrecognised queue on the Rift is still a Rift game. Riot adds queues

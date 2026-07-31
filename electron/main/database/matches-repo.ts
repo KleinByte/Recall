@@ -1,6 +1,16 @@
 import type { Database, Statement } from "better-sqlite3"
-import type { MatchRow, ModeFamily, TrackedMode } from "../matches/types.js"
+import type {
+  MatchRow,
+  ModeFamily,
+  PerformanceLabel,
+  TrackedMode,
+} from "../matches/types.js"
 import type { StyleAverages } from "../matches/style.js"
+import { LABEL_EVALUATOR_VERSION } from "../matches/labels.js"
+import {
+  LEAGUE_CLASSIC_QUEUE_IDS,
+  PERSONAL_RECORD_RIFT_QUEUE_IDS,
+} from "../matches/eligibility.js"
 
 export interface StatsFilter {
   puuid: string
@@ -12,6 +22,7 @@ export interface StatsFilter {
   championIds?: number[]
   roles?: string[]
   excludeQueueIds?: number[]
+  excludeLeagueClassic?: boolean
 }
 
 export interface StatsSummary {
@@ -278,6 +289,117 @@ export class MatchesRepository {
         "UPDATE matches SET riot_match_id = ? WHERE game_id = ? AND puuid = ?",
       )
       .run(riotMatchId, gameId, puuid)
+  }
+
+  needsLabelEvaluation(
+    gameId: number,
+    puuid: string,
+    evaluatorVersion = LABEL_EVALUATOR_VERSION,
+  ): boolean {
+    const row = this.db.prepare(
+      `SELECT evaluator_version AS evaluatorVersion, status
+       FROM match_label_evaluations
+       WHERE game_id = ? AND puuid = ?`,
+    ).get(gameId, puuid) as
+      | { evaluatorVersion: number; status: "ready" | "unavailable" }
+      | undefined
+
+    return !row || row.evaluatorVersion < evaluatorVersion
+  }
+
+  markLabelsUnavailable(
+    gameId: number,
+    puuid: string,
+    evaluatorVersion = LABEL_EVALUATOR_VERSION,
+    now = Date.now(),
+  ) {
+    const mark = this.db.transaction(() => {
+      this.db.prepare(
+        "DELETE FROM match_performance_labels WHERE game_id = ? AND puuid = ?",
+      ).run(gameId, puuid)
+      this.db.prepare(
+        `INSERT INTO match_label_evaluations
+         (game_id, puuid, evaluator_version, source, status, evaluated_at)
+         VALUES (?, ?, ?, 'match_v5', 'unavailable', ?)
+         ON CONFLICT(game_id, puuid) DO UPDATE SET
+           evaluator_version = excluded.evaluator_version,
+           source = excluded.source,
+           status = excluded.status,
+           evaluated_at = excluded.evaluated_at`,
+      ).run(gameId, puuid, evaluatorVersion, now)
+    })
+    mark()
+  }
+
+  replacePerformanceLabels(
+    gameId: number,
+    puuid: string,
+    labels: PerformanceLabel[],
+    evaluatorVersion = LABEL_EVALUATOR_VERSION,
+    now = Date.now(),
+  ) {
+    const replace = this.db.transaction(() => {
+      this.db.prepare(
+        "DELETE FROM match_performance_labels WHERE game_id = ? AND puuid = ?",
+      ).run(gameId, puuid)
+
+      const insert = this.db.prepare(
+        `INSERT INTO match_performance_labels
+         (game_id, puuid, label_id, name, category, polarity, tooltip,
+          evidence_json, source, confidence, priority, evaluator_version,
+          created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      for (const label of labels) {
+        insert.run(
+          gameId,
+          puuid,
+          label.id,
+          label.name,
+          label.category,
+          label.polarity,
+          label.tooltip,
+          JSON.stringify(label.evidence),
+          label.source,
+          label.confidence,
+          label.priority,
+          evaluatorVersion,
+          now,
+        )
+      }
+
+      this.db.prepare(
+        `INSERT INTO match_label_evaluations
+         (game_id, puuid, evaluator_version, source, status, evaluated_at)
+         VALUES (?, ?, ?, 'match_v5', 'ready', ?)
+         ON CONFLICT(game_id, puuid) DO UPDATE SET
+           evaluator_version = excluded.evaluator_version,
+           source = excluded.source,
+           status = excluded.status,
+           evaluated_at = excluded.evaluated_at`,
+      ).run(gameId, puuid, evaluatorVersion, now)
+    })
+    replace()
+  }
+
+  getPerformanceLabels(gameId: number, puuid: string): PerformanceLabel[] {
+    const rows = this.db.prepare(
+      `SELECT label_id AS id, name, category, polarity, tooltip,
+              evidence_json AS evidenceJson, source, confidence, priority
+       FROM match_performance_labels
+       WHERE game_id = ? AND puuid = ?
+       ORDER BY priority DESC, label_id`,
+    ).all(gameId, puuid) as Array<Omit<PerformanceLabel, "evidence"> & {
+      evidenceJson: string
+    }>
+
+    return rows.map(({ evidenceJson, ...row }) => {
+      try {
+        return { ...row, evidence: JSON.parse(evidenceJson) }
+      } catch {
+        return { ...row, evidence: {} }
+      }
+    })
   }
 
   hasCompleteMatch(gameId: number, puuid: string): boolean {
@@ -609,6 +731,17 @@ export class MatchesRepository {
                   JOIN annotation_tags t ON t.id = mat.tag_id
                   WHERE mat.game_id = matches.game_id AND mat.puuid = matches.puuid
                 ), '') AS tag_names,
+                COALESCE((
+                  SELECT GROUP_CONCAT(name, ' · ')
+                  FROM (
+                    SELECT mpl.name
+                    FROM match_performance_labels mpl
+                    WHERE mpl.game_id = matches.game_id
+                      AND mpl.puuid = matches.puuid
+                    ORDER BY mpl.priority DESC, mpl.label_id
+                    LIMIT 6
+                  )
+                ), '') AS label_names,
                 (SELECT COUNT(*) FROM match_experiments me
                  WHERE me.game_id = matches.game_id AND me.puuid = matches.puuid)
                   AS experiment_count
@@ -628,14 +761,21 @@ export class MatchesRepository {
    * rather than reporting a number with no story attached.
    */
   getRecords(filter: StatsFilter): PersonalRecord[] {
-    const { clause, params } = buildFilter(filter)
+    const { clause, params } = buildFilter({
+      ...filter,
+      excludeLeagueClassic: true,
+    })
+    const eligibleModes = `(
+      mode IN ('aram', 'mayhem')
+      OR queue_id IN (${PERSONAL_RECORD_RIFT_QUEUE_IDS.join(", ")})
+    )`
 
     return RECORDS.flatMap(({ key, label, expression }) => {
       const row = this.db
         .prepare(
           `SELECT game_id AS gameId, champion_id AS championId,
                   played_at AS playedAt, mode, ${expression} AS value
-           FROM matches ${clause}
+           FROM matches ${clause} AND ${eligibleModes}
            ORDER BY value DESC, game_id DESC
            LIMIT 1`,
         )
@@ -813,6 +953,18 @@ function buildFilter(filter: StatsFilter) {
     params.push(...filter.excludeQueueIds)
   }
 
+  if (filter.excludeLeagueClassic) {
+    conditions.push(
+      `NOT (
+        queue_id IN (${LEAGUE_CLASSIC_QUEUE_IDS.join(", ")})
+        OR (
+          UPPER(COALESCE(game_mode, '')) = 'CLASSIC'
+          AND LOWER(COALESCE(queue_name, '')) LIKE '%classic%'
+        )
+      )`,
+    )
+  }
+
   return { clause: `WHERE ${conditions.join(" AND ")}`, params }
 }
 
@@ -924,6 +1076,9 @@ function toMatchRow(row: Record<string, never>): MatchRow {
     hasNote: row.has_note === undefined ? undefined : row.has_note === 1,
     tagNames: typeof row.tag_names === "string" && row.tag_names
       ? (row.tag_names as unknown as string).split(" · ")
+      : undefined,
+    labelNames: typeof row.label_names === "string" && row.label_names
+      ? (row.label_names as unknown as string).split(" · ")
       : undefined,
     experimentCount: row.experiment_count ?? undefined,
   }

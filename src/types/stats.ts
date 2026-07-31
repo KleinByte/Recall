@@ -19,6 +19,7 @@ export interface StatsFilter {
   championIds?: number[]
   roles?: string[]
   excludeQueueIds?: number[]
+  excludeLeagueClassic?: boolean
 }
 
 export interface MatchQuery extends StatsFilter {
@@ -315,6 +316,19 @@ export interface TeamRow {
 export interface MatchDetail {
   participants: ParticipantRow[]
   teams: TeamRow[]
+  labels: PerformanceLabel[]
+}
+
+export interface PerformanceLabel {
+  id: string
+  name: string
+  category: string
+  polarity: "positive" | "negative" | "mixed"
+  tooltip: string
+  evidence: Record<string, string | number | boolean>
+  source: "match_v5" | "timeline"
+  confidence: "exact" | "strong" | "inferred"
+  priority: number
 }
 
 export type Confidence = "thin" | "fair" | "solid"
@@ -490,6 +504,7 @@ export interface MatchRow {
   bookmarked?: boolean
   hasNote?: boolean
   tagNames?: string[]
+  labelNames?: string[]
   experimentCount?: number
 }
 

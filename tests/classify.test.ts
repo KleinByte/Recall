@@ -83,6 +83,15 @@ describe("classifyMatch — Summoner's Rift", () => {
     expect(classifyMatch(rift(9999))?.mode).toBe("sr_normal")
   })
 
+  it("keeps League Classic out of the normal Rift family", () => {
+    expect(classifyMatch(rift(710))).toEqual({
+      mode: "other",
+      family: "other",
+      isRanked: false,
+      queueName: "League Classic",
+    })
+  })
+
   it("marks only ranked queues as ranked", () => {
     expect(classifyMatch(rift(400))?.isRanked).toBe(false)
     expect(classifyMatch(rift(440))?.isRanked).toBe(true)

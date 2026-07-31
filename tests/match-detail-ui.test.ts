@@ -71,6 +71,7 @@ const participant = (
 describe("groupMatchSides", () => {
   it("lists the local player's team first and attaches team summaries", () => {
     const detail: MatchDetail = {
+      labels: [],
       participants: [participant(6, 200), participant(1, 100, 1)],
       teams: [
         { gameId: 1, puuid: "owner", teamId: 200, win: 0, bans: "[]", baronKills: 0, dragonKills: 0, heraldKills: 0, hordeKills: 0, towerKills: 0, inhibitorKills: 0, firstBlood: 0, firstTower: 0, firstBaron: 0, firstDragon: 0, firstInhibitor: 0 },

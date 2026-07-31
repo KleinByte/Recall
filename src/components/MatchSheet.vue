@@ -174,6 +174,19 @@ const kda = computed(() =>
         </div>
       </div>
 
+      <section v-if="detail?.labels.length" class="game-labels" aria-label="Game labels">
+        <article
+          v-for="label in detail.labels"
+          :key="label.id"
+          class="game-label"
+          :class="label.polarity"
+          :title="`${label.tooltip} Evidence: ${Object.entries(label.evidence).map(([key, value]) => `${key}: ${value}`).join(', ')}`"
+        >
+          <span class="label-name">{{ label.name }}</span>
+          <span class="label-tooltip">{{ label.tooltip }}</span>
+        </article>
+      </section>
+
       <div class="body">
         <div class="chart-side">
           <StyleRadar
@@ -341,6 +354,30 @@ const kda = computed(() =>
 .kpi-hint {
   font-size: 11px;
 }
+
+.game-labels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--space-2);
+}
+
+.game-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid rgba(200, 170, 110, 0.35);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  background: rgba(200, 170, 110, 0.06);
+}
+
+.game-label.positive { border-left-color: var(--win); }
+.game-label.negative { border-left-color: var(--loss); }
+.game-label.mixed { border-left-color: var(--gold-bright); }
+.label-name { color: var(--text-primary); font-family: var(--font-heading); font-size: 12px; }
+.label-tooltip { color: var(--text-secondary); font-size: 10px; line-height: 1.35; }
 
 .body {
   display: grid;

@@ -239,5 +239,22 @@ export interface MatchRow {
   bookmarked?: boolean
   hasNote?: boolean
   tagNames?: string[]
+  /** Highest-priority automatically awarded Match-V5 labels. */
+  labelNames?: string[]
   experimentCount?: number
+}
+
+export type PerformanceLabelPolarity = "positive" | "negative" | "mixed"
+export type PerformanceLabelConfidence = "exact" | "strong" | "inferred"
+
+export interface PerformanceLabel {
+  id: string
+  name: string
+  category: string
+  polarity: PerformanceLabelPolarity
+  tooltip: string
+  evidence: Record<string, string | number | boolean>
+  source: "match_v5" | "timeline"
+  confidence: PerformanceLabelConfidence
+  priority: number
 }

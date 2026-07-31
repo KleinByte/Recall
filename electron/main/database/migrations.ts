@@ -597,6 +597,48 @@ export const migrations: Migration[] = [
          OR LOWER(COALESCE(queue_name, '')) LIKE '%tutorial%';
     `,
   },
+  {
+    // Auto-awarded post-game labels are deliberately separate from the
+    // player's free-form review tags. Each evaluation records the algorithm
+    // version even when no label was earned, so an empty result is durable
+    // and can be recomputed when the definitions change.
+    version: 13,
+    up: `
+      CREATE TABLE IF NOT EXISTS match_label_evaluations (
+        game_id            INTEGER NOT NULL,
+        puuid              TEXT    NOT NULL,
+        evaluator_version  INTEGER NOT NULL,
+        source             TEXT    NOT NULL CHECK (source IN ('match_v5', 'timeline')),
+        status             TEXT    NOT NULL CHECK (status IN ('ready', 'unavailable')),
+        evaluated_at       INTEGER NOT NULL,
+        PRIMARY KEY (game_id, puuid),
+        FOREIGN KEY (game_id, puuid) REFERENCES matches (game_id, puuid)
+          ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS match_performance_labels (
+        game_id           INTEGER NOT NULL,
+        puuid             TEXT    NOT NULL,
+        label_id          TEXT    NOT NULL,
+        name              TEXT    NOT NULL,
+        category          TEXT    NOT NULL,
+        polarity          TEXT    NOT NULL CHECK (polarity IN ('positive', 'negative', 'mixed')),
+        tooltip           TEXT    NOT NULL,
+        evidence_json     TEXT    NOT NULL,
+        source            TEXT    NOT NULL CHECK (source IN ('match_v5', 'timeline')),
+        confidence        TEXT    NOT NULL CHECK (confidence IN ('exact', 'strong', 'inferred')),
+        priority          REAL    NOT NULL,
+        evaluator_version INTEGER NOT NULL,
+        created_at        INTEGER NOT NULL,
+        PRIMARY KEY (game_id, puuid, label_id),
+        FOREIGN KEY (game_id, puuid) REFERENCES matches (game_id, puuid)
+          ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_performance_labels_match
+        ON match_performance_labels (puuid, game_id, priority DESC);
+    `,
+  },
 ]
 
 export const latestSchemaVersion = migrations.at(-1)?.version ?? 0

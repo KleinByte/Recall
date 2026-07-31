@@ -70,6 +70,7 @@ import {
   type ExperimentOutcome,
 } from "./database/review-repo.js"
 import { TimelineService } from "./riot/timeline-service.js"
+import { RecentMatchEnricher } from "./riot/recent-match-enricher.js"
 import { ReviewService } from "./review/review-service.js"
 import {
   recommendChampions,
@@ -313,6 +314,35 @@ function readRiotApiKey(): string | undefined {
   }
 }
 
+function saveRiotAccount(
+  summoner: Summoner,
+  matchPuuid: string,
+  regionalRoute: string,
+  platformId: string,
+) {
+  getDatabase().prepare(
+    `INSERT INTO riot_accounts
+     (puuid, match_puuid, regional_route, platform_id,
+      game_name, tag_line, resolved_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(puuid) DO UPDATE SET
+       match_puuid = excluded.match_puuid,
+       regional_route = excluded.regional_route,
+       platform_id = excluded.platform_id,
+       game_name = excluded.game_name,
+       tag_line = excluded.tag_line,
+       resolved_at = excluded.resolved_at`,
+  ).run(
+    summoner.puuid,
+    matchPuuid,
+    regionalRoute,
+    platformId,
+    summoner.gameName,
+    summoner.tagLine,
+    Date.now(),
+  )
+}
+
 function getTimelineService(win: BrowserWindow) {
   if (!timelineService) {
     timelineService = new TimelineService(
@@ -465,11 +495,32 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
     console.warn(`Could not determine Riot API route: ${(error as Error).message}`)
   }
 
+  const recentEnricher = regionalRoute && platformId
+    ? new RecentMatchEnricher(
+      readRiotApiKey,
+      regionalRoute,
+      platformId,
+      summoner.puuid,
+      { gameName: summoner.gameName, tagLine: summoner.tagLine },
+      getRepository(),
+      getParticipants(),
+      {
+        onAccountResolved: (matchPuuid) => saveRiotAccount(
+          summoner,
+          matchPuuid,
+          regionalRoute,
+          platformId,
+        ),
+      },
+    )
+    : undefined
+
   const sync = new MatchSync(
     client,
     getRepository(),
     summoner.puuid,
     getParticipants(),
+    recentEnricher,
   )
   const challengeSync = new ChallengeSync(
     client,
@@ -700,26 +751,11 @@ async function startRiotHistoryBackfill(
         tagLine: active.summoner.tagLine,
       },
       onAccountResolved: (matchPuuid) => {
-        getDatabase().prepare(
-          `INSERT INTO riot_accounts
-           (puuid, match_puuid, regional_route, platform_id,
-            game_name, tag_line, resolved_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(puuid) DO UPDATE SET
-             match_puuid = excluded.match_puuid,
-             regional_route = excluded.regional_route,
-             platform_id = excluded.platform_id,
-             game_name = excluded.game_name,
-             tag_line = excluded.tag_line,
-             resolved_at = excluded.resolved_at`,
-        ).run(
-          active.summoner.puuid,
+        saveRiotAccount(
+          active.summoner,
           matchPuuid,
-          active.regionalRoute,
+          active.regionalRoute!,
           active.platformId ?? "",
-          active.summoner.gameName,
-          active.summoner.tagLine,
-          Date.now(),
         )
         getTimelineService(win).queuePendingBookmarks(active.summoner.puuid)
       },
@@ -1497,9 +1533,13 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
       getParticipants().getLobbyComparison(withPuuid(filter)),
   )
 
-  ipcMain.handle("matches:detail", (_event, gameId: number) =>
-    getParticipants().getMatchDetail(gameId, withPuuid().puuid),
-  )
+  ipcMain.handle("matches:detail", (_event, gameId: number) => {
+    const puuid = withPuuid().puuid
+    return {
+      ...getParticipants().getMatchDetail(gameId, puuid),
+      labels: getRepository().getPerformanceLabels(gameId, puuid),
+    }
+  })
 
   ipcMain.handle(
     "stats:drift",

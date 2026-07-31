@@ -16,6 +16,7 @@ import type {
   Goal,
   PersonalRecord,
   RankedHistory,
+  StatsFilter,
 } from "../types/stats"
 
 const props = defineProps<{
@@ -43,8 +44,48 @@ const TIERS = [
   "MASTER",
 ]
 
+type RecordScopeId = "rankedSolo" | "aram" | "mayhem" | "allRift"
+
+const RECORD_SCOPES: readonly {
+  id: RecordScopeId
+  label: string
+  filter: Partial<StatsFilter>
+}[] = [
+  {
+    id: "rankedSolo",
+    label: "Solo/Duo Ranked",
+    filter: { mode: "sr_ranked_solo", excludeLeagueClassic: true },
+  },
+  {
+    id: "aram",
+    label: "ARAM",
+    filter: { mode: "aram", excludeLeagueClassic: true },
+  },
+  {
+    id: "mayhem",
+    label: "Mayhem",
+    filter: { mode: "mayhem", excludeLeagueClassic: true },
+  },
+  {
+    id: "allRift",
+    label: "All Rift",
+    filter: {
+      modes: [
+        "sr_ranked_solo",
+        "sr_ranked_flex",
+        "sr_normal",
+        "sr_quickplay",
+        "sr_swiftplay",
+      ],
+      excludeLeagueClassic: true,
+    },
+  },
+]
+
 const ranked = ref<RankedHistory[]>([])
 const records = ref<PersonalRecord[]>([])
+const recordScope = ref<RecordScopeId>("rankedSolo")
+const recordsLoading = ref(false)
 const goals = ref<Goal[]>([])
 const challenges = ref<ChallengeRow[]>([])
 
@@ -54,18 +95,42 @@ const targetTier = ref("GOLD")
 const challengeSearch = ref("")
 const chosenChallenge = ref<ChallengeRow | null>(null)
 
+const selectedRecordScope = computed(() =>
+  RECORD_SCOPES.find((scope) => scope.id === recordScope.value)!,
+)
+
+let recordsRequest = 0
+
+async function loadRecords() {
+  const request = ++recordsRequest
+  recordsLoading.value = true
+
+  try {
+    const nextRecords = await api.getRecords(selectedRecordScope.value.filter)
+    if (request === recordsRequest) records.value = nextRecords
+  } finally {
+    if (request === recordsRequest) recordsLoading.value = false
+  }
+}
+
+async function selectRecordScope(scope: RecordScopeId) {
+  if (scope === recordScope.value) return
+  recordScope.value = scope
+  records.value = []
+  await loadRecords()
+}
+
 async function load() {
   try {
-    const [nextRanked, nextRecords, nextGoals, nextChallenges] =
+    const [nextRanked, nextGoals, nextChallenges] =
       await Promise.all([
         api.getRankedHistory(),
-        api.getRecords({}),
         api.listGoals(),
         api.listChallenges({ includeRetired: false }),
+        loadRecords(),
       ])
 
     ranked.value = nextRanked
-    records.value = nextRecords
     goals.value = nextGoals
     challenges.value = nextChallenges
   } catch {
@@ -325,9 +390,31 @@ const formatRecord = (record: PersonalRecord) =>
       </ul>
     </section>
 
-    <section v-if="records.length" class="card">
-      <h2 class="section-title">Personal records</h2>
-      <div class="records">
+    <section class="card records-card">
+      <div class="records-head">
+        <div>
+          <h2 class="section-title">Personal records</h2>
+          <p class="muted records-note">
+            Special modes stay separate so their rules do not distort your best Rift games.
+          </p>
+        </div>
+        <div class="record-tabs" role="tablist" aria-label="Personal record mode">
+          <button
+            v-for="scope in RECORD_SCOPES"
+            :key="scope.id"
+            type="button"
+            role="tab"
+            class="record-tab"
+            :class="{ active: recordScope === scope.id }"
+            :aria-selected="recordScope === scope.id"
+            @click="selectRecordScope(scope.id)"
+          >
+            {{ scope.label }}
+          </button>
+        </div>
+      </div>
+
+      <div v-if="records.length" class="records">
         <div v-for="record in records" :key="record.key" class="record">
           <div class="muted record-label">{{ record.label }}</div>
           <div class="numeric record-value">{{ formatRecord(record) }}</div>
@@ -344,6 +431,12 @@ const formatRecord = (record: PersonalRecord) =>
           </div>
         </div>
       </div>
+      <p v-else-if="recordsLoading" class="muted records-empty">
+        Loading {{ selectedRecordScope.label }} records…
+      </p>
+      <p v-else class="muted records-empty">
+        No {{ selectedRecordScope.label }} games have been recorded yet.
+      </p>
     </section>
   </div>
 </template>
@@ -546,6 +639,61 @@ h1 {
   gap: var(--space-4);
 }
 
+.records-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.records-note {
+  max-width: 58ch;
+  margin: var(--space-1) 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.record-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+}
+
+.record-tab {
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--text-muted);
+  font: 11px var(--font-body);
+  cursor: pointer;
+}
+
+.record-tab:hover {
+  color: var(--text-primary);
+  background: var(--surface-2);
+}
+
+.record-tab.active {
+  background: var(--surface-3);
+  color: var(--gold-bright);
+  box-shadow: inset 0 -2px var(--gold);
+}
+
+.records-empty {
+  margin: 0;
+  padding: var(--space-5);
+  border: 1px dashed var(--border-subtle);
+  text-align: center;
+  font-size: 12px;
+}
+
 .record {
   background: var(--surface-2);
   border: 1px solid var(--border-subtle);
@@ -584,5 +732,15 @@ h1 {
 
 .notice {
   padding: var(--space-5);
+}
+
+@media (max-width: 820px) {
+  .records-head {
+    flex-direction: column;
+  }
+
+  .record-tabs {
+    justify-content: flex-start;
+  }
 }
 </style>

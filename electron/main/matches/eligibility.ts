@@ -13,14 +13,45 @@ export const BOT_QUEUE_IDS = [
   2000, 2010, 2020,
 ] as const
 
+/**
+ * League Classic currently identifies itself as the legacy "Ranked 5s"
+ * queue. The name check below also covers a future client label that says
+ * Classic directly without confusing Mayhem's "Classic-ish" queue.
+ */
+export const LEAGUE_CLASSIC_QUEUE_IDS = [710] as const
+
+/** Standard Summoner's Rift queues eligible for comparable personal records. */
+export const PERSONAL_RECORD_RIFT_QUEUE_IDS = [
+  400, 420, 430, 440, 480, 490,
+] as const
+
 const BOT_QUEUE_ID_SET = new Set<number>(BOT_QUEUE_IDS)
 const BOT_QUEUE_NAME =
   /\b(?:bot|bots|tutorial)\b|co[\s-]?op\s+vs\.?\s+ai/i
+const LEAGUE_CLASSIC_QUEUE_ID_SET = new Set<number>(LEAGUE_CLASSIC_QUEUE_IDS)
+const LEAGUE_CLASSIC_QUEUE_NAME = /\b(?:league(?: of legends)?\s+)?classic\b/i
 
 export function isBotQueue(queueId: number, queueName?: string): boolean {
   return (
     BOT_QUEUE_ID_SET.has(queueId) ||
     (queueName !== undefined && BOT_QUEUE_NAME.test(queueName))
+  )
+}
+
+export function isLeagueClassicQueue(
+  game: Pick<LcuGame, "queueId" | "mapId" | "gameMode">,
+  queue?: QueueInfo,
+): boolean {
+  const mapId = queue?.mapId || game.mapId
+  const gameMode = queue?.gameMode || game.gameMode
+  const queueName = queue?.name
+
+  return (
+    mapId === 11 &&
+    (LEAGUE_CLASSIC_QUEUE_ID_SET.has(game.queueId) ||
+      (gameMode === "CLASSIC" &&
+        queueName !== undefined &&
+        LEAGUE_CLASSIC_QUEUE_NAME.test(queueName)))
   )
 }
 

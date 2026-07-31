@@ -10,6 +10,30 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.2",
+    releasedAt: "2026-07-31",
+    title: "Every standout game gets a story",
+    summary:
+      "Recall now turns supported Match-V5 evidence into concise post-game labels without making a Riot API key a requirement for recording your history.",
+    sections: [
+      {
+        title: "Evidence-backed game labels",
+        items: [
+          "See up to six high-signal labels such as Pentakill, Ouch, You Hurt, Deathless, Visionary, and Objective Thief on supported games.",
+          "Open a game to read the exact statistic or lobby comparison behind every awarded label.",
+          "Overlapping labels are suppressed so one performance story does not crowd out the rest of the game.",
+        ],
+      },
+      {
+        title: "Optional Riot enrichment",
+        items: [
+          "A missing or rejected Riot API key never prevents Recall from recording a finished game from the League Client.",
+          "Supported Match-V5 games now refresh their full lobby and labels as they enter Recall, while unavailable records are skipped safely.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.0",
     releasedAt: "2026-07-31",
     title: "Recall Grade, rebuilt around your games",

@@ -89,6 +89,99 @@ describe("getRecords", () => {
     expect(damage.gameId).toBe(2)
     expect(damage.value).toBe(42_000)
   })
+
+  it("keeps League Classic out of Rift records", () => {
+    matches.insertMany([
+      buildMatchRow({
+        gameId: 1,
+        queueId: 710,
+        gameMode: "CLASSIC",
+        queueName: "Ranked 5s",
+        mode: "sr_normal",
+        modeFamily: "sr",
+        kills: 40,
+      }),
+      buildMatchRow({
+        gameId: 2,
+        queueId: 400,
+        gameMode: "CLASSIC",
+        queueName: "Normal",
+        mode: "sr_normal",
+        modeFamily: "sr",
+        kills: 18,
+      }),
+    ])
+
+    const kills = matches
+      .getRecords({
+        puuid: PUUID,
+        modes: [
+          "sr_ranked_solo",
+          "sr_ranked_flex",
+          "sr_normal",
+          "sr_quickplay",
+          "sr_swiftplay",
+        ],
+        excludeLeagueClassic: true,
+      })
+      .find((record) => record.key === "kills")!
+
+    expect(kills.gameId).toBe(2)
+    expect(kills.value).toBe(18)
+  })
+
+  it("keeps ARAM and Mayhem records in their own scopes", () => {
+    matches.insertMany([
+      buildMatchRow({ gameId: 1, mode: "aram", kills: 20 }),
+      buildMatchRow({ gameId: 2, mode: "mayhem", kills: 35 }),
+      buildMatchRow({ gameId: 3, mode: "other", kills: 50 }),
+    ])
+
+    expect(
+      matches.getRecords({ puuid: PUUID, mode: "aram" })
+        .find((record) => record.key === "kills")!.gameId,
+    ).toBe(1)
+    expect(
+      matches.getRecords({ puuid: PUUID, mode: "mayhem" })
+        .find((record) => record.key === "kills")!.gameId,
+    ).toBe(2)
+  })
+
+  it("excludes rotating Rift modes and Arena from unscoped records", () => {
+    matches.insertMany([
+      buildMatchRow({
+        gameId: 1,
+        queueId: 900,
+        gameMode: "URF",
+        mode: "sr_normal",
+        modeFamily: "sr",
+        kills: 45,
+      }),
+      buildMatchRow({
+        gameId: 2,
+        queueId: 1750,
+        gameMode: "CHERRY",
+        mode: "other",
+        modeFamily: "other",
+        kills: 40,
+      }),
+      buildMatchRow({
+        gameId: 3,
+        queueId: 450,
+        gameMode: "ARAM",
+        mode: "aram",
+        modeFamily: "aram",
+        kills: 22,
+      }),
+    ])
+
+    const kills = matches
+      .getRecords({ puuid: PUUID })
+      .find((record) => record.key === "kills")!
+
+    expect(kills.gameId).toBe(3)
+    expect(kills.value).toBe(22)
+  })
 })
 
 describe("GoalsRepository", () => {

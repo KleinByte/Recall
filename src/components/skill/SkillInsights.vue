@@ -241,7 +241,7 @@ const shortDate = (timestamp: number) => new Date(timestamp).toLocaleDateString(
     </section>
 
     <section class="story-section evidence-section">
-      <header class="story-head">
+      <header class="story-head evidence-head">
         <div>
           <p class="chapter">06 · Evidence</p>
           <h2>What repeats in your strongest games</h2>
@@ -369,6 +369,15 @@ th { position: sticky; top: 0; background: var(--surface-1); color: var(--text-m
 .component-grid small { color: var(--text-muted); font-size: 10px; }
 
 .evidence-section { padding-bottom: var(--space-5); }
+.evidence-head {
+  padding: var(--space-4);
+  border-left: 2px solid var(--cyan);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--cyan) 8%, var(--surface-1)),
+    color-mix(in srgb, var(--surface-1) 45%, transparent)
+  );
+}
 .predictive-chart { margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid var(--border-subtle); }
 .evidence-detail { margin-top: var(--space-2); }
 .finding-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--space-3); padding: var(--space-4) 0; }

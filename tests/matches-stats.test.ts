@@ -248,15 +248,29 @@ describe("getRecentMatches", () => {
     expect(recent[2].gameId).toBe(3)
   })
 
-  it("can leave rotating Classic-ish matches out of a feed", () => {
+  it("leaves League Classic out of a feed without hiding Mayhem", () => {
     repo.insertMany([
-      buildMatchRow({ gameId: 1, playedAt: 1_000, queueId: 450 }),
-      buildMatchRow({ gameId: 2, playedAt: 2_000, queueId: 2450 }),
+      buildMatchRow({
+        gameId: 1,
+        playedAt: 1_000,
+        queueId: 2450,
+        gameMode: "KIWI_JADE",
+        mode: "mayhem",
+      }),
+      buildMatchRow({
+        gameId: 2,
+        playedAt: 2_000,
+        queueId: 710,
+        gameMode: "CLASSIC",
+        mode: "sr_normal",
+        modeFamily: "sr",
+        queueName: "Ranked 5s",
+      }),
       buildMatchRow({ gameId: 3, playedAt: 3_000, queueId: 420 }),
     ])
 
     expect(
-      repo.getRecentMatches({ puuid: PUUID, excludeQueueIds: [2450] }, 6)
+      repo.getRecentMatches({ puuid: PUUID, excludeLeagueClassic: true }, 6)
         .map((match) => match.gameId),
     ).toEqual([3, 1])
   })

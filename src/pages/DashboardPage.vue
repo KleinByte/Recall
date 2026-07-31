@@ -46,9 +46,6 @@ const QUEUE_LABELS: Record<string, string> = {
   RANKED_PREMADE_5x5: "Flex",
 }
 
-/** The rotating Classic-ish Mayhem queue is retained in history, but not in the dashboard feed. */
-const DASHBOARD_EXCLUDED_QUEUE_IDS = [2450]
-
 /** Midnight this morning, in the player's own timezone. */
 function startOfToday(): number {
   const now = new Date()
@@ -86,7 +83,7 @@ async function load() {
       api.getSummary({ sinceMs: since }),
       api.getForm({}, 20),
       api.listChallenges({}),
-      api.getMatches({ excludeQueueIds: DASHBOARD_EXCLUDED_QUEUE_IDS }, 6),
+      api.getMatches({ excludeLeagueClassic: true }, 6),
       api.getRankedHistory(),
       api.getRankedChampions({}),
     ])
@@ -161,9 +158,19 @@ const rankedQueues = computed(() =>
     .map((entry) => ({
       ...entry,
       label: QUEUE_LABELS[entry.queue],
+      first: entry.points[0],
       latest: entry.points[entry.points.length - 1],
     })),
 )
+
+const rankHistoryMeta = (recordedAt: number, readings: number) => {
+  const since = new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(recordedAt))
+  return `${readings} ${readings === 1 ? "reading" : "readings"} · since ${since}`
+}
 
 const categories = computed<CategoryProgress[]>(() => {
   const raw = profile.value?.challenges?.categoryJson
@@ -275,17 +282,26 @@ const championName = (id: number) => championNameById(props.champions, id)
         <div class="dashboard-column">
           <Panel
             v-if="rankedQueues.length"
-            title="Rank"
+            title="Rank over time"
             :meta="rankedQueues[0].latest.label"
           >
             <div v-for="queue in rankedQueues" :key="queue.queue" class="queue">
               <div class="queue-head">
-                <span class="muted queue-label">{{ queue.label }}</span>
-                <span class="numeric">
-                  {{ queue.latest.label }} · {{ queue.latest.leaguePoints }} LP
-                </span>
+                <div>
+                  <span class="muted queue-label">{{ queue.label }}</span>
+                  <div class="queue-rank">{{ queue.latest.label }}</div>
+                </div>
+                <div class="queue-current">
+                  <span class="numeric queue-lp">{{ queue.latest.leaguePoints }} LP</span>
+                  <span class="muted queue-record">
+                    {{ queue.latest.wins }}W {{ queue.latest.losses }}L
+                  </span>
+                </div>
               </div>
-              <RankGraph v-if="queue.points.length > 1" :points="queue.points" />
+              <RankGraph :points="queue.points" />
+              <p class="muted queue-foot">
+                {{ rankHistoryMeta(queue.first.recordedAt, queue.points.length) }}
+              </p>
             </div>
           </Panel>
 
@@ -480,15 +496,46 @@ h1 {
 .queue-head {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: end;
   font-size: 12px;
-  margin-bottom: var(--space-2);
+  margin-bottom: var(--space-1);
 }
 
 .queue-label {
+  display: block;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 1.2px;
+}
+
+.queue-rank {
+  margin-top: 2px;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 18px;
+  letter-spacing: 0.4px;
+}
+
+.queue-current {
+  display: flex;
+  flex-direction: column;
+  align-items: end;
+  gap: 2px;
+}
+
+.queue-lp {
+  color: var(--gold);
+  font-size: 14px;
+}
+
+.queue-record,
+.queue-foot {
+  font-size: 11px;
+}
+
+.queue-foot {
+  margin: 0;
+  text-align: right;
 }
 
 .game-list,

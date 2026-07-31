@@ -9,7 +9,7 @@ describe("desktop page layout", () => {
 
     expect(dashboard).toContain('class="dashboard-columns"')
     expect(dashboard).toMatch(
-      /class="dashboard-column"[\s\S]*title="Rank"[\s\S]*title="Recent games"/,
+      /class="dashboard-column"[\s\S]*title="Rank over time"[\s\S]*title="Recent games"/,
     )
     expect(dashboard).toMatch(
       /class="dashboard-column"[\s\S]*title="Playstyle"[\s\S]*title="Champions in form"/,
@@ -59,13 +59,44 @@ describe("desktop page layout", () => {
     expect(review).toContain("sampleTimelineEvents(source, 90)")
   })
 
-  it("keeps Classic-ish matches out of the dashboard feed while retaining their queue tag", () => {
+  it("shows ranked history from the first reading and plots it on a time axis", () => {
+    const dashboard = read("src/pages/DashboardPage.vue")
+    const rankGraph = read("src/components/RankGraph.vue")
+
+    expect(dashboard).toContain('title="Rank over time"')
+    expect(dashboard).toContain('<RankGraph :points="queue.points" />')
+    expect(dashboard).not.toContain('v-if="queue.points.length > 1"')
+    expect(dashboard).toContain("rankHistoryMeta(queue.first.recordedAt")
+    expect(rankGraph).toContain('type: "time"')
+    expect(rankGraph).toContain('step: "end"')
+    expect(rankGraph).toContain("timestamps.length === 1")
+  })
+
+  it("keeps League Classic out of the dashboard feed while retaining queue tags", () => {
     const dashboard = read("src/pages/DashboardPage.vue")
     const matches = read("src/components/MatchList.vue")
 
-    expect(dashboard).toContain("DASHBOARD_EXCLUDED_QUEUE_IDS")
-    expect(dashboard).toContain("excludeQueueIds: DASHBOARD_EXCLUDED_QUEUE_IDS")
+    expect(dashboard).toContain("excludeLeagueClassic: true")
+    expect(dashboard).not.toContain("2450")
     expect(matches).toContain("match.queueName ?? modeLabel(match.mode)")
+  })
+
+  it("scopes personal records with mode tabs", () => {
+    const progress = read("src/pages/ProgressPage.vue")
+
+    expect(progress).toContain('role="tablist"')
+    expect(progress).toContain('label: "Solo/Duo Ranked"')
+    expect(progress).toContain('label: "ARAM"')
+    expect(progress).toContain('label: "Mayhem"')
+    expect(progress).toContain('label: "All Rift"')
+    expect(progress).toContain("excludeLeagueClassic: true")
+  })
+
+  it("visually separates the evidence introduction from its accordions", () => {
+    const insights = read("src/components/skill/SkillInsights.vue")
+
+    expect(insights).toContain('class="story-head evidence-head"')
+    expect(insights).toMatch(/\.evidence-head \{[\s\S]*border-left: 2px solid var\(--cyan\)/)
   })
 
   it("sorts champions from their table headers instead of separate buttons", () => {

@@ -103,4 +103,21 @@ describe("classifyMatch with client queue data", () => {
       queueName: "Arena",
     })
   })
+
+  it("recognizes a future League Classic label on the Rift", () => {
+    const result = classifyMatch(
+      game({ queueId: 9002 }),
+      queue({
+        id: 9002,
+        name: "League of Legends Classic",
+        isRanked: false,
+      }),
+    )
+
+    expect(result).toMatchObject({
+      mode: "other",
+      family: "other",
+      queueName: "League Classic",
+    })
+  })
 })

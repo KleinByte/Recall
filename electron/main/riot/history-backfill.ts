@@ -5,6 +5,7 @@ import {
   type RiotBackfillState,
 } from "../database/riot-backfill-repo.js"
 import { gradeLobby } from "../matches/grade.js"
+import { evaluateMatchLabels } from "../matches/labels.js"
 import type { QueueIndex } from "../matches/queues.js"
 import { RiotApiClient, RiotApiError } from "./api-client.js"
 import { mapRiotMatch, type RiotMatchDto } from "./match-mapper.js"
@@ -123,7 +124,8 @@ export class RiotHistoryBackfill {
           if (
             knownGameId &&
             this.matches.hasCompleteMatch(knownGameId, this.puuid) &&
-            this.participants.hasCurrentLobby(knownGameId, this.puuid)
+            this.participants.hasCurrentLobby(knownGameId, this.puuid) &&
+            !this.matches.needsLabelEvaluation(knownGameId, this.puuid)
           ) {
             this.matches.setRiotMatchId(knownGameId, this.puuid, matchId)
             state = this.advanceOne(state, {
@@ -195,6 +197,20 @@ export class RiotHistoryBackfill {
             mapped.unknownParticipantFields,
           )
 
+          const owner = mapped.participants.find(
+            (participant) => participant.isPlayer === 1,
+          )
+          this.matches.replacePerformanceLabels(
+            mapped.match.gameId,
+            this.puuid,
+            owner ? evaluateMatchLabels({
+              match: mapped.match,
+              player: owner,
+              participants: mapped.participants,
+              teams: mapped.teams,
+            }) : [],
+          )
+
           if (
             mapped.match.isMatched === 1 &&
             (mapped.match.modeFamily === "aram" ||
@@ -208,9 +224,6 @@ export class RiotHistoryBackfill {
               mapped.match.gameId,
               this.puuid,
               grades,
-            )
-            const owner = mapped.participants.find(
-              (participant) => participant.isPlayer === 1,
             )
             const grade = owner && grades.get(owner.participantId)
             if (grade) {

@@ -11,6 +11,10 @@ import {
 import { fetchQueues, type QueueIndex } from "./matches/queues.js"
 import type { LcuGame, MatchRow, ModeFamily } from "./matches/types.js"
 
+interface MatchEnricher {
+  enrich(rows: MatchRow[], queues: QueueIndex): Promise<number>
+}
+
 export interface SyncResult {
   fetched: number
   inserted: number
@@ -57,6 +61,7 @@ export class MatchSync {
     private readonly repository: MatchesRepository,
     private readonly puuid: string,
     private readonly participants?: ParticipantsRepository,
+    private readonly enricher?: MatchEnricher,
   ) {}
 
   async syncNow(): Promise<SyncResult> {
@@ -88,6 +93,11 @@ export class MatchSync {
       )
 
     const inserted = this.repository.insertMany(rows)
+    if (this.enricher) {
+      // Match-V5 is an optional enhancement. The enricher owns all API-key
+      // and network failures so recording from the local client stays durable.
+      await this.enricher.enrich(rows, this.queues)
+    }
     const graded = await this.gradePendingMatches()
     const lobbies = await this.backfillLobbies(rows)
 

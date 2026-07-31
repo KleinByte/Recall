@@ -55,7 +55,12 @@ const kda = (match: MatchRow) =>
             <span v-if="match.hasNote" title="Has note">Note</span>
             <span v-if="match.experimentCount" title="Practice experiment">Experiment</span>
           </div>
-          <div v-if="match.tagNames?.length" class="row-tags muted">
+          <div v-if="match.labelNames?.length" class="row-labels">
+            <span v-for="label in match.labelNames.slice(0, 3)" :key="label" class="game-label">
+              {{ label }}
+            </span>
+          </div>
+          <div v-else-if="match.tagNames?.length" class="row-tags muted">
             {{ match.tagNames.join(" · ") }}
           </div>
         </div>
@@ -156,6 +161,19 @@ const kda = (match: MatchRow) =>
 }
 
 .row-tags { font-size: 10px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.row-labels { display: flex; gap: 4px; margin-top: 3px; overflow: hidden; }
+.game-label {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border: 1px solid rgba(200, 170, 110, 0.34);
+  border-radius: 999px;
+  background: rgba(200, 170, 110, 0.08);
+  color: var(--gold-bright);
+  font-size: 9px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
 
 .result {
   font-family: var(--font-heading);
