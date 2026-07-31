@@ -62,12 +62,8 @@ async function fetchAramStats() {
 }
 
 async function loadChampions() {
-  if (!connected.value) return
-
   try {
-    const currentSummoner = summoner.value ?? (await api.getSummoner())
-    summoner.value = currentSummoner
-    allChampions.value = await api.getChampions(currentSummoner.summonerId)
+    allChampions.value = await api.getChampions()
   } catch (error) {
     console.warn("Could not load champion data", error)
   }
@@ -135,6 +131,7 @@ onMounted(async () => {
   }
 
   await loadSettings()
+  await loadChampions()
 
   const status = await api.getStatus()
   connected.value = status.connected

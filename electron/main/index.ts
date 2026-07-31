@@ -77,6 +77,10 @@ import {
 } from "./review/recommendations.js"
 import type { ChampionChoiceObjective } from "./review/types.js"
 import { latestSchemaVersion } from "./database/migrations.js"
+import {
+  mergeChampionCatalog,
+  type ChampionCatalogEntry,
+} from "./champion-catalog.js"
 
 const { autoUpdater } = electronUpdater
 import {
@@ -113,6 +117,7 @@ const indexHtml = path.join(RENDERER_DIST, "index.html")
 
 let store: Store
 const RIOT_API_KEY_STORE = "riot-api-key-encrypted"
+const CHAMPION_CATALOG_STORE = "champion-catalog"
 
 function getDatabasePath() {
   return path.join(app.getPath("userData"), "stats.db")
@@ -165,7 +170,7 @@ let liveSession: LiveSession = {
   updatedAt: Date.now(),
 }
 
-/** Champion names, read from the client once per session for the overlay. */
+/** Champion names from the durable catalog, refreshed whenever the client connects. */
 let championNames: Map<number, string> | undefined
 
 /**
@@ -537,7 +542,6 @@ function stopSession(win: BrowserWindow) {
   session.client.close()
   session.gameClient.close()
   session = undefined
-  championNames = undefined
   hideOverlay()
   clearLiveSession(win)
 
@@ -985,26 +989,43 @@ function hideOverlay() {
   getOverlay().hide()
 }
 
-/** Champion names for the overlay, fetched once and reused. */
-async function championNameFor(championId: number): Promise<string | undefined> {
-  if (!session) return undefined
+function storedChampionCatalog(): ChampionCatalogEntry[] {
+  return mergeChampionCatalog(store.get(CHAMPION_CATALOG_STORE))
+}
 
-  if (!championNames) {
-    try {
-      const champions = await session.client.request<
-        { id: number; name: string }[]
-      >(
-        `/lol-champions/v1/inventories/${session.summoner.summonerId}/champions-minimal`,
-      )
-      championNames = new Map(
-        champions.map((champion) => [champion.id, champion.name]),
-      )
-    } catch {
-      return undefined
-    }
+function rememberChampionCatalog(fetched: unknown): ChampionCatalogEntry[] {
+  const merged = mergeChampionCatalog(storedChampionCatalog(), fetched)
+  store.set(CHAMPION_CATALOG_STORE, merged)
+  championNames = new Map(merged.map((champion) => [champion.id, champion.name]))
+  return merged
+}
+
+/** Returns the last complete catalog offline and refreshes it when League is open. */
+async function loadChampionCatalog(): Promise<ChampionCatalogEntry[]> {
+  const stored = storedChampionCatalog()
+  championNames = new Map(stored.map((champion) => [champion.id, champion.name]))
+  if (!session) return stored
+
+  try {
+    const fetched = await session.client.request<ChampionCatalogEntry[]>(
+      `/lol-champions/v1/inventories/${session.summoner.summonerId}/champions-minimal`,
+    )
+    // Keep every positive-id entry the client returned. Hidden entries do not
+    // belong in picker UIs, but remembering their names prevents an imported
+    // match from ever regressing to a raw "Champion 123" label.
+    return rememberChampionCatalog(fetched)
+  } catch {
+    return stored
   }
+}
 
-  return championNames.get(championId)
+/** Champion names for overlays and recommendations, online or offline. */
+async function championNameFor(championId: number): Promise<string | undefined> {
+  const known = championNames?.get(championId)
+  if (known) return known
+
+  const catalog = await loadChampionCatalog()
+  return catalog.find((champion) => champion.id === championId)?.name
 }
 
 /**
@@ -1058,6 +1079,8 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
   })
 
   ipcMain.handle("store-get", (_event, key: string) => store.get(key))
+
+  ipcMain.handle("champions:catalog", () => loadChampionCatalog())
 
   ipcMain.handle("data-trust:get", () =>
     getDataTrustService().report(
@@ -1578,6 +1601,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
         observations: insightsRepo.getObservations(scoped),
         championStats: repo.getChampionStats(scoped),
         itemObservations: insightsRepo.getFinalItemObservations(scoped),
+        gradeComponentHistory: insightsRepo.getGradeComponentHistory(scoped),
       })
     },
   )

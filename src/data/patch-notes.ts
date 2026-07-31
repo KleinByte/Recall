@@ -10,6 +10,37 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.0",
+    releasedAt: "2026-07-31",
+    title: "Recall Grade, rebuilt around your games",
+    summary:
+      "Recall 2.0 turns your recorded matches into a clearer performance story, with a more durable champion catalog and an expanded visual language for Skill.",
+    sections: [
+      {
+        title: "A new Skill story",
+        items: [
+          "Recall Grade now leads Skill with form, consistency, coverage, and a match-by-match Grade Journey.",
+          "Explore Grade DNA, play rhythm, weekday ranges, game-length patterns, and champion-pool performance in dedicated visualizations.",
+          "Mode and queue scopes make it easier to compare Summoner's Rift, ARAM, Mayhem, and narrower Rift queues without mixing their data.",
+        ],
+      },
+      {
+        title: "Charts built for review",
+        items: [
+          "Interactive charts now cover calendars, scatter plots, heatmaps, treemaps, trends, and evidence instead of flattening every pattern into a list.",
+          "Detailed tables and findings remain available beneath the visual summaries when you need the underlying match data.",
+        ],
+      },
+      {
+        title: "More durable context",
+        items: [
+          "Recall preserves a growing local champion catalog so names and analysis remain useful when the League Client is unavailable.",
+          "The app brand and navigation now share a dedicated Recall mark for a more consistent identity across the interface.",
+        ],
+      },
+    ],
+  },
+  {
     version: "1.1.9",
     releasedAt: "2026-07-31",
     title: "Updates that stay out of your way",

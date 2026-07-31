@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue"
-import SkillInsights from "../components/skill/SkillInsights.vue"
+import { computed, defineAsyncComponent, onMounted, ref } from "vue"
 import SkillOverview from "../components/skill/SkillOverview.vue"
 import { api } from "../helpers/api"
 import {
@@ -10,6 +9,8 @@ import {
 } from "../helpers/skill-scopes"
 import type { Champion } from "../types/lol"
 import type { SkillReportV2 } from "../types/stats"
+
+const SkillInsights = defineAsyncComponent(() => import("../components/skill/SkillInsights.vue"))
 
 defineProps<{
   champions: Champion[] | null
@@ -182,9 +183,7 @@ onMounted(async () => {
     />
     <SkillInsights
       v-else-if="report"
-      :insights="report.insights"
-      :outcomes="report.overview.outcomes"
-      :family="report.scope.family"
+      :report="report"
       :timezone-label="timezoneLabel"
     />
   </div>

@@ -1,6 +1,7 @@
 import type { Champion } from "../types/lol"
 import championCatalog from "../data/champions.json"
 import { publicAssetUrl } from "./assets"
+import { RECALL_GRADES, recallGradeFromScore } from "../shared/recall-grade"
 
 const offlineChampionNames = championCatalog as Record<string, string>
 
@@ -81,39 +82,8 @@ export const modeLabel = (mode: string) => {
   }
 }
 
-/** Mirrors the grade thresholds used when matches are graded. */
-const GRADE_THRESHOLDS: [string, number][] = [
-  ["S+", 1.6],
-  ["S", 1.25],
-  ["S-", 0.95],
-  ["A+", 0.7],
-  ["A", 0.45],
-  ["A-", 0.2],
-  ["B+", -0.05],
-  ["B", -0.3],
-  ["B-", -0.55],
-  ["C+", -0.85],
-  ["C", -1.15],
-  ["C-", -1.5],
-]
-
 export function gradeFromScore(score?: number): string | undefined {
-  if (score === undefined || score === null) return undefined
-  return GRADE_THRESHOLDS.find(([, minimum]) => score >= minimum)?.[0] ?? "D"
+  return recallGradeFromScore(score)
 }
 
-export const GRADE_ORDER = [
-  "S+",
-  "S",
-  "S-",
-  "A+",
-  "A",
-  "A-",
-  "B+",
-  "B",
-  "B-",
-  "C+",
-  "C",
-  "C-",
-  "D",
-]
+export const GRADE_ORDER = [...RECALL_GRADES]

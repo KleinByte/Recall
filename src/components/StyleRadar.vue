@@ -1,17 +1,10 @@
 <script setup lang="ts">
 import { computed } from "vue"
-import {
-  Chart as ChartJS,
-  Filler,
-  LineElement,
-  PointElement,
-  RadialLinearScale,
-  Tooltip,
-} from "chart.js"
-import { Radar } from "vue-chartjs"
+import type { EChartsCoreOption } from "echarts/core"
+import BaseEChart from "./charts/BaseEChart.vue"
+import { CHART_COLOURS } from "../charts/recall-chart-theme"
+import { escapeTooltip } from "../charts/formatters"
 import type { StyleAxis } from "../types/stats"
-
-ChartJS.register(RadialLinearScale, PointElement, LineElement, Filler, Tooltip)
 
 const props = defineProps<{
   axes: StyleAxis[]
@@ -20,110 +13,89 @@ const props = defineProps<{
   secondaryLabel?: string
 }>()
 
-const GOLD = "#c8aa6d"
-const CYAN = "#0acbe6"
+const valueFor = (axis: StyleAxis) => Math.round(axis.value * 100)
 
-const toPercent = (axes: StyleAxis[]) =>
-  axes.map((axis) => Math.round(axis.value * 100))
-
-const chartData = computed(() => {
-  const datasets = [
-    {
-      label: props.primaryLabel ?? "All games",
-      data: toPercent(props.axes),
-      borderColor: GOLD,
-      backgroundColor: "rgba(200, 170, 109, 0.22)",
-      pointBackgroundColor: GOLD,
-      pointBorderColor: GOLD,
-      pointRadius: 3,
-      borderWidth: 2,
-    },
-  ]
+const option = computed<EChartsCoreOption>(() => {
+  const seriesData: Array<{
+    name: string
+    value: number[]
+    lineStyle: { color: string; width: number }
+    itemStyle: { color: string }
+    areaStyle: { color: string }
+  }> = [{
+    name: props.primaryLabel ?? "All games",
+    value: props.axes.map(valueFor),
+    lineStyle: { color: CHART_COLOURS.gold, width: 2 },
+    itemStyle: { color: CHART_COLOURS.gold },
+    areaStyle: { color: "rgba(200, 170, 109, 0.22)" },
+  }]
 
   if (props.recent) {
-    datasets.push({
-      label: props.secondaryLabel ?? "Last 10 games",
-      data: toPercent(props.recent),
-      borderColor: CYAN,
-      backgroundColor: "rgba(10, 203, 230, 0.10)",
-      pointBackgroundColor: CYAN,
-      pointBorderColor: CYAN,
-      pointRadius: 2,
-      borderWidth: 1,
+    seriesData.push({
+      name: props.secondaryLabel ?? "Last 10 games",
+      value: props.axes.map((axis) =>
+        valueFor(props.recent?.find((entry) => entry.key === axis.key) ?? axis),
+      ),
+      lineStyle: { color: CHART_COLOURS.cyan, width: 1.5 },
+      itemStyle: { color: CHART_COLOURS.cyan },
+      areaStyle: { color: "rgba(10, 203, 230, 0.10)" },
     })
   }
 
-  return { labels: props.axes.map((axis) => axis.label), datasets }
-})
-
-/** Descriptions keyed by label, so the tooltip can explain each spoke. */
-const descriptions = computed(() =>
-  Object.fromEntries(props.axes.map((axis) => [axis.label, axis.description])),
-)
-
-const reducedMotion = () =>
-  typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
-
-const chartOptions = computed(() => ({
-  responsive: true,
-  maintainAspectRatio: false,
-  animation: { duration: reducedMotion() ? 0 : 520 },
-  // Chart.js reserves the container for point labels and draws the web inside
-  // what is left, so trimming the padding is what actually makes it bigger.
-  layout: { padding: 8 },
-  scales: {
-    r: {
-      min: 0,
-      max: 100,
-      angleLines: { color: "rgba(200, 170, 109, 0.18)" },
-      grid: { color: "rgba(200, 170, 109, 0.18)" },
-      pointLabels: {
-        color: "#f0e6d2",
-        padding: 4,
-        font: { family: "BeaufortforLOL Medium, serif", size: 13 },
-      },
-      ticks: {
-        display: false,
-        // Rings still step every 20% even though the numbers are hidden.
-        stepSize: 20,
-      },
-    },
-  },
-  plugins: {
-    legend: { display: false },
+  return {
     tooltip: {
-      backgroundColor: "#0f1c33",
-      borderColor: "rgba(200, 170, 109, 0.55)",
-      borderWidth: 1,
-      titleColor: "#c8aa6d",
-      bodyColor: "#f0e6d2",
-      padding: 10,
-      callbacks: {
-        label: (context: { dataset: { label?: string }; parsed: { r: number } }) =>
-          `${context.dataset.label}: ${context.parsed.r}%`,
-        afterBody: (items: { label: string }[]) => {
-          const description = descriptions.value[items[0]?.label]
-          return description ? [description] : []
-        },
+      trigger: "item",
+      formatter: (raw: unknown) => {
+        const item = raw as { name?: string; value?: number[] }
+        const values = item.value ?? []
+        return [
+          `<strong>${escapeTooltip(item.name ?? "Playstyle")}</strong>`,
+          ...props.axes.map((axis, index) =>
+            `${escapeTooltip(axis.label)}: ${values[index] ?? 0}%<br><span style="color:${CHART_COLOURS.textSecondary}">${escapeTooltip(axis.description)}</span>`,
+          ),
+        ].join("<br>")
       },
     },
-  },
-}))
+    legend: {
+      show: seriesData.length > 1,
+      bottom: 4,
+      textStyle: { color: CHART_COLOURS.textSecondary },
+    },
+    radar: {
+      center: ["50%", seriesData.length > 1 ? "47%" : "50%"],
+      radius: seriesData.length > 1 ? "66%" : "72%",
+      splitNumber: 5,
+      indicator: props.axes.map((axis) => ({ name: axis.label, max: 100 })),
+      axisName: {
+        color: CHART_COLOURS.text,
+        fontFamily: "BeaufortforLOL Medium, serif",
+        fontSize: 13,
+      },
+      axisLine: { lineStyle: { color: "rgba(200, 170, 109, 0.18)" } },
+      splitLine: { lineStyle: { color: "rgba(200, 170, 109, 0.18)" } },
+      splitArea: { show: false },
+    },
+    series: [{
+      type: "radar",
+      symbolSize: 5,
+      data: seriesData,
+    }],
+  }
+})
 </script>
 
 <template>
-  <div class="radar">
-    <Radar :data="chartData" :options="chartOptions" />
-  </div>
+  <BaseEChart
+    :option="option"
+    ariaLabel="Playstyle fingerprint across the displayed axes."
+    height="640px"
+    class="radar"
+  />
 </template>
 
 <style scoped>
-/* Chart.js sizes a radar by the smaller side, so height is what actually makes
-   the web bigger. The cap stops it stranding itself in a very wide column. */
 .radar {
-  height: 640px;
   max-width: 820px;
   margin: 0 auto;
-  position: relative;
 }
 </style>

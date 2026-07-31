@@ -1,124 +1,86 @@
 <script setup lang="ts">
+import type { EChartsCoreOption } from "echarts/core"
 import { computed } from "vue"
-import {
-  BarElement,
-  BarController,
-  CategoryScale,
-  Chart as ChartJS,
-  Filler,
-  LineController,
-  LineElement,
-  LinearScale,
-  PointElement,
-  Tooltip,
-} from "chart.js"
-import { Chart } from "vue-chartjs"
+import BaseEChart from "../charts/BaseEChart.vue"
+import { escapeTooltip } from "../../charts/formatters"
 
 const props = defineProps<{
   rows: Array<{ label: string; games: number; wins?: number; winRate: number }>
 }>()
 
-ChartJS.register(
-  BarController,
-  BarElement,
-  CategoryScale,
-  Filler,
-  LineController,
-  LineElement,
-  LinearScale,
-  PointElement,
-  Tooltip,
-)
-
-const reducedMotion = () =>
-  typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
-
-const chartData = computed(() => ({
-  labels: props.rows.map((row) => row.label),
-  datasets: [
+const option = computed<EChartsCoreOption>(() => ({
+  animationDuration: 520,
+  grid: { top: 12, right: 48, bottom: 34, left: 42 },
+  tooltip: {
+    trigger: "axis",
+    axisPointer: { type: "cross" },
+    formatter: (params: Array<{ dataIndex: number }>) => {
+      const row = props.rows[params[0]?.dataIndex]
+      if (!row) return ""
+      const wins = row.wins ?? Math.round(row.winRate * row.games)
+      return `<strong>${escapeTooltip(row.label)}</strong><br/>${row.games} games<br/>${wins} wins · ${Math.round(row.winRate * 100)}% win rate`
+    },
+  },
+  xAxis: {
+    type: "category",
+    data: props.rows.map((row) => row.label),
+    axisTick: { alignWithLabel: true },
+    axisLabel: { fontSize: 10 },
+  },
+  yAxis: [
     {
-      type: "bar" as const,
-      label: "Recorded games",
-      data: props.rows.map((row) => row.games),
-      yAxisID: "games",
-      backgroundColor: props.rows.map((row) =>
-        row.games === 0 ? "rgba(160, 155, 140, 0.18)" : row.winRate >= 0.5
-          ? "rgba(28, 191, 138, 0.58)"
-          : "rgba(232, 64, 87, 0.56)",
-      ),
-      borderColor: props.rows.map((row) => row.winRate >= 0.5 ? "#1cbf8a" : "#e84057"),
-      borderWidth: 1,
-      borderRadius: 4,
-      borderSkipped: false,
-      order: 2,
+      type: "value",
+      name: "Games",
+      minInterval: 1,
+      axisLabel: { formatter: (value: number) => `${Math.round(value)}` },
+      splitLine: { show: false },
     },
     {
-      type: "line" as const,
-      label: "Recorded win rate",
-      data: props.rows.map((row) => row.games ? Math.round(row.winRate * 100) : null),
-      yAxisID: "rate",
-      borderColor: "#0acbe6",
-      backgroundColor: "rgba(10, 203, 230, 0.18)",
-      pointBackgroundColor: "#f0e6d2",
-      pointBorderColor: "#0acbe6",
-      pointHoverRadius: 5,
-      pointRadius: 4,
-      borderWidth: 2.5,
-      tension: 0.32,
-      fill: true,
-      spanGaps: false,
-      order: 1,
-    },
-  ],
-}))
-
-const chartOptions = computed(() => ({
-  responsive: true,
-  maintainAspectRatio: false,
-  animation: { duration: reducedMotion() ? 0 : 520 },
-  scales: {
-    x: {
-      grid: { color: "rgba(200, 170, 109, 0.10)" },
-      ticks: { color: "#a09b8c", font: { size: 10 } },
-    },
-    games: {
-      beginAtZero: true,
-      grid: { display: false },
-      ticks: { color: "#a09b8c", precision: 0 },
-      title: { display: true, text: "Games", color: "#a09b8c", font: { size: 10 } },
-    },
-    rate: {
-      position: "right" as const,
+      type: "value",
+      name: "Win rate",
       min: 0,
       max: 100,
-      grid: { color: "rgba(200, 170, 109, 0.14)", drawOnChartArea: true },
-      ticks: { color: "#a09b8c", callback: (value: number | string) => `${value}%` },
-      title: { display: true, text: "Win rate", color: "#a09b8c", font: { size: 10 } },
+      axisLabel: { formatter: (value: number) => `${value}%` },
+      splitLine: { lineStyle: { color: "rgba(200, 170, 109, 0.14)" } },
     },
-  },
-  plugins: {
-    legend: { display: false },
-    tooltip: {
-      backgroundColor: "#0f1c33",
-      borderColor: "rgba(200, 170, 109, 0.55)",
-      borderWidth: 1,
-      titleColor: "#c8aa6d",
-      bodyColor: "#f0e6d2",
-      padding: 10,
-      callbacks: {
-        afterBody: (items: Array<{ dataIndex: number }>) => {
-          const row = props.rows[items[0]?.dataIndex]
-          return row ? [`${row.wins ?? Math.round(row.winRate * row.games)} wins from ${row.games} games`] : []
+  ],
+  series: [
+    {
+      name: "Recorded games",
+      type: "bar",
+      yAxisIndex: 0,
+      barMaxWidth: 32,
+      data: props.rows.map((row) => ({
+        value: row.games,
+        itemStyle: {
+          color: row.games === 0 ? "rgba(160, 155, 140, 0.18)" : row.winRate >= 0.5
+            ? "rgba(28, 191, 138, 0.66)"
+            : "rgba(232, 64, 87, 0.64)",
+          borderColor: row.winRate >= 0.5 ? "#1cbf8a" : "#e84057",
+          borderWidth: 1,
+          borderRadius: [4, 4, 0, 0],
         },
-      },
+      })),
     },
-  },
+    {
+      name: "Recorded win rate",
+      type: "line",
+      yAxisIndex: 1,
+      smooth: 0.32,
+      connectNulls: false,
+      symbolSize: 8,
+      lineStyle: { color: "#0acbe6", width: 2.5 },
+      itemStyle: { color: "#f0e6d2", borderColor: "#0acbe6", borderWidth: 2 },
+      areaStyle: { color: "rgba(10, 203, 230, 0.12)" },
+      data: props.rows.map((row) => row.games ? Math.round(row.winRate * 100) : null),
+    },
+  ],
 }))
 </script>
 
 <template>
   <div class="outcome-trend">
-    <Chart type="bar" :data="chartData" :options="chartOptions" />
+    <BaseEChart :option="option" ariaLabel="Games played and win rate by Recall grade band" />
   </div>
   <ul class="outcome-key">
     <li v-for="row in rows" :key="row.label" :class="{ empty: !row.games }">
@@ -156,24 +118,9 @@ const chartOptions = computed(() => ({
   background: var(--surface-2);
 }
 
-.outcome-key .band-label {
-  color: var(--text-primary);
-}
-
-.outcome-key .rate {
-  font-size: 12px;
-}
-
-.outcome-key .positive {
-  color: var(--win);
-}
-
-.outcome-key .negative {
-  color: var(--loss);
-}
-
-.outcome-key .empty {
-  border-left-color: var(--border-subtle);
-  opacity: 0.55;
-}
+.outcome-key .band-label { color: var(--text-primary); }
+.outcome-key .rate { font-size: 12px; }
+.outcome-key .positive { color: var(--win); }
+.outcome-key .negative { color: var(--loss); }
+.outcome-key .empty { border-left-color: var(--border-subtle); opacity: 0.55; }
 </style>

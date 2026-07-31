@@ -100,16 +100,9 @@ export const api = {
     return lcuRequest<Summoner>("/lol-summoner/v1/current-summoner")
   },
 
-  async getChampions(summonerId: number): Promise<Champion[]> {
-    const champions = await lcuRequest<Champion[]>(
-      `/lol-champions/v1/inventories/${summonerId}/champions-minimal`,
-    )
-
-    // The first entry is the "None" placeholder champion.
-    return champions
-      .slice(1)
-      .filter((champion) => champion.isVisibleInClient)
-      .sort((a, b) => a.name.localeCompare(b.name))
+  async getChampions(): Promise<Champion[]> {
+    const champions = await invoke<Champion[]>("champions:catalog")
+    return champions.filter((champion) => champion.isVisibleInClient)
   },
 
   getChallenges(): Promise<Record<string, RawChallenge>> {

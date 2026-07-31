@@ -38,8 +38,11 @@ describe("Skill Overview", () => {
     expect(overview).toContain("styleComparison")
     expect(overview).toContain("style?.earlier")
     expect(overview).toContain("style.recent")
-    expect(deltaChart).toContain('indexAxis: "y"')
-    expect(deltaChart).toContain("prefers-reduced-motion")
+    expect(deltaChart).toContain('type: "bar"')
+    expect(deltaChart).toContain('type: "category"')
+    expect(deltaChart).toContain("markLine")
+    expect(deltaChart).toContain("BaseEChart")
+    expect(deltaChart).not.toContain("chart.js")
   })
 
   it("restores the useful historical playstyle and outcome visuals", () => {
@@ -55,12 +58,18 @@ describe("Skill Overview", () => {
 })
 
 describe("Skill Insights", () => {
-  it("renders the seven approved sections in order", () => {
+  it("renders the chart-led story chapters in order", () => {
     const insights = read("src/components/skill/SkillInsights.vue")
 
     expect(insights).toMatch(
-      /Best-game pattern[\s\S]*Playing conditions[\s\S]*Predictive signals[\s\S]*Game shape[\s\S]*Trends[\s\S]*Champion choices[\s\S]*Item associations/,
+      /01 · Form[\s\S]*02 · Grade DNA[\s\S]*03 · Rhythm[\s\S]*04 · Match shape[\s\S]*05 · Champion pool[\s\S]*06 · Evidence/,
     )
+    expect(insights).toContain("GradeJourneyChart")
+    expect(insights).toContain("GradeDnaHeatmap")
+    expect(insights).toContain("PlayCalendarChart")
+    expect(insights).toContain("WeekdayGradeBoxplot")
+    expect(insights).toContain("DurationGradeScatter")
+    expect(insights).toContain("ChampionPoolTreemap")
   })
 
   it("shows evidence, sample size, intervals, and timezone context", () => {
@@ -74,45 +83,58 @@ describe("Skill Insights", () => {
     expect(finding).toContain("rateInterval")
     expect(finding).toContain("finding.games }} games")
     expect(finding).toContain("finding.eligibleGames }} eligible in scope")
-    expect(insights).toContain("Times use this device's current timezone")
     expect(insights).toContain("timezoneLabel")
+    expect(insights).toContain("percentile point (PP)")
+    expect(insights).toContain('class="detail-pane"')
   })
 
-  it("states every predictive result distinctly", () => {
+  it("keeps every predictive result visible in the collapsed evidence pane", () => {
     const insights = read("src/components/skill/SkillInsights.vue")
 
-    expect(insights).toContain("Not enough graded history for predictive signals")
-    expect(insights).toContain("No repeatable pregame signal yet")
-    expect(insights).toContain("Repeatable pregame signals")
-    expect(insights).toContain("Predictive analysis unavailable")
+    expect(insights).toContain("report.insights.predictive.state")
+    expect(insights).toContain("report.insights.predictive.message")
+    expect(insights).toContain("predictiveEntries")
+    expect(insights).toContain("Predictive model")
   })
 
-  it("leads with visual takeaways and locally named items", () => {
+  it("leads with a Recall Grade identity and ECharts evidence", () => {
     const insights = read("src/components/skill/SkillInsights.vue")
     const finding = read("src/components/skill/InsightFinding.vue")
     const overview = read("src/components/skill/SkillOverview.vue")
     const effectChart = read("src/components/skill/EffectChart.vue")
 
-    expect(insights).toContain("Top takeaways")
-    expect(insights).toContain("selectTakeaways")
+    expect(insights).toContain("One grade. Eight signals. Every match in context.")
+    expect(insights).toContain("grade-identity")
     expect(insights).toContain("EffectChart")
     expect(finding).toContain("findingItemAsset")
     expect(finding).toContain("findingSummary")
     expect(finding).toContain("Stronger games")
     expect(overview).toContain("itemAsset")
-    expect(effectChart).toContain('indexAxis: "y"')
-    expect(effectChart).toContain("prefers-reduced-motion")
+    expect(effectChart).toContain('type: "bar"')
+    expect(effectChart).toContain('type: "category"')
+    expect(effectChart).toContain("BaseEChart")
   })
 
-  it("resolves item finding labels and charts every comparable section", () => {
+  it("resolves finding labels and keeps detailed evidence condensed", () => {
     const insights = read("src/components/skill/SkillInsights.vue")
 
     expect(insights).toContain("findingLabel")
-    expect(insights).toContain("findingSummary")
-    expect(insights).toContain("takeawayEntries")
-    expect(insights).toContain("sectionEffectGroups")
-    expect(insights).toContain("group.entries")
+    expect(insights).toContain("confidentFindings")
+    expect(insights).toContain("evidenceEntries")
+    expect(insights).toContain('v-for="section in sections"')
+    expect(insights).toContain("InsightFinding")
     expect(insights).toContain(":entries=\"predictiveEntries\"")
+  })
+
+  it("uses ECharts everywhere and leaves reduced motion to the shared wrapper", () => {
+    const wrapper = read("src/components/charts/BaseEChart.vue")
+    const packageJson = read("package.json")
+
+    expect(wrapper).toContain("prefers-reduced-motion")
+    expect(wrapper).toContain("ResizeObserver")
+    expect(packageJson).toContain('"echarts": "6.1.0"')
+    expect(packageJson).not.toContain('"chart.js"')
+    expect(packageJson).not.toContain('"vue-chartjs"')
   })
 
   it("keeps generated report copy associative", () => {

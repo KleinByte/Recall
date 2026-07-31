@@ -1,50 +1,13 @@
 <script setup lang="ts">
 import { computed } from "vue"
-import {
-  CategoryScale,
-  Chart as ChartJS,
-  Filler,
-  LinearScale,
-  LineElement,
-  PointElement,
-  Tooltip,
-} from "chart.js"
-import { Line } from "vue-chartjs"
+import type { EChartsCoreOption } from "echarts/core"
+import BaseEChart from "./charts/BaseEChart.vue"
+import { CHART_COLOURS } from "../charts/recall-chart-theme"
+import { escapeTooltip } from "../charts/formatters"
 import type { RankedPoint } from "../types/stats"
-
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Filler,
-  Tooltip,
-)
 
 const props = defineProps<{ points: RankedPoint[] }>()
 
-const GOLD = "#c8aa6d"
-
-const chartData = computed(() => ({
-  labels: props.points.map((point) =>
-    new Date(point.recordedAt).toLocaleDateString(),
-  ),
-  datasets: [
-    {
-      label: "Rank",
-      data: props.points.map((point) => point.points),
-      borderColor: GOLD,
-      backgroundColor: "rgba(200, 170, 109, 0.16)",
-      pointBackgroundColor: GOLD,
-      pointRadius: 2,
-      borderWidth: 2,
-      fill: true,
-      tension: 0.2,
-    },
-  ],
-}))
-
-/** Rank names rather than raw points, which mean nothing on their own. */
 const labelFor = (value: number) => {
   const nearest = props.points.reduce((best, point) =>
     Math.abs(point.points - value) < Math.abs(best.points - value) ? point : best,
@@ -52,57 +15,49 @@ const labelFor = (value: number) => {
   return nearest.label
 }
 
-const chartOptions = computed(() => ({
-  responsive: true,
-  maintainAspectRatio: false,
-  scales: {
-    x: {
-      grid: { color: "rgba(200, 170, 109, 0.10)" },
-      ticks: { color: "#6b6863", font: { size: 10 }, maxTicksLimit: 8 },
-    },
-    y: {
-      grid: { color: "rgba(200, 170, 109, 0.14)" },
-      ticks: {
-        color: "#a09b8c",
-        font: { size: 10 },
-        maxTicksLimit: 6,
-        callback: (value: number | string) => labelFor(Number(value)),
-      },
+const option = computed<EChartsCoreOption>(() => ({
+  grid: { left: 76, right: 18, top: 12, bottom: 34 },
+  tooltip: {
+    trigger: "axis",
+    formatter: (raw: unknown) => {
+      const entry = (Array.isArray(raw) ? raw[0] : raw) as { dataIndex?: number }
+      const point = props.points[entry?.dataIndex ?? 0]
+      if (!point) return ""
+      return [
+        `<strong>${escapeTooltip(point.label)} · ${point.leaguePoints} LP</strong>`,
+        `${point.wins}W ${point.losses}L`,
+      ].join("<br>")
     },
   },
-  plugins: {
-    legend: { display: false },
-    tooltip: {
-      backgroundColor: "#0f1c33",
-      borderColor: "rgba(200, 170, 109, 0.55)",
-      borderWidth: 1,
-      titleColor: "#c8aa6d",
-      bodyColor: "#f0e6d2",
-      padding: 10,
-      callbacks: {
-        label: (context: { dataIndex: number }) => {
-          const point = props.points[context.dataIndex]
-          return `${point.label} · ${point.leaguePoints} LP`
-        },
-        afterBody: (items: { dataIndex: number }[]) => {
-          const point = props.points[items[0].dataIndex]
-          return [`${point.wins}W ${point.losses}L`]
-        },
-      },
-    },
+  xAxis: {
+    type: "category",
+    boundaryGap: false,
+    data: props.points.map((point) => new Date(point.recordedAt).toLocaleDateString()),
+    axisLabel: { fontSize: 10, hideOverlap: true },
   },
+  yAxis: {
+    type: "value",
+    axisLabel: { fontSize: 10, formatter: (value: number) => labelFor(value) },
+    splitNumber: 5,
+  },
+  series: [{
+    name: "Rank",
+    type: "line",
+    data: props.points.map((point) => point.points),
+    showSymbol: props.points.length <= 40,
+    symbolSize: 5,
+    lineStyle: { color: CHART_COLOURS.gold, width: 2 },
+    itemStyle: { color: CHART_COLOURS.gold },
+    areaStyle: { color: "rgba(200, 170, 109, 0.16)" },
+    smooth: 0.2,
+  }],
 }))
 </script>
 
 <template>
-  <div class="graph">
-    <Line :data="chartData" :options="chartOptions" />
-  </div>
+  <BaseEChart
+    :option="option"
+    ariaLabel="Ranked tier and league-points history over time."
+    height="240px"
+  />
 </template>
-
-<style scoped>
-.graph {
-  height: 240px;
-  position: relative;
-}
-</style>

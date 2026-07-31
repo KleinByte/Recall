@@ -17,6 +17,7 @@ import {
 } from "@fortawesome/free-solid-svg-icons"
 import type { Summoner } from "../types/lol"
 import type { PageId } from "../helpers/navigation"
+import RecallMark from "./RecallMark.vue"
 
 defineProps<{
   page: PageId
@@ -49,20 +50,22 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
 <template>
   <nav class="sidebar" :class="{ collapsed }">
     <div class="brand">
-      <div class="brand-title" aria-label="Recall">
-        <img src="/favicon.ico" class="brand-logo" alt="" />
-        <span v-if="!collapsed" class="brand-mark">ECALL</span>
+      <div class="brand-row">
+        <div class="brand-title" aria-label="Recall">
+          <RecallMark class="brand-logo" />
+          <span v-if="!collapsed" class="brand-mark">ECALL</span>
+        </div>
+        <button
+          class="collapse-toggle"
+          type="button"
+          :aria-label="collapsed ? 'Expand navigation' : 'Collapse navigation'"
+          :aria-expanded="!collapsed"
+          :title="collapsed ? 'Expand navigation' : 'Collapse navigation'"
+          @click="emit('update:collapsed', !collapsed)"
+        >
+          <FontAwesomeIcon :icon="collapsed ? faAnglesRight : faAnglesLeft" fixed-width />
+        </button>
       </div>
-      <button
-        class="collapse-toggle"
-        type="button"
-        :aria-label="collapsed ? 'Expand navigation' : 'Collapse navigation'"
-        :aria-expanded="!collapsed"
-        :title="collapsed ? 'Expand navigation' : 'Collapse navigation'"
-        @click="emit('update:collapsed', !collapsed)"
-      >
-        <FontAwesomeIcon :icon="collapsed ? faAnglesRight : faAnglesLeft" fixed-width />
-      </button>
       <span v-if="!collapsed" class="brand-name">League companion</span>
     </div>
 
@@ -132,32 +135,40 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
 }
 
 .brand {
-  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   padding: 0 var(--space-2) var(--space-5);
   border-bottom: 1px solid var(--border-subtle);
   margin-bottom: var(--space-3);
 }
 
+.brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
 .brand-title {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 1px;
+  min-width: 0;
 }
 
 .brand-logo {
-  width: 34px;
-  height: 34px;
-  flex: 0 0 34px;
-  object-fit: contain;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  filter: drop-shadow(0 0 8px rgba(10, 203, 230, 0.13));
 }
 
 .brand-mark {
   font-family: var(--font-display);
-  font-size: 25px;
-  letter-spacing: 3px;
+  font-size: 24px;
+  letter-spacing: 2.4px;
   color: var(--gold);
   line-height: 1;
 }
@@ -171,11 +182,9 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
 }
 
 .collapse-toggle {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
   display: grid;
   place-items: center;
   padding: 0;
@@ -196,10 +205,9 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
   padding-inline: 0;
 }
 
-.sidebar.collapsed .collapse-toggle {
-  top: 36px;
-  right: 50%;
-  transform: translateX(50%);
+.sidebar.collapsed .brand-row {
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
 .nav {

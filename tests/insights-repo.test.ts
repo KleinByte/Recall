@@ -751,3 +751,40 @@ describe("getFinalItemObservations", () => {
     expect(rows).toEqual([])
   })
 })
+
+describe("getGradeComponentHistory", () => {
+  it("returns the player's chart-ready grade components in chronological order", () => {
+    matches.insertMany([
+      buildMatchRow({ gameId: 2, playedAt: 2_000, mode: "aram", modeFamily: "aram" }),
+      buildMatchRow({ gameId: 1, playedAt: 1_000, mode: "aram", modeFamily: "aram" }),
+    ])
+
+    for (const gameId of [1, 2]) {
+      matches.setGrade(gameId, PUUID, "A", gameId / 10)
+      participants.insertMany([player({ gameId, participantId: 1, isPlayer: 1 })])
+      participants.setGrades(gameId, PUUID, new Map([[1, {
+        grade: "A",
+        score: gameId / 10,
+        percentile: 0.7,
+        breakdown: {
+          algorithmVersion: 1,
+          compositePercentile: 0.7,
+          components: [{
+            key: "combat",
+            label: "Combat",
+            percentile: 0.8,
+            weight: 0.2,
+            contribution: 0.16,
+            scope: "lobby",
+          }],
+        },
+      }]]))
+    }
+
+    const rows = insights.getGradeComponentHistory({ puuid: PUUID, modes: ["aram"] })
+
+    expect(rows.map((row) => row.gameId)).toEqual([1, 2])
+    expect(rows[0].components[0]).toMatchObject({ key: "combat", percentile: 0.8 })
+    expect(rows[1]).toMatchObject({ grade: "A", gradeScore: 0.2, compositePercentile: 0.7 })
+  })
+})

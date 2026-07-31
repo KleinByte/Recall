@@ -564,6 +564,45 @@ export interface PredictiveSection {
   signals?: PredictiveSignal[]
 }
 
+export interface SkillHistoryPoint {
+  gameId: number
+  playedAt: number
+  championId: number
+  role?: string
+  win: boolean
+  grade?: string
+  gradeScore?: number
+  durationSecs: number
+}
+
+export interface SkillGradeComponent {
+  key: "combat" | "participation" | "economy" | "survival" | "frontlining" | "farming" | "vision" | "objectives"
+  label: string
+  percentile: number
+  weight: number
+  contribution: number
+  scope: "lobby" | "team" | "role"
+}
+
+export interface SkillGradeComponentPoint {
+  gameId: number
+  playedAt: number
+  grade?: string
+  gradeScore?: number
+  compositePercentile: number
+  components: SkillGradeComponent[]
+}
+
+export interface SkillChampionPoint {
+  championId: number
+  games: number
+  wins: number
+  winRate: number
+  kda: number
+  avgGradeScore?: number
+  gradedGames: number
+}
+
 export interface SkillReportV2 {
   version: 2
   generatedAt: number
@@ -582,6 +621,11 @@ export interface SkillReportV2 {
       top: Array<{ championId: number; games: number; wins: number }>
     }
     builds: Array<{ itemId: number; games: number }>
+  }
+  visuals: {
+    history: SkillHistoryPoint[]
+    gradeComponents: SkillGradeComponentPoint[]
+    champions: SkillChampionPoint[]
   }
   insights: {
     bestGamePattern: InsightSection

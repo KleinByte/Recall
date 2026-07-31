@@ -3,6 +3,7 @@ import type { StatsFilter } from "./matches-repo.js"
 import { durationBucketsFor } from "../matches/insights.js"
 import { computePerGameAxes } from "../matches/style.js"
 import type { ModeFamily, TrackedMode } from "../matches/types.js"
+import type { GradeComponent } from "../review/types.js"
 
 export interface BucketRow {
   label: string
@@ -70,6 +71,7 @@ export interface InsightObservation {
   family: ModeFamily
   queueId: number
   win: boolean
+  grade?: string
   gradeScore?: number
   championId: number
   role?: string
@@ -77,6 +79,15 @@ export interface InsightObservation {
   completeLobby: boolean
   metrics: InsightMetrics
   styleAxes: Record<string, number>
+}
+
+export interface GradeComponentObservation {
+  gameId: number
+  playedAt: number
+  grade?: string
+  gradeScore?: number
+  compositePercentile: number
+  components: GradeComponent[]
 }
 
 export interface FinalItemObservation {
@@ -441,7 +452,7 @@ export class InsightsRepository {
     const matchRows = this.db
       .prepare(
         `SELECT game_id, played_at, mode, mode_family, queue_id, win,
-                grade_score, champion_id, role, duration_secs,
+                grade, grade_score, champion_id, role, duration_secs,
                 kills, deaths, assists,
                 damage_to_champions, damage_taken, damage_self_mitigated,
                 total_heal, gold_earned,
@@ -457,6 +468,7 @@ export class InsightsRepository {
       mode_family: ModeFamily
       queue_id: number
       win: number
+      grade: string | null
       grade_score: number | null
       champion_id: number
       role: string | null
@@ -565,6 +577,7 @@ export class InsightsRepository {
         family: m.mode_family,
         queueId: m.queue_id,
         win: m.win === 1,
+        grade: m.grade ?? undefined,
         gradeScore: m.grade_score ?? undefined,
         championId: m.champion_id,
         role: m.role ?? undefined,
@@ -602,6 +615,77 @@ export class InsightsRepository {
           visionPerMin: m.vision_score / durationMins,
           ccPerMin: m.time_ccing_others / durationMins,
         }, m.mode_family as ModeFamily),
+      }
+    })
+  }
+
+  /** Latest grade algorithm breakdown for the player's most recent graded games. */
+  getGradeComponentHistory(filter: StatsFilter, limit = 60): GradeComponentObservation[] {
+    const conditions = ["m.puuid = ?", "m.is_matched = 1", "p.is_player = 1"]
+    const params: (string | number)[] = [filter.puuid]
+
+    if (filter.mode) {
+      conditions.push("m.mode = ?")
+      params.push(filter.mode)
+    } else if (filter.modes?.length) {
+      conditions.push(`m.mode IN (${filter.modes.map(() => "?").join(", ")})`)
+      params.push(...filter.modes)
+    }
+
+    if (filter.modeFamily) {
+      conditions.push("m.mode_family = ?")
+      params.push(filter.modeFamily)
+    }
+
+    if (filter.sinceMs !== undefined) {
+      conditions.push("m.played_at >= ?")
+      params.push(filter.sinceMs)
+    }
+
+    const rows = this.db.prepare(
+      `SELECT game_id, played_at, grade, grade_score, composite_percentile, components_json
+       FROM (
+         SELECT m.game_id, m.played_at, m.grade, m.grade_score,
+                g.composite_percentile, g.components_json,
+                ROW_NUMBER() OVER (
+                  PARTITION BY m.game_id
+                  ORDER BY g.algorithm_version DESC
+                ) AS version_rank
+         FROM matches m
+         JOIN match_participants p
+           ON p.game_id = m.game_id AND p.puuid = m.puuid
+         JOIN match_grade_breakdowns g
+           ON g.game_id = p.game_id
+          AND g.puuid = p.puuid
+          AND g.participant_id = p.participant_id
+         WHERE ${conditions.join(" AND ")}
+       )
+       WHERE version_rank = 1
+       ORDER BY played_at DESC, game_id DESC
+       LIMIT ?`,
+    ).all(...params, Math.max(1, limit)) as Array<{
+      game_id: number
+      played_at: number
+      grade: string | null
+      grade_score: number | null
+      composite_percentile: number
+      components_json: string
+    }>
+
+    return rows.reverse().flatMap((row) => {
+      try {
+        const components = JSON.parse(row.components_json)
+        if (!Array.isArray(components)) return []
+        return [{
+          gameId: row.game_id,
+          playedAt: row.played_at,
+          grade: row.grade ?? undefined,
+          gradeScore: row.grade_score ?? undefined,
+          compositePercentile: row.composite_percentile,
+          components: components as GradeComponent[],
+        }]
+      } catch {
+        return []
       }
     })
   }

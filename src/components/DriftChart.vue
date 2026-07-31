@@ -1,123 +1,77 @@
 <script setup lang="ts">
 import { computed } from "vue"
-import {
-  CategoryScale,
-  Chart as ChartJS,
-  LinearScale,
-  LineElement,
-  PointElement,
-  Tooltip,
-} from "chart.js"
-import { Line } from "vue-chartjs"
+import type { EChartsCoreOption } from "echarts/core"
+import BaseEChart from "./charts/BaseEChart.vue"
+import { CHART_COLOURS } from "../charts/recall-chart-theme"
 import type { StyleAxis } from "../types/stats"
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip)
-
 const props = defineProps<{
-  /** Oldest window first; each entry is one window's axes. */
   windows: { label: string; axes: StyleAxis[] }[]
 }>()
 
-/** Enough separation that six lines stay tellable apart on a dark ground. */
 const COLOURS = [
-  "#c8aa6d",
-  "#0acbe6",
-  "#e84057",
-  "#a09b8c",
-  "#0397ab",
-  "#f0e6d2",
+  CHART_COLOURS.gold,
+  CHART_COLOURS.cyan,
+  CHART_COLOURS.negative,
+  CHART_COLOURS.textSecondary,
+  CHART_COLOURS.cyanDark,
+  CHART_COLOURS.goldBright,
 ]
 
-const chartData = computed(() => {
-  const first = props.windows[0]?.axes ?? []
+const series = computed(() => (props.windows[0]?.axes ?? []).map((axis, index) => ({
+  name: axis.label,
+  type: "line" as const,
+  data: props.windows.map((window) =>
+    Math.round((window.axes.find((entry) => entry.key === axis.key)?.value ?? 0) * 100),
+  ),
+  symbolSize: 5,
+  lineStyle: { color: COLOURS[index % COLOURS.length], width: 1.5 },
+  itemStyle: { color: COLOURS[index % COLOURS.length] },
+  smooth: 0.25,
+})))
 
-  return {
-    labels: props.windows.map((window) => window.label),
-    datasets: first.map((axis, index) => ({
-      label: axis.label,
-      data: props.windows.map((window) => {
-        const match = window.axes.find((entry) => entry.key === axis.key)
-        return Math.round((match?.value ?? 0) * 100)
-      }),
-      borderColor: COLOURS[index % COLOURS.length],
-      backgroundColor: COLOURS[index % COLOURS.length],
-      pointRadius: 2,
-      borderWidth: 1.5,
-      tension: 0.25,
-    })),
-  }
-})
-
-const chartOptions = {
-  responsive: true,
-  maintainAspectRatio: false,
-  animation: {
-    duration: typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
-      ? 0
-      : 520,
+const option = computed<EChartsCoreOption>(() => ({
+  grid: { left: 44, right: 16, top: 12, bottom: 32 },
+  tooltip: { trigger: "axis" },
+  xAxis: {
+    type: "category",
+    data: props.windows.map((window) => window.label),
+    axisLabel: { fontSize: 10, hideOverlap: true },
   },
-  interaction: { mode: "index" as const, intersect: false },
-  scales: {
-    x: {
-      grid: { color: "rgba(200, 170, 109, 0.10)" },
-      ticks: { color: "#6b6863", font: { size: 10 } },
-    },
-    y: {
-      min: 0,
-      max: 100,
-      grid: { color: "rgba(200, 170, 109, 0.14)" },
-      ticks: {
-        color: "#a09b8c",
-        font: { size: 10 },
-        callback: (value: number | string) => `${value}%`,
-      },
-    },
+  yAxis: {
+    type: "value",
+    min: 0,
+    max: 100,
+    axisLabel: { fontSize: 10, formatter: (value: number) => `${value}%` },
   },
-  plugins: {
-    legend: { display: false },
-    tooltip: {
-      backgroundColor: "#0f1c33",
-      borderColor: "rgba(200, 170, 109, 0.55)",
-      borderWidth: 1,
-      titleColor: "#c8aa6d",
-      bodyColor: "#f0e6d2",
-      padding: 10,
-    },
-  },
-}
+  series: series.value,
+}))
 </script>
 
 <template>
   <div>
-    <div class="graph">
-      <Line :data="chartData" :options="chartOptions" />
-    </div>
-
+    <BaseEChart
+      :option="option"
+      ariaLabel="Playstyle measurements across consecutive game windows."
+      height="200px"
+    />
     <ul class="key">
-      <li v-for="(set, index) in chartData.datasets" :key="set.label">
-        <span
-          class="swatch"
-          :style="{ background: COLOURS[index % COLOURS.length] }"
-        />
-        <span class="muted">{{ set.label }}</span>
+      <li v-for="(set, index) in series" :key="set.name">
+        <span class="swatch" :style="{ background: COLOURS[index % COLOURS.length] }" />
+        <span class="muted">{{ set.name }}</span>
       </li>
     </ul>
   </div>
 </template>
 
 <style scoped>
-.graph {
-  height: 200px;
-  position: relative;
-}
-
 .key {
-  list-style: none;
-  margin: var(--space-3) 0 0;
-  padding: 0;
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1) var(--space-3);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
   font-size: 11px;
 }
 

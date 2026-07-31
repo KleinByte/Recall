@@ -7,9 +7,12 @@ describe("Recall branding", () => {
   it("uses the Recall logo as the sidebar brand mark", () => {
     const sidebar = read("src/components/AppSidebar.vue")
 
-    expect(sidebar).toContain('src="/favicon.ico"')
+    expect(sidebar).toContain('import RecallMark from "./RecallMark.vue"')
+    expect(sidebar).toContain('<RecallMark class="brand-logo" />')
     expect(sidebar).toContain('aria-label="Recall"')
     expect(sidebar).toContain("ECALL")
+    expect(sidebar).toContain('class="brand-row"')
+    expect(sidebar).not.toContain("position: absolute")
   })
 
   it("supports a persistent collapsible icon rail with accessible controls", () => {

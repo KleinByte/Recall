@@ -1,86 +1,63 @@
 <script setup lang="ts">
+import type { EChartsCoreOption } from "echarts/core"
 import { computed } from "vue"
-import {
-  BarElement,
-  CategoryScale,
-  Chart as ChartJS,
-  type ChartOptions,
-  LinearScale,
-  Tooltip,
-  type TooltipItem,
-} from "chart.js"
-import { Bar } from "vue-chartjs"
+import BaseEChart from "../charts/BaseEChart.vue"
+import { escapeTooltip, formatSigned } from "../../charts/formatters"
 import type { StyleAxis } from "../../types/stats"
-
-ChartJS.register(BarElement, CategoryScale, LinearScale, Tooltip)
 
 const props = defineProps<{
   baseline: StyleAxis[]
   recent: StyleAxis[]
 }>()
 
-const reducedMotion = () =>
-  typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
-
 const changes = computed(() => props.baseline.map((axis) => ({
   label: axis.label,
   value: Math.round(((props.recent.find((entry) => entry.key === axis.key)?.value ?? axis.value) - axis.value) * 100),
 })))
 
-const chartData = computed(() => ({
-  labels: changes.value.map((change) => change.label),
-  datasets: [{
-    data: changes.value.map((change) => change.value),
-    backgroundColor: changes.value.map((change) => change.value >= 0 ? "#0acbe6" : "#e84057"),
-    borderRadius: 3,
-    borderSkipped: false,
+const option = computed<EChartsCoreOption>(() => ({
+  animationDuration: 520,
+  grid: { top: 8, right: 24, bottom: 28, left: 92 },
+  tooltip: {
+    trigger: "axis",
+    axisPointer: { type: "shadow" },
+    formatter: (params: Array<{ data: number; name: string }>) => {
+      const point = params[0]
+      return point ? `<strong>${escapeTooltip(point.name)}</strong><br/>${formatSigned(point.data, 0)} pp` : ""
+    },
+  },
+  xAxis: {
+    type: "value",
+    axisLabel: { formatter: (value: number) => `${formatSigned(value, 0)} pp` },
+    splitLine: { lineStyle: { color: "rgba(200, 170, 109, 0.14)" } },
+  },
+  yAxis: {
+    type: "category",
+    data: changes.value.map((change) => change.label),
+    axisLine: { show: false },
+    axisTick: { show: false },
+  },
+  series: [{
+    type: "bar",
+    data: changes.value.map((change) => ({
+      value: change.value,
+      itemStyle: { color: change.value >= 0 ? "#0acbe6" : "#e84057", borderRadius: 3 },
+    })),
+    barMaxWidth: 24,
+    markLine: {
+      symbol: "none",
+      silent: true,
+      label: { show: false },
+      lineStyle: { color: "rgba(240, 230, 210, 0.42)", width: 1 },
+      data: [{ xAxis: 0 }],
+    },
   }],
-}))
-
-const chartOptions = computed<ChartOptions<"bar">>(() => ({
-  responsive: true,
-  maintainAspectRatio: false,
-  indexAxis: "y" as const,
-  animation: { duration: reducedMotion() ? 0 : 520 },
-  plugins: {
-    legend: { display: false },
-    tooltip: {
-      backgroundColor: "#0f1c33",
-      borderColor: "rgba(200, 170, 109, 0.55)",
-      borderWidth: 1,
-      titleColor: "#c8aa6d",
-      bodyColor: "#f0e6d2",
-      padding: 10,
-      callbacks: {
-        label: (context: TooltipItem<"bar">) => {
-          const value = context.parsed.x ?? 0
-          return `${value > 0 ? "+" : ""}${value} percentage points`
-        },
-      },
-    },
-  },
-  scales: {
-    x: {
-      grid: { color: "rgba(200, 170, 109, 0.14)" },
-      ticks: {
-        color: "#a09b8c",
-        callback: (value) => {
-          const numericValue = Number(value)
-          return `${numericValue > 0 ? "+" : ""}${value}pp`
-        },
-      },
-    },
-    y: {
-      grid: { display: false },
-      ticks: { color: "#f0e6d2", font: { size: 11 } },
-    },
-  },
 }))
 </script>
 
 <template>
   <div class="style-delta">
-    <Bar :data="chartData" :options="chartOptions" />
+    <BaseEChart :option="option" ariaLabel="Changes in play style compared with the baseline period" />
   </div>
 </template>
 

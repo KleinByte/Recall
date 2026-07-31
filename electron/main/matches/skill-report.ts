@@ -2,7 +2,7 @@
  * Comparative and conditional skill insights from ordered observations
  */
 
-import type { InsightObservation, FinalItemObservation, ChampionPool, BuiltItem, BucketRow, ContributionShare, TimeBucketRow } from "../database/insights-repo.js"
+import type { InsightObservation, FinalItemObservation, GradeComponentObservation, ChampionPool, BuiltItem, BucketRow, ContributionShare, TimeBucketRow } from "../database/insights-repo.js"
 import type { ChampionStatRow, StatsSummary, GradeCount } from "../database/matches-repo.js"
 import type { LobbyComparison } from "../database/participants-repo.js"
 import {
@@ -241,7 +241,7 @@ export function buildPlayingConditions(
   )
 
   const graded = sessions.filter((s) => s.observation.gradeScore !== undefined)
-  
+
   // Require at least 30 graded games overall
   if (graded.length < CONDITIONS_MIN_GRADED) {
     return {
@@ -320,7 +320,7 @@ export function buildDurationInsights(
   observations: InsightObservation[],
 ): DurationInsightsReport {
   const graded = observations.filter((obs) => obs.gradeScore !== undefined)
-  
+
   if (graded.length === 0) {
     return {
       key: "duration",
@@ -373,7 +373,7 @@ export function buildDurationInsights(
     const otherGames = eligibleBuckets
       .filter((b) => b.label !== bucket.label)
       .flatMap((b) => b.games)
-    
+
     const otherGrades = otherGames.map((g) => g.gradeScore!)
     const gradeInterval = otherGrades.length > 0
       ? bootstrapDifference(grades, otherGrades, `duration:${bucket.label}`)
@@ -612,7 +612,7 @@ function buildConditionFinding(
 ): InsightFinding {
   const wins = games.filter((g) => g.observation.win).length
   const count = games.length
-  
+
   // Handle count=0 safely: rawRate 0, Wilson [0,1], adjusted rate baseline, delta 0
   const rawRate = count === 0 ? 0 : wins / count
   const rateInterval = wilsonInterval(wins, count)
@@ -622,9 +622,9 @@ function buildConditionFinding(
   const grades = games
     .filter((g) => g.observation.gradeScore !== undefined)
     .map((g) => g.observation.gradeScore!)
-  
+
   const bucketMean = grades.length > 0 ? grades.reduce((sum, g) => sum + g, 0) / grades.length : scopeGradeBaseline
-  
+
   // Adjusted grade formula: (n * bucketMean + 12 * scopeMean) / (n + 12)
   // For 0 games: (0 * x + 12 * baseline) / 12 = baseline, delta = 0
   const adjustedGrade = (grades.length * bucketMean + 12 * scopeGradeBaseline) / (grades.length + 12)
@@ -635,7 +635,7 @@ function buildConditionFinding(
   const allGrades = allSessions
     .filter((s) => s.observation.gradeScore !== undefined)
     .map((s) => s.observation.gradeScore!)
-  
+
   const gradeInterval = grades.length >= BUCKET_MIN_GRADED && allGrades.length > grades.length
     ? bootstrapDifference(grades, allGrades, `condition:${label}`)
     : undefined
@@ -643,7 +643,7 @@ function buildConditionFinding(
   // Directional copy only if bucket has >=8 graded games and grade interval excludes zero
   const includesZero = !gradeInterval || (gradeInterval.low <= 0 && gradeInterval.high >= 0)
   const hasEnoughGames = grades.length >= BUCKET_MIN_GRADED
-  
+
   const summary =
     !hasEnoughGames || includesZero
       ? `${label}: ${count} games, insufficient data for grade comparison.`
@@ -1137,6 +1137,7 @@ export interface SkillReportInput {
   observations: InsightObservation[]
   championStats: ChampionStatRow[]
   itemObservations: FinalItemObservation[]
+  gradeComponentHistory: GradeComponentObservation[]
 }
 
 export interface SkillStyleReport {
@@ -1180,8 +1181,30 @@ export interface SkillReportV2 {
     lobby?: LobbyComparison
     contribution?: ContributionShare
     outcomes: { duration: BucketRow[]; hours: TimeBucketRow[]; weekdays: TimeBucketRow[] }
-    pool?: { champions: number; games: number; coreShare: number }
+    pool?: { champions: number; games: number; coreShare: number; top: Array<{ championId: number; games: number; wins: number }> }
     builds: Array<{ itemId: number; games: number }>
+  }
+  visuals: {
+    history: Array<{
+      gameId: number
+      playedAt: number
+      championId: number
+      role?: string
+      win: boolean
+      grade?: string
+      gradeScore?: number
+      durationSecs: number
+    }>
+    gradeComponents: GradeComponentObservation[]
+    champions: Array<{
+      championId: number
+      games: number
+      wins: number
+      winRate: number
+      kda: number
+      avgGradeScore?: number
+      gradedGames: number
+    }>
   }
   insights: {
     bestGamePattern: InsightSection
@@ -1197,7 +1220,7 @@ export interface SkillReportV2 {
 export function buildSkillReport(input: SkillReportInput): SkillReportV2 {
   const {
     modes, family, generatedAt, summary, style, grades, lobby, contribution,
-    pool, builds, observations, championStats, itemObservations, duration, hours, weekdays,
+    pool, builds, observations, championStats, itemObservations, gradeComponentHistory, duration, hours, weekdays,
   } = input
 
   const baseline = summary.avgGradeScore ?? 0
@@ -1240,9 +1263,31 @@ export function buildSkillReport(input: SkillReportInput): SkillReportV2 {
       contribution,
       outcomes: { duration, hours, weekdays },
       pool: pool
-        ? { champions: pool.champions, games: pool.games, coreShare: pool.coreShare }
+        ? { champions: pool.champions, games: pool.games, coreShare: pool.coreShare, top: pool.top }
         : undefined,
       builds: builds.map((b) => ({ itemId: b.itemId, games: b.games })),
+    },
+    visuals: {
+      history: observations.slice(-180).map((observation) => ({
+        gameId: observation.gameId,
+        playedAt: observation.playedAt,
+        championId: observation.championId,
+        role: observation.role,
+        win: observation.win,
+        grade: observation.grade,
+        gradeScore: observation.gradeScore,
+        durationSecs: observation.durationSecs,
+      })),
+      gradeComponents: gradeComponentHistory,
+      champions: championStats.map((champion) => ({
+        championId: champion.championId,
+        games: champion.games,
+        wins: champion.wins,
+        winRate: champion.winRate,
+        kda: champion.kda,
+        avgGradeScore: champion.avgGradeScore,
+        gradedGames: champion.gradedGames,
+      })),
     },
     insights: {
       bestGamePattern,
