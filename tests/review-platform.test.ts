@@ -132,6 +132,34 @@ describe("timeline mapping", () => {
     expect(timeline.events[1].category).toBe("vision")
   })
 
+  it("deduplicates repeated LCU events and drops synthetic undefined ward placements", () => {
+    const duplicatedWard = {
+      type: "WARD_PLACED",
+      timestamp: 61_000,
+      participantId: 1,
+      wardType: "YELLOW_TRINKET",
+    }
+    const timeline = mapTimeline([{
+      timestamp: 60_000,
+      participantFrames: {
+        "1": { participantId: 1, totalGold: 1_000 },
+      },
+      events: [
+        duplicatedWard,
+        duplicatedWard,
+        { ...duplicatedWard, wardType: "UNDEFINED" },
+        { ...duplicatedWard, wardType: "UNDEFINED" },
+      ],
+    }], 1, new Map([[1, 100]]))
+
+    expect(timeline.events).toHaveLength(1)
+    expect(timeline.events[0]).toMatchObject({
+      type: "WARD_PLACED",
+      participantId: 1,
+      wardType: "YELLOW_TRINKET",
+    })
+  })
+
   it("selects at most three separated two-minute gold swings", () => {
     const frames = Array.from({ length: 12 }, (_, index) => ({
       timestamp: index * 60_000,

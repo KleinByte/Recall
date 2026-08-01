@@ -1,4 +1,4 @@
-export const TIMELINE_MAPPER_VERSION = 3
+export const TIMELINE_MAPPER_VERSION = 4
 
 export type TimelineEventCategory =
   | "kill"
@@ -144,6 +144,37 @@ function numberOrZero(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0
 }
 
+/**
+ * The local match-history endpoint can repeat the same event many times in a
+ * single frame. Event indexes are therefore not identities; use the event's
+ * observable payload so every placement, purchase, and takedown is counted
+ * once across all timeline consumers.
+ */
+function eventIdentity(event: Omit<CompactTimelineEvent, "eventId">) {
+  return JSON.stringify([
+    event.timestamp,
+    event.type,
+    event.participantId ?? null,
+    event.targetId ?? null,
+    event.assistingParticipantIds ?? null,
+    event.teamId ?? null,
+    event.itemId ?? null,
+    event.beforeId ?? null,
+    event.afterId ?? null,
+    event.skillSlot ?? null,
+    event.level ?? null,
+    event.objective ?? null,
+    event.killType ?? null,
+    event.multiKillLength ?? null,
+    event.bounty ?? null,
+    event.shutdownBounty ?? null,
+    event.wardType ?? null,
+    event.laneType ?? null,
+    event.position?.x ?? null,
+    event.position?.y ?? null,
+  ])
+}
+
 export function mapTimeline(
   frames: RawFrame[],
   ownerParticipantId: number,
@@ -151,6 +182,7 @@ export function mapTimeline(
 ): CompactTimeline {
   const compactFrames: CompactTimelineFrame[] = []
   const events: CompactTimelineEvent[] = []
+  const seenEvents = new Set<string>()
 
   for (const frame of frames) {
     const timestamp = numberOrZero(frame.timestamp)
@@ -202,12 +234,14 @@ export function mapTimeline(
 
     for (const [eventIndex, event] of (frame.events ?? []).entries()) {
       if (!event.type || !KEPT_EVENTS.has(event.type)) continue
+      // LCU emits large batches of duplicated, synthetic WARD_PLACED events
+      // with this sentinel type. Real placements carry their actual ward type.
+      if (event.type === "WARD_PLACED" && event.wardType?.toUpperCase() === "UNDEFINED") continue
       const participantId = event.participantId ?? event.killerId ?? event.creatorId
       const targetId = event.victimId
       const objective = event.monsterSubType ?? event.monsterType ??
         event.towerType ?? event.buildingType
-      events.push({
-        eventId: `${numberOrZero(event.timestamp ?? timestamp)}:${event.type}:${eventIndex}:${participantId ?? 0}:${targetId ?? 0}`,
+      const mappedEvent: Omit<CompactTimelineEvent, "eventId"> = {
         timestamp: numberOrZero(event.timestamp ?? timestamp),
         type: event.type,
         category: categoryFor(event.type),
@@ -233,6 +267,13 @@ export function mapTimeline(
           typeof event.position.y === "number"
           ? { x: event.position.x, y: event.position.y }
           : undefined,
+      }
+      const identity = eventIdentity(mappedEvent)
+      if (seenEvents.has(identity)) continue
+      seenEvents.add(identity)
+      events.push({
+        ...mappedEvent,
+        eventId: `${mappedEvent.timestamp}:${event.type}:${eventIndex}:${participantId ?? 0}:${targetId ?? 0}`,
       })
     }
   }

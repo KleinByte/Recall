@@ -10,6 +10,23 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.6",
+    releasedAt: "2026-08-01",
+    title: "Accurate timeline event counts",
+    summary:
+      "Recall now rejects duplicated and synthetic League Client timeline events before they can inflate vision measurements or game labels.",
+    sections: [
+      {
+        title: "Trustworthy vision evidence",
+        items: [
+          "Repeated local-client timeline events are counted once across labels, RVI measurements, and analysis.",
+          "Synthetic undefined ward events are excluded, while real trinket and control-ward placements remain available.",
+          "Deep Vision is checked against the match's recorded ward total and now explains how many placements qualified out of the full total.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.5",
     releasedAt: "2026-08-01",
     title: "Your performance, mapped and measured",

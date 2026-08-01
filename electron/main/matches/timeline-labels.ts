@@ -335,22 +335,41 @@ export function evaluateTimelineLabels(
     })
   }
 
-  const deepWards = timeline.events.filter((event) => {
-    if (event.type !== "WARD_PLACED" || event.participantId !== ownerId) return false
+  const deepWardsByPlacement = new Map<string, CompactTimelineEvent>()
+  for (const event of timeline.events) {
+    if (event.type !== "WARD_PLACED" || event.participantId !== ownerId) continue
+    if (event.wardType?.toUpperCase() === "UNDEFINED") continue
     const observedPosition = event.position ??
       participantAt(frameNear(timeline.frames, event.timestamp), ownerId)?.position
-    return isOnTeamSide(observedPosition, enemyTeamId)
-  })
-  if (deepWards.length >= 4) add({
+    if (!isOnTeamSide(observedPosition, enemyTeamId)) continue
+    const placementKey = JSON.stringify([
+      event.timestamp,
+      event.participantId,
+      event.wardType ?? null,
+      event.position?.x ?? null,
+      event.position?.y ?? null,
+    ])
+    if (!deepWardsByPlacement.has(placementKey)) deepWardsByPlacement.set(placementKey, event)
+  }
+  const deepWards = [...deepWardsByPlacement.values()]
+  const recordedWardTotal = Number.isFinite(player.wardsPlaced)
+    ? Math.max(0, player.wardsPlaced)
+    : deepWards.length
+  const deepWardCount = Math.min(deepWards.length, recordedWardTotal)
+  if (deepWardCount >= 4) add({
     id: "deep_vision", name: "Deep Vision", category: "Vision", polarity: "positive",
     confidence: deepWards.every((event) => event.position) ? "strong" : "inferred",
     priority: 72, group: "vision",
     tooltip: deepWards.every((event) => event.position)
-      ? `You placed ${deepWards.length} wards deep on the enemy side of the map.`
-      : `You placed ${deepWards.length} wards while the nearest timeline snapshots put you on the enemy side.`,
+      ? `${deepWardCount} of your ${recordedWardTotal} ward placements were deep on the enemy side of the map.`
+      : `${deepWardCount} of your ${recordedWardTotal} ward placements happened while nearby timeline snapshots showed you on the enemy side.`,
     evidence: {
-      deepWards: deepWards.length,
-      exactEventPositions: deepWards.filter((event) => event.position).length,
+      deepWards: deepWardCount,
+      wardsPlaced: recordedWardTotal,
+      exactEventPositions: Math.min(
+        deepWardCount,
+        deepWards.filter((event) => event.position).length,
+      ),
     },
   })
 

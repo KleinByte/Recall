@@ -169,4 +169,46 @@ describe("timeline performance labels", () => {
     expect(labels.find((label) => label.id === "caught_out")?.confidence).toBe("inferred")
     expect(labels.find((label) => label.id === "shopping_with_a_fortune")?.confidence).toBe("inferred")
   })
+
+  it("counts unique real ward placements and never exceeds the recorded match total", () => {
+    const realPlacements = Array.from({ length: 8 }, (_, index) => ({
+      eventId: `ward-${index}`,
+      timestamp: 570_000 + index * 1_000,
+      type: "WARD_PLACED",
+      category: "vision" as const,
+      participantId: 1,
+      wardType: "YELLOW_TRINKET",
+    }))
+    const repeatedNoise = Array.from({ length: 74 }, (_, index) => ({
+      eventId: `noise-${index}`,
+      timestamp: 575_000,
+      type: "WARD_PLACED",
+      category: "vision" as const,
+      participantId: 1,
+      wardType: "UNDEFINED",
+    }))
+    const labels = evaluateTimelineLabels({
+      match,
+      player: { ...owner, wardsPlaced: 6 } as ParticipantRow,
+      participants: [owner, enemyJungler],
+      timeline: timeline({
+        frames: [{
+          ...timeline().frames[0],
+          participants: timeline().frames[0].participants.map((entry) => entry.participantId === 1
+            ? { ...entry, position: { x: 10_000, y: 7_000 } }
+            : entry),
+        }],
+        events: [...realPlacements, ...realPlacements, ...repeatedNoise],
+      }),
+    })
+
+    expect(labels.find((label) => label.id === "deep_vision")).toMatchObject({
+      tooltip: "6 of your 6 ward placements happened while nearby timeline snapshots showed you on the enemy side.",
+      evidence: {
+        deepWards: 6,
+        wardsPlaced: 6,
+        exactEventPositions: 0,
+      },
+    })
+  })
 })
