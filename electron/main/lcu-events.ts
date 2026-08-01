@@ -38,7 +38,7 @@ function parseEventMessage(message: string) {
 export class LcuEvents extends EventEmitter {
   private socket?: WebSocket
   private timer?: NodeJS.Timeout
-  private stopped = false
+  private stopped = true
   private inGame = false
 
   constructor(private readonly credentials: LcuCredentials) {
@@ -46,6 +46,7 @@ export class LcuEvents extends EventEmitter {
   }
 
   start() {
+    if (!this.stopped || this.timer || this.socket) return
     this.stopped = false
     this.timer = setTimeout(() => this.connect(), CONNECT_DELAY_MS)
   }
@@ -53,13 +54,16 @@ export class LcuEvents extends EventEmitter {
   stop() {
     this.stopped = true
     if (this.timer) clearTimeout(this.timer)
+    this.timer = undefined
     this.socket?.removeAllListeners()
-    this.socket?.close()
+    this.socket?.terminate()
     this.socket = undefined
+    this.removeAllListeners()
   }
 
   private connect() {
-    if (this.stopped) return
+    this.timer = undefined
+    if (this.stopped || this.socket) return
 
     const { address, port } = this.credentials
 
@@ -82,6 +86,7 @@ export class LcuEvents extends EventEmitter {
     })
 
     socket.on("close", () => {
+      if (this.socket === socket) this.socket = undefined
       if (this.stopped) return
       this.timer = setTimeout(() => this.connect(), RECONNECT_DELAY_MS)
     })

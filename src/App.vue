@@ -1,27 +1,18 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue"
+import { defineAsyncComponent, onMounted, ref } from "vue"
 import AppSidebar from "./components/AppSidebar.vue"
 import ChampSelectBanner from "./components/ChampSelectBanner.vue"
-import ChampionDetail from "./components/ChampionDetail.vue"
-import MatchSheet from "./components/MatchSheet.vue"
 import PatchNotesModal from "./components/PatchNotesModal.vue"
 import PostGameBanner from "./components/PostGameBanner.vue"
 import UpdateReadyBanner from "./components/UpdateReadyBanner.vue"
 import WindowTitleBar from "./components/WindowTitleBar.vue"
-import ChallengesPage from "./pages/ChallengesPage.vue"
-import ChampionsPage from "./pages/ChampionsPage.vue"
 import DashboardPage from "./pages/DashboardPage.vue"
-import LiveGamePage from "./pages/LiveGamePage.vue"
-import MatchesPage from "./pages/MatchesPage.vue"
-import ProgressPage from "./pages/ProgressPage.vue"
-import ReviewPage from "./pages/ReviewPage.vue"
-import SettingsPage from "./pages/SettingsPage.vue"
-import SkillPage from "./pages/SkillPage.vue"
 import {
   currentAppVersion,
   hasUnseenPatchNotes,
 } from "./data/patch-notes"
 import { api } from "./helpers/api"
+import { useApiEvents } from "./helpers/use-api-events"
 import { loadDataDragonVersion } from "./helpers/ddragon"
 import {
   detailChampionId,
@@ -36,6 +27,17 @@ import type { StoredSettings } from "./types/app"
 import type { LiveSession } from "./types/live"
 import type { UpdateStatus } from "./types/update"
 
+const ChampionDetail = defineAsyncComponent(() => import("./components/ChampionDetail.vue"))
+const MatchSheet = defineAsyncComponent(() => import("./components/MatchSheet.vue"))
+const ChallengesPage = defineAsyncComponent(() => import("./pages/ChallengesPage.vue"))
+const ChampionsPage = defineAsyncComponent(() => import("./pages/ChampionsPage.vue"))
+const LiveGamePage = defineAsyncComponent(() => import("./pages/LiveGamePage.vue"))
+const MatchesPage = defineAsyncComponent(() => import("./pages/MatchesPage.vue"))
+const ProgressPage = defineAsyncComponent(() => import("./pages/ProgressPage.vue"))
+const ReviewPage = defineAsyncComponent(() => import("./pages/ReviewPage.vue"))
+const SettingsPage = defineAsyncComponent(() => import("./pages/SettingsPage.vue"))
+const SkillPage = defineAsyncComponent(() => import("./pages/SkillPage.vue"))
+
 const connected = ref(false)
 const summoner = ref<Summoner | null>(null)
 const allChampions = ref<Champion[] | null>(null)
@@ -47,6 +49,7 @@ const showPatchNotes = ref(false)
 const updateStatus = ref<UpdateStatus>({ kind: "up-to-date" })
 const dismissedUpdateVersion = ref<string | null>(null)
 let hasFocusedLiveGame = false
+const events = useApiEvents()
 
 const isColoredWhenDone = ref(false)
 const showChampionNames = ref(false)
@@ -139,7 +142,7 @@ onMounted(async () => {
   summoner.value = status.summoner
   if (status.connected) void loadChampions()
 
-  api.on(
+  events.on(
     "lcu:status",
     (payload: { connected: boolean; summoner: Summoner | null }) => {
       connected.value = payload.connected
@@ -148,7 +151,7 @@ onMounted(async () => {
     },
   )
 
-  api.on("live:updated", (live: LiveSession) => {
+  events.on("live:updated", (live: LiveSession) => {
     if (live.phase === "Idle") {
       hasFocusedLiveGame = false
     } else if (!hasFocusedLiveGame) {
@@ -157,7 +160,7 @@ onMounted(async () => {
     }
   })
 
-  api.onUpdateStatus((status) => {
+  events.onUpdateStatus((status) => {
     updateStatus.value = status
   })
   void api.getUpdateStatus().then((status) => {
@@ -165,7 +168,7 @@ onMounted(async () => {
   })
 
   // Shown wherever the user happens to be, and never steals focus.
-  api.on("match:recorded", (match: MatchRow) => {
+  events.on("match:recorded", (match: MatchRow) => {
     lastGame.value = match
   })
 })

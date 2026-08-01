@@ -2,7 +2,11 @@
 import type { EChartsCoreOption } from "echarts/core"
 import { computed } from "vue"
 import BaseEChart from "../charts/BaseEChart.vue"
-import { escapeTooltip, formatSigned } from "../../charts/formatters"
+import {
+  escapeTooltip,
+  formatSigned,
+  numericChartValue,
+} from "../../charts/formatters"
 import type { StyleAxis } from "../../types/stats"
 
 const props = defineProps<{
@@ -21,9 +25,17 @@ const option = computed<EChartsCoreOption>(() => ({
   tooltip: {
     trigger: "axis",
     axisPointer: { type: "shadow" },
-    formatter: (params: Array<{ data: number; name: string }>) => {
-      const point = params[0]
-      return point ? `<strong>${escapeTooltip(point.name)}</strong><br/>${formatSigned(point.data, 0)} pp` : ""
+    formatter: (raw: unknown) => {
+      const params = Array.isArray(raw) ? raw : [raw]
+      const point = params[0] as {
+        data?: unknown
+        name?: string
+        value?: unknown
+      } | undefined
+      const value = numericChartValue(point?.value) ?? numericChartValue(point?.data)
+      return point && value !== undefined
+        ? `<strong>${escapeTooltip(point.name ?? "Playstyle change")}</strong><br/>${formatSigned(value, 0)} pp`
+        : ""
     },
   },
   xAxis: {

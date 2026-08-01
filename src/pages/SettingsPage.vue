@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
 import { api } from "../helpers/api"
+import { useApiEvents } from "../helpers/use-api-events"
 import { updatePresentation } from "../helpers/update"
 import type { UpdateStatus } from "../types/update"
 import type { RiotHistoryBackfillState, StatsMeta } from "../types/stats"
@@ -11,6 +12,7 @@ const props = defineProps<{
   showChampionNames: boolean
   connected: boolean
 }>()
+const events = useApiEvents()
 
 const emit = defineEmits<{
   (event: "update:isColoredWhenDone", value: boolean): void
@@ -59,19 +61,19 @@ async function loadMeta() {
 
 onMounted(() => {
   void loadMeta()
-  api.on("stats:updated", () => void loadMeta())
+  events.on("stats:updated", () => void loadMeta())
   void api.getUpdateStatus().then((status) => { updateStatus.value = status })
-  api.onUpdateStatus((status) => { updateStatus.value = status })
+  events.onUpdateStatus((status) => { updateStatus.value = status })
   void api.getRiotApiKeyStatus().then((status) => {
     riotKeyConfigured.value = status.configured
     riotKeyProtected.value = status.protected
     riotHistory.value = status.history
   })
-  api.on("riot-history:updated", (status: RiotHistoryBackfillState) => {
+  events.on("riot-history:updated", (status: RiotHistoryBackfillState) => {
     riotHistory.value = status
   })
   void loadTrust()
-  api.on("data-trust:updated", () => void loadTrust())
+  events.on("data-trust:updated", () => void loadTrust())
 })
 
 async function loadTrust(check = false) {
@@ -267,9 +269,10 @@ const formatDate = (value?: number) =>
     <section class="card">
       <h2 class="section-title">Riot API</h2>
       <p class="muted note">
-        Used for Match-V5 history and optional live teammate stats. After saving,
-        Recall imports every match Riot still exposes for your account. The key
-        is encrypted by your operating system and is never shown again.
+        Used only for the full Match-V5 history import you start here. Normal
+        post-game details, scoreboards, and recent timelines come directly from
+        the connected League client without a developer key. The key is encrypted
+        by your operating system and is never shown again.
       </p>
       <p class="muted note">
         Paste the Web API key beginning with <code>RGAPI-</code>. An RSO client
@@ -335,8 +338,9 @@ const formatDate = (value?: number) =>
       </dl>
 
       <p class="muted note">
-        Recall keeps imported and newly played matches locally. Without a Riot
-        API key, the League client fallback is limited to its most recent 20 games.
+        Recall keeps imported and newly played matches locally. The League client
+        supplies its recent window; the optional developer key is only for importing
+        older Match-V5 history from this Settings page.
       </p>
 
       <div class="actions">

@@ -2,6 +2,8 @@
 import { computed, nextTick, onMounted, ref, watch } from "vue"
 import ChallengeRowView from "../components/ChallengeRow.vue"
 import { api } from "../helpers/api"
+import { useApiEvents } from "../helpers/use-api-events"
+import { useCoalescedTask } from "../helpers/use-coalesced-task"
 import {
   challengeGameModeLabel,
   challengeGameModes,
@@ -25,6 +27,7 @@ const props = defineProps<{
   isColoredWhenDone?: boolean
   showChampionNames?: boolean
 }>()
+const events = useApiEvents()
 
 const CATEGORIES = [
   "All",
@@ -98,10 +101,12 @@ async function togglePin(challengeId: number) {
     : await api.pinChallenge(challengeId)
 }
 
+const refresh = useCoalescedTask(load)
+
 onMounted(() => {
-  void load()
-  api.on("challenges:updated", () => void load())
-  api.on("lcu:status", () => void load())
+  void refresh()
+  events.on("challenges:updated", () => void refresh())
+  events.on("lcu:status", () => void refresh())
 })
 
 /**

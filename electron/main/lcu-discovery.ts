@@ -3,6 +3,8 @@ import { EventEmitter } from "node:events"
 import { existsSync, readFileSync, unwatchFile, watchFile } from "node:fs"
 import path from "node:path"
 
+const DISCOVERY_INTERVAL_MS = 10_000
+
 export interface LcuCredentials {
   address: string
   port: number
@@ -49,34 +51,51 @@ export class LcuDiscovery extends EventEmitter {
   private discoveryTimer?: NodeJS.Timeout
   private lockfilePath?: string
   private previousLockfile?: string
+  private discovering = false
+  private stopped = true
 
   start() {
-    if (process.platform !== "win32") return
+    if (process.platform !== "win32" || this.discoveryTimer || !this.stopped) return
 
+    this.stopped = false
     void this.discover()
-    this.discoveryTimer = setInterval(() => void this.discover(), 1000)
+    this.discoveryTimer = setInterval(
+      () => void this.discover(),
+      DISCOVERY_INTERVAL_MS,
+    )
   }
 
   stop() {
+    this.stopped = true
     if (this.discoveryTimer) clearInterval(this.discoveryTimer)
     if (this.lockfilePath) unwatchFile(this.lockfilePath)
     this.discoveryTimer = undefined
+    this.installDirectory = undefined
     this.lockfilePath = undefined
     this.previousLockfile = undefined
   }
 
   private async discover() {
-    if (this.installDirectory) return
+    if (this.installDirectory || this.discovering || this.stopped) return
 
-    const installDirectory = await findLeagueClientInstallDirectory()
-    if (!installDirectory || !existsSync(path.join(installDirectory, "LeagueClient.exe"))) {
-      return
+    this.discovering = true
+    try {
+      const installDirectory = await findLeagueClientInstallDirectory()
+      if (
+        this.stopped ||
+        !installDirectory ||
+        !existsSync(path.join(installDirectory, "LeagueClient.exe"))
+      ) return
+
+      this.installDirectory = installDirectory
+      this.lockfilePath = path.join(installDirectory, "lockfile")
+      if (this.discoveryTimer) clearInterval(this.discoveryTimer)
+      this.discoveryTimer = undefined
+      watchFile(this.lockfilePath, { interval: 1000 }, () => this.readLockfile())
+      this.readLockfile()
+    } finally {
+      this.discovering = false
     }
-
-    this.installDirectory = installDirectory
-    this.lockfilePath = path.join(installDirectory, "lockfile")
-    watchFile(this.lockfilePath, { interval: 1000 }, () => this.readLockfile())
-    this.readLockfile()
   }
 
   private readLockfile() {

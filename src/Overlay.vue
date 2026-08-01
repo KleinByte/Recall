@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
 import { championIconUrl } from "./helpers/format"
+import { useApiEvents } from "./helpers/use-api-events"
 import type { ChampionStatus } from "./types/stats"
 
 interface OverlayData {
@@ -11,9 +12,10 @@ interface OverlayData {
 }
 
 const data = ref<OverlayData | null>(null)
+const events = useApiEvents()
 
 onMounted(() => {
-  window.ipcRenderer.on("overlay:data", (_event, payload: OverlayData) => {
+  events.on("overlay:data", (payload: OverlayData) => {
     data.value = payload
   })
 })

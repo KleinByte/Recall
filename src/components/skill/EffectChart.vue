@@ -2,7 +2,12 @@
 import type { EChartsCoreOption } from "echarts/core"
 import { computed } from "vue"
 import BaseEChart from "../charts/BaseEChart.vue"
-import { escapeTooltip, formatGradeShift, formatSigned } from "../../charts/formatters"
+import {
+  escapeTooltip,
+  formatGradeShift,
+  formatSigned,
+  numericChartValue,
+} from "../../charts/formatters"
 
 const props = defineProps<{
   entries: Array<{ label: string; value: number }>
@@ -25,9 +30,17 @@ const option = computed<EChartsCoreOption>(() => ({
   tooltip: {
     trigger: "axis",
     axisPointer: { type: "shadow" },
-    formatter: (params: Array<{ data: number; name: string }>) => {
-      const point = params[0]
-      return point ? `<strong>${escapeTooltip(point.name)}</strong><br/>${formatValue(point.data)}` : ""
+    formatter: (raw: unknown) => {
+      const params = Array.isArray(raw) ? raw : [raw]
+      const point = params[0] as {
+        data?: unknown
+        name?: string
+        value?: unknown
+      } | undefined
+      const value = numericChartValue(point?.value) ?? numericChartValue(point?.data)
+      return point && value !== undefined
+        ? `<strong>${escapeTooltip(point.name ?? "Evidence")}</strong><br/>${formatValue(value)}`
+        : ""
     },
   },
   xAxis: {
@@ -62,12 +75,18 @@ const option = computed<EChartsCoreOption>(() => ({
 
 <template>
   <div class="effect-chart" :style="{ height: chartHeight }">
-    <BaseEChart :option="option" :ariaLabel="`Estimated ${unit === 'grade' ? 'Recall grade' : 'win-rate'} effects`" />
+    <BaseEChart
+      :option="option"
+      :ariaLabel="`Estimated ${unit === 'grade' ? 'Recall grade' : 'win-rate'} effects`"
+      :height="chartHeight"
+    />
   </div>
 </template>
 
 <style scoped>
 .effect-chart {
   position: relative;
+  min-width: 0;
+  overflow: hidden;
 }
 </style>

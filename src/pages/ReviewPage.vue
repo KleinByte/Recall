@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { api } from "../helpers/api"
+import { useApiEvents } from "../helpers/use-api-events"
+import { useCoalescedTask } from "../helpers/use-coalesced-task"
 import {
   championIconUrl,
   championNameById,
@@ -10,6 +12,7 @@ import {
 import {
   itemIconUrl,
   loadGameAssets,
+  normalizeAugmentId,
   type GameAssetCatalog,
 } from "../helpers/game-assets"
 import { focusReviewGameId } from "../helpers/navigation"
@@ -36,6 +39,7 @@ import type {
 } from "../types/review"
 
 const props = defineProps<{ champions: Champion[] | null }>()
+const events = useApiEvents()
 type Tab = "review" | "sessions" | "bookmarks" | "experiments"
 const tab = ref<Tab>("review")
 const review = ref<MatchReview>()
@@ -54,6 +58,7 @@ const timelineFilter = ref<"all" | "you" | "kills" | "objectives" | "items" | "l
 const assets = ref<GameAssetCatalog>({ version: "latest", items: {}, augments: {} })
 const augmentSummary = ref<Record<number, OwnerAugmentSummary>>({})
 let saveTimer: ReturnType<typeof setTimeout> | undefined
+let annotationSavesInFlight = 0
 
 const owner = computed(() =>
   review.value?.scoreboard.find((participant) => participant.isPlayer === 1),
@@ -224,20 +229,30 @@ async function load(gameId?: number) {
   }
 }
 
+const refreshCurrent = useCoalescedTask(() => load(review.value?.match.gameId))
+
 function queueNoteSave() {
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(() => void saveAnnotation(), 750)
 }
 
 async function saveAnnotation() {
-  if (!review.value) return
+  const current = review.value
+  if (!current) return
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = undefined
-  review.value.annotation = await api.saveAnnotation(review.value.match.gameId, {
-    note: review.value.annotation.note,
-    bookmarked: review.value.annotation.bookmarked,
-    tagIds: review.value.annotation.tags.map((tag) => tag.id),
-  })
+  const gameId = current.match.gameId
+  annotationSavesInFlight += 1
+  try {
+    const annotation = await api.saveAnnotation(gameId, {
+      note: current.annotation.note,
+      bookmarked: current.annotation.bookmarked,
+      tagIds: current.annotation.tags.map((tag) => tag.id),
+    })
+    if (review.value?.match.gameId === gameId) review.value.annotation = annotation
+  } finally {
+    annotationSavesInFlight -= 1
+  }
 }
 
 async function toggleBookmark() {
@@ -339,23 +354,23 @@ onMounted(() => {
   void load()
   void loadGameAssets().then((catalog) => {
     assets.value = catalog
-    const entries = Object.entries(catalog.augments).map(([id, augment]) => ({
-      augmentId: Number(id),
-      name: augment.name,
-      iconPath: augment.icon,
-      rarity: augment.rarity,
-    }))
+    const entries = Object.entries(catalog.augments).flatMap(([id, augment]) => {
+      const augmentId = normalizeAugmentId(id)
+      return augmentId !== undefined
+        ? [{ augmentId, name: augment.name, iconPath: augment.icon, rarity: augment.rarity }]
+        : []
+    })
     if (entries.length) {
       void api.cacheAugmentCatalog({
         dataVersion: catalog.version,
         entries,
-      })
+      }).catch((error) => console.warn("Could not cache augment catalog", error))
     }
   })
-  api.on("review:updated", () => {
-    if (!saveTimer) void load(review.value?.match.gameId)
+  events.on("review:updated", () => {
+    if (!saveTimer && annotationSavesInFlight === 0) void refreshCurrent()
   })
-  api.on("timeline:updated", (gameId: number) => {
+  events.on("timeline:updated", (gameId: number) => {
     if (review.value?.match.gameId === gameId) {
       void api.getTimeline(gameId).then((state) => {
         if (review.value) review.value.timeline = state
@@ -633,8 +648,8 @@ onBeforeUnmount(() => {
         </div>
         <div v-else class="timeline-empty">
           <p class="muted">{{ review.timeline.error || (review.timeline.status === 'pending'
-            ? 'Timeline queued. Add a Riot API key in Settings if needed.'
-            : 'Timelines are fetched only when you ask or bookmark a match.') }}</p>
+            ? 'Timeline queued until the League client is connected.'
+            : 'Recent timelines come directly from the connected League client.') }}</p>
           <button class="league-button" :disabled="review.timeline.status === 'loading'"
             @click="loadTimeline(review.timeline.status === 'unavailable' || review.timeline.status === 'error')">
             {{ review.timeline.status === 'loading' ? 'Loading…' : 'Load timeline' }}

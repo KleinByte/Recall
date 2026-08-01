@@ -10,6 +10,39 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.5",
+    releasedAt: "2026-08-01",
+    title: "Your performance, mapped and measured",
+    summary:
+      "Recall introduces the Recall Vector Index, a dedicated Analyze workspace, and more reliable local-client data capture with a broad performance and stability pass.",
+    sections: [
+      {
+        title: "Recall Vector Index",
+        items: [
+          "RVI measures eight transparent performance vectors with sample stabilization, evidence coverage, recent movement, and mode-specific Rift or ARAM measurements.",
+          "Your RVI shape becomes a recognizable playstyle such as Playmaker, Vanguard, Macro Player, Guardian, or All-Rounder instead of merely repeating the highest categories.",
+          "Expand any vector to inspect every available measurement, its score, sample, comparison, and influence on the result.",
+        ],
+      },
+      {
+        title: "A new Analyze workspace",
+        items: [
+          "Explore death density directly over Summoner's Rift as either a continuous heat overlay or individual death dots, with useful location and timing details.",
+          "Review performance form, session endurance, match signatures, champion efficiency quadrants, and champion learning curves in one responsive workspace.",
+          "Skill filters now include a searchable champion grid, while chart sizing, contrast, disclosure controls, and small-screen layouts are clearer throughout.",
+        ],
+      },
+      {
+        title: "Faster and more dependable",
+        items: [
+          "Recent match timelines now come from the local League Client and are cached in Recall; Riot developer access remains reserved for optional history imports.",
+          "IPC subscriptions, chart instances, resize observers, refresh bursts, and League Client discovery now have stricter ownership and cleanup to prevent listener and memory growth.",
+          "Numeric chart formatting tolerates incomplete data, and timeline or chart gaps no longer turn missing evidence into misleading zeroes.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.4",
     releasedAt: "2026-07-31",
     title: "Your playstyle has a name",

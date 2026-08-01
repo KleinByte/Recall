@@ -2,6 +2,10 @@ import type { MatchesRepository } from "./database/matches-repo.js"
 import type { ParticipantsRepository } from "./database/participants-repo.js"
 import type { LcuClient } from "./lcu-client.js"
 import { gradeLobby, type GradeInput } from "./matches/grade.js"
+import {
+  evaluateMatchLabels,
+  prioritizePerformanceLabels,
+} from "./matches/labels.js"
 import { mapMatchRow } from "./matches/map-match.js"
 import {
   mapParticipants,
@@ -10,10 +14,6 @@ import {
 } from "./matches/map-participants.js"
 import { fetchQueues, type QueueIndex } from "./matches/queues.js"
 import type { LcuGame, MatchRow, ModeFamily } from "./matches/types.js"
-
-interface MatchEnricher {
-  enrich(rows: MatchRow[], queues: QueueIndex): Promise<number>
-}
 
 export interface SyncResult {
   fetched: number
@@ -61,7 +61,6 @@ export class MatchSync {
     private readonly repository: MatchesRepository,
     private readonly puuid: string,
     private readonly participants?: ParticipantsRepository,
-    private readonly enricher?: MatchEnricher,
   ) {}
 
   async syncNow(): Promise<SyncResult> {
@@ -93,11 +92,6 @@ export class MatchSync {
       )
 
     const inserted = this.repository.insertMany(rows)
-    if (this.enricher) {
-      // Match-V5 is an optional enhancement. The enricher owns all API-key
-      // and network failures so recording from the local client stays durable.
-      await this.enricher.enrich(rows, this.queues)
-    }
     const graded = await this.gradePendingMatches()
     const lobbies = await this.backfillLobbies(rows)
 
@@ -162,6 +156,22 @@ export class MatchSync {
     }
     if ((family === "aram" || family === "sr") && detail.gameId) {
       this.participants.setGrades(detail.gameId, this.puuid, gradeLobby(this.gradeInputs(detail), family))
+    }
+    if (detail.gameId) {
+      const match = this.repository.getMatch(detail.gameId, this.puuid)
+      const owner = rows.find((row) => row.isPlayer === 1)
+      if (match && owner) {
+        this.repository.replacePerformanceLabels(
+          detail.gameId,
+          this.puuid,
+          prioritizePerformanceLabels(evaluateMatchLabels({
+            match,
+            player: owner,
+            participants: rows,
+            teams,
+          })),
+        )
+      }
     }
 
     return stored

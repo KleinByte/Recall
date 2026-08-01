@@ -4,14 +4,15 @@ import ChallengeDetailModal from "../components/ChallengeDetailModal.vue"
 import FormStrip from "../components/FormStrip.vue"
 import GradeBadge from "../components/GradeBadge.vue"
 import RankedHistoryPanel from "../components/RankedHistoryPanel.vue"
-import StyleRadar from "../components/StyleRadar.vue"
+import PerformanceRadar from "../components/skill/PerformanceRadar.vue"
 import MiniBar from "../components/ui/MiniBar.vue"
 import Panel from "../components/ui/Panel.vue"
 import StatTile from "../components/ui/StatTile.vue"
 import { api } from "../helpers/api"
+import { useApiEvents } from "../helpers/use-api-events"
+import { useCoalescedTask } from "../helpers/use-coalesced-task"
 import { challengeTierProgress } from "../helpers/challenges"
 import { openChampion, openMatch } from "../helpers/navigation"
-import { classifyPlaystyle } from "../helpers/playstyle"
 import {
   championIconUrl,
   championNameById,
@@ -30,16 +31,17 @@ import type {
   ChampionRanking,
   MatchRow,
   ModeFamily,
+  PerformanceProfile,
   ProfileSummary,
   RankedHistory,
   StatsSummary,
-  StyleProfile,
 } from "../types/stats"
 
 const props = defineProps<{
   champions: Champion[] | null
   connected: boolean
 }>()
+const events = useApiEvents()
 
 /** Midnight this morning, in the player's own timezone. */
 function startOfToday(): number {
@@ -55,8 +57,8 @@ const challenges = ref<ChallengeRow[]>([])
 const recent = ref<MatchRow[]>([])
 const ranked = ref<RankedHistory[]>([])
 const ranking = ref<ChampionRanking | null>(null)
-const style = ref<StyleProfile | undefined>(undefined)
-const styleFamily = ref<ModeFamily>("aram")
+const rviProfile = ref<PerformanceProfile | undefined>(undefined)
+const rviFamily = ref<ModeFamily>("aram")
 const selectedChallenge = ref<ChallengeRow | null>(null)
 
 async function load() {
@@ -92,42 +94,39 @@ async function load() {
     ranked.value = nextRanked
     ranking.value = nextRanking
 
-    await loadStyle()
+    await loadRvi()
   } catch {
     // No account seen yet; the empty states cover this.
   }
 }
 
-/** The playstyle snapshot follows whichever family has been played most. */
-async function loadStyle() {
+/** The dashboard RVI snapshot follows whichever family has been played most. */
+async function loadRvi() {
   const [rift, abyss] = await Promise.all([
     api.getSummary({ modeFamily: "sr" }),
     api.getSummary({ modeFamily: "aram" }),
   ])
 
-  styleFamily.value = rift.games > abyss.games ? "sr" : "aram"
-
-  const report = await api.getStyleReport(
-    { modeFamily: styleFamily.value },
-    styleFamily.value,
+  rviFamily.value = rift.games > abyss.games ? "sr" : "aram"
+  rviProfile.value = await api.getRviProfile(
+    { modeFamily: rviFamily.value },
+    rviFamily.value,
   )
-  style.value = report.career
 }
 
+const refresh = useCoalescedTask(load)
+
 onMounted(() => {
-  void load()
-  api.on("stats:updated", () => void load())
-  api.on("challenges:updated", () => void load())
-  api.on("profile:updated", () => void load())
-  api.on("ranked:updated", () => void load())
-  api.on("lcu:status", () => void load())
+  void refresh()
+  events.on("stats:updated", () => void refresh())
+  events.on("challenges:updated", () => void refresh())
+  events.on("profile:updated", () => void refresh())
+  events.on("ranked:updated", () => void refresh())
+  events.on("lcu:status", () => void refresh())
 })
 
 const hasGames = computed(() => (summary.value?.games ?? 0) > 0)
 const averageGrade = computed(() => gradeFromScore(summary.value?.avgGradeScore))
-const styleIdentity = computed(() =>
-  style.value ? classifyPlaystyle(style.value.axes, style.value.games) : undefined,
-)
 
 const confidenceLabel = (games: number) => {
   if (games >= 12) return "Strong read"
@@ -305,19 +304,12 @@ const championName = (id: number) => championNameById(props.champions, id)
 
         <div class="dashboard-column right-column">
           <Panel
-            v-if="style"
-            title="Playstyle"
-            :meta="styleFamily === 'sr' ? `Summoner's Rift` : 'ARAM'"
-            class="playstyle-panel"
+            v-if="rviProfile"
+            title="Recall Vector Index"
+            :meta="`${rviProfile.score} · ${rviFamily === 'sr' ? `Summoner's Rift` : 'ARAM'}`"
+            class="rvi-panel"
           >
-            <div v-if="styleIdentity" class="style-reading">
-              <div>
-                <span class="style-kicker">Your identity</span>
-                <strong class="style-name">{{ styleIdentity.label }}</strong>
-              </div>
-              <p class="muted style-description">{{ styleIdentity.description }}</p>
-            </div>
-            <StyleRadar :axes="style.axes" height="215px" />
+            <PerformanceRadar :dimensions="rviProfile.dimensions" height="270px" />
           </Panel>
 
           <Panel
@@ -488,7 +480,7 @@ h1 {
 }
 
 .rank-panel,
-.playstyle-panel {
+.rvi-panel {
   height: 340px;
 }
 
@@ -505,43 +497,6 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-}
-
-.style-reading {
-  display: grid;
-  grid-template-columns: minmax(130px, .7fr) minmax(0, 1.3fr);
-  align-items: center;
-  gap: var(--space-3);
-  min-height: 48px;
-  margin-bottom: -4px;
-  padding: var(--space-2) var(--space-3);
-  border-left: 2px solid var(--gold);
-  background: linear-gradient(90deg, rgba(200, 170, 109, .1), transparent);
-}
-
-.style-kicker,
-.style-name {
-  display: block;
-}
-
-.style-kicker {
-  color: var(--text-muted);
-  font-size: 9px;
-  letter-spacing: 1.2px;
-  text-transform: uppercase;
-}
-
-.style-name {
-  color: var(--gold-bright);
-  font-family: var(--font-display);
-  font-size: 19px;
-  letter-spacing: .4px;
-}
-
-.style-description {
-  margin: 0;
-  font-size: 11px;
-  line-height: 1.35;
 }
 
 .game {
@@ -777,17 +732,13 @@ h1 {
   }
 
   .rank-panel,
-  .playstyle-panel {
+  .rvi-panel {
     height: auto;
     min-height: 340px;
   }
 }
 
 @media (max-width: 620px) {
-  .style-reading {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .champion {
     grid-template-columns: 18px 42px minmax(0, 1fr) 54px;
   }

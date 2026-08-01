@@ -3,9 +3,23 @@ import {
   normalizeRiotApiKey,
   RiotApiClient,
 } from "../electron/main/riot/api-client.js"
-import { RiotRateLimiter } from "../electron/main/riot/rate-limiter.js"
+import { abortableSleep, RiotRateLimiter } from "../electron/main/riot/rate-limiter.js"
 
 describe("RiotRateLimiter", () => {
+  it("removes abort listeners after both completion and cancellation", async () => {
+    const completed = new AbortController()
+    const completedRemove = vi.spyOn(completed.signal, "removeEventListener")
+    await abortableSleep(0, completed.signal)
+    expect(completedRemove).toHaveBeenCalledWith("abort", expect.any(Function))
+
+    const cancelled = new AbortController()
+    const cancelledRemove = vi.spyOn(cancelled.signal, "removeEventListener")
+    const sleep = abortableSleep(60_000, cancelled.signal)
+    cancelled.abort()
+    await expect(sleep).rejects.toThrow()
+    expect(cancelledRemove).toHaveBeenCalledWith("abort", expect.any(Function))
+  })
+
   it("uses the documented personal-key windows before Riot sends headers", async () => {
     let now = 0
     const sleeps: number[] = []

@@ -44,6 +44,7 @@ import {
   rankChampions,
 } from "./matches/insights.js"
 import { buildSkillReport } from "./matches/skill-report.js"
+import { buildPerformanceProfile } from "./matches/performance-profile.js"
 import { championsNeededFor } from "./challenges/champion-needs.js"
 import { championStatusFor, overlayContentFor } from "./challenges/pinned.js"
 import { Overlay, type OverlayPosition } from "./overlay.js"
@@ -69,8 +70,7 @@ import {
   type ExperimentInput,
   type ExperimentOutcome,
 } from "./database/review-repo.js"
-import { TimelineService } from "./riot/timeline-service.js"
-import { RecentMatchEnricher } from "./riot/recent-match-enricher.js"
+import { LcuTimelineService } from "./lcu-timeline-service.js"
 import {
   evaluateMatchLabels,
   prioritizePerformanceLabels,
@@ -163,6 +163,7 @@ interface Session {
 
 let session: Session | undefined
 let connectRetry: NodeJS.Timeout | undefined
+let lcuDiscovery: LcuDiscovery | undefined
 let tray: Tray | undefined
 let overlay: Overlay | undefined
 let overlayRevision = 0
@@ -198,7 +199,7 @@ let riotBackfills: RiotBackfillRepository | undefined
 let reviewRepository: ReviewRepository | undefined
 let backupManager: BackupManager | undefined
 let dataTrustService: DataTrustService | undefined
-let timelineService: TimelineService | undefined
+let timelineService: LcuTimelineService | undefined
 let reviewService: ReviewService | undefined
 let startupRestoreError: string | undefined
 let riotBackfillAbort: AbortController | undefined
@@ -350,9 +351,9 @@ function saveRiotAccount(
 
 function getTimelineService(win: BrowserWindow) {
   if (!timelineService) {
-    timelineService = new TimelineService(
+    timelineService = new LcuTimelineService(
       getDatabase(),
-      readRiotApiKey,
+      () => session?.client,
       (gameId) => broadcast(win, "timeline:updated", gameId),
       async (gameId, puuid, timeline) => {
         const match = getRepository().getMatch(gameId, puuid)
@@ -522,32 +523,11 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
     console.warn(`Could not determine Riot API route: ${(error as Error).message}`)
   }
 
-  const recentEnricher = regionalRoute && platformId
-    ? new RecentMatchEnricher(
-      readRiotApiKey,
-      regionalRoute,
-      platformId,
-      summoner.puuid,
-      { gameName: summoner.gameName, tagLine: summoner.tagLine },
-      getRepository(),
-      getParticipants(),
-      {
-        onAccountResolved: (matchPuuid) => saveRiotAccount(
-          summoner,
-          matchPuuid,
-          regionalRoute,
-          platformId,
-        ),
-      },
-    )
-    : undefined
-
   const sync = new MatchSync(
     client,
     getRepository(),
     summoner.puuid,
     getParticipants(),
-    recentEnricher,
   )
   const challengeSync = new ChallengeSync(
     client,
@@ -784,8 +764,6 @@ async function startRiotHistoryBackfill(
           active.regionalRoute!,
           active.platformId ?? "",
         )
-        getTimelineService(win).queuePendingBookmarks(active.summoner.puuid)
-        getTimelineService(win).queueRecentMatches(active.summoner.puuid)
       },
       onProgress: (state) => {
         if (revision !== riotBackfillRevision) return
@@ -985,7 +963,9 @@ async function snapshotProfile(win: BrowserWindow) {
 }
 
 function connectToLcu(win: BrowserWindow) {
+  if (lcuDiscovery) return
   const discovery = new LcuDiscovery()
+  lcuDiscovery = discovery
 
   discovery.on("connect", (credentials: LcuCredentials) => {
     stopSession(win)
@@ -995,6 +975,12 @@ function connectToLcu(win: BrowserWindow) {
   discovery.on("disconnect", () => stopSession(win))
 
   discovery.start()
+}
+
+function stopLcuDiscovery() {
+  lcuDiscovery?.stop()
+  lcuDiscovery?.removeAllListeners()
+  lcuDiscovery = undefined
 }
 
 function requireSession() {
@@ -1480,11 +1466,6 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     const encrypted = safeStorage.encryptString(apiKey).toString("base64")
     store.set(RIOT_API_KEY_STORE, encrypted)
     void startRiotHistoryBackfill(win, true)
-    const puuid = currentPuuid()
-    if (puuid) {
-      getTimelineService(win).queuePendingBookmarks(puuid)
-      getTimelineService(win).queueRecentMatches(puuid)
-    }
     return { configured: true }
   })
 
@@ -1646,6 +1627,20 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
   })
 
   ipcMain.handle(
+    "stats:rvi",
+    (_event, filter: Partial<StatsFilter>, family: ModeFamily) => {
+      const scoped = withPuuid(filter)
+      const insightsRepo = getInsights()
+      return buildPerformanceProfile({
+        family,
+        observations: insightsRepo.getObservations(scoped),
+        gradeComponentHistory: insightsRepo.getGradeComponentHistory(scoped, 240),
+        timelineHistory: insightsRepo.getRviTimelineHistory(scoped, 240),
+      })
+    },
+  )
+
+  ipcMain.handle(
     "stats:skill-report",
     (_event, filter: Partial<StatsFilter>, family: ModeFamily) => {
       const scoped = withPuuid(filter)
@@ -1682,6 +1677,8 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
         championStats: repo.getChampionStats(scoped),
         itemObservations: insightsRepo.getFinalItemObservations(scoped),
         gradeComponentHistory: insightsRepo.getGradeComponentHistory(scoped),
+        performanceComponentHistory: insightsRepo.getGradeComponentHistory(scoped, 240),
+        performanceTimelineHistory: insightsRepo.getRviTimelineHistory(scoped, 240),
       })
     },
   )
@@ -1984,6 +1981,7 @@ async function prepareShutdown(
   riotBackfillRevision += 1
   riotBackfillAbort?.abort()
   riotBackfillAbort = undefined
+  stopLcuDiscovery()
   stopSession(win)
 
   // Aborted API requests still need one turn to record their durable paused

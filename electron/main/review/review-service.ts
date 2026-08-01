@@ -4,7 +4,7 @@ import type { ParticipantsRepository } from "../database/participants-repo.js"
 import type { ReviewRepository } from "../database/review-repo.js"
 import { gradeLobby, GRADE_ALGORITHM_VERSION } from "../matches/grade.js"
 import type { MatchRow } from "../matches/types.js"
-import type { TimelineService } from "../riot/timeline-service.js"
+import type { LcuTimelineService } from "../lcu-timeline-service.js"
 import { confidenceForGames, type GradeBreakdown } from "./types.js"
 import { buildSessions } from "./sessions.js"
 
@@ -14,7 +14,7 @@ export class ReviewService {
     private readonly matches: MatchesRepository,
     private readonly participants: ParticipantsRepository,
     private readonly reviews: ReviewRepository,
-    private readonly timelines: TimelineService,
+    private readonly timelines: LcuTimelineService,
   ) {}
 
   overview(puuid: string) {

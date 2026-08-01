@@ -3,6 +3,8 @@ import { computed, onMounted, ref } from "vue"
 import GradeBadge from "../components/GradeBadge.vue"
 import ScrollArea from "../components/ui/ScrollArea.vue"
 import { api } from "../helpers/api"
+import { useApiEvents } from "../helpers/use-api-events"
+import { useCoalescedTask } from "../helpers/use-coalesced-task"
 import { openChampion } from "../helpers/navigation"
 import {
   championIconUrl,
@@ -23,6 +25,7 @@ const props = defineProps<{
   champions: Champion[] | null
   connected: boolean
 }>()
+const events = useApiEvents()
 
 type SortKey =
   | "name"
@@ -97,11 +100,13 @@ async function load() {
   }
 }
 
+const refresh = useCoalescedTask(load)
+
 onMounted(() => {
-  void load()
-  api.on("stats:updated", () => void load())
-  api.on("challenges:updated", () => void load())
-  api.on("lcu:status", () => void load())
+  void refresh()
+  events.on("stats:updated", () => void refresh())
+  events.on("challenges:updated", () => void refresh())
+  events.on("lcu:status", () => void refresh())
 })
 
 const masteryById = computed(() => {

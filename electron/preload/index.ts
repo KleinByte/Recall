@@ -1,14 +1,40 @@
 import { ipcRenderer, contextBridge } from "electron"
 
+type IpcListener = Parameters<typeof ipcRenderer.on>[1]
+
+interface ChannelSubscription {
+  listeners: Map<string, IpcListener>
+  wrapped: IpcListener
+}
+
+// Context-bridge callback proxies do not have stable identity across separate
+// `on` and `off` calls. Keep one native listener per channel and address the
+// renderer owners by a plain string instead.
+const channelSubscriptions = new Map<string, ChannelSubscription>()
+
 // --------- Expose some API to the Renderer process ---------
 contextBridge.exposeInMainWorld("ipcRenderer", {
-  on(...args: Parameters<typeof ipcRenderer.on>) {
-    const [channel, listener] = args
-    return ipcRenderer.on(channel, (event, ...args) => listener(event, ...args))
+  on(channel: string, listener: IpcListener, subscriptionId: string) {
+    let subscription = channelSubscriptions.get(channel)
+    if (!subscription) {
+      const listeners = new Map<string, IpcListener>()
+      const wrapped: IpcListener = (event, ...payload) => {
+        for (const current of [...listeners.values()]) current(event, ...payload)
+      }
+      subscription = { listeners, wrapped }
+      channelSubscriptions.set(channel, subscription)
+      ipcRenderer.on(channel, wrapped)
+    }
+    // Re-registering the same owner (for example after HMR) replaces its proxy.
+    subscription.listeners.set(subscriptionId, listener)
   },
-  off(...args: Parameters<typeof ipcRenderer.off>) {
-    const [channel, ...omit] = args
-    return ipcRenderer.off(channel, ...omit)
+  off(channel: string, _listener: IpcListener, subscriptionId: string) {
+    const subscription = channelSubscriptions.get(channel)
+    if (!subscription) return
+    subscription.listeners.delete(subscriptionId)
+    if (subscription.listeners.size > 0) return
+    ipcRenderer.off(channel, subscription.wrapped)
+    channelSubscriptions.delete(channel)
   },
   send(...args: Parameters<typeof ipcRenderer.send>) {
     const [channel, ...omit] = args
@@ -31,11 +57,13 @@ function domReady(
     if (condition.includes(document.readyState)) {
       resolve(true)
     } else {
-      document.addEventListener("readystatechange", () => {
+      const handleReadyState = () => {
         if (condition.includes(document.readyState)) {
+          document.removeEventListener("readystatechange", handleReadyState)
           resolve(true)
         }
-      })
+      }
+      document.addEventListener("readystatechange", handleReadyState)
     }
   })
 }

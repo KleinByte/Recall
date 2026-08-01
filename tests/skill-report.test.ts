@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { InsightObservation, FinalItemObservation } from "../electron/main/database/insights-repo.js"
+import type { InsightObservation, FinalItemObservation, RviTimelineObservation } from "../electron/main/database/insights-repo.js"
 import type { ChampionStatRow } from "../electron/main/database/matches-repo.js"
 import {
   buildBestGamePattern,
@@ -10,6 +10,7 @@ import {
   buildItemFindings,
   buildTrendFindings,
   buildSkillReport,
+  buildDeathMap,
   type SkillReportV2,
 } from "../electron/main/matches/skill-report.js"
 import { computePerGameAxes } from "../electron/main/matches/style.js"
@@ -774,6 +775,63 @@ describe("Trend findings", () => {
 })
 
 // --- Report composition ---
+
+describe("Death map", () => {
+  const timeline = (gameId: number, participantId: number): RviTimelineObservation => ({
+    gameId,
+    playedAt: 1_700_000_000_000,
+    durationSecs: 2_100,
+    participantId,
+    teamId: 100,
+    summary: {
+      frames: [],
+      turningPoints: [],
+      events: [
+        {
+          eventId: `${gameId}:owner-death`,
+          timestamp: 12 * 60_000,
+          type: "CHAMPION_KILL",
+          category: "kill",
+          participantId: 8,
+          targetId: participantId,
+          position: { x: 6_250, y: 7_100 },
+        },
+        {
+          eventId: `${gameId}:other-death`,
+          timestamp: 17 * 60_000,
+          type: "CHAMPION_KILL",
+          category: "kill",
+          participantId: 9,
+          targetId: participantId + 1,
+          position: { x: 8_000, y: 8_000 },
+        },
+        {
+          eventId: `${gameId}:invalid-position`,
+          timestamp: 31 * 60_000,
+          type: "CHAMPION_KILL",
+          category: "kill",
+          participantId: 9,
+          targetId: participantId,
+          position: { x: 20_000, y: 8_000 },
+        },
+      ],
+    },
+  })
+
+  it("keeps only the tracked player's valid Summoner's Rift death positions", () => {
+    expect(buildDeathMap("sr", [timeline(1, 4), timeline(2, 6)])).toEqual({
+      timelineGames: 2,
+      deaths: [
+        { gameId: 1, playedAt: 1_700_000_000_000, timestamp: 720_000, x: 6_250, y: 7_100 },
+        { gameId: 2, playedAt: 1_700_000_000_000, timestamp: 720_000, x: 6_250, y: 7_100 },
+      ],
+    })
+  })
+
+  it("does not project non-Rift timelines onto the Rift image", () => {
+    expect(buildDeathMap("aram", [timeline(1, 4)])).toBeUndefined()
+  })
+})
 
 describe("SkillReportV2", () => {
   const baseInput = () => ({

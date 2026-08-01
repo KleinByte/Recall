@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue"
 import { api } from "../helpers/api"
+import { useApiEvents } from "../helpers/use-api-events"
 import { championIconUrl, championNameById } from "../helpers/format"
 import type { Champion } from "../types/lol"
 import type { ChampionStatus } from "../types/stats"
 
 const props = defineProps<{ champions: Champion[] | null }>()
+const events = useApiEvents()
 
 const championId = ref<number | null>(null)
 const statuses = ref<ChampionStatus[]>([])
@@ -24,17 +26,17 @@ async function refresh(id: number | null) {
 }
 
 onMounted(() => {
-  api.on("pick", (id: number | null) => {
+  events.on("pick", (id: number | null) => {
     championId.value = id
   })
 
   // The banner belongs to champion select; once the game starts it has said
   // everything it can.
-  api.on("game-start", () => {
+  events.on("game-start", () => {
     championId.value = null
   })
 
-  api.on("lcu:status", (payload: { connected: boolean }) => {
+  events.on("lcu:status", (payload: { connected: boolean }) => {
     if (!payload.connected) championId.value = null
   })
 })

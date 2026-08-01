@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
 import { api } from "../helpers/api"
+import { useApiEvents } from "../helpers/use-api-events"
 import {
   championIconUrl,
   championNameById,
@@ -25,6 +26,7 @@ const props = defineProps<{
   champions: Champion[] | null
   aramStats: AramStats | null
 }>()
+const events = useApiEvents()
 
 const empty: LiveSession = {
   phase: "Idle",
@@ -101,7 +103,7 @@ onMounted(async () => {
   if (stored) objective.value = stored
   void loadGameAssets().then((result) => { assets.value = result })
   await update(await api.getLiveSession())
-  api.on("live:updated", (next: LiveSession) => void update(next))
+  events.on("live:updated", (next: LiveSession) => void update(next))
 })
 
 const localPlayer = computed(() =>

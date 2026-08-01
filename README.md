@@ -68,10 +68,11 @@ experiments. The Review page explains the grading calculation, compares a game
 only with matches that happened before it, and groups games into sessions so a
 rough night does not get flattened into a lifetime average.
 
-Match timelines are opt-in. Use **Load timeline**, or bookmark a match, and
-Recall will fetch and cache a compact local summary with kills, assists, item
-transactions, levels, wards, objectives, team gold, and turning points. Raw
-timeline responses are not stored.
+Recall captures recent timelines from the authenticated local League Client and
+caches a compact summary. The exact event families vary with what the current
+client build exposes; periodic gold, experience, position, kill, and structure
+data are kept when available. Raw timeline responses are not stored, and no
+developer key is used for normal timeline requests.
 
 ## How history syncing works
 
@@ -82,11 +83,12 @@ all modes. Recall checks that window often and permanently saves new games, but
 the client cannot provide a deeper local archive. For the best coverage, run
 Recall regularly instead of waiting months between syncs.
 
-You can optionally add a personal Riot API key in Settings. Recall uses
-Match-V5 to backfill the matches Riot makes available for the signed-in
-account, resumes long imports after restarts, and respects the rate limits
-reported by Riot. Developer keys expire on Riot's schedule, so a key that
-worked yesterday may need to be regenerated.
+You can optionally add a personal Riot API key in Settings. It is used only for
+the full Match-V5 history import started there. Recall resumes that import after
+restarts and respects the rate limits reported by Riot. Normal post-game sync,
+full recent scoreboards, grades, labels, and recent timelines remain local and
+keyless. Developer keys expire on Riot's schedule, so a key that worked
+yesterday may need to be regenerated.
 
 Some rotating modes are not consistently exposed through Match-V5. ARAM:
 Mayhem games can still be recorded when they appear in the League client's

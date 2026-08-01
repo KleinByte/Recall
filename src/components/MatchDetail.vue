@@ -70,9 +70,9 @@ const kdaOf = (row: ParticipantRow) =>
     <p v-if="loading" class="muted note">Reading the scoreboard…</p>
 
     <p v-else-if="!sides.length" class="muted note">
-      No scoreboard was recorded for this game. Add a Riot API key in Settings
-      to import full Match-V5 scoreboards where Riot still exposes them; local
-      client-only games may keep just your own line.
+      No scoreboard was recorded for this game. Recent scoreboards come from
+      the League client automatically. If this match predates its local window,
+      the optional Settings history import may recover the Match-V5 scoreboard.
     </p>
 
     <div v-else class="sides">

@@ -2,6 +2,8 @@
 import { computed, onMounted, ref } from "vue"
 import RankGraph from "../components/RankGraph.vue"
 import { api } from "../helpers/api"
+import { useApiEvents } from "../helpers/use-api-events"
+import { useCoalescedTask } from "../helpers/use-coalesced-task"
 import {
   championIconUrl,
   championNameById,
@@ -23,6 +25,7 @@ const props = defineProps<{
   champions: Champion[] | null
   connected: boolean
 }>()
+const events = useApiEvents()
 
 const QUEUE_LABELS: Record<string, string> = {
   RANKED_SOLO_5x5: "Solo/Duo",
@@ -138,12 +141,14 @@ async function load() {
   }
 }
 
+const refresh = useCoalescedTask(load)
+
 onMounted(() => {
-  void load()
-  api.on("stats:updated", () => void load())
-  api.on("ranked:updated", () => void load())
-  api.on("challenges:updated", () => void load())
-  api.on("lcu:status", () => void load())
+  void refresh()
+  events.on("stats:updated", () => void refresh())
+  events.on("ranked:updated", () => void refresh())
+  events.on("challenges:updated", () => void refresh())
+  events.on("lcu:status", () => void refresh())
 })
 
 const rankedQueues = computed(() =>

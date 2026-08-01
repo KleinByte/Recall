@@ -4,6 +4,8 @@ import MatchList from "../components/MatchList.vue"
 import Pagination from "../components/Pagination.vue"
 import StatCard from "../components/StatCard.vue"
 import { api } from "../helpers/api"
+import { useApiEvents } from "../helpers/use-api-events"
+import { useCoalescedTask } from "../helpers/use-coalesced-task"
 import {
   formatDecimal,
   formatPercent,
@@ -23,6 +25,7 @@ const props = defineProps<{
   champions: Champion[] | null
   connected: boolean
 }>()
+const events = useApiEvents()
 
 const MODES: { value: TrackedMode; label: string }[] = [
   { value: "sr_ranked_solo", label: "Ranked Solo" },
@@ -128,26 +131,29 @@ async function loadPlayedChampions() {
   }
 }
 
+const refreshMatches = useCoalescedTask(load)
+const refreshChampionIds = useCoalescedTask(loadPlayedChampions)
+
 onMounted(async () => {
-  await loadPlayedChampions()
-  void load()
-  api.on("stats:updated", () => {
-    void loadPlayedChampions()
-    void load()
+  await refreshChampionIds()
+  void refreshMatches()
+  events.on("stats:updated", () => {
+    void refreshChampionIds()
+    void refreshMatches()
   })
-  api.on("lcu:status", () => void load())
+  events.on("lcu:status", () => void refreshMatches())
   void api.listTags().then((rows) => { tags.value = rows })
   void api.listExperiments().then((rows) => { experiments.value = rows })
-  api.on("review:updated", () => void load())
+  events.on("review:updated", () => void refreshMatches())
 })
 
 // Any filter change starts again from the first page.
 watch(query, () => {
-  page.value = 1
-  void load()
+  if (page.value !== 1) page.value = 1
+  else void refreshMatches()
 })
 
-watch([page, pageSize], () => void load())
+watch([page, pageSize], () => void refreshMatches())
 
 const toggleMode = (mode: TrackedMode) => {
   selectedModes.value = selectedModes.value.includes(mode)

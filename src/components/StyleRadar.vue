@@ -89,14 +89,14 @@ const option = computed<EChartsCoreOption>(() => {
   <BaseEChart
     :option="option"
     ariaLabel="Playstyle fingerprint across the displayed axes."
-    :height="height ?? '640px'"
+    :height="height ?? '360px'"
     class="radar"
   />
 </template>
 
 <style scoped>
 .radar {
-  max-width: 820px;
+  max-width: 600px;
   margin: 0 auto;
 }
 </style>

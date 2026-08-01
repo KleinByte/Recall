@@ -1,6 +1,7 @@
 import { use } from "echarts/core"
 import {
   BarChart,
+  HeatmapChart,
   LineChart,
   RadarChart,
   ScatterChart,
@@ -15,6 +16,7 @@ import {
   MarkLineComponent,
   RadarComponent,
   TooltipComponent,
+  VisualMapContinuousComponent,
 } from "echarts/components"
 import { LabelLayout, UniversalTransition } from "echarts/features"
 import { CanvasRenderer } from "echarts/renderers"
@@ -26,6 +28,7 @@ export function registerBaseCharts() {
 
   use([
     BarChart,
+    HeatmapChart,
     LineChart,
     RadarChart,
     ScatterChart,
@@ -38,6 +41,7 @@ export function registerBaseCharts() {
     MarkLineComponent,
     RadarComponent,
     TooltipComponent,
+    VisualMapContinuousComponent,
     LabelLayout,
     UniversalTransition,
     CanvasRenderer,

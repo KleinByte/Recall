@@ -12,8 +12,10 @@ import type { RankedHistory } from "../types/stats"
 const props = withDefaults(defineProps<{
   histories: RankedHistory[]
   allowSeasonSelection?: boolean
+  compact?: boolean
 }>(), {
   allowSeasonSelection: false,
+  compact: false,
 })
 
 const QUEUE_LABELS: Record<string, string> = {
@@ -102,7 +104,12 @@ const historyMeta = computed(() => {
 </script>
 
 <template>
-  <Panel title="Rank over time" :meta="periodLabel" class="ranked-history-panel">
+  <Panel
+    title="Rank over time"
+    :meta="periodLabel"
+    class="ranked-history-panel"
+    :class="{ compact }"
+  >
     <template #actions>
       <div class="rank-controls">
         <label class="sr-only" for="ranked-queue">Ranked queue</label>
@@ -141,7 +148,7 @@ const historyMeta = computed(() => {
           <span class="muted queue-record">{{ latest.wins }}W {{ latest.losses }}L</span>
         </div>
       </div>
-      <RankGraph :points="points" />
+      <RankGraph :points="points" :height="compact ? '150px' : '220px'" />
     </template>
     <p v-else class="muted empty-period">
       No {{ queueLabel(selectedQueue) }} readings were recorded during {{ periodLabel }}.
@@ -208,6 +215,19 @@ const historyMeta = computed(() => {
   margin: 0;
   text-align: center;
   font-size: 12px;
+}
+
+.compact .rank-summary {
+  align-items: center;
+  margin-bottom: 0;
+}
+
+.compact .queue-rank {
+  font-size: 16px;
+}
+
+.compact .empty-period {
+  min-height: 150px;
 }
 
 @media (max-width: 620px) {

@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import GradeBadge from "../GradeBadge.vue"
-import DriftChart from "../DriftChart.vue"
-import StyleRadar from "../StyleRadar.vue"
-import StyleDeltaChart from "./StyleDeltaChart.vue"
+import RankedHistoryPanel from "../RankedHistoryPanel.vue"
+import PerformanceProfile from "./PerformanceProfile.vue"
 import OutcomeTrendChart from "./OutcomeTrendChart.vue"
 import MiniBar from "../ui/MiniBar.vue"
 import Panel from "../ui/Panel.vue"
 import StatTile from "../ui/StatTile.vue"
 import { itemAsset } from "../../helpers/items"
+import { classifyRviIdentity } from "../../helpers/rvi-identity"
 import {
   championIconUrl,
   championNameById,
@@ -18,13 +18,14 @@ import {
   GRADE_ORDER,
   gradeFromScore,
 } from "../../helpers/format"
-import type { LobbyMetric, ModeFamily, SkillReportV2 } from "../../types/stats"
+import type { LobbyMetric, ModeFamily, RankedHistory, SkillReportV2 } from "../../types/stats"
 import type { Champion } from "../../types/lol"
 
 const props = defineProps<{
   overview: SkillReportV2["overview"]
   family: ModeFamily
   champions: Champion[] | null
+  ranked: RankedHistory[]
 }>()
 
 const summary = computed(() => props.overview.summary)
@@ -53,11 +54,9 @@ const comparisonValue = (metric: LobbyMetric) =>
 const comparisonUnit = (scope: "role" | "lobby") =>
   scope === "role" ? "score" : "/10"
 
-const styleComparison = computed(() => {
-  const style = props.overview.style
-  if (!style?.earlier || !style.recent) return undefined
-  return { earlier: style.earlier, recent: style.recent }
-})
+const rviIdentity = computed(() => props.overview.performance
+  ? classifyRviIdentity(props.overview.performance)
+  : undefined)
 </script>
 
 <template>
@@ -97,65 +96,19 @@ const styleComparison = computed(() => {
       />
     </section>
 
-    <Panel
-      v-if="overview.style"
-      title="Playstyle"
-      :meta="`${overview.style.career.games} games`"
-    >
-      <div class="playstyle">
-        <div class="radar-side">
-          <StyleRadar
-            :axes="overview.style.career.axes"
-            :recent="styleComparison?.recent.axes"
-            primary-label="All games"
-            secondary-label="Last 10 games"
-          />
-          <div v-if="styleComparison" class="radar-legend">
-            <span class="legend-key career" /> <span>All games</span>
-            <span class="legend-key recent" /> <span>Last 10 games</span>
-          </div>
-        </div>
-        <div class="axis-list">
-          <div
-            v-for="axis in overview.style.career.axes"
-            :key="axis.key"
-            class="axis-row"
-            :title="`${axis.description}. Formula: ${axis.formula}`"
-          >
-            <div class="axis-copy">
-              <span>{{ axis.label }}</span>
-              <span class="muted formula">{{ axis.formula }}</span>
-            </div>
-            <MiniBar :value="axis.value" />
-            <span class="numeric axis-value">{{ Math.round(axis.value * 100) }}%</span>
-          </div>
-          <p class="muted footnote">
-            Display scales describe the mix of what happened in your games. They are not
-            population benchmarks.
-          </p>
-        </div>
-      </div>
-      <section
-        v-if="styleComparison"
-        class="style-comparison"
-      >
-        <header>
-          <h3>Playstyle change</h3>
-          <p class="muted">Your last 10 games compared with the games before them.</p>
-        </header>
-        <StyleDeltaChart
-          :baseline="styleComparison.earlier.axes"
-          :recent="styleComparison.recent.axes"
-        />
-      </section>
-      <section v-if="overview.style.drift.length >= 2" class="style-drift">
-        <header>
-          <h3>Playstyle over time</h3>
-          <p class="muted">Rolling 10-game windows, oldest to newest.</p>
-        </header>
-        <DriftChart :windows="overview.style.drift" />
-      </section>
-    </Panel>
+    <RankedHistoryPanel
+      v-if="ranked.length"
+      class="overview-rank"
+      :histories="ranked"
+      allow-season-selection
+      compact
+    />
+
+    <PerformanceProfile
+      v-if="overview.performance"
+      :profile="overview.performance"
+      :identity="rviIdentity"
+    />
 
     <Panel
       v-if="overview.lobby"
@@ -294,122 +247,21 @@ const styleComparison = computed(() => {
 
 .kpis {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(138px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
   grid-auto-rows: 1fr;
   gap: var(--space-3);
 }
 
-.playstyle {
-  display: grid;
-  grid-template-columns: minmax(420px, 1.6fr) minmax(260px, 0.7fr);
-  gap: var(--space-5);
-  align-items: start;
+.overview-rank {
+  width: min(100%, 920px);
 }
 
-.radar-side {
-  min-width: 0;
-}
-
-.radar-legend {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-2);
-  margin-top: var(--space-2);
-  color: var(--text-secondary);
-  font-size: 11px;
-}
-
-.legend-key {
-  width: 12px;
-  height: 2px;
-}
-
-.legend-key.career {
-  background: var(--gold);
-}
-
-.legend-key.recent {
-  margin-left: var(--space-2);
-  background: var(--cyan);
-}
-
-.style-comparison {
-  margin-top: var(--space-5);
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--border-subtle);
-}
-
-.style-drift {
-  margin-top: var(--space-5);
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--border-subtle);
-}
-
-.style-drift h3,
-.style-drift p {
-  margin: 0;
-}
-
-.style-drift h3 {
-  color: var(--text-primary);
-  font-family: var(--font-heading);
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.style-drift p {
-  margin-top: var(--space-1);
-  font-size: 11px;
-}
-
-.style-comparison h3,
-.style-comparison p {
-  margin: 0;
-}
-
-.style-comparison h3 {
-  color: var(--text-primary);
-  font-family: var(--font-heading);
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.style-comparison p {
-  margin-top: var(--space-1);
-  font-size: 11px;
-}
-
-.axis-list,
 .rows,
 .grades {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
 }
-
-.axis-row {
-  display: grid;
-  grid-template-columns: minmax(110px, 0.8fr) minmax(80px, 1fr) 40px;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.axis-copy {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  color: var(--text-primary);
-  font-size: 14px;
-}
-
-.formula {
-  font-size: 11px;
-  overflow-wrap: anywhere;
-}
-
-.axis-value,
 .small {
   text-align: right;
   font-size: 12px;
@@ -615,12 +467,6 @@ const styleComparison = computed(() => {
   font-family: var(--font-numeric);
 }
 
-@media (max-width: 1280px) {
-  .playstyle {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
 @media (max-width: 800px) {
   .context-grid,
   .contribution-layout {
@@ -630,5 +476,14 @@ const styleComparison = computed(() => {
   .contribution-metrics {
     grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   }
+}
+
+@media (max-width: 560px) {
+  .kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2);
+  }
+
+  .overview-grid { grid-template-columns: minmax(0, 1fr); }
 }
 </style>

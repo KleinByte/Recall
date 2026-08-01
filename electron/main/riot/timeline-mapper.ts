@@ -154,7 +154,11 @@ export function mapTimeline(
 
   for (const frame of frames) {
     const timestamp = numberOrZero(frame.timestamp)
-    const participantFrames = Object.values(frame.participantFrames ?? {})
+    const participantFrames = Object.entries(frame.participantFrames ?? {})
+      .map(([key, participant]) => ({
+        ...participant,
+        participantId: participant.participantId ?? Number(key),
+      }))
     let blueGold = 0
     let redGold = 0
     for (const participant of participantFrames) {

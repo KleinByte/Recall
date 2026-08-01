@@ -2,13 +2,15 @@
 import { onMounted, ref } from "vue"
 import { currentAppVersion } from "../data/patch-notes"
 import { api } from "../helpers/api"
+import { useApiEvents } from "../helpers/use-api-events"
 import RecallMark from "./RecallMark.vue"
 
 const isMaximized = ref(false)
+const events = useApiEvents()
 
 onMounted(async () => {
   isMaximized.value = await api.isWindowMaximized()
-  api.on("window:maximized", (value: boolean) => {
+  events.on("window:maximized", (value: boolean) => {
     isMaximized.value = value
   })
 })

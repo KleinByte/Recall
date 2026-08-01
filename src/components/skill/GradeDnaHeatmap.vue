@@ -65,7 +65,17 @@ const option = computed<EChartsCoreOption>(() => ({
   series: [{
     type: "heatmap",
     data: heatData.value,
-    label: { show: games.value.length <= 14, formatter: (raw: unknown) => `${(raw as { value: number[] }).value[2]}` },
+    label: {
+      show: games.value.length <= 14,
+      color: "#f0e6d2",
+      fontSize: 10,
+      fontWeight: 700,
+      backgroundColor: "rgba(6, 14, 28, .74)",
+      borderRadius: 2,
+      padding: [2, 3],
+      textBorderWidth: 0,
+      formatter: (raw: unknown) => `${(raw as { value: number[] }).value[2]}`,
+    },
     emphasis: { itemStyle: { shadowBlur: 10, shadowColor: "rgba(0,0,0,0.5)" } },
   }],
 }))

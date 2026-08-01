@@ -34,9 +34,11 @@ const nodes = computed(() => props.champions
 const option = computed<EChartsCoreOption>(() => ({
   tooltip: {
     formatter: (raw: unknown) => {
-      const node = (raw as { data: { name: string; recall: SkillChampionPoint } }).data
-      const champion = node.recall
-      return `<strong>${escapeTooltip(node.name)}</strong><br/>${champion.games} games · ${Math.round(champion.winRate * 100)}% win rate<br/>${champion.avgGradeScore === undefined ? "No graded games" : `Average ${escapeTooltip(recallGradeFromScore(champion.avgGradeScore) ?? "–")} (${champion.avgGradeScore.toFixed(2)})`}<br/>${champion.kda.toFixed(2)} KDA`
+      const item = raw as { name?: unknown; data?: { name?: unknown; recall?: SkillChampionPoint } }
+      const champion = item.data?.recall
+      if (!champion) return ""
+      const name = item.data?.name ?? item.name ?? championNameById(props.catalog, champion.championId)
+      return `<strong>${escapeTooltip(name)}</strong><br/>${champion.games} games · ${Math.round(champion.winRate * 100)}% win rate<br/>${champion.avgGradeScore === undefined ? "No graded games" : `Average ${escapeTooltip(recallGradeFromScore(champion.avgGradeScore) ?? "–")} (${champion.avgGradeScore.toFixed(2)})`}<br/>${champion.kda.toFixed(2)} KDA`
     },
   },
   series: [{
@@ -44,10 +46,18 @@ const option = computed<EChartsCoreOption>(() => ({
     roam: false,
     nodeClick: false,
     breadcrumb: { show: false },
-    label: { show: true, formatter: (raw: unknown) => {
-      const item = raw as { name: string; data: { recall: SkillChampionPoint } }
-      return `${item.name}\n${item.data.recall.games} games`
-    } },
+    label: {
+      show: true,
+      color: "#f0e6d2",
+      fontWeight: 600,
+      textBorderWidth: 0,
+      textShadowBlur: 4,
+      textShadowColor: "rgba(0, 0, 0, .82)",
+      formatter: (raw: unknown) => {
+        const item = raw as { name: string; data: { recall: SkillChampionPoint } }
+        return `${item.name}\n${item.data.recall.games} games`
+      },
+    },
     upperLabel: { show: false },
     data: nodes.value,
   }],

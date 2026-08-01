@@ -55,7 +55,15 @@ const option = computed<EChartsCoreOption>(() => ({
     markLine: {
       symbol: "none",
       silent: true,
-      data: [{ yAxis: 0, label: { formatter: "Lobby average", position: "insideEndTop" } }],
+      data: [{ yAxis: 0, label: {
+        formatter: "Lobby average",
+        position: "insideEndTop",
+        color: CHART_COLOURS.cyan,
+        backgroundColor: "rgba(6, 14, 28, .82)",
+        borderRadius: 3,
+        padding: [3, 5],
+        textBorderWidth: 0,
+      } }],
       lineStyle: { color: CHART_COLOURS.cyan, type: "dashed", opacity: 0.62 },
     },
   }],

@@ -19,6 +19,7 @@ import type {
   MatchQuery,
   MatchRow,
   ModeFamily,
+  PerformanceProfile,
   PersonalRecord,
   ProfileSummary,
   RankedHistory,
@@ -51,6 +52,54 @@ import type {
 } from "../types/review"
 
 const ipc = () => window.ipcRenderer
+
+type IpcSubscriber = (...args: any[]) => void
+
+interface IpcChannelSubscription {
+  renderer: typeof window.ipcRenderer
+  subscribers: Set<IpcSubscriber>
+  subscriptionId: string
+  wrapped: (_event: unknown, ...args: any[]) => void
+}
+
+/** One native Electron listener per channel, fanned out to active Vue owners. */
+const ipcSubscriptions = new Map<string, IpcChannelSubscription>()
+const ipcSubscriptionOwner = `recall-renderer-${Math.random().toString(36).slice(2)}`
+
+function subscribe(channel: string, subscriber: IpcSubscriber) {
+  let subscription = ipcSubscriptions.get(channel)
+  if (!subscription) {
+    const renderer = ipc()
+    const subscribers = new Set<IpcSubscriber>()
+    const wrapped = (_event: unknown, ...args: any[]) => {
+      for (const listener of [...subscribers]) listener(...args)
+    }
+    const subscriptionId = `${ipcSubscriptionOwner}:${channel}`
+    subscription = { renderer, subscribers, subscriptionId, wrapped }
+    ipcSubscriptions.set(channel, subscription)
+    renderer.on(channel, wrapped, subscriptionId)
+  }
+
+  subscription.subscribers.add(subscriber)
+  return () => {
+    const current = ipcSubscriptions.get(channel)
+    if (!current) return
+    current.subscribers.delete(subscriber)
+    // Keep the single channel bridge warm for the renderer lifetime. Page
+    // navigation and Vue HMR can then add/remove owners without repeatedly
+    // crossing Electron's context bridge. The module HMR disposer below owns
+    // the native bridge itself.
+  }
+}
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    for (const [channel, subscription] of ipcSubscriptions) {
+      subscription.renderer.off(channel, subscription.wrapped, subscription.subscriptionId)
+    }
+    ipcSubscriptions.clear()
+  })
+}
 
 /**
  * Copies a value to plain data.
@@ -225,6 +274,13 @@ export const api = {
     family: ModeFamily,
   ): Promise<SkillReportV2> {
     return invoke("stats:skill-report", filter, family)
+  },
+
+  getRviProfile(
+    filter: Partial<StatsFilter>,
+    family: ModeFamily,
+  ): Promise<PerformanceProfile | undefined> {
+    return invoke("stats:rvi", filter, family)
   },
 
   getDrift(
@@ -456,11 +512,11 @@ export const api = {
   },
 
   onUpdateStatus(listener: (status: UpdateStatus) => void) {
-    ipc().on("app:update-status", (_event, status: UpdateStatus) => listener(status))
+    return subscribe("app:update-status", (status: UpdateStatus) => listener(status))
   },
 
   on(channel: string, listener: (...args: any[]) => void) {
-    ipc().on(channel, (_event, ...args) => listener(...args))
+    return subscribe(channel, listener)
   },
 }
 

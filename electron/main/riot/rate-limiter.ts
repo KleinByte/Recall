@@ -21,15 +21,17 @@ export const abortableSleep: Sleep = (milliseconds, signal) =>
       return
     }
 
-    const timer = setTimeout(resolve, Math.max(0, milliseconds))
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer)
-        reject(signal.reason ?? new DOMException("Aborted", "AbortError"))
-      },
-      { once: true },
-    )
+    const finish = () => {
+      signal?.removeEventListener("abort", abort)
+      resolve()
+    }
+    const abort = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener("abort", abort)
+      reject(signal?.reason ?? new DOMException("Aborted", "AbortError"))
+    }
+    const timer = setTimeout(finish, Math.max(0, milliseconds))
+    signal?.addEventListener("abort", abort, { once: true })
   })
 
 function pairs(value: string | null): { count: number; windowMs: number }[] {

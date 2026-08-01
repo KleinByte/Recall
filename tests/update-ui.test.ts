@@ -59,7 +59,11 @@ describe("update API", () => {
       "app:update-retry",
       "app:update-install",
     ])
-    expect(on).toHaveBeenCalledWith("app:update-status", expect.any(Function))
+    expect(on).toHaveBeenCalledWith(
+      "app:update-status",
+      expect.any(Function),
+      expect.stringMatching(/:app:update-status$/),
+    )
   })
 })
 
@@ -68,7 +72,8 @@ describe("update-ready notification", () => {
     const app = readFileSync("src/App.vue", "utf8")
     const banner = readFileSync("src/components/UpdateReadyBanner.vue", "utf8")
 
-    expect(app).toContain("api.onUpdateStatus")
+    expect(app).toContain("useApiEvents")
+    expect(app).toContain("events.onUpdateStatus")
     expect(app).toContain("UpdateReadyBanner")
     expect(app).toContain(':status="updateStatus"')
     expect(banner).toContain("status.kind === 'downloaded'")

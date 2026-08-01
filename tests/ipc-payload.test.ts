@@ -13,6 +13,31 @@ afterEach(() => {
  * cross the boundary unless it is copied first.
  */
 describe("toPlainPayload", () => {
+  it("removes renderer owners without recreating the native channel bridge", () => {
+    const on = vi.fn()
+    const off = vi.fn()
+    vi.stubGlobal("window", { ipcRenderer: { on, off } })
+    const listener = vi.fn()
+
+    const dispose = api.on("lcu:status", listener)
+    const wrapped = on.mock.calls[0][1]
+    wrapped({}, { connected: true })
+    dispose()
+
+    expect(listener).toHaveBeenCalledWith({ connected: true })
+    expect(on.mock.calls[0][2]).toMatch(/:lcu:status$/)
+    expect(off).not.toHaveBeenCalled()
+
+    const nextListener = vi.fn()
+    const disposeNext = api.on("lcu:status", nextListener)
+    wrapped({}, { connected: false })
+    disposeNext()
+
+    expect(on).toHaveBeenCalledTimes(1)
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(nextListener).toHaveBeenCalledWith({ connected: false })
+  })
+
   it("invokes the full refresh IPC endpoint", async () => {
     const invoke = vi.fn().mockResolvedValue({ fetched: 0, inserted: 0 })
     vi.stubGlobal("window", { ipcRenderer: { invoke } })
@@ -99,5 +124,14 @@ describe("getSkillReport", () => {
       { modes: ["sr_ranked_solo", "sr_ranked_flex"] },
       "sr",
     )
+  })
+
+  it("loads the dashboard RVI profile through its focused endpoint", async () => {
+    const invoke = vi.fn().mockResolvedValue({ score: 61, dimensions: [] })
+    vi.stubGlobal("window", { ipcRenderer: { invoke } })
+
+    await api.getRviProfile({ modeFamily: "sr" }, "sr")
+
+    expect(invoke).toHaveBeenCalledWith("stats:rvi", { modeFamily: "sr" }, "sr")
   })
 })

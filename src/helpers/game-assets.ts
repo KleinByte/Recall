@@ -21,7 +21,7 @@ interface DDragonItem {
 }
 
 interface CommunityAugment {
-  id?: number
+  id?: number | string
   nameTRA?: string
   name?: string
   descriptionTRA?: string
@@ -32,6 +32,11 @@ interface CommunityAugment {
 }
 
 let catalogPromise: Promise<GameAssetCatalog> | undefined
+
+export function normalizeAugmentId(value: unknown): number | undefined {
+  const id = Number(value)
+  return Number.isSafeInteger(id) && id > 0 ? id : undefined
+}
 
 function communityIcon(path?: string) {
   if (!path) return ""
@@ -79,9 +84,10 @@ export function loadGameAssets(): Promise<GameAssetCatalog> {
         ? response.json() as Promise<CommunityAugment[]>
         : [])
       for (const augment of augmentData) {
-        if (!augment.id) continue
-        augments[augment.id] = {
-          name: augment.nameTRA ?? augment.name ?? `Augment ${augment.id}`,
+        const augmentId = normalizeAugmentId(augment.id)
+        if (augmentId === undefined) continue
+        augments[augmentId] = {
+          name: augment.nameTRA ?? augment.name ?? `Augment ${augmentId}`,
           description: augment.descriptionTRA ?? augment.description,
           icon: communityIcon(augment.augmentSmallIconPath ?? augment.iconPath),
           rarity: augment.rarity,

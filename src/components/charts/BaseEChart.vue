@@ -19,6 +19,8 @@ const props = withDefaults(defineProps<{
 const root = ref<HTMLElement>()
 let chart: ECharts | undefined
 let observer: ResizeObserver | undefined
+let updateFrame: number | undefined
+let resizeFrame: number | undefined
 
 const reducedMotion = () =>
   typeof window !== "undefined" &&
@@ -44,17 +46,38 @@ function update() {
   })
 }
 
+function scheduleUpdate() {
+  if (updateFrame !== undefined) cancelAnimationFrame(updateFrame)
+  updateFrame = requestAnimationFrame(() => {
+    updateFrame = undefined
+    update()
+  })
+}
+
 onMounted(() => {
   if (!root.value) return
   chart = init(root.value, RECALL_CHART_THEME, { renderer: "canvas" })
   update()
-  observer = new ResizeObserver(() => chart?.resize())
+  observer = new ResizeObserver(() => {
+    if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame)
+    resizeFrame = requestAnimationFrame(() => {
+      resizeFrame = undefined
+      chart?.resize()
+    })
+  })
   observer.observe(root.value)
 })
 
-watch(preparedOption, update, { deep: true })
+// ECharts rejects setOption while it is dispatching interactions such as a
+// tooltip or zoom event. A post-render animation frame both coalesces rapid
+// reactive changes and waits until that interaction has completed.
+watch(preparedOption, scheduleUpdate, { flush: "post" })
 
 onBeforeUnmount(() => {
+  if (updateFrame !== undefined) cancelAnimationFrame(updateFrame)
+  if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame)
+  updateFrame = undefined
+  resizeFrame = undefined
   observer?.disconnect()
   observer = undefined
   chart?.dispose()

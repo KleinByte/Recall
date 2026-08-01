@@ -622,6 +622,58 @@ export interface SkillChampionPoint {
   gradedGames: number
 }
 
+export type PerformanceConfidence = "learning" | "provisional" | "established"
+
+export interface PerformanceMetricScore {
+  key: string
+  label: string
+  score: number
+  weight: number
+  games: number
+  description: string
+  comparison: string
+}
+
+export interface PerformanceDimensionScore {
+  key: string
+  label: string
+  shortLabel: string
+  description: string
+  score: number
+  recentScore?: number
+  delta?: number
+  games: number
+  confidence: PerformanceConfidence
+  metrics: PerformanceMetricScore[]
+}
+
+export interface PerformanceProfile {
+  algorithmVersion: number
+  score: number
+  games: number
+  recentGames: number
+  measuredGames: number
+  coverage: number
+  confidence: PerformanceConfidence
+  comparison: string
+  dimensions: PerformanceDimensionScore[]
+  strongestKey?: string
+  growthKey?: string
+}
+
+export interface SkillDeathPoint {
+  gameId: number
+  playedAt: number
+  timestamp: number
+  x: number
+  y: number
+}
+
+export interface SkillDeathMap {
+  timelineGames: number
+  deaths: SkillDeathPoint[]
+}
+
 export interface SkillReportV2 {
   version: 2
   generatedAt: number
@@ -629,6 +681,8 @@ export interface SkillReportV2 {
   overview: {
     summary: StatsSummary
     style?: SkillStyleReport
+    performance?: PerformanceProfile
+    deathMap?: SkillDeathMap
     grades: GradeCount[]
     lobby?: LobbyComparison
     contribution?: ContributionShare

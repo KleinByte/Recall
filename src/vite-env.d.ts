@@ -8,5 +8,10 @@ declare module '*.vue' {
 
 interface Window {
   // expose in the `electron/preload/index.ts`
-  ipcRenderer: import('electron').IpcRenderer
+  ipcRenderer: {
+    on(channel: string, listener: (event: unknown, ...args: any[]) => void, subscriptionId: string): void
+    off(channel: string, listener: (event: unknown, ...args: any[]) => void, subscriptionId: string): void
+    send(channel: string, ...args: unknown[]): void
+    invoke<T = unknown>(channel: string, ...args: unknown[]): Promise<T>
+  }
 }

@@ -6,7 +6,12 @@ import { CHART_COLOURS } from "../charts/recall-chart-theme"
 import { escapeTooltip } from "../charts/formatters"
 import type { RankedPoint } from "../types/stats"
 
-const props = defineProps<{ points: RankedPoint[] }>()
+const props = withDefaults(defineProps<{
+  points: RankedPoint[]
+  height?: string
+}>(), {
+  height: "220px",
+})
 
 const DAY_MS = 24 * 60 * 60 * 1_000
 
@@ -105,6 +110,6 @@ const option = computed<EChartsCoreOption>(() => {
   <BaseEChart
     :option="option"
     ariaLabel="Ranked tier and league-points history over time."
-    height="220px"
+    :height="height"
   />
 </template>

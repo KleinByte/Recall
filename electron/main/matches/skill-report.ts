@@ -2,7 +2,7 @@
  * Comparative and conditional skill insights from ordered observations
  */
 
-import type { InsightObservation, FinalItemObservation, GradeComponentObservation, ChampionPool, BuiltItem, BucketRow, ContributionShare, TimeBucketRow } from "../database/insights-repo.js"
+import type { InsightObservation, FinalItemObservation, GradeComponentObservation, RviTimelineObservation, ChampionPool, BuiltItem, BucketRow, ContributionShare, TimeBucketRow } from "../database/insights-repo.js"
 import type { ChampionStatRow, StatsSummary, GradeCount } from "../database/matches-repo.js"
 import type { LobbyComparison } from "../database/participants-repo.js"
 import {
@@ -17,6 +17,10 @@ import {
 import { durationBucketsFor, rankChampions } from "./insights.js"
 import { STYLE_AXIS_LABELS } from "./style.js"
 import type { StyleAxis, StyleProfile } from "./style.js"
+import {
+  buildPerformanceProfile,
+  type PerformanceProfile,
+} from "./performance-profile.js"
 import type { TrackedMode, ModeFamily } from "./types.js"
 import { buildPredictiveSection, type PredictiveSection, type PredictiveSignal } from "./predictive-insights.js"
 export { buildPredictiveSection, type PredictiveSection, type PredictiveSignal }
@@ -1138,6 +1142,8 @@ export interface SkillReportInput {
   championStats: ChampionStatRow[]
   itemObservations: FinalItemObservation[]
   gradeComponentHistory: GradeComponentObservation[]
+  performanceComponentHistory?: GradeComponentObservation[]
+  performanceTimelineHistory?: RviTimelineObservation[]
 }
 
 export interface SkillStyleReport {
@@ -1145,6 +1151,49 @@ export interface SkillStyleReport {
   recent?: StyleProfile
   earlier?: StyleProfile
   drift: Array<{ label: string; axes: StyleAxis[] }>
+}
+
+export interface SkillDeathPoint {
+  gameId: number
+  playedAt: number
+  timestamp: number
+  x: number
+  y: number
+}
+
+export interface SkillDeathMap {
+  timelineGames: number
+  deaths: SkillDeathPoint[]
+}
+
+export function buildDeathMap(
+  family: ModeFamily,
+  timelineHistory: RviTimelineObservation[] = [],
+): SkillDeathMap | undefined {
+  if (family !== "sr" || timelineHistory.length === 0) return undefined
+
+  const deaths = timelineHistory.flatMap((game) => game.summary.events.flatMap((event) => {
+    const position = event.position
+    if (
+      event.type !== "CHAMPION_KILL" ||
+      event.targetId !== game.participantId ||
+      !position ||
+      !Number.isFinite(position.x) ||
+      !Number.isFinite(position.y) ||
+      position.x < 0 || position.x > 15_000 ||
+      position.y < 0 || position.y > 15_000
+    ) return []
+
+    return [{
+      gameId: game.gameId,
+      playedAt: game.playedAt,
+      timestamp: event.timestamp,
+      x: position.x,
+      y: position.y,
+    }]
+  }))
+
+  return { timelineGames: timelineHistory.length, deaths }
 }
 
 function buildStyleDrift(
@@ -1177,6 +1226,8 @@ export interface SkillReportV2 {
   overview: {
     summary: StatsSummary
     style?: SkillStyleReport
+    performance?: PerformanceProfile
+    deathMap?: SkillDeathMap
     grades: GradeCount[]
     lobby?: LobbyComparison
     contribution?: ContributionShare
@@ -1220,7 +1271,8 @@ export interface SkillReportV2 {
 export function buildSkillReport(input: SkillReportInput): SkillReportV2 {
   const {
     modes, family, generatedAt, summary, style, grades, lobby, contribution,
-    pool, builds, observations, championStats, itemObservations, gradeComponentHistory, duration, hours, weekdays,
+    pool, builds, observations, championStats, itemObservations, gradeComponentHistory,
+    performanceComponentHistory, performanceTimelineHistory, duration, hours, weekdays,
   } = input
 
   const baseline = summary.avgGradeScore ?? 0
@@ -1258,6 +1310,13 @@ export function buildSkillReport(input: SkillReportInput): SkillReportV2 {
     overview: {
       summary,
       style: overviewStyle,
+      performance: buildPerformanceProfile({
+        family,
+        observations,
+        gradeComponentHistory: performanceComponentHistory ?? gradeComponentHistory ?? [],
+        timelineHistory: performanceTimelineHistory,
+      }),
+      deathMap: buildDeathMap(family, performanceTimelineHistory),
       grades,
       lobby,
       contribution,

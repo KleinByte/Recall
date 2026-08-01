@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, ref } from "vue"
+import ChampionPicker from "../components/ChampionPicker.vue"
 import SkillOverview from "../components/skill/SkillOverview.vue"
-import RankedHistoryPanel from "../components/RankedHistoryPanel.vue"
 import { api } from "../helpers/api"
+import { useApiEvents } from "../helpers/use-api-events"
+import { useCoalescedTask } from "../helpers/use-coalesced-task"
 import {
   filterForSkillScope,
   SKILL_SCOPES,
@@ -12,13 +14,15 @@ import type { Champion } from "../types/lol"
 import type { RankedHistory, SkillReportV2, StatsFilter } from "../types/stats"
 
 const SkillInsights = defineAsyncComponent(() => import("../components/skill/SkillInsights.vue"))
+const SkillAnalyze = defineAsyncComponent(() => import("../components/skill/SkillAnalyze.vue"))
+const events = useApiEvents()
 
 const props = defineProps<{
   champions: Champion[] | null
   connected: boolean
 }>()
 
-type SkillTab = "overview" | "insights"
+type SkillTab = "overview" | "insights" | "analyze"
 
 const ROLES = [
   { value: "TOP", label: "Top" },
@@ -43,6 +47,8 @@ const failed = ref(false)
 const oldestPlayedAt = ref<number | undefined>()
 const playedChampionIds = ref<number[]>([])
 let choseInitialScope = false
+let countsRequest = 0
+let reportRequest = 0
 
 const selectedScope = computed(() =>
   SKILL_SCOPES.find((scope) => scope.id === scopeId.value)!,
@@ -89,9 +95,12 @@ function currentFilter(scope: SkillScopeId = scopeId.value): StatsFilter {
 }
 
 async function loadCounts() {
+  const request = ++countsRequest
   const summaries = await Promise.all(
     SKILL_SCOPES.map((scope) => api.getSummary(currentFilter(scope.id))),
   )
+
+  if (request !== countsRequest) return
 
   counts.value = Object.fromEntries(
     SKILL_SCOPES.map((scope, index) => [scope.id, summaries[index].games]),
@@ -107,20 +116,23 @@ async function loadCounts() {
 }
 
 async function loadReport() {
+  const request = ++reportRequest
   loading.value = true
   failed.value = false
   try {
     const scope = selectedScope.value
-    report.value = await api.getSkillReport(
+    const nextReport = await api.getSkillReport(
       currentFilter(scope.id),
       scope.family,
     )
+    if (request === reportRequest) report.value = nextReport
   } catch (error) {
+    if (request !== reportRequest) return
     console.warn("Could not load Skill report", error)
     report.value = null
     failed.value = true
   } finally {
-    loading.value = false
+    if (request === reportRequest) loading.value = false
   }
 }
 
@@ -135,6 +147,9 @@ async function clearDetailFilters() {
   championId.value = undefined
   await applyFilters()
 }
+
+const refreshAll = useCoalescedTask(applyFilters)
+const refreshReport = useCoalescedTask(loadReport)
 
 onMounted(async () => {
   try {
@@ -151,11 +166,11 @@ onMounted(async () => {
     // The normal empty state handles an account without recorded matches.
   }
   await loadReport()
-  api.on("stats:updated", () => void applyFilters())
-  api.on("ranked:updated", async () => {
+  events.on("stats:updated", () => void refreshAll())
+  events.on("ranked:updated", async () => {
     ranked.value = await api.getRankedHistory()
   })
-  api.on("lcu:status", () => void loadReport())
+  events.on("lcu:status", () => void refreshReport())
 })
 </script>
 
@@ -210,15 +225,14 @@ onMounted(async () => {
           </select>
         </label>
 
-        <label class="field champion-field">
+        <div class="field champion-field">
           <span class="muted field-label">Champion</span>
-          <select v-model="championId" class="league-select" @change="applyFilters">
-            <option :value="undefined">Any champion</option>
-            <option v-for="champion in championOptions" :key="champion.id" :value="champion.id">
-              {{ champion.name }}
-            </option>
-          </select>
-        </label>
+          <ChampionPicker
+            v-model="championId"
+            :champions="championOptions"
+            @change="applyFilters"
+          />
+        </div>
 
         <button v-if="hasDetailFilters" class="league-button clear" @click="clearDetailFilters">
           Clear filters
@@ -228,12 +242,6 @@ onMounted(async () => {
         Every chart and finding below uses this exact selection.
       </p>
     </section>
-
-    <RankedHistoryPanel
-      v-if="ranked.length"
-      :histories="ranked"
-      allow-season-selection
-    />
 
     <nav class="tab-row" aria-label="Skill view">
       <button
@@ -251,6 +259,14 @@ onMounted(async () => {
         @click="tab = 'insights'"
       >
         Insights
+      </button>
+      <button
+        class="tab-button"
+        :class="{ active: tab === 'analyze' }"
+        :aria-pressed="tab === 'analyze'"
+        @click="tab = 'analyze'"
+      >
+        Analyze
       </button>
     </nav>
 
@@ -274,11 +290,17 @@ onMounted(async () => {
       :overview="report.overview"
       :family="report.scope.family"
       :champions="champions"
+      :ranked="ranked"
     />
     <SkillInsights
-      v-else-if="report"
+      v-else-if="report && tab === 'insights'"
       :report="report"
       :timezone-label="timezoneLabel"
+      :champions="champions"
+    />
+    <SkillAnalyze
+      v-else-if="report && tab === 'analyze'"
+      :report="report"
       :champions="champions"
     />
   </div>
@@ -313,9 +335,20 @@ h1 {
 }
 
 .filters { padding: var(--space-3) var(--space-4); }
-.control-row { display: flex; align-items: end; flex-wrap: wrap; gap: var(--space-3); }
-.field { display: grid; flex: 1 1 160px; gap: var(--space-1); min-width: 150px; }
-.champion-field { flex-grow: 1.2; min-width: 190px; }
+.control-row {
+  display: grid;
+  grid-template-columns:
+    minmax(150px, 1.05fr)
+    minmax(135px, .8fr)
+    minmax(135px, .8fr)
+    minmax(210px, 1.25fr)
+    auto;
+  align-items: end;
+  gap: var(--space-3);
+}
+
+.field { display: grid; gap: var(--space-1); min-width: 0; }
+.champion-field { min-width: 0; }
 .field-label { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
 .field .league-select { width: 100%; }
 .field .league-select:disabled { cursor: not-allowed; opacity: .55; }
@@ -358,8 +391,19 @@ h1 {
   margin-bottom: 0;
 }
 
-@media (max-width: 760px) {
-  .field { flex-basis: 150px; }
-  .champion-field { flex-basis: 190px; }
+@media (max-width: 1050px) {
+  .control-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .clear { justify-self: start; }
+}
+
+@media (max-width: 560px) {
+  .page { gap: var(--space-3); }
+  .filters { padding: var(--space-3); }
+  .control-row { grid-template-columns: minmax(0, 1fr); }
+  .clear { width: 100%; }
+  .filter-note { line-height: 1.45; }
 }
 </style>

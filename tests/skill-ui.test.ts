@@ -1,27 +1,51 @@
-import { readFileSync } from "node:fs"
+import { readFileSync, statSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 
 const read = (path: string) => readFileSync(path, "utf8")
 
 describe("Skill Overview", () => {
+  it("makes RVI the single performance identity below ranked history", () => {
+    const overview = read("src/components/skill/SkillOverview.vue")
+    const profile = read("src/components/skill/PerformanceProfile.vue")
+    const engine = read("electron/main/matches/performance-profile.ts")
+
+    expect(overview).toMatch(/RankedHistoryPanel[\s\S]*PerformanceProfile[\s\S]*title="Recorded comparisons"/)
+    expect(overview).toContain("classifyRviIdentity")
+    expect(overview).toContain("overview.performance")
+    expect(overview).not.toContain("classifyPlaystyle")
+    expect(overview).not.toContain('title="Playstyle"')
+    expect(profile).toContain("Recall Vector Index")
+    expect(profile).toContain("RVI playstyle")
+    expect(profile).toContain("How RVI measures it")
+    expect(profile).toContain("measurement-table")
+    expect(profile).toContain("segment-meter")
+    expect(profile).toContain(':aria-expanded="detailsOpen"')
+    expect(profile).toContain('v-if="detailsOpen"')
+    expect(profile).toContain("Influence")
+    expect(profile).toContain("metric.games")
+    expect(profile).toContain("dimension-grid")
+    expect(engine).toContain("RVI_ALGORITHM_VERSION")
+  })
+
   it("offers queue and season-selectable ranked growth history", () => {
-    const page = read("src/pages/SkillPage.vue")
+    const overview = read("src/components/skill/SkillOverview.vue")
     const ranked = read("src/components/RankedHistoryPanel.vue")
 
-    expect(page).toContain("RankedHistoryPanel")
-    expect(page).toContain("allow-season-selection")
+    expect(overview).toContain("RankedHistoryPanel")
+    expect(overview).toContain("allow-season-selection")
+    expect(overview).toMatch(/RankedHistoryPanel[\s\S]*compact[\s\S]*PerformanceProfile/)
     expect(ranked).toContain("All seasons")
     expect(ranked).toContain('v-model="selectedQueue"')
     expect(ranked).toContain('v-model="selectedSeason"')
     expect(ranked).toContain("change")
   })
 
-  it("uses literal Recall and playstyle copy", () => {
+  it("uses literal Recall and an RVI-native identity", () => {
     const overview = read("src/components/skill/SkillOverview.vue")
 
     expect(overview).toContain("Avg Recall grade")
     expect(overview).toContain("graded")
-    expect(overview).toContain("axis.formula")
+    expect(overview).toContain("rviIdentity")
     expect(overview).not.toMatch(/strengths|weaknesses|you play best|to work on/i)
   })
 
@@ -41,28 +65,18 @@ describe("Skill Overview", () => {
     expect(overview).toContain("gradedGames")
   })
 
-  it("uses an animated diverging chart for playstyle changes", () => {
+  it("removes the duplicate playstyle presentation", () => {
     const overview = read("src/components/skill/SkillOverview.vue")
-    const deltaChart = read("src/components/skill/StyleDeltaChart.vue")
 
-    expect(overview).toContain("StyleDeltaChart")
-    expect(overview).toContain("overview.style.career")
-    expect(overview).toContain("styleComparison")
-    expect(overview).toContain("style?.earlier")
-    expect(overview).toContain("style.recent")
-    expect(deltaChart).toContain('type: "bar"')
-    expect(deltaChart).toContain('type: "category"')
-    expect(deltaChart).toContain("markLine")
-    expect(deltaChart).toContain("BaseEChart")
-    expect(deltaChart).not.toContain("chart.js")
+    expect(overview).not.toContain("StyleRadar")
+    expect(overview).not.toContain("StyleDeltaChart")
+    expect(overview).not.toContain("DriftChart")
+    expect(overview).toContain(':identity="rviIdentity"')
   })
 
-  it("restores the useful historical playstyle and outcome visuals", () => {
+  it("keeps the useful scoped outcome visuals", () => {
     const overview = read("src/components/skill/SkillOverview.vue")
 
-    expect(overview).toContain(":recent=")
-    expect(overview).toContain("Last 10 games")
-    expect(overview).toContain("DriftChart")
     expect(overview).toContain("OutcomeTrendChart")
     expect(overview).toContain("Game length")
     expect(overview).toContain("Time of day")
@@ -125,6 +139,8 @@ describe("Skill Insights", () => {
     expect(effectChart).toContain('type: "bar"')
     expect(effectChart).toContain('type: "category"')
     expect(effectChart).toContain("BaseEChart")
+    expect(effectChart).toContain("numericChartValue")
+    expect(effectChart).toContain(':height="chartHeight"')
   })
 
   it("resolves finding labels and keeps detailed evidence condensed", () => {
@@ -162,15 +178,19 @@ describe("Skill page coordination", () => {
   it("keeps tabs local and uses one report fetch path", () => {
     const page = read("src/pages/SkillPage.vue")
 
-    expect(page).toContain('type SkillTab = "overview" | "insights"')
+    expect(page).toContain('type SkillTab = "overview" | "insights" | "analyze"')
     expect(page).toContain('ref<SkillTab>("overview")')
     expect(page).toContain("<SkillInsights")
+    expect(page).toContain("<SkillAnalyze")
+    expect(page).toContain("Analyze")
+    expect(page).toMatch(/Overview[\s\S]*Insights[\s\S]*Analyze/)
     expect(page.match(/getSkillReport/g)).toHaveLength(1)
     expect(page).not.toMatch(/@click="[^\"]*loadReport[^\"]*"[^>]*>\s*Insights/)
   })
 
-  it("uses match-style selects for mode, season, role, and champion filters", () => {
+  it("uses compact selects and a searchable visual champion picker", () => {
     const page = read("src/pages/SkillPage.vue")
+    const championPicker = read("src/components/ChampionPicker.vue")
 
     expect(page).toContain("riftScopes")
     expect(page).toContain("otherScopes")
@@ -178,7 +198,68 @@ describe("Skill page coordination", () => {
     expect(page).toContain('v-model="season"')
     expect(page).toContain('v-model="role"')
     expect(page).toContain('v-model="championId"')
+    expect(page).toContain("ChampionPicker")
     expect(page).toContain('class="league-select"')
     expect(page).not.toContain('class="scope-button')
+    expect(championPicker).toContain('type="search"')
+    expect(championPicker).toContain('class="champion-grid"')
+    expect(championPicker).toContain("championIconUrl")
+    expect(championPicker).toContain('role="listbox"')
+  })
+
+  it("maps persisted death density over an optimized Rift image", () => {
+    const overview = read("src/components/skill/SkillOverview.vue")
+    const analyze = read("src/components/skill/SkillAnalyze.vue")
+    const heatmap = read("src/components/skill/DeathHeatmap.vue")
+    const mapAsset = statSync("public/summoners-rift-base.webp")
+
+    expect(overview).not.toContain("DeathHeatmap")
+    expect(analyze).toContain("DeathHeatmap")
+    expect(analyze).toContain("report.overview.deathMap")
+    expect(analyze).toContain("report.scope.family === 'sr'")
+    expect(heatmap).toContain('type: "heatmap"')
+    expect(heatmap).toContain('type: "scatter"')
+    expect(heatmap).toContain('type: "category"')
+    expect(heatmap).toContain("xAxisIndex: 1")
+    expect(heatmap).toContain("yAxisIndex: 1")
+    expect(heatmap).toContain("Array.isArray(item.data)")
+    expect(heatmap).toContain("nearbyDeaths")
+    expect(heatmap).toContain("nearby death")
+    expect(heatmap).toContain("% of deaths in this selection")
+    expect(heatmap).toContain("Average death")
+    expect(heatmap).not.toContain("relative density")
+    expect(heatmap).toContain("summoners-rift-base.webp")
+    expect(heatmap).toMatch(/mode,\s*season, role, and champion filters above/)
+    expect(heatmap).toContain("before 15 min")
+    expect(heatmap).toContain("15–30 min")
+    expect(heatmap).toContain("Heat overlay")
+    expect(heatmap).toContain("Death dots")
+    expect(heatmap).toContain("visualization")
+    expect(heatmap).not.toContain("Rank hotspots")
+    expect(heatmap).toContain("rankedHotspots")
+    expect(heatmap).toContain("HEAT_STOPS")
+    expect(heatmap).toContain('class="map-layout"')
+    expect(heatmap).toContain('class="hotspot-aside"')
+    expect(mapAsset.size).toBeLessThan(1_000_000)
+  })
+
+  it("builds Analyze from honest RVI and Recall Grade views", () => {
+    const analyze = read("src/components/skill/SkillAnalyze.vue")
+    const signatures = read("src/components/skill/MatchSignaturesChart.vue")
+    const form = read("src/components/skill/PerformanceFormChart.vue")
+
+    expect(analyze).toContain("PerformanceFormChart")
+    expect(analyze).toContain("MatchSignaturesChart")
+    expect(analyze).toContain("SessionEnduranceChart")
+    expect(analyze).toContain("ChampionQuadrantChart")
+    expect(analyze).toContain("ChampionLearningCurve")
+    expect(analyze).toContain("classifyRviIdentity")
+    expect(analyze).toContain("per-match comparison percentiles, not RVI vector scores")
+    expect(signatures).toContain('type: "parallel"')
+    expect(form).toContain("dimension.delta")
+    expect(form).toContain('color: "#f0e6d2"')
+    expect(form).toContain("textBorderWidth: 0")
+    expect(analyze).toContain("align-items: stretch")
+    expect(analyze).toContain("height: 100%")
   })
 })

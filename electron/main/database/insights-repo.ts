@@ -4,6 +4,7 @@ import { durationBucketsFor } from "../matches/insights.js"
 import { computePerGameAxes } from "../matches/style.js"
 import type { ModeFamily, TrackedMode } from "../matches/types.js"
 import type { GradeComponent } from "../review/types.js"
+import type { CompactTimeline } from "../riot/timeline-mapper.js"
 
 export interface BucketRow {
   label: string
@@ -129,6 +130,16 @@ function normalizedRole(alias = ""): string {
       THEN UPPER(${prefix}lane)
     ELSE NULL
   END`
+}
+
+export interface RviTimelineObservation {
+  gameId: number
+  playedAt: number
+  durationSecs: number
+  participantId: number
+  teamId: number
+  opponentParticipantId?: number
+  summary: CompactTimeline
 }
 
 function scope(filter: StatsFilter) {
@@ -665,6 +676,56 @@ export class InsightsRepository {
         }, m.mode_family as ModeFamily),
       }
     })
+  }
+
+  /** Cached local-client timelines with the identity context RVI needs. */
+  getRviTimelineHistory(filter: StatsFilter, limit = 240): RviTimelineObservation[] {
+    const { conditions, params } = lobbyScope(filter)
+    const rows = this.db.prepare(
+      `SELECT m.game_id AS gameId, m.played_at AS playedAt,
+              m.duration_secs AS durationSecs, p.participant_id AS participantId,
+              p.team_id AS teamId, t.data_json AS dataJson,
+              (
+                SELECT o.participant_id
+                FROM match_participants o
+                WHERE o.game_id = p.game_id AND o.puuid = p.puuid
+                  AND o.team_id <> p.team_id
+                  AND UPPER(COALESCE(o.role, o.lane, '')) =
+                      UPPER(COALESCE(p.role, p.lane, ''))
+                LIMIT 1
+              ) AS opponentParticipantId
+       FROM match_participants p
+       JOIN matches m ON m.game_id = p.game_id AND m.puuid = p.puuid
+       JOIN match_timeline_cache t ON t.game_id = p.game_id AND t.puuid = p.puuid
+       WHERE ${conditions.join(" AND ")} AND p.is_player = 1
+         AND t.status = 'ready' AND t.data_json IS NOT NULL
+       ORDER BY m.played_at DESC, m.game_id DESC
+       LIMIT ?`,
+    ).all(...params, limit) as Array<{
+      gameId: number
+      playedAt: number
+      durationSecs: number
+      participantId: number
+      teamId: number
+      opponentParticipantId: number | null
+      dataJson: string
+    }>
+
+    return rows.flatMap((row) => {
+      try {
+        return [{
+          gameId: row.gameId,
+          playedAt: row.playedAt,
+          durationSecs: row.durationSecs,
+          participantId: row.participantId,
+          teamId: row.teamId,
+          opponentParticipantId: row.opponentParticipantId ?? undefined,
+          summary: JSON.parse(row.dataJson) as CompactTimeline,
+        }]
+      } catch {
+        return []
+      }
+    }).reverse()
   }
 
   /** Latest grade algorithm breakdown for the player's most recent graded games. */

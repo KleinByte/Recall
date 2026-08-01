@@ -12,14 +12,15 @@ describe("desktop page layout", () => {
       /class="dashboard-column left-column"[\s\S]*RankedHistoryPanel[\s\S]*title="Recent games"/,
     )
     expect(dashboard).toMatch(
-      /class="dashboard-column right-column"[\s\S]*title="Playstyle"[\s\S]*title="Champions in form"/,
+      /class="dashboard-column right-column"[\s\S]*title="Recall Vector Index"[\s\S]*title="Champions in form"/,
     )
     expect(dashboard).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))")
     expect(dashboard).toContain("grid-template-rows: auto minmax(0, 1fr)")
-    expect(dashboard).toContain('height="215px"')
-    expect(dashboard).toContain("classifyPlaystyle")
-    expect(dashboard).toContain("styleIdentity.label")
-    expect(dashboard).toMatch(/\.rank-panel,[\s\S]*\.playstyle-panel \{[\s\S]*height: 340px/)
+    expect(dashboard).toContain('height="270px"')
+    expect(dashboard).toContain("getRviProfile")
+    expect(dashboard).toContain("PerformanceRadar")
+    expect(dashboard).not.toContain("StyleRadar")
+    expect(dashboard).toMatch(/\.rank-panel,[\s\S]*\.rvi-panel \{[\s\S]*height: 340px/)
   })
 
   it("makes repeated dashboard cards align within their rows", () => {
@@ -37,7 +38,7 @@ describe("desktop page layout", () => {
     expect(skill).toMatch(/\.kpis \{[\s\S]*grid-auto-rows: 1fr/)
     expect(skill).toMatch(/\.metric-grid \{[\s\S]*grid-auto-rows: 1fr/)
     expect(skill).toMatch(/\.overview-grid \{[\s\S]*align-items: stretch/)
-    expect(skill).toMatch(/\.playstyle \{[\s\S]*align-items: start/)
+    expect(skill).toContain("PerformanceProfile")
     expect(skill).toContain('class="context-grid"')
     expect(skill).toContain('class="contribution-layout"')
     expect(skill).toMatch(/\.context-grid \{[\s\S]*grid-template-columns: repeat\(2/)
@@ -80,7 +81,7 @@ describe("desktop page layout", () => {
 
     expect(dashboard).toContain("RankedHistoryPanel")
     expect(panel).toContain('title="Rank over time"')
-    expect(panel).toContain('<RankGraph :points="points" />')
+    expect(panel).toContain('<RankGraph :points="points" :height="compact ? \'150px\' : \'220px\'" />')
     expect(panel).toContain("currentRankedSeason")
     expect(panel).toContain('v-model="selectedQueue"')
     expect(rankGraph).toContain('type: "time"')
