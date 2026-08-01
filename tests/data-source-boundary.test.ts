@@ -28,6 +28,10 @@ describe("League data-source boundary", () => {
 
     expect(history).toContain("new RiotApiClient")
     expect(main).toContain("startRiotHistoryBackfill")
+    expect(main.match(/startRiotHistoryBackfill\(win/g)).toHaveLength(3)
+    expect(main).toContain('ipcMain.handle("riot-api-key:save"')
+    expect(main).toContain('ipcMain.handle("riot-history:retry"')
+    expect(main).toContain('ipcMain.handle("riot-history:reimport-details"')
     expect(main).not.toContain("/lol/match/v5/")
   })
 

@@ -13,6 +13,7 @@ import {
   itemIconUrl,
   loadGameAssets,
   normalizeAugmentId,
+  timelineObjectiveIconUrl,
   type GameAssetCatalog,
 } from "../helpers/game-assets"
 import { focusReviewGameId } from "../helpers/navigation"
@@ -55,7 +56,7 @@ const experimentHypothesis = ref("")
 const experimentChampionIds = ref<number[]>([])
 const experimentModes = ref<TrackedMode[]>([])
 const timelineFilter = ref<"all" | "you" | "kills" | "objectives" | "items" | "levels" | "vision">("all")
-const assets = ref<GameAssetCatalog>({ version: "latest", items: {}, augments: {} })
+const assets = ref<GameAssetCatalog>({ version: "latest", items: {}, augments: {}, abilities: {} })
 const augmentSummary = ref<Record<number, OwnerAugmentSummary>>({})
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 let annotationSavesInFlight = 0
@@ -138,6 +139,23 @@ function participant(participantId?: number) {
   return review.value?.scoreboard.find((entry) => entry.participantId === participantId)
 }
 
+/**
+ * Mayhem timelines currently report killerId 0. When the victim's opposing
+ * team has exactly one member not listed as an assist, that missing member is
+ * the killer; otherwise the event remains honestly unattributed.
+ */
+function killActor(event: TimelineEvent) {
+  const direct = participant(event.participantId)
+  if (direct) return direct
+  const victim = participant(event.targetId)
+  if (!victim) return undefined
+  const assists = new Set(event.assistingParticipantIds ?? [])
+  const candidates = review.value?.scoreboard.filter((entry) =>
+    entry.teamId !== victim.teamId && !assists.has(entry.participantId),
+  ) ?? []
+  return candidates.length === 1 ? candidates[0] : undefined
+}
+
 function eventTime(timestamp: number) {
   return `${Math.floor(timestamp / 60_000)}:${String(Math.floor(timestamp / 1_000) % 60).padStart(2, "0")}`
 }
@@ -161,11 +179,32 @@ function itemIcon(event: TimelineEvent) {
   return assets.value.items[id ?? 0]?.icon ?? itemIconUrl(id, assets.value.version)
 }
 
+function abilityAsset(event: TimelineEvent) {
+  if (event.type !== "SKILL_LEVEL_UP" || !event.skillSlot) return undefined
+  const championId = participant(event.participantId)?.championId
+  return championId ? assets.value.abilities[championId]?.[event.skillSlot - 1] : undefined
+}
+
+function abilityKey(skillSlot?: number) {
+  return skillSlot && skillSlot >= 1 && skillSlot <= 4
+    ? ["Q", "W", "E", "R"][skillSlot - 1]
+    : "ability"
+}
+
 function timelineMarkerIcon(event: TimelineEvent) {
   if (event.category === "kill") {
-    return championIconUrl(participant(event.participantId)?.championId || 0)
+    const actor = killActor(event)
+    const target = participant(event.targetId)
+    return championIconUrl(actor?.championId || target?.championId || 0)
   }
   if (event.category === "item") return itemIcon(event)
+  if (event.type === "SKILL_LEVEL_UP") return abilityAsset(event)?.icon
+  if (event.type === "LEVEL_UP") {
+    return championIconUrl(participant(event.participantId)?.championId || 0)
+  }
+  if (event.category === "objective") {
+    return timelineObjectiveIconUrl(event.type, event.objective, event.teamId)
+  }
   return undefined
 }
 
@@ -180,15 +219,30 @@ function timelineMarkerGlyph(event: TimelineEvent) {
 function timelineMarkerTitle(event: TimelineEvent) {
   const time = eventTime(event.timestamp)
   if (event.category === "kill") {
-    const killer = participant(event.participantId)?.summonerName ?? "Execution"
+    const killer = killActor(event)?.summonerName
     const victim = participant(event.targetId)?.summonerName ?? `Player ${event.targetId}`
-    return `${time} · ${killer} killed ${victim}`
+    return killer
+      ? `${time} · ${killer} killed ${victim}`
+      : `${time} · Mayhem takedown on ${victim}`
   }
   if (event.category === "item") {
     const player = participant(event.participantId)?.summonerName ?? `Player ${event.participantId}`
     return `${time} · ${player} · ${itemName(event)}`
   }
+  if (event.type === "SKILL_LEVEL_UP") {
+    const player = participant(event.participantId)?.summonerName ?? `Player ${event.participantId}`
+    const ability = abilityAsset(event)?.name ?? abilityKey(event.skillSlot)
+    return `${time} · ${player} ranked ${ability} (${abilityKey(event.skillSlot)})`
+  }
   return `${time} · ${objectiveName(event.objective || event.type)}`
+}
+
+function timelineEventDescription(event: TimelineEvent) {
+  if (event.type === "SKILL_LEVEL_UP") {
+    return `ranked ${abilityAsset(event)?.name ?? abilityKey(event.skillSlot)} (${abilityKey(event.skillSlot)})`
+  }
+  if (event.type === "LEVEL_UP") return `reached level ${event.level ?? "?"}`
+  return objectiveName(event.objective || event.type)
 }
 
 function augmentName(augmentId: number) {
@@ -609,9 +663,9 @@ onBeforeUnmount(() => {
               :key="event.eventId" class="event-row" :class="event.category">
               <time>{{ eventTime(event.timestamp) }}</time>
               <template v-if="event.category === 'kill'">
-                <img :src="championIconUrl(participant(event.participantId)?.championId || 0)" alt="" />
-                <div><strong>{{ participant(event.participantId)?.summonerName || (event.participantId ? `Player ${event.participantId}` : "Execution") }}</strong>
-                  <span>killed <strong>{{ participant(event.targetId)?.summonerName || `Player ${event.targetId}` }}</strong>
+                <img :src="championIconUrl(killActor(event)?.championId || participant(event.targetId)?.championId || 0)" alt="" />
+                <div><strong>{{ killActor(event)?.summonerName || "Mayhem takedown" }}</strong>
+                  <span>{{ killActor(event) ? "killed" : "on" }} <strong>{{ participant(event.targetId)?.summonerName || `Player ${event.targetId}` }}</strong>
                     <template v-if="event.assistingParticipantIds?.length">
                       · assisted by {{ event.assistingParticipantIds.map(id => participant(id)?.summonerName || `Player ${id}`).join(", ") }}
                     </template>
@@ -624,9 +678,10 @@ onBeforeUnmount(() => {
                   <span>{{ event.type.replace("ITEM_", "").toLowerCase() }} {{ itemName(event) }}</span></div>
               </template>
               <template v-else>
-                <span class="event-glyph">{{ event.category === 'objective' ? '◆' : event.category === 'level' ? '↑' : '◉' }}</span>
+                <img v-if="timelineMarkerIcon(event)" :src="timelineMarkerIcon(event)" alt="" />
+                <span v-else class="event-glyph">{{ event.category === 'objective' ? '◆' : event.category === 'level' ? '↑' : '◉' }}</span>
                 <div><strong>{{ participant(event.participantId)?.summonerName || (event.teamId ? `Team ${event.teamId}` : "Match") }}</strong>
-                  <span>{{ objectiveName(event.objective || event.type) }}</span></div>
+                  <span>{{ timelineEventDescription(event) }}</span></div>
               </template>
             </article>
           </div>

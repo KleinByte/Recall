@@ -10,6 +10,31 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.7",
+    releasedAt: "2026-08-01",
+    title: "Momentum and richer match timelines",
+    summary:
+      "Recall adds The Dial and makes Mayhem, objective, item, and ability events immediately recognizable in match review.",
+    sections: [
+      {
+        title: "Readable match events",
+        items: [
+          "Mayhem takedowns recover the acting champion when the League Client omits its participant ID, with an honest victim fallback when the event is ambiguous.",
+          "Towers, inhibitors, Baron, dragons, Herald, Void Grubs, and other objectives now use recognizable League Client artwork.",
+          "Skill rank-ups use each champion's Q, W, E, or R artwork from Data Dragon, while mode-specific item icons gain a League Client fallback.",
+        ],
+      },
+      {
+        title: "The Dial",
+        items: [
+          "A League-themed ECharts gauge now sits beside Recent Form and blends recent grades, wins, losses, and streak direction into a 0–100 reading.",
+          "Three perfect wins puts you Dialed In; a fifth pushes The Dial into Flow State with its strongest effects.",
+          "The paired panels stay proportional across desktop and compact layouts, and all gauge motion respects reduced-motion preferences.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.6",
     releasedAt: "2026-08-01",
     title: "Accurate timeline event counts",

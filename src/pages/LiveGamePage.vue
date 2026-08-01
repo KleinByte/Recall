@@ -39,7 +39,7 @@ const live = ref<LiveSession>(empty)
 const recommendations = ref<ChampionChoice[]>([])
 const loading = ref(false)
 const objective = ref<ChampionChoiceObjective>("best_overall")
-const assets = ref<GameAssetCatalog>({ version: "latest", items: {}, augments: {} })
+const assets = ref<GameAssetCatalog>({ version: "latest", items: {}, augments: {}, abilities: {} })
 let recommendationRevision = 0
 let recommendationSignature = ""
 

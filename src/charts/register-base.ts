@@ -1,6 +1,7 @@
 import { use } from "echarts/core"
 import {
   BarChart,
+  GaugeChart,
   HeatmapChart,
   LineChart,
   RadarChart,
@@ -28,6 +29,7 @@ export function registerBaseCharts() {
 
   use([
     BarChart,
+    GaugeChart,
     HeatmapChart,
     LineChart,
     RadarChart,

@@ -46,4 +46,17 @@ describe("performance and resource lifecycle", () => {
     expect(review).toContain("annotationSavesInFlight")
     expect(review).toContain("refreshCurrent")
   })
+
+  it("refreshes only the dashboard data affected by each client event", () => {
+    const dashboard = read("src/pages/DashboardPage.vue")
+    const main = read("electron/main/index.ts")
+
+    expect(dashboard).toContain('queueRefresh("stats")')
+    expect(dashboard).toContain('queueRefresh("profile")')
+    expect(dashboard).toContain('queueRefresh("ranked")')
+    expect(dashboard).not.toContain('events.on("lcu:status"')
+    expect(main).toContain('if (changed) broadcast(win, "profile:updated")')
+    expect(main).toContain('if (imported > 0 && state.status !== "running")')
+    expect(main).not.toContain("imported >= 10")
+  })
 })

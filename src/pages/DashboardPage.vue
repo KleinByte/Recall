@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 import ChallengeDetailModal from "../components/ChallengeDetailModal.vue"
 import FormStrip from "../components/FormStrip.vue"
 import GradeBadge from "../components/GradeBadge.vue"
+import MomentumGauge from "../components/MomentumGauge.vue"
 import RankedHistoryPanel from "../components/RankedHistoryPanel.vue"
 import PerformanceRadar from "../components/skill/PerformanceRadar.vue"
 import MiniBar from "../components/ui/MiniBar.vue"
@@ -13,6 +14,7 @@ import { useApiEvents } from "../helpers/use-api-events"
 import { useCoalescedTask } from "../helpers/use-coalesced-task"
 import { challengeTierProgress } from "../helpers/challenges"
 import { openChampion, openMatch } from "../helpers/navigation"
+import { performanceMomentum } from "../helpers/momentum"
 import {
   championIconUrl,
   championNameById,
@@ -55,49 +57,73 @@ const session = ref<StatsSummary | null>(null)
 const form = ref<boolean[]>([])
 const challenges = ref<ChallengeRow[]>([])
 const recent = ref<MatchRow[]>([])
+const momentumMatches = ref<MatchRow[]>([])
 const ranked = ref<RankedHistory[]>([])
 const ranking = ref<ChampionRanking | null>(null)
 const rviProfile = ref<PerformanceProfile | undefined>(undefined)
 const rviFamily = ref<ModeFamily>("aram")
 const selectedChallenge = ref<ChallengeRow | null>(null)
+const momentumClock = ref(Date.now())
+let momentumExpiryTimer: ReturnType<typeof setTimeout> | undefined
 
-async function load() {
-  try {
-    const since = startOfToday()
+function scheduleMomentumExpiry(matches: MatchRow[]) {
+  if (momentumExpiryTimer !== undefined) clearTimeout(momentumExpiryTimer)
+  momentumExpiryTimer = undefined
+  momentumClock.value = Date.now()
+  const expiresAt = performanceMomentum(matches, momentumClock.value).sessionExpiresAt
+  if (expiresAt === undefined || expiresAt <= momentumClock.value) return
+  momentumExpiryTimer = setTimeout(() => {
+    momentumExpiryTimer = undefined
+    momentumClock.value = Date.now()
+  }, expiresAt - momentumClock.value + 50)
+}
 
-    const [
-      nextProfile,
-      nextSummary,
-      nextSession,
-      nextForm,
-      nextChallenges,
-      nextRecent,
-      nextRanked,
-      nextRanking,
-    ] = await Promise.all([
-      api.getProfile(),
+onBeforeUnmount(() => {
+  if (momentumExpiryTimer !== undefined) clearTimeout(momentumExpiryTimer)
+})
+
+async function loadStats() {
+  const since = startOfToday()
+  const [
+    nextSummary,
+    nextSession,
+    nextForm,
+    nextRecent,
+    nextMomentumMatches,
+    nextRanking,
+  ] = await Promise.all([
       api.getSummary({}),
       api.getSummary({ sinceMs: since }),
       api.getForm({}, 20),
-      api.listChallenges({}),
       api.getMatches({ excludeLeagueClassic: true }, 6),
-      api.getRankedHistory(),
+      api.getMatches({}, 10),
       api.getRankedChampions({}),
-    ])
+  ])
 
-    profile.value = nextProfile
-    summary.value = nextSummary
-    session.value = nextSession
-    form.value = nextForm
-    challenges.value = nextChallenges
-    recent.value = nextRecent
-    ranked.value = nextRanked
-    ranking.value = nextRanking
+  summary.value = nextSummary
+  session.value = nextSession
+  form.value = nextForm
+  recent.value = nextRecent
+  momentumMatches.value = nextMomentumMatches
+  scheduleMomentumExpiry(nextMomentumMatches)
+  ranking.value = nextRanking
+  await loadRvi()
+}
 
-    await loadRvi()
-  } catch {
-    // No account seen yet; the empty states cover this.
-  }
+async function loadProfile() {
+  profile.value = await api.getProfile()
+}
+
+async function loadChallenges() {
+  challenges.value = await api.listChallenges({})
+}
+
+async function loadRanked() {
+  ranked.value = await api.getRankedHistory()
+}
+
+async function loadAll() {
+  await Promise.all([loadStats(), loadProfile(), loadChallenges(), loadRanked()])
 }
 
 /** The dashboard RVI snapshot follows whichever family has been played most. */
@@ -114,19 +140,50 @@ async function loadRvi() {
   )
 }
 
-const refresh = useCoalescedTask(load)
+type RefreshScope = "all" | "stats" | "profile" | "challenges" | "ranked"
+const pendingRefreshes = new Set<RefreshScope>()
+const refresh = useCoalescedTask(async () => {
+  const scopes = new Set(pendingRefreshes)
+  pendingRefreshes.clear()
+  try {
+    if (scopes.has("all")) {
+      await loadAll()
+      return
+    }
+    const tasks: Promise<void>[] = []
+    if (scopes.has("stats")) tasks.push(loadStats())
+    if (scopes.has("profile")) tasks.push(loadProfile())
+    if (scopes.has("challenges")) tasks.push(loadChallenges())
+    if (scopes.has("ranked")) tasks.push(loadRanked())
+    await Promise.all(tasks)
+  } catch {
+    // No account seen yet; the empty states cover this.
+  }
+})
+
+function queueRefresh(scope: RefreshScope) {
+  pendingRefreshes.add(scope)
+  void refresh()
+}
 
 onMounted(() => {
-  void refresh()
-  events.on("stats:updated", () => void refresh())
-  events.on("challenges:updated", () => void refresh())
-  events.on("profile:updated", () => void refresh())
-  events.on("ranked:updated", () => void refresh())
-  events.on("lcu:status", () => void refresh())
+  queueRefresh("all")
+  events.on("stats:updated", () => queueRefresh("stats"))
+  events.on("challenges:updated", () => queueRefresh("challenges"))
+  events.on("profile:updated", () => queueRefresh("profile"))
+  events.on("ranked:updated", () => queueRefresh("ranked"))
 })
 
 const hasGames = computed(() => (summary.value?.games ?? 0) > 0)
 const averageGrade = computed(() => gradeFromScore(summary.value?.avgGradeScore))
+const momentum = computed(() => performanceMomentum(
+  momentumMatches.value,
+  momentumClock.value,
+))
+const recentFormWins = computed(() => form.value.filter(Boolean).length)
+const recentFormRate = computed(() => form.value.length
+  ? recentFormWins.value / form.value.length
+  : 0)
 
 const confidenceLabel = (games: number) => {
   if (games >= 12) return "Strong read"
@@ -257,9 +314,27 @@ const championName = (id: number) => championNameById(props.champions, id)
         />
       </section>
 
-      <Panel v-if="form.length" title="Recent form">
-        <FormStrip :results="form" />
-      </Panel>
+      <section v-if="form.length" class="form-momentum-grid">
+        <Panel title="Recent form" :meta="`${form.length} games`" class="form-panel">
+          <div class="form-summary">
+            <div>
+              <strong>{{ recentFormWins }}W · {{ form.length - recentFormWins }}L</strong>
+              <span class="muted">Newest result first</span>
+            </div>
+            <strong class="form-rate">{{ formatPercent(recentFormRate) }}</strong>
+          </div>
+          <FormStrip :results="form" />
+        </Panel>
+
+        <Panel title="The Dial" :meta="momentum.label" class="momentum-panel">
+          <MomentumGauge
+            :score="momentum.score"
+            :label="momentum.label"
+            :streak="momentum.streak"
+            :overdrive-tier="momentum.overdriveTier"
+          />
+        </Panel>
+      </section>
 
       <section class="dashboard-columns">
         <div class="dashboard-column left-column">
@@ -470,6 +545,64 @@ h1 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-4);
   align-items: stretch;
+}
+
+.form-momentum-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(270px, .8fr);
+  gap: var(--space-4);
+  align-items: stretch;
+}
+
+.form-panel,
+.momentum-panel {
+  height: 204px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.momentum-panel :deep(.head) {
+  position: relative;
+  z-index: 6;
+}
+
+.form-summary {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.form-summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.form-summary > div > strong,
+.form-rate {
+  color: var(--gold-bright);
+  font: 19px var(--font-display);
+  letter-spacing: .5px;
+}
+
+.form-summary span {
+  font-size: 10px;
+}
+
+.form-rate {
+  color: var(--cyan);
+  font-size: 23px;
+}
+
+.form-panel :deep(.form-strip) {
+  gap: 6px;
+}
+
+.form-panel :deep(.pill) {
+  width: 25px;
+  height: 25px;
 }
 
 .dashboard-column {
@@ -723,6 +856,10 @@ h1 {
 }
 
 @media (max-width: 820px) {
+  .form-momentum-grid {
+    grid-template-columns: minmax(0, 1.25fr) minmax(250px, .75fr);
+  }
+
   .dashboard-columns {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -739,6 +876,16 @@ h1 {
 }
 
 @media (max-width: 620px) {
+  .form-momentum-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .form-panel,
+  .momentum-panel {
+    height: auto;
+    min-height: 190px;
+  }
+
   .champion {
     grid-template-columns: 18px 42px minmax(0, 1fr) 54px;
   }

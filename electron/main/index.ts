@@ -580,7 +580,6 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
   broadcast(win, "lcu:status", { connected: true, summoner })
   void initialiseLiveSession(win)
   await runSync(win)
-  void startRiotHistoryBackfill(win, false)
 }
 
 function stopSession(win: BrowserWindow) {
@@ -801,10 +800,11 @@ async function startRiotHistoryBackfill(
         }
 
         const imported = state.matchesImported - announcedImported
-        if (
-          imported > 0 &&
-          (imported >= 10 || state.status !== "running")
-        ) {
+        // Import progress has its own lightweight event. Rebuilding every
+        // dashboard chart after each ten-match batch made app startup look
+        // like a refresh loop, so publish the heavier stats event once when
+        // this import run settles.
+        if (imported > 0 && state.status !== "running") {
           announcedImported = state.matchesImported
           broadcast(win, "stats:updated", {
             inserted: imported,
@@ -945,7 +945,7 @@ async function snapshotProfile(win: BrowserWindow) {
       categoryProgress?: unknown[]
     }>("/lol-challenges/v1/summary-player-data/local-player")
 
-    getProfiles().recordSnapshot({
+    const changed = getProfiles().recordSnapshot({
       puuid: session.summoner.puuid,
       recordedAt: Date.now(),
       overallLevel: summary.overallChallengeLevel ?? "NONE",
@@ -954,9 +954,9 @@ async function snapshotProfile(win: BrowserWindow) {
       categoryJson: JSON.stringify(summary.categoryProgress ?? []),
     })
 
-    // The dashboard may have rendered before this first snapshot existed, so
-    // it is told to refresh even when the score has not moved.
-    broadcast(win, "profile:updated")
+    // Avoid restarting dashboard charts on every periodic sync when the
+    // profile snapshot is identical to the one already stored.
+    if (changed) broadcast(win, "profile:updated")
   } catch (error) {
     console.warn(`Profile snapshot skipped: ${(error as Error).message}`)
   }
