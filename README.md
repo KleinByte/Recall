@@ -14,22 +14,22 @@ next month.
 
 [Download the latest Windows release](https://github.com/KleinByte/Recall/releases/latest)
 
-![Recall dashboard with match history, ranked progress, playstyle, and recent form](docs/screenshots/recall-dashboard.png)
+![Recall dashboard with recent form, League Classic games, and Recall Vector Index](docs/screenshots/recall-dashboard.jpg)
 
 ## What it does
 
 - Saves supported matches locally so your useful history does not disappear
   when it rolls out of the League client.
-- Tracks ARAM, ARAM: Mayhem, Ranked Solo/Duo, Ranked Flex, Normal, Quickplay,
-  and Swiftplay.
+- Tracks ARAM, ARAM: Mayhem, League Classic, Ranked Solo/Duo, Ranked Flex,
+  Normal, Quickplay, and Swiftplay as distinct modes.
 - Turns challenge data into something you can plan around with search,
   category and tier filters, completion filters, sorting, and pinned goals.
 - Shows whether the champion you are hovering in champion select still counts
   toward a pinned champion challenge.
-- Grades complete scoreboards from S+ through D by comparing your performance
-  with the other players in that match.
+- Grades complete scoreboards from S+ through D, resolves Summoner's Rift roles,
+  and compares your performance with the right players in that match.
 - Keeps ranked snapshots, personal records, champion results, mastery context,
-  playstyle trends, and lobby comparisons.
+  playstyle trends, lobby comparisons, and a mode-specific Recall Vector Index.
 - Provides a review journal with bookmarks, notes, tags, session boundaries,
   timeline events, and reusable practice experiments.
 - Stores everything on your machine and includes integrity checks, verified
@@ -47,13 +47,11 @@ Champion challenges show which champions are done and which are still needed.
 Pin the challenges you are chasing and Recall can surface the answer during
 champion select without making you dig through the client.
 
-![Challenge browser with sorting, filters, pinned goals, and progress](docs/screenshots/recall-challenges.png)
+![Challenge browser with mode and map filters, pinned goals, and tier progress](docs/screenshots/recall-challenges.jpg)
 
-Challenges shown on the dashboard open in place with the details that matter:
-the current and next tier, exact progress, points, percentile, supported modes,
-and champion completion count.
-
-![Challenge detail popup opened from the dashboard](docs/screenshots/recall-challenge-details.png)
+Challenge rows and dashboard shortcuts open the details that matter: the
+current and next tier, exact progress, points, percentile, supported modes, and
+champion completion count.
 
 ## Match history and review
 
@@ -64,9 +62,17 @@ context needed to understand why a result looked good or bad.
 
 The history view is paged and can be filtered or sorted by mode, result,
 champion, grade, date, duration, KDA, damage, bookmarks, notes, tags, and
-experiments. The Review page explains the grading calculation, compares a game
-only with matches that happened before it, and groups games into sessions so a
-rough night does not get flattened into a lifetime average.
+experiments. Its rows keep champion, assigned role, result, KDA, CS pace,
+damage, lobby rank, and date aligned for quick scanning. League Classic has its
+own filter instead of being folded into Other.
+
+![Match history with role-aware rows, lobby rank, and a League Classic filter](docs/screenshots/recall-matches.jpg)
+
+The Review page explains the grading calculation, compares a game only with
+matches that happened before it, and groups games into sessions so a rough
+night does not get flattened into a lifetime average. Full scoreboards are
+ordered like Riot's lanes, while modes without assigned roles omit the role
+presentation entirely.
 
 Recall captures recent timelines from the authenticated local League Client and
 caches a compact summary. The exact event families vary with what the current
@@ -107,6 +113,12 @@ recent-game window, but an API backfill cannot recover a match that Riot does
 not return. Recall reports those source limits instead of pretending a partial
 archive is complete.
 
+League Classic is treated as its own mode throughout Recall. Its matches,
+filters, performance grades, Recall Vector Index, champion results, and saved
+item art stay separate from modern Summoner's Rift. Classic item icons are
+bundled from Riot's Data Dragon catalog, so recorded builds remain readable
+without borrowing modern item art.
+
 ## Performance grades
 
 Riot does not provide a post-game letter grade through the local client API, so
@@ -114,12 +126,18 @@ Recall calculates one from the full lobby. An average performance lands around
 a B. Strong games move into A and S territory, while weak games fall below the
 lobby baseline.
 
-Summoner's Rift grading is role-aware. A support is not punished for farming
-less than a mid laner, and a tank is not expected to produce the same damage
-profile as a carry. The Review page shows the lobby percentile, component
-weights, and each weighted contribution. If a match does not include a complete
-scoreboard, Recall keeps the available data and explains why a detailed grade
-cannot be produced.
+Summoner's Rift grading is role-aware. Recall prefers the position assigned in
+champion select for your team, then uses Riot's post-game lane and role data
+with deterministic team-composition fallbacks where necessary. A support is
+not punished for farming less than a mid laner, and a tank is not expected to
+produce the same damage profile as a carry. ARAM and other modes without roles
+do not invent them.
+
+League Classic has its own grading cohort and Recall Vector Index, so its pace,
+economy, and builds are not measured against modern Summoner's Rift. The Review
+page shows the lobby percentile, component weights, and each weighted
+contribution. If a match does not include a complete scoreboard, Recall keeps
+the available data and explains why a detailed grade cannot be produced.
 
 ## Install
 
