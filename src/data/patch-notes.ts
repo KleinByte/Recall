@@ -10,6 +10,31 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.13",
+    releasedAt: "2026-08-02",
+    title: "See the game before opening it",
+    summary:
+      "Recall brings richer match cards, player mastery, live resource confidence, Tempo, and both teams' gold curves into one sharper review experience.",
+    sections: [
+      {
+        title: "Richer match review",
+        items: [
+          "Match cards now surface the champion, result, role, build, KDA, CS, kill participation, teams, and standout labels without requiring a separate detail view.",
+          "Full reviews include champion mastery context for every available player, and Riot's recognizable position artwork replaces the generic role symbols.",
+          "The match timeline plots Blue and Red team gold independently, keeps objective markers aligned to the relevant team, and summarizes the final resource difference.",
+        ],
+      },
+      {
+        title: "Live resource control",
+        items: [
+          "The live companion estimates both teams' resources from symmetric League Client signals and explains which side currently holds the advantage.",
+          "Win confidence combines the resource edge with takedowns, objectives, surviving players, and game time while staying explicitly labeled as an estimate.",
+          "The new Tempo gauge reacts to recent lead growth, clean execution, objective swings, deaths, and throws so momentum changes are visible while the game unfolds.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.12",
     releasedAt: "2026-08-02",
     title: "League Classic joins Recall",
