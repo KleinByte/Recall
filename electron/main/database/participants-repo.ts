@@ -971,12 +971,16 @@ function resolvedRole(alias: string): string {
 
 function normalizedRole(alias: string): string {
   const role = resolvedRole(alias)
+  const assigned = `UPPER(COALESCE(${alias}.assigned_position, ''))`
   return `CASE
     WHEN UPPER(COALESCE(${role}, '')) IN ('TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY')
       THEN UPPER(${role})
-    WHEN UPPER(COALESCE(${role}, '')) IN ('SUPPORT', 'DUO_SUPPORT') THEN 'UTILITY'
-    WHEN UPPER(COALESCE(${role}, '')) IN ('CARRY', 'DUO_CARRY') THEN 'BOTTOM'
-    WHEN UPPER(COALESCE(${alias}.lane, '')) IN ('TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM')
+    WHEN ${assigned} IN ('TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY')
+      THEN ${assigned}
+    WHEN UPPER(COALESCE(${alias}.lane, '')) IN ('BOTTOM', 'BOT') THEN
+      CASE WHEN UPPER(COALESCE(${role}, '')) IN ('SUPPORT', 'DUO_SUPPORT')
+        THEN 'UTILITY' ELSE 'BOTTOM' END
+    WHEN UPPER(COALESCE(${alias}.lane, '')) IN ('TOP', 'JUNGLE', 'MIDDLE')
       THEN UPPER(${alias}.lane)
     ELSE NULL
   END`

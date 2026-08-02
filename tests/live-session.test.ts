@@ -57,6 +57,21 @@ describe("readLiveSession", () => {
     expect(live.enemies[0].assignedPosition).toBe("UTILITY")
   })
 
+  it("uses the champ-select game id when gameflow has not exposed it yet", async () => {
+    const live = await readLiveSession(client({
+      "/lol-gameflow/v1/session": {
+        gameData: { gameMode: "CLASSIC", mapId: 11, queue: { id: 420 } },
+      },
+      "/lol-champ-select/v1/session": {
+        gameId: 88,
+        myTeam: [],
+        theirTeam: [],
+      },
+    }) as never, "ChampSelect")
+
+    expect(live.gameId).toBe(88)
+  })
+
   it("keeps Mayhem separate from normal ARAM", async () => {
     const live = await readLiveSession(client({
       "/lol-gameflow/v1/session": {

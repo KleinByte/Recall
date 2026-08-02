@@ -171,4 +171,38 @@ describe("mapRiotMatch", () => {
     expect(result.participants[0].role).toBe("MIDDLE")
     expect(result.match.role).toBe("MIDDLE")
   })
+
+  it("falls back from an invalid team position to the individual estimate", () => {
+    const dto = match({
+      participants: Array.from({ length: 10 }, (_, i) =>
+        participant(i + 1, {
+          teamPosition: "Invalid",
+          individualPosition: "UTILITY",
+        }),
+      ),
+    })
+
+    const result = mapRiotMatch(dto, PUUID)!
+
+    expect(result.participants[0].role).toBe("UTILITY")
+    expect(result.gradeInputs[0].role).toBe("UTILITY")
+  })
+
+  it("keeps a legacy bottom support hint when positions are unavailable", () => {
+    const dto = match({
+      participants: Array.from({ length: 10 }, (_, i) =>
+        participant(i + 1, {
+          teamPosition: undefined,
+          individualPosition: undefined,
+          lane: "BOTTOM",
+          role: "SUPPORT",
+        }),
+      ),
+    })
+
+    const result = mapRiotMatch(dto, PUUID)!
+
+    expect(result.participants[0].role).toBe("SUPPORT")
+    expect(result.gradeInputs[0].role).toBe("UTILITY")
+  })
 })

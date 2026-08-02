@@ -1,4 +1,5 @@
 import catalog from "../data/items.json"
+import classic from "../data/classic-items.json"
 import { publicAssetUrl } from "./assets"
 
 interface ItemCatalogEntry {
@@ -6,6 +7,9 @@ interface ItemCatalogEntry {
 }
 
 const items = catalog as Record<string, ItemCatalogEntry>
+const classicItems = new Map(
+  classic.items.map((item) => [String(item.id), { name: item.name }]),
+)
 
 export interface ItemAsset {
   name: string
@@ -14,7 +18,7 @@ export interface ItemAsset {
 }
 
 export function itemAsset(itemId: number): ItemAsset {
-  const item = items[String(itemId)]
+  const item = items[String(itemId)] ?? classicItems.get(String(itemId))
   if (item) {
     return {
       name: item.name,

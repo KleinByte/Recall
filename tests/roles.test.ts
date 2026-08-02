@@ -1,7 +1,24 @@
 import { describe, expect, it } from "vitest"
 import { laneMatchups, positionLabel, resolvePosition } from "../src/helpers/roles"
+import { resolvePosition as resolveMainPosition } from "../electron/main/matches/position.js"
 
 describe("resolvePosition", () => {
+  it("stays identical in the renderer and main process", () => {
+    const cases: Array<[string?, string?, string?]> = [
+      ["TOP", "SOLO"],
+      ["BOTTOM", "SUPPORT"],
+      ["BOTTOM", "CARRY"],
+      ["NONE", "SUPPORT"],
+      ["JUNGLE", "TOP"],
+      ["TOP", "MIDDLE", "UTILITY"],
+      ["NONE", "NONE", "JUNGLE"],
+    ]
+
+    for (const values of cases) {
+      expect(resolveMainPosition(...values)).toBe(resolvePosition(...values))
+    }
+  })
+
   it("accepts the canonical team position Match-V5 stores in role", () => {
     expect(resolvePosition(undefined, "UTILITY")).toBe("UTILITY")
     expect(resolvePosition("BOTTOM", "BOTTOM")).toBe("BOTTOM")
@@ -34,10 +51,15 @@ describe("resolvePosition", () => {
     expect(resolvePosition("", "DUO_CARRY")).toBeUndefined()
   })
 
-  it("trusts champion select over Riot's post-game classification", () => {
+  it("uses champion select when no canonical post-game position exists", () => {
     expect(resolvePosition("MIDDLE", "SOLO", "UTILITY")).toBe("UTILITY")
     expect(resolvePosition("NONE", "NONE", "JUNGLE")).toBe("JUNGLE")
     expect(resolvePosition("TOP", "SOLO", "")).toBe("TOP")
+  })
+
+  it("prefers Match-V5's played-position estimate to the queue assignment", () => {
+    expect(resolvePosition("TOP", "MIDDLE", "UTILITY")).toBe("MIDDLE")
+    expect(resolvePosition("JUNGLE", "JUNGLE", "TOP")).toBe("JUNGLE")
   })
 })
 

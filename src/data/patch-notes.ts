@@ -10,6 +10,30 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.10",
+    releasedAt: "2026-08-02",
+    title: "Roles that hold up, and League Classic item art",
+    summary:
+      "Recall now keeps Riot's post-game position, champion-select assignment, filters, and grades in agreement—and recognizes every League Classic item without needing the network.",
+    sections: [
+      {
+        title: "Role accuracy",
+        items: [
+          "Riot's estimate of the position actually played now leads, while the position assigned in champion select remains a fallback when post-game evidence is missing.",
+          "Invalid or short-game role hints no longer turn an entire lobby into supports, and role-aware filters, comparisons, and grades now share the same answer.",
+          "Dodged drafts and abandoned pick intents are cleared before they can attach the wrong assignment to a later match.",
+        ],
+      },
+      {
+        title: "League Classic",
+        items: [
+          "All 416 items Riot marks for League Classic are cataloged from Data Dragon, including dedicated classics such as Atma's Impaler, Frozen Mallet, and Ionic Spark.",
+          "The 151 Classic-specific icons are bundled with Recall, so match history and item findings keep their names and artwork offline.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.9",
     releasedAt: "2026-08-01",
     title: "Roles read the way you played them",

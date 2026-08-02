@@ -15,6 +15,7 @@ import {
 } from "./matches/map-participants.js"
 import { fetchQueues, type QueueIndex } from "./matches/queues.js"
 import type { LcuGame, MatchRow, ModeFamily } from "./matches/types.js"
+import { resolvePosition } from "./matches/position.js"
 
 export interface SyncResult {
   fetched: number
@@ -159,7 +160,11 @@ export class MatchSync {
       )
     }
     if ((family === "aram" || family === "sr") && detail.gameId) {
-      this.participants.setGrades(detail.gameId, this.puuid, gradeLobby(this.gradeInputs(detail), family))
+      this.participants.setGrades(
+        detail.gameId,
+        this.puuid,
+        gradeLobby(this.gradeInputs(detail), family),
+      )
     }
     if (detail.gameId) {
       const match = this.repository.getMatch(detail.gameId, this.puuid)
@@ -206,7 +211,9 @@ export class MatchSync {
         // same request again later.
         this.storeLobby(detail, modeFamily)
 
-        const result = gradeLobby(this.gradeInputs(detail), modeFamily).get(identityParticipantId(detail, this.puuid))
+        const result = gradeLobby(this.gradeInputs(detail), modeFamily).get(
+          identityParticipantId(detail, this.puuid),
+        )
         if (!result) continue
 
         this.repository.setGrade(
@@ -231,6 +238,13 @@ export class MatchSync {
 
   private gradeInputs(detail: GameDetail): GradeInput[] {
     const minutes = Math.max(1, (detail.gameDuration ?? 0) / 60)
+    const ownerId = identityParticipantId(detail, this.puuid)
+    const ownTeam = detail.participants?.find(
+      (participant) => participant.participantId === ownerId,
+    )?.teamId
+    const assigned = detail.gameId && this.champSelect
+      ? this.champSelect.positionsFor(detail.gameId, this.puuid)
+      : new Map<number, string>()
 
     const lobby: GradeInput[] = (detail.participants ?? []).map((participant) => ({
       participantId: participant.participantId,
@@ -247,7 +261,13 @@ export class MatchSync {
         minutes,
       visionScore: number(participant.stats?.visionScore),
       damageObjectives: number(participant.stats?.damageDealtToObjectives),
-      role: participant.timeline?.role,
+      role: resolvePosition(
+        participant.timeline?.lane,
+        participant.timeline?.role,
+        participant.teamId === ownTeam && participant.championId !== undefined
+          ? assigned.get(participant.championId)
+          : undefined,
+      ),
     }))
 
     return lobby
@@ -255,7 +275,9 @@ export class MatchSync {
 }
 
 function identityParticipantId(detail: GameDetail, puuid: string): number {
-  return detail.participantIdentities?.find((entry) => entry.player?.puuid === puuid)?.participantId ?? -1
+  return detail.participantIdentities?.find(
+    (entry) => entry.player?.puuid === puuid,
+  )?.participantId ?? -1
 }
 
 const number = (value: number | boolean | undefined) =>

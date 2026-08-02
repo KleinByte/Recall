@@ -22,6 +22,9 @@ export class ChampSelectRepository {
     )
     if (usable.length === 0) return 0
 
+    const replace = this.db.prepare(
+      "DELETE FROM champ_select_positions WHERE game_id = ? AND puuid = ?",
+    )
     const insert = this.db.prepare(
       `INSERT OR REPLACE INTO champ_select_positions
        (game_id, puuid, champion_id, position, captured_at)
@@ -30,6 +33,10 @@ export class ChampSelectRepository {
     const capturedAt = Date.now()
 
     return this.db.transaction((batch: ChampSelectPosition[]) => {
+      // Each read is a complete snapshot of the usable selections. Removing
+      // the previous snapshot prevents an abandoned pick intent from being
+      // stamped onto a different champion locked later in the same draft.
+      replace.run(gameId, puuid)
       let written = 0
       for (const entry of batch) {
         written += insert.run(

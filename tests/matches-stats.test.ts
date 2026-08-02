@@ -7,12 +7,25 @@ import { buildMatchRow, buildMatchSequence } from "./fixtures/matches.js"
 const PUUID = "test-puuid"
 
 let repo: MatchesRepository
+let db: InstanceType<typeof Database>
 
 beforeEach(() => {
-  const db = new Database(":memory:")
+  db = new Database(":memory:")
   applyMigrations(db)
   repo = new MatchesRepository(db)
 })
+
+function storeOwnerPosition(gameId: number, assignedPosition: string) {
+  db.prepare(
+    `INSERT INTO match_participants
+     (game_id, puuid, participant_id, team_id, is_player, champion_id, win,
+      kills, deaths, assists, gold_earned, damage_to_champions, damage_taken,
+      damage_self_mitigated, total_heal, time_ccing_others,
+      total_minions_killed, neutral_minions, vision_score, damage_objectives,
+      assigned_position)
+     VALUES (?, ?, 1, 100, 1, 84, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ?)`,
+  ).run(gameId, PUUID, assignedPosition)
+}
 
 describe("getSummary", () => {
   it("counts games, wins and losses", () => {
@@ -103,6 +116,21 @@ describe("getSummary", () => {
     // the hint on its own is not evidence of anyone having played support.
     repo.insertMany([buildMatchRow({ gameId: 1, role: "SUPPORT", lane: "NONE" })])
 
+    expect(repo.getSummary({ puuid: PUUID, roles: ["UTILITY"] }).games).toBe(0)
+  })
+
+  it("uses the champion-select assignment when post-game position is absent", () => {
+    repo.insertMany([buildMatchRow({ gameId: 1, role: "SUPPORT", lane: "NONE" })])
+    storeOwnerPosition(1, "UTILITY")
+
+    expect(repo.getSummary({ puuid: PUUID, roles: ["UTILITY"] }).games).toBe(1)
+  })
+
+  it("keeps Match-V5's played position ahead of the queue assignment", () => {
+    repo.insertMany([buildMatchRow({ gameId: 1, role: "MIDDLE", lane: "TOP" })])
+    storeOwnerPosition(1, "UTILITY")
+
+    expect(repo.getSummary({ puuid: PUUID, roles: ["MIDDLE"] }).games).toBe(1)
     expect(repo.getSummary({ puuid: PUUID, roles: ["UTILITY"] }).games).toBe(0)
   })
 

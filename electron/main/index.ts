@@ -579,7 +579,12 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
   })
   events.on("phase", (phase: string) => {
     if (phase === "ChampSelect") void refreshLiveSession(win, "ChampSelect")
-    if (phase === "InProgress") void refreshLiveSession(win, "InProgress")
+    else if (phase === "InProgress") void refreshLiveSession(win, "InProgress")
+    else if (liveSession.phase === "ChampSelect" && phase !== "GameStart") {
+      // A dodge returns through Lobby/Matchmaking without ever producing a
+      // game id. Do not let that draft's champions leak into the next game.
+      assignedPositions.clear()
+    }
   })
   events.start()
 
@@ -637,8 +642,8 @@ function clearLiveSession(win: BrowserWindow) {
 
 /**
  * Champion select is the only place the client states the position it gave
- * each of our players, and it is gone by the time the game id is known, so the
- * roster is held by cell until the match it belongs to can be named.
+ * each of our players. The roster is held by cell until the match can be named
+ * (some client versions expose gameId immediately; others do so at game start).
  */
 function rememberAssignedPositions(champSelectSession: LiveSession) {
   for (const player of champSelectSession.allies) {
@@ -668,7 +673,10 @@ async function refreshLiveSession(win: BrowserWindow, phase: LivePhase) {
       session.summoner.puuid,
     )
     if (revision !== liveRevision) return
-    if (phase === "ChampSelect") rememberAssignedPositions(next)
+    if (phase === "ChampSelect") {
+      rememberAssignedPositions(next)
+      storeAssignedPositions(next.gameId)
+    }
     liveSession = next
     broadcast(win, "live:updated", liveSession)
     if (phase === "InProgress") {

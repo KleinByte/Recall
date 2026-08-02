@@ -1,4 +1,5 @@
 import type { GradeInput } from "../matches/grade.js"
+import { resolvePosition } from "../matches/position.js"
 import { mapMatchRow } from "../matches/map-match.js"
 import type { QueueInfo } from "../matches/queues.js"
 import type {
@@ -210,13 +211,16 @@ function laneFor(participant: RiotMatchParticipant) {
 }
 
 function positionFor(participant: RiotMatchParticipant) {
-  return (
-    participant.teamPosition ||
-    participant.individualPosition ||
-    participant.lane ||
-    participant.role ||
-    undefined
-  )
+  // Riot recommends teamPosition as the lobby-aware estimate. Some payloads
+  // use non-position sentinels such as "Invalid", so only let a canonical
+  // value mask the individual estimate. Preserve the legacy role hint when
+  // neither estimate is usable; lane + SUPPORT is needed to distinguish bot
+  // carry from support.
+  const estimated =
+    resolvePosition(undefined, participant.teamPosition) ??
+    resolvePosition(undefined, participant.individualPosition)
+  if (estimated) return estimated
+  return participant.role || participant.lane || undefined
 }
 
 function displayName(participant: RiotMatchParticipant) {
@@ -426,7 +430,10 @@ export function mapRiotMatch(
       (participant.totalMinionsKilled + participant.neutralMinions) / minutes,
     visionScore: participant.visionScore,
     damageObjectives: participant.damageObjectives,
-    role: participant.role,
+    role: resolvePosition(
+      participant.lane,
+      participant.role,
+    ),
   }))
 
   const unknownParticipantFields = [...new Set(

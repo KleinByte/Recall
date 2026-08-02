@@ -164,6 +164,10 @@ export async function readLiveSession(
 
   if (phase === "ChampSelect") {
     const select = await client.request<Record<string, any>>("/lol-champ-select/v1/session")
+    // Current champ-select sessions expose their own gameId. Prefer the
+    // gameflow value when present, but do not wait for InProgress to persist
+    // assignments when champ select already identifies the match.
+    result.gameId ??= number(select.gameId)
     result.localPlayerCellId = number(select.localPlayerCellId)
     result.rerollsRemaining = number(select.rerollsRemaining)
     result.secondsRemaining = Math.max(0, Math.ceil((number(select.timer?.adjustedTimeLeftInPhase) ?? 0) / 1000))

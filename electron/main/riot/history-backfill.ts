@@ -10,6 +10,7 @@ import { evaluateMatchLabels } from "../matches/labels.js"
 import type { QueueIndex } from "../matches/queues.js"
 import { RiotApiClient, RiotApiError } from "./api-client.js"
 import { mapRiotMatch, type RiotMatchDto } from "./match-mapper.js"
+import { resolvePosition } from "../matches/position.js"
 
 const PAGE_SIZE = 100
 
@@ -221,8 +222,21 @@ export class RiotHistoryBackfill {
             (mapped.match.modeFamily === "aram" ||
               mapped.match.modeFamily === "sr")
           ) {
+            const positionByParticipant = new Map(
+              mapped.participants.map((participant) => [
+                participant.participantId,
+                resolvePosition(
+                  participant.lane,
+                  participant.role,
+                  participant.assignedPosition,
+                ),
+              ]),
+            )
             const grades = gradeLobby(
-              mapped.gradeInputs,
+              mapped.gradeInputs.map((input) => ({
+                ...input,
+                role: positionByParticipant.get(input.participantId),
+              })),
               mapped.match.modeFamily,
             )
             this.participants.setGrades(

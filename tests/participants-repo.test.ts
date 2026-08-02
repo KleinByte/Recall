@@ -402,6 +402,7 @@ describe("lobby comparison", () => {
         goldEarned: i === 0 ? 10000 : (i === 5 ? 12000 : 15000),
         visionScore: i === 0 ? 30 : (i === 5 ? 25 : 40),
         role: i === 0 || i === 5 ? "MIDDLE" : "TOP",
+        assignedPosition: i === 0 ? "UTILITY" : undefined,
         extendedMetrics: { teamPosition: i === 0 || i === 5 ? "MIDDLE" : "TOP" },
       }),
     )
@@ -425,7 +426,8 @@ describe("lobby comparison", () => {
     matches.insertMany([
       buildMatchRow({ gameId: 1, mode: "sr_ranked_solo", modeFamily: "sr" }),
     ])
-    // No role data at all — force lobby fallback.
+    // This is a real short-game LCU failure mode: a role hint with no lane is
+    // not enough evidence to call every participant a support.
     const players = Array.from({ length: 10 }, (_, i) =>
       participant({
         gameId: 1,
@@ -434,8 +436,8 @@ describe("lobby comparison", () => {
         isPlayer: i === 0 ? 1 : 0,
         totalMinionsKilled: i === 0 ? 150 : 100,
         neutralMinions: 0,
-        role: undefined,
-        lane: undefined,
+        role: "SUPPORT",
+        lane: "NONE",
         extendedMetrics: {},
       }),
     )

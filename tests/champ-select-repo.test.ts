@@ -42,6 +42,22 @@ describe("ChampSelectRepository", () => {
     expect(repo.positionsFor(7, PUUID).get(64)).toBe("TOP")
   })
 
+  it("replaces an abandoned pick intent with the latest draft snapshot", () => {
+    repo.record(7, PUUID, [
+      { championId: 64, position: "JUNGLE" },
+      { championId: 17, position: "TOP" },
+    ])
+    repo.record(7, PUUID, [
+      { championId: 64, position: "JUNGLE" },
+      { championId: 84, position: "TOP" },
+    ])
+
+    expect([...repo.positionsFor(7, PUUID)]).toEqual([
+      [64, "JUNGLE"],
+      [84, "TOP"],
+    ])
+  })
+
   it("keeps games and accounts apart", () => {
     repo.record(7, PUUID, [{ championId: 64, position: "JUNGLE" }])
     repo.record(8, PUUID, [{ championId: 64, position: "TOP" }])
