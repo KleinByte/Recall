@@ -90,7 +90,7 @@ const rviIdentity = computed(() => props.overview.performance
         :value="formatDecimal(detail.csPerMin, 1)"
       />
       <StatTile
-        v-if="detail && family === 'sr'"
+        v-if="detail && (family === 'sr' || family === 'classic')"
         label="Vision / min"
         :value="formatDecimal(detail.visionPerMin, 2)"
       />

@@ -220,7 +220,8 @@ export class RiotHistoryBackfill {
           if (
             mapped.match.isMatched === 1 &&
             (mapped.match.modeFamily === "aram" ||
-              mapped.match.modeFamily === "sr")
+              mapped.match.modeFamily === "sr" ||
+              mapped.match.modeFamily === "classic")
           ) {
             const positionByParticipant = new Map(
               mapped.participants.map((participant) => [

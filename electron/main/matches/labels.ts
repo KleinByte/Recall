@@ -209,7 +209,7 @@ export function evaluateMatchLabels(context: LabelContext): PerformanceLabel[] {
     evidence: { trueDamage: player.trueDamageToChampions, lobbyRank: 1 }, priority: 69,
   })
 
-  if (match.modeFamily === "sr" && !isSupport(player) && !isJungle(player) && (cs >= 250 || csPerMinute >= 8.5)) add({
+  if ((match.modeFamily === "sr" || match.modeFamily === "classic") && !isSupport(player) && !isJungle(player) && (cs >= 250 || csPerMinute >= 8.5)) add({
     id: "farm_machine", name: "Farm Machine", category: "Economy", polarity: "positive",
     tooltip: `You collected ${cs} CS (${csPerMinute.toFixed(1)} per minute).`,
     evidence: { cs, csPerMinute }, priority: 69,
@@ -226,7 +226,7 @@ export function evaluateMatchLabels(context: LabelContext): PerformanceLabel[] {
     priority: 72, confidence: "strong", group: "efficiency",
   })
 
-  if (visionRank <= 2 && player.visionScore / minutes >= (isSupport(player) ? 1.5 : 0.8) && match.modeFamily === "sr") add({
+  if (visionRank <= 2 && player.visionScore / minutes >= (isSupport(player) ? 1.5 : 0.8) && (match.modeFamily === "sr" || match.modeFamily === "classic")) add({
     id: "visionary", name: "Visionary", category: "Vision", polarity: "positive",
     tooltip: `You ranked #${visionRank} with ${player.visionScore} vision score (${(player.visionScore / minutes).toFixed(1)} per minute).`,
     evidence: { visionScore: player.visionScore, visionPerMinute: player.visionScore / minutes, lobbyRank: visionRank },
@@ -240,7 +240,7 @@ export function evaluateMatchLabels(context: LabelContext): PerformanceLabel[] {
     id: "control_freak", name: "Control Freak", category: "Vision", polarity: "positive",
     tooltip: `You purchased ${player.controlWards} control wards.`, evidence: { controlWards: player.controlWards }, priority: 62,
   })
-  if (match.modeFamily === "sr" && minutes >= 25 && player.controlWards === 0 && (isSupport(player) || isJungle(player))) add({
+  if ((match.modeFamily === "sr" || match.modeFamily === "classic") && minutes >= 25 && player.controlWards === 0 && (isSupport(player) || isJungle(player))) add({
     id: "no_control_wards", name: "No Pink Budget", category: "Vision", polarity: "negative",
     tooltip: `You purchased no control wards in a ${Math.round(minutes)}-minute game.`,
     evidence: { controlWards: 0, minutes: Math.round(minutes) }, priority: 64,
@@ -262,7 +262,7 @@ export function evaluateMatchLabels(context: LabelContext): PerformanceLabel[] {
     tooltip: `You contributed to ${Math.round(turretTakedowns)} turret takedowns.`,
     evidence: { turretTakedowns: Math.round(turretTakedowns) }, priority: 74, group: "structures",
   })
-  if (player.damageTurrets === 0 && match.modeFamily === "sr" && !isSupport(player) && minutes >= 20) add({
+  if (player.damageTurrets === 0 && (match.modeFamily === "sr" || match.modeFamily === "classic") && !isSupport(player) && minutes >= 20) add({
     id: "no_structure_damage", name: "No Structure Damage", category: "Objectives", polarity: "negative",
     tooltip: "You dealt no damage to enemy turrets.", evidence: { turretDamage: 0 }, priority: 63, group: "structures",
   })

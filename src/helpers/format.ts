@@ -75,6 +75,8 @@ export const modeLabel = (mode: string) => {
       return "Swiftplay"
     case "sr_normal":
       return "Normal"
+    case "league_classic":
+      return "League Classic"
     case "other":
       return "Other"
     default:

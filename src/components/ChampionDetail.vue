@@ -50,18 +50,24 @@ async function load(championId: number) {
   try {
     const filter = { championIds: [championId] }
 
-    // A champion may be played in either place, so the breakdown follows
+    // A champion may be played in any supported family, so the breakdown follows
     // wherever it has actually been played most.
-    const [aram, rift] = await Promise.all([
+    const [aram, rift, classic] = await Promise.all([
       api.getStyleReport({ ...filter, modeFamily: "aram" }, "aram"),
       api.getStyleReport({ ...filter, modeFamily: "sr" }, "sr"),
+      api.getStyleReport({ ...filter, modeFamily: "classic" }, "classic"),
     ])
 
-    const aramGames = aram.career?.games ?? 0
-    const riftGames = rift.career?.games ?? 0
-    family.value = riftGames > aramGames ? "sr" : "aram"
-
-    championStyle.value = (family.value === "sr" ? rift : aram).career
+    const styles = [
+      { family: "aram" as const, report: aram },
+      { family: "sr" as const, report: rift },
+      { family: "classic" as const, report: classic },
+    ]
+    const selected = styles.reduce((best, entry) =>
+      (entry.report.career?.games ?? 0) > (best.report.career?.games ?? 0) ? entry : best,
+    )
+    family.value = selected.family
+    championStyle.value = selected.report.career
 
     const [nextSummary, nextGrades, overall, bestGames, worstGames, championNeeds] =
       await Promise.all([
@@ -193,7 +199,7 @@ const gradeBars = computed(() => {
             />
             <p class="muted footnote">
               Gold is {{ name }}. Blue is how you play
-              {{ family === "sr" ? "Summoner's Rift" : "ARAM" }} overall.
+              {{ family === "sr" ? "Summoner's Rift" : family === "classic" ? "League Classic" : "ARAM" }} overall.
             </p>
           </div>
 

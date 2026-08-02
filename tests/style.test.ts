@@ -79,7 +79,7 @@ describe("buildStyleProfile", () => {
   })
 
   it("every axis has a non-empty formula", () => {
-    for (const family of ["sr", "aram"] as const) {
+    for (const family of ["sr", "aram", "classic"] as const) {
       for (const axis of buildStyleProfile(averages(), family)!.axes) {
         expect(axis.formula.length).toBeGreaterThan(0)
       }

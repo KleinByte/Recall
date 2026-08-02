@@ -27,9 +27,9 @@ const kda = (match: MatchRow) =>
     ? match.kills + match.assists
     : (match.kills + match.assists) / match.deaths
 
-// Only the Rift assigns positions; ARAM and Arena would report noise.
+// Lane-based modes assign positions; ARAM and Arena would report noise.
 const position = (match: MatchRow) =>
-  match.modeFamily === "sr"
+  match.modeFamily === "sr" || match.modeFamily === "classic"
     ? resolvePosition(match.lane, match.role, match.assignedPosition)
     : undefined
 

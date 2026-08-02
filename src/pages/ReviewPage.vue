@@ -73,7 +73,9 @@ const teams = computed(() => [100, 200].map((teamId) => ({
   teamId,
   players: review.value?.scoreboard.filter((player) => player.teamId === teamId) ?? [],
 })))
-const showsRoles = computed(() => review.value?.match.modeFamily === "sr")
+const showsRoles = computed(() =>
+  review.value?.match.modeFamily === "sr" || review.value?.match.modeFamily === "classic",
+)
 
 /** Every row stays independently open so two lanes can be compared at once. */
 const openMatchups = ref<Record<string, boolean>>({})
@@ -927,6 +929,7 @@ onBeforeUnmount(() => {
             <option value="sr_ranked_solo">Ranked Solo</option><option value="sr_ranked_flex">Ranked Flex</option>
             <option value="sr_normal">Normal Draft</option><option value="sr_quickplay">Quickplay</option>
             <option value="sr_swiftplay">Swiftplay</option>
+            <option value="league_classic">League Classic</option>
           </select>
           <span class="muted">Leave empty for all modes.</span>
         </label>

@@ -56,8 +56,11 @@ const selectedScope = computed(() =>
 const riftScopes = computed(() =>
   SKILL_SCOPES.filter((scope) => scope.primary === "rift"),
 )
-const otherScopes = computed(() =>
-  SKILL_SCOPES.filter((scope) => scope.primary !== "rift"),
+const abyssScopes = computed(() =>
+  SKILL_SCOPES.filter((scope) => scope.primary === "aram" || scope.primary === "mayhem"),
+)
+const classicScopes = computed(() =>
+  SKILL_SCOPES.filter((scope) => scope.primary === "classic"),
 )
 const seasonOptions = computed(() => {
   const newest = new Date().getFullYear()
@@ -83,7 +86,7 @@ function detailFilter(): StatsFilter {
     filter.sinceMs = new Date(season.value, 0, 1).getTime()
     filter.untilMs = new Date(season.value + 1, 0, 1).getTime() - 1
   }
-  if (role.value !== undefined && selectedScope.value.family === "sr") {
+  if (role.value !== undefined && (selectedScope.value.family === "sr" || selectedScope.value.family === "classic")) {
     filter.roles = [role.value]
   }
   if (championId.value !== undefined) filter.championIds = [championId.value]
@@ -107,7 +110,7 @@ async function loadCounts() {
   ) as Record<SkillScopeId, number>
 
   if (!choseInitialScope) {
-    const candidates: SkillScopeId[] = ["riftAll", "aram", "mayhem"]
+    const candidates: SkillScopeId[] = ["riftAll", "aram", "mayhem", "leagueClassic"]
     scopeId.value = candidates.reduce((best, id) =>
       counts.value[id] > counts.value[best] ? id : best,
     )
@@ -137,7 +140,7 @@ async function loadReport() {
 }
 
 async function applyFilters() {
-  if (selectedScope.value.family !== "sr") role.value = undefined
+  if (selectedScope.value.family !== "sr" && selectedScope.value.family !== "classic") role.value = undefined
   await Promise.all([loadCounts(), loadReport()])
 }
 
@@ -195,7 +198,12 @@ onMounted(async () => {
               </option>
             </optgroup>
             <optgroup label="Howling Abyss">
-              <option v-for="scope in otherScopes" :key="scope.id" :value="scope.id">
+              <option v-for="scope in abyssScopes" :key="scope.id" :value="scope.id">
+                {{ scope.label }} · {{ counts[scope.id] }}
+              </option>
+            </optgroup>
+            <optgroup label="League Classic">
+              <option v-for="scope in classicScopes" :key="scope.id" :value="scope.id">
                 {{ scope.label }} · {{ counts[scope.id] }}
               </option>
             </optgroup>
@@ -215,7 +223,7 @@ onMounted(async () => {
           <select
             v-model="role"
             class="league-select"
-            :disabled="selectedScope.family !== 'sr'"
+            :disabled="selectedScope.family !== 'sr' && selectedScope.family !== 'classic'"
             @change="applyFilters"
           >
             <option :value="undefined">Any role</option>

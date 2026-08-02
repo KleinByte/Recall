@@ -44,8 +44,8 @@ export function classifyMatch(
 
   if (isLeagueClassicQueue(game, queue)) {
     return {
-      mode: "other",
-      family: "other",
+      mode: "league_classic",
+      family: "classic",
       isRanked: false,
       queueName: "League Classic",
     }

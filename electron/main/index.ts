@@ -1347,7 +1347,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
       ))]
       const mode = oneOf(rawMode, [
         "sr_ranked_solo", "sr_ranked_flex", "sr_normal", "sr_quickplay",
-        "sr_swiftplay", "aram", "mayhem", "other",
+        "sr_swiftplay", "aram", "mayhem", "league_classic", "other",
       ] as const, "Mode")
       const objective = oneOf(rawObjective, [
         "best_overall", "recent_form", "challenges", "practice", "most_reliable",
@@ -1465,7 +1465,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
       championIds: input.championIds.map((id) => integer(id, "Champion id")),
       modes: input.modes.map((mode) => oneOf(mode, [
         "sr_ranked_solo", "sr_ranked_flex", "sr_normal", "sr_quickplay",
-        "sr_swiftplay", "aram", "mayhem", "other",
+        "sr_swiftplay", "aram", "mayhem", "league_classic", "other",
       ] as const, "Mode")) as TrackedMode[],
       status: input.status === undefined
         ? undefined

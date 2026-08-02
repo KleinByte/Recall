@@ -1,5 +1,8 @@
 import type { Database } from "better-sqlite3"
-import { BOT_QUEUE_IDS } from "../matches/eligibility.js"
+import {
+  BOT_QUEUE_IDS,
+  LEAGUE_CLASSIC_PVP_QUEUE_IDS,
+} from "../matches/eligibility.js"
 
 interface Migration {
   version: number
@@ -699,6 +702,27 @@ export const migrations: Migration[] = [
         captured_at INTEGER NOT NULL,
         PRIMARY KEY (game_id, puuid, champion_id)
       );
+    `,
+  },
+  {
+    // League Classic moved from the legacy 710 identifier to Riot's Jade
+    // queue group. Reclassify already-captured PvP rows into their own family
+    // so they receive isolated filters, records, grades and RVI profiles.
+    version: 17,
+    up: `
+      UPDATE matches
+      SET mode = 'league_classic',
+          mode_family = 'classic',
+          is_ranked = 0,
+          queue_name = 'League Classic'
+      WHERE queue_id IN (${LEAGUE_CLASSIC_PVP_QUEUE_IDS.join(", ")})
+         OR UPPER(COALESCE(game_mode, '')) = 'JADE'
+         OR LOWER(COALESCE(queue_name, '')) LIKE '%league classic%'
+         OR LOWER(COALESCE(queue_name, '')) LIKE '%5v5 jade%';
+
+      UPDATE matches
+      SET is_matched = 0
+      WHERE queue_id IN (4320, 4321);
     `,
   },
 ]

@@ -193,7 +193,8 @@ describe("Skill page coordination", () => {
     const championPicker = read("src/components/ChampionPicker.vue")
 
     expect(page).toContain("riftScopes")
-    expect(page).toContain("otherScopes")
+    expect(page).toContain("abyssScopes")
+    expect(page).toContain("classicScopes")
     expect(page).toContain("counts[scope.id]")
     expect(page).toContain('v-model="season"')
     expect(page).toContain('v-model="role"')

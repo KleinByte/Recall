@@ -90,15 +90,15 @@ describe("getRecords", () => {
     expect(damage.value).toBe(42_000)
   })
 
-  it("keeps League Classic out of Rift records", () => {
+  it("keeps League Classic records separate from modern Rift", () => {
     matches.insertMany([
       buildMatchRow({
         gameId: 1,
         queueId: 710,
         gameMode: "CLASSIC",
         queueName: "Ranked 5s",
-        mode: "sr_normal",
-        modeFamily: "sr",
+        mode: "league_classic",
+        modeFamily: "classic",
         kills: 40,
       }),
       buildMatchRow({
@@ -122,12 +122,15 @@ describe("getRecords", () => {
           "sr_quickplay",
           "sr_swiftplay",
         ],
-        excludeLeagueClassic: true,
       })
       .find((record) => record.key === "kills")!
 
     expect(kills.gameId).toBe(2)
     expect(kills.value).toBe(18)
+    expect(
+      matches.getRecords({ puuid: PUUID, mode: "league_classic" })
+        .find((record) => record.key === "kills")!.gameId,
+    ).toBe(1)
   })
 
   it("keeps ARAM and Mayhem records in their own scopes", () => {

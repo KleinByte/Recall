@@ -99,7 +99,7 @@ export function evaluateTimelineLabels(
   context: TimelineLabelContext,
 ): PrioritizablePerformanceLabel[] {
   const { match, player, participants, timeline } = context
-  if (match.modeFamily !== "sr" || match.isMatched !== 1 || timeline.frames.length === 0) return []
+  if ((match.modeFamily !== "sr" && match.modeFamily !== "classic") || match.isMatched !== 1 || timeline.frames.length === 0) return []
 
   const labels: PrioritizablePerformanceLabel[] = []
   const add = (label: Omit<PrioritizablePerformanceLabel, "source">) =>

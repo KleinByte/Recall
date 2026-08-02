@@ -457,7 +457,7 @@ export class MatchesRepository {
       .prepare(
         `SELECT game_id AS gameId, mode_family AS modeFamily FROM matches
          WHERE puuid = ? AND is_matched = 1 AND grade IS NULL
-           AND mode_family IN ('sr', 'aram')
+           AND mode_family IN ('sr', 'aram', 'classic')
          ORDER BY played_at DESC
          LIMIT ?`,
       )
@@ -772,12 +772,9 @@ export class MatchesRepository {
    * rather than reporting a number with no story attached.
    */
   getRecords(filter: StatsFilter): PersonalRecord[] {
-    const { clause, params } = buildFilter({
-      ...filter,
-      excludeLeagueClassic: true,
-    })
+    const { clause, params } = buildFilter(filter)
     const eligibleModes = `(
-      mode IN ('aram', 'mayhem')
+      mode IN ('aram', 'mayhem', 'league_classic')
       OR queue_id IN (${PERSONAL_RECORD_RIFT_QUEUE_IDS.join(", ")})
     )`
 
@@ -1000,6 +997,8 @@ function buildFilter(filter: StatsFilter) {
   if (filter.excludeLeagueClassic) {
     conditions.push(
       `NOT (
+        mode = 'league_classic'
+        OR
         queue_id IN (${LEAGUE_CLASSIC_QUEUE_IDS.join(", ")})
         OR (
           UPPER(COALESCE(game_mode, '')) = 'CLASSIC'

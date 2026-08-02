@@ -92,6 +92,24 @@ describe("readLiveSession", () => {
     expect(live.mapId).toBe(12)
   })
 
+  it("recognizes League Classic during champion select", async () => {
+    const live = await readLiveSession(client({
+      "/lol-gameflow/v1/session": {
+        gameData: {
+          queue: {
+            id: 4300,
+            gameMode: "JADE",
+            mapId: 11,
+            name: "5v5 Jade",
+          },
+        },
+      },
+      "/lol-champ-select/v1/session": { myTeam: [], theirTeam: [] },
+    }) as never, "ChampSelect")
+
+    expect(live.mode).toBe("league_classic")
+  })
+
   it("uses both client rosters and resolves in-game Riot IDs locally", async () => {
     const live = await readLiveSession(
       client({

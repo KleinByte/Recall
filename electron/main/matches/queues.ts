@@ -14,9 +14,12 @@ export interface QueueInfo {
   id: number
   name: string
   shortName: string
+  description?: string
   gameMode: string
   mapId: number
   isRanked: boolean
+  gameSelectModeGroup?: string
+  gameSelectCategory?: string
 }
 
 export type QueueIndex = Map<number, QueueInfo>

@@ -105,7 +105,7 @@ export interface DurationBucket {
  * surrender, so the two families cannot share bands.
  */
 export function durationBucketsFor(family: ModeFamily): DurationBucket[] {
-  if (family === "sr") {
+  if (family === "sr" || family === "classic") {
     return [
       { label: "Under 22 min", maxSecs: 1320 },
       { label: "22–28 min", maxSecs: 1680 },

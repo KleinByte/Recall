@@ -18,7 +18,7 @@ export const VISION_PER_MINUTE_FULL = 2
 export const CC_SECONDS_PER_MINUTE_FULL = 20
 
 /** CS/min that fills the farming ring per mode family. Display ring full at this value; not a population benchmark. */
-export const CS_PER_MINUTE_FULL: Record<ModeFamily, number> = { sr: 10, aram: 5, other: 10 }
+export const CS_PER_MINUTE_FULL: Record<ModeFamily, number> = { sr: 10, aram: 5, classic: 10, other: 10 }
 
 export const STYLE_AXIS_LABELS: Record<string, string> = {
   aggression: "Aggression",
@@ -56,7 +56,7 @@ export function computePerGameAxes(input: PerGameAxisInput, family: ModeFamily):
     farming: cl(input.csPerMin / CS_PER_MINUTE_FULL[family]),
   }
 
-  if (family === "sr") {
+  if (family === "sr" || family === "classic") {
     axes.objectives = cl(guard(input.damageObjectives, input.damageObjectives + input.damageToChampions))
     axes.vision = cl(input.visionPerMin / VISION_PER_MINUTE_FULL)
   } else {
@@ -164,7 +164,7 @@ function axesFor(averages: StyleAverages, family: ModeFamily): StyleAxis[] {
     },
   ]
 
-  if (family === "sr") {
+  if (family === "sr" || family === "classic") {
     return [
       ...shared,
       {

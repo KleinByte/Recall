@@ -64,6 +64,10 @@ export class ReviewService {
         role: participant.role,
       })), match.modeFamily)
       this.participants.setGrades(gameId, puuid, results)
+      const ownerGrade = results.get(owner.participantId)
+      if (ownerGrade) {
+        this.matches.setGrade(gameId, puuid, ownerGrade.grade, ownerGrade.score)
+      }
       grade = this.reviews.getGradeBreakdown(gameId, puuid, owner.participantId)
     }
     if (!grade && match.grade) {
@@ -111,7 +115,7 @@ export class ReviewService {
     const championMode = previous.filter((candidate) =>
       candidate.championId === match.championId && candidate.mode === match.mode,
     ).slice(0, 20)
-    const roleMode = match.modeFamily === "sr"
+    const roleMode = match.modeFamily === "sr" || match.modeFamily === "classic"
       ? previous.filter((candidate) =>
         candidate.mode === match.mode && match.role && candidate.role === match.role,
       ).slice(0, 20)

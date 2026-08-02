@@ -1,6 +1,7 @@
 import type { LcuClient } from "./lcu-client.js"
 import type { LiveGameSnapshot } from "./game-client.js"
 import type { TrackedMode } from "./matches/types.js"
+import { LEAGUE_CLASSIC_QUEUE_IDS } from "./matches/eligibility.js"
 
 export type LivePhase = "Idle" | "ChampSelect" | "InProgress"
 
@@ -50,6 +51,9 @@ const text = (value: unknown): string | undefined =>
     : undefined
 
 function modeFor(queueId?: number, gameMode?: string, mapId?: number): TrackedMode | undefined {
+  if ((queueId !== undefined && LEAGUE_CLASSIC_QUEUE_IDS.some((id) => id === queueId)) || gameMode === "JADE") {
+    return "league_classic"
+  }
   if (mapId === 12) return gameMode?.startsWith("KIWI") ? "mayhem" : "aram"
   if (mapId !== 11) return undefined
   if (queueId === 420) return "sr_ranked_solo"

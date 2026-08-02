@@ -35,6 +35,7 @@ const MODES: { value: TrackedMode; label: string }[] = [
   { value: "sr_swiftplay", label: "Swiftplay" },
   { value: "aram", label: "ARAM" },
   { value: "mayhem", label: "Mayhem" },
+  { value: "league_classic", label: "League Classic" },
   { value: "other", label: "Other" },
 ]
 

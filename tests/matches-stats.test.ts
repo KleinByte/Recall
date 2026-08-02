@@ -284,7 +284,7 @@ describe("getRecentMatches", () => {
     expect(recent[2].gameId).toBe(3)
   })
 
-  it("leaves League Classic out of a feed without hiding Mayhem", () => {
+  it("keeps League Classic independently filterable from Mayhem", () => {
     repo.insertMany([
       buildMatchRow({
         gameId: 1,
@@ -298,17 +298,21 @@ describe("getRecentMatches", () => {
         playedAt: 2_000,
         queueId: 710,
         gameMode: "CLASSIC",
-        mode: "sr_normal",
-        modeFamily: "sr",
+        mode: "league_classic",
+        modeFamily: "classic",
         queueName: "Ranked 5s",
       }),
       buildMatchRow({ gameId: 3, playedAt: 3_000, queueId: 420 }),
     ])
 
     expect(
-      repo.getRecentMatches({ puuid: PUUID, excludeLeagueClassic: true }, 6)
+      repo.getRecentMatches({ puuid: PUUID, mode: "league_classic" }, 6)
         .map((match) => match.gameId),
-    ).toEqual([3, 1])
+    ).toEqual([2])
+    expect(
+      repo.getRecentMatches({ puuid: PUUID, mode: "mayhem" }, 6)
+        .map((match) => match.gameId),
+    ).toEqual([1])
   })
 })
 

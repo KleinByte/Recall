@@ -156,11 +156,12 @@ describe("desktop page layout", () => {
     expect(rankGraph).toContain("timestamps.length === 1")
   })
 
-  it("keeps League Classic out of the dashboard feed while retaining queue tags", () => {
+  it("includes League Classic in the dashboard feed while retaining queue tags", () => {
     const dashboard = read("src/pages/DashboardPage.vue")
     const matches = read("src/components/MatchList.vue")
 
-    expect(dashboard).toContain("excludeLeagueClassic: true")
+    expect(dashboard).toContain("api.getMatches({}, 6)")
+    expect(dashboard).toContain('modeFamily: "classic"')
     expect(dashboard).not.toContain("2450")
     expect(matches).toContain("match.queueName ?? modeLabel(match.mode)")
   })
@@ -172,8 +173,9 @@ describe("desktop page layout", () => {
     expect(progress).toContain('label: "Solo/Duo Ranked"')
     expect(progress).toContain('label: "ARAM"')
     expect(progress).toContain('label: "Mayhem"')
+    expect(progress).toContain('label: "League Classic"')
     expect(progress).toContain('label: "All Rift"')
-    expect(progress).toContain("excludeLeagueClassic: true")
+    expect(progress).not.toContain("excludeLeagueClassic: true")
   })
 
   it("visually separates the evidence introduction from its accordions", () => {

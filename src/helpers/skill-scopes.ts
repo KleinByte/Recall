@@ -3,12 +3,12 @@ import type { ModeFamily, StatsFilter, TrackedMode } from "../types/stats"
 export type SkillScopeId =
   | "riftAll" | "riftRanked" | "riftNormal"
   | "rankedSolo" | "rankedFlex" | "draftBlind"
-  | "quickplay" | "swiftplay" | "aram" | "mayhem"
+  | "quickplay" | "swiftplay" | "aram" | "mayhem" | "leagueClassic"
 
 export interface SkillScope {
   id: SkillScopeId
   label: string
-  primary: "rift" | "aram" | "mayhem"
+  primary: "rift" | "aram" | "mayhem" | "classic"
   family: ModeFamily
   kind: "combined" | "leaf"
   modes: readonly TrackedMode[]
@@ -25,6 +25,7 @@ export const SKILL_SCOPES: readonly SkillScope[] = [
   { id: "swiftplay", label: "Swiftplay", primary: "rift", family: "sr", kind: "leaf", modes: ["sr_swiftplay"] },
   { id: "aram", label: "ARAM", primary: "aram", family: "aram", kind: "leaf", modes: ["aram"] },
   { id: "mayhem", label: "Mayhem", primary: "mayhem", family: "aram", kind: "leaf", modes: ["mayhem"] },
+  { id: "leagueClassic", label: "League Classic", primary: "classic", family: "classic", kind: "leaf", modes: ["league_classic"] },
 ] as const
 
 export function filterForSkillScope(id: SkillScopeId): StatsFilter {

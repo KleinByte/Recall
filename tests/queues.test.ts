@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { classifyMatch } from "../electron/main/matches/classify.js"
+import { isEligibleMatch } from "../electron/main/matches/eligibility.js"
 import { indexQueues, type QueueInfo } from "../electron/main/matches/queues.js"
 import type { LcuGame } from "../electron/main/matches/types.js"
 
@@ -115,9 +116,43 @@ describe("classifyMatch with client queue data", () => {
     )
 
     expect(result).toMatchObject({
-      mode: "other",
-      family: "other",
+      mode: "league_classic",
+      family: "classic",
       queueName: "League Classic",
     })
+  })
+
+  it("recognizes the client's current Jade queue group", () => {
+    const result = classifyMatch(
+      game({ queueId: 9003, gameMode: "JADE" }),
+      queue({
+        id: 9003,
+        name: "5v5 Jade",
+        shortName: "Classic",
+        gameMode: "JADE",
+        gameSelectModeGroup: "kJade",
+        gameSelectCategory: "kPvP",
+        isRanked: false,
+      }),
+    )
+
+    expect(result).toMatchObject({ mode: "league_classic", family: "classic" })
+  })
+
+  it("excludes League Classic co-op while retaining its PvP queues", () => {
+    const pvp = queue({
+      id: 4300,
+      gameSelectCategory: "kPvP",
+      description: "5v5 Classic",
+    })
+    const bots = queue({
+      id: 4320,
+      name: "Jade",
+      gameSelectCategory: "kVersusAI",
+      description: "Classic Co-op vs. AI",
+    })
+
+    expect(isEligibleMatch(game({ queueId: 4300 }), pvp)).toBe(true)
+    expect(isEligibleMatch(game({ queueId: 4320 }), bots)).toBe(false)
   })
 })

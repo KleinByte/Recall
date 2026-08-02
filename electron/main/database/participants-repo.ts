@@ -801,16 +801,19 @@ export class ParticipantsRepository {
 
     const where = conditions.join(" AND ")
 
-    const isSrFamily =
+    const isLaneFamily =
       filter.modeFamily === "sr" ||
+      filter.modeFamily === "classic" ||
       (filter.modes?.length && filter.modes.every((mode) => mode.startsWith("sr_"))) ||
-      (filter.mode?.startsWith("sr_") ?? false)
+      (filter.modes?.length && filter.modes.every((mode) => mode === "league_classic")) ||
+      (filter.mode?.startsWith("sr_") ?? false) ||
+      filter.mode === "league_classic"
 
     const metrics = METRICS.map((metric) => {
       const mine = qualify(metric.expression, "me")
       const theirs = qualify(metric.expression, "other")
 
-      const useRole = metric.roleScoped && isSrFamily
+      const useRole = metric.roleScoped && isLaneFamily
 
       const roleJoinCondition = useRole
         ? `AND ${normalizedRole("other")} = ${normalizedRole("me")}

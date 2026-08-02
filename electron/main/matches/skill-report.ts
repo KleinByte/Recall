@@ -992,7 +992,7 @@ function bootstrapMeanDifference(
 }
 
 function axisKeysFor(family: ModeFamily): string[] {
-  return family === "sr"
+  return family === "sr" || family === "classic"
     ? ["aggression", "damage", "durability", "farming", "objectives", "vision"]
     : ["aggression", "damage", "durability", "farming", "sustain", "teamfighting"]
 }
@@ -1170,7 +1170,7 @@ export function buildDeathMap(
   family: ModeFamily,
   timelineHistory: RviTimelineObservation[] = [],
 ): SkillDeathMap | undefined {
-  if (family !== "sr" || timelineHistory.length === 0) return undefined
+  if ((family !== "sr" && family !== "classic") || timelineHistory.length === 0) return undefined
 
   const deaths = timelineHistory.flatMap((game) => game.summary.events.flatMap((event) => {
     const position = event.position

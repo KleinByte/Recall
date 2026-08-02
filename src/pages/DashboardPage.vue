@@ -95,7 +95,7 @@ async function loadStats() {
       api.getSummary({}),
       api.getSummary({ sinceMs: since }),
       api.getForm({}, 20),
-      api.getMatches({ excludeLeagueClassic: true }, 6),
+      api.getMatches({}, 6),
       api.getMatches({}, 10),
       api.getRankedChampions({}),
   ])
@@ -128,12 +128,17 @@ async function loadAll() {
 
 /** The dashboard RVI snapshot follows whichever family has been played most. */
 async function loadRvi() {
-  const [rift, abyss] = await Promise.all([
+  const [rift, abyss, classic] = await Promise.all([
     api.getSummary({ modeFamily: "sr" }),
     api.getSummary({ modeFamily: "aram" }),
+    api.getSummary({ modeFamily: "classic" }),
   ])
 
-  rviFamily.value = rift.games > abyss.games ? "sr" : "aram"
+  rviFamily.value = [
+    { family: "sr" as const, games: rift.games },
+    { family: "aram" as const, games: abyss.games },
+    { family: "classic" as const, games: classic.games },
+  ].reduce((best, entry) => entry.games > best.games ? entry : best).family
   rviProfile.value = await api.getRviProfile(
     { modeFamily: rviFamily.value },
     rviFamily.value,
@@ -381,7 +386,7 @@ const championName = (id: number) => championNameById(props.champions, id)
           <Panel
             v-if="rviProfile"
             title="Recall Vector Index"
-            :meta="`${rviProfile.score} · ${rviFamily === 'sr' ? `Summoner's Rift` : 'ARAM'}`"
+            :meta="`${rviProfile.score} · ${rviFamily === 'sr' ? `Summoner's Rift` : rviFamily === 'classic' ? 'League Classic' : 'ARAM'}`"
             class="rvi-panel"
           >
             <PerformanceRadar :dimensions="rviProfile.dimensions" height="270px" />

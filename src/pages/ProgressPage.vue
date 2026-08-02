@@ -47,7 +47,7 @@ const TIERS = [
   "MASTER",
 ]
 
-type RecordScopeId = "rankedSolo" | "aram" | "mayhem" | "allRift"
+type RecordScopeId = "rankedSolo" | "aram" | "mayhem" | "leagueClassic" | "allRift"
 
 const RECORD_SCOPES: readonly {
   id: RecordScopeId
@@ -57,17 +57,22 @@ const RECORD_SCOPES: readonly {
   {
     id: "rankedSolo",
     label: "Solo/Duo Ranked",
-    filter: { mode: "sr_ranked_solo", excludeLeagueClassic: true },
+    filter: { mode: "sr_ranked_solo" },
   },
   {
     id: "aram",
     label: "ARAM",
-    filter: { mode: "aram", excludeLeagueClassic: true },
+    filter: { mode: "aram" },
   },
   {
     id: "mayhem",
     label: "Mayhem",
-    filter: { mode: "mayhem", excludeLeagueClassic: true },
+    filter: { mode: "mayhem" },
+  },
+  {
+    id: "leagueClassic",
+    label: "League Classic",
+    filter: { mode: "league_classic" },
   },
   {
     id: "allRift",
@@ -80,7 +85,6 @@ const RECORD_SCOPES: readonly {
         "sr_quickplay",
         "sr_swiftplay",
       ],
-      excludeLeagueClassic: true,
     },
   },
 ]

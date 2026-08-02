@@ -6,9 +6,10 @@ export type TrackedMode =
   | "sr_swiftplay"
   | "aram"
   | "mayhem"
+  | "league_classic"
   | "other"
 
-export type ModeFamily = "sr" | "aram" | "other"
+export type ModeFamily = "sr" | "aram" | "classic" | "other"
 
 export interface StatsFilter {
   mode?: TrackedMode

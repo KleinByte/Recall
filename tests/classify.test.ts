@@ -83,13 +83,21 @@ describe("classifyMatch — Summoner's Rift", () => {
     expect(classifyMatch(rift(9999))?.mode).toBe("sr_normal")
   })
 
-  it("keeps League Classic out of the normal Rift family", () => {
+  it("classifies the legacy League Classic queue as its own family", () => {
     expect(classifyMatch(rift(710))).toEqual({
-      mode: "other",
-      family: "other",
+      mode: "league_classic",
+      family: "classic",
       isRanked: false,
       queueName: "League Classic",
     })
+  })
+
+  it("classifies the current Jade League Classic queues", () => {
+    expect(classifyMatch(rift(4300, "JADE"))).toMatchObject({
+      mode: "league_classic",
+      family: "classic",
+    })
+    expect(classifyMatch(rift(4310, "JADE"))?.mode).toBe("league_classic")
   })
 
   it("marks only ranked queues as ranked", () => {

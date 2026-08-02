@@ -16,7 +16,7 @@ describe("Skill scopes", () => {
       .flatMap((scope) => scope.modes)
     expect(leaves).toEqual([
       "sr_ranked_solo", "sr_ranked_flex", "sr_normal",
-      "sr_quickplay", "sr_swiftplay", "aram", "mayhem",
+      "sr_quickplay", "sr_swiftplay", "aram", "mayhem", "league_classic",
     ])
     expect(new Set(leaves).size).toBe(leaves.length)
   })

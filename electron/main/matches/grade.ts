@@ -184,7 +184,7 @@ function composite(components: GradeComponent[]): number {
 export function gradeLobby(lobby: GradeInput[], family: ModeFamily): Map<number, GradeResult> {
   if (lobby.length < 10) return new Map()
 
-  const weights = family === "sr" ? RIFT_WEIGHTS : ARAM_WEIGHTS
+  const weights = family === "sr" || family === "classic" ? RIFT_WEIGHTS : ARAM_WEIGHTS
   const components = lobby.map((player) => componentValues(player, lobby, weights))
   const raw = components.map(composite)
   const mean = raw.reduce((sum, value) => sum + value, 0) / raw.length

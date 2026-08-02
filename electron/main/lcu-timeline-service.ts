@@ -153,7 +153,7 @@ export class LcuTimelineService {
            FROM matches m
            LEFT JOIN match_timeline_cache t
              ON t.game_id = m.game_id AND t.puuid = m.puuid
-           WHERE m.puuid = ? AND m.mode_family IN ('sr', 'aram')
+           WHERE m.puuid = ? AND m.mode_family IN ('sr', 'aram', 'classic')
              AND m.is_matched = 1
              AND EXISTS (
                SELECT 1 FROM match_participants p

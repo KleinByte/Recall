@@ -70,7 +70,7 @@ const sessionCount = computed(() => {
     </section>
 
     <DeathHeatmap
-      v-if="report.scope.family === 'sr' && report.overview.deathMap"
+      v-if="(report.scope.family === 'sr' || report.scope.family === 'classic') && report.overview.deathMap"
       :map="report.overview.deathMap"
     />
 

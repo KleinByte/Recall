@@ -163,7 +163,7 @@ export class MatchSync {
         teams.length,
       )
     }
-    if ((family === "aram" || family === "sr") && detail.gameId) {
+    if ((family === "aram" || family === "sr" || family === "classic") && detail.gameId) {
       this.participants.setGrades(
         detail.gameId,
         this.puuid,

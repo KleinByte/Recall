@@ -128,9 +128,9 @@ const kda = computed(() =>
     : (props.match.kills + props.match.assists) / props.match.deaths,
 )
 
-// Only the Rift assigns positions; ARAM and Arena would report noise.
+// Lane-based modes assign positions; ARAM and Arena would report noise.
 const position = computed(() =>
-  props.match.modeFamily === "sr"
+  props.match.modeFamily === "sr" || props.match.modeFamily === "classic"
     ? resolvePosition(props.match.lane, props.match.role, props.match.assignedPosition)
     : undefined,
 )
@@ -257,7 +257,7 @@ const evidenceOf = (label: PerformanceLabel) =>
           <p v-else-if="!loading" class="muted note">
             {{
               match.modeFamily === "other"
-                ? "Style scoring is available for Rift and ARAM games."
+                ? "Style scoring is available for Rift, League Classic and ARAM games."
                 : "No scoreboard was recorded for this game, so it cannot be scored on its own."
             }}
           </p>

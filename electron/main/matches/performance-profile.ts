@@ -281,8 +281,8 @@ function observationMetric(observation: InsightObservation, key: string): number
     damagePace: metric.damagePerMinute / 900,
     ccPace: metric.ccPerMinute / 12,
     deathRate: 1 - metric.deaths / 10,
-    goldPace: metric.goldPerMinute / (observation.family === "sr" ? 550 : 650),
-    csPace: metric.csPerMinute / (observation.family === "sr" ? 10 : 5),
+    goldPace: metric.goldPerMinute / (observation.family === "sr" || observation.family === "classic" ? 550 : 650),
+    csPace: metric.csPerMinute / (observation.family === "sr" || observation.family === "classic" ? 10 : 5),
     objectivePace: metric.objectiveDamagePerMinute === undefined
       ? undefined
       : metric.objectiveDamagePerMinute / 350,
@@ -750,7 +750,9 @@ export function buildPerformanceProfile(input: {
   const recentRows = rows.slice(-PERFORMANCE_RECENT_GAMES)
   const observations = new Map(input.observations.map((observation) => [observation.gameId, observation]))
   const timelines = new Map((input.timelineHistory ?? []).map((timeline) => [timeline.gameId, timeline]))
-  const definitions = input.family === "sr" ? RIFT_DIMENSIONS : ABYSS_DIMENSIONS
+  const definitions = input.family === "sr" || input.family === "classic"
+    ? RIFT_DIMENSIONS
+    : ABYSS_DIMENSIONS
   const primary = definitions.flatMap((definition) => {
     const dimension = buildMeasuredDimension(definition, rows, recentRows, observations, timelines)
     return dimension ? [dimension] : []

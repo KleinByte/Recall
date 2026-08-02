@@ -64,6 +64,42 @@ describe("applyMigrations", () => {
     ])
   })
 
+  it("moves already-recorded Jade games into the League Classic family", () => {
+    const db = new Database(":memory:")
+    for (const migration of migrations.slice(0, 16)) db.exec(migration.up)
+    db.pragma("user_version = 16")
+    const repo = new MatchesRepository(db)
+    repo.insertMany([
+      buildMatchRow({
+        gameId: 1,
+        queueId: 4300,
+        gameMode: "JADE",
+        mode: "sr_normal",
+        modeFamily: "sr",
+        queueName: "5v5 Jade",
+      }),
+      buildMatchRow({
+        gameId: 2,
+        queueId: 4320,
+        gameMode: "JADE",
+        mode: "other",
+        modeFamily: "other",
+        isMatched: 1,
+      }),
+    ])
+
+    applyMigrations(db)
+
+    expect(db.prepare(
+      `SELECT game_id AS gameId, mode, mode_family AS family,
+              is_matched AS isMatched
+       FROM matches ORDER BY game_id`,
+    ).all()).toEqual([
+      { gameId: 1, mode: "league_classic", family: "classic", isMatched: 1 },
+      { gameId: 2, mode: "league_classic", family: "classic", isMatched: 0 },
+    ])
+  })
+
   it("upgrades every historical schema version to the latest", () => {
     for (let version = 1; version < latestSchemaVersion; version += 1) {
       const db = new Database(":memory:")
