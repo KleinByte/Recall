@@ -111,15 +111,16 @@ describe("desktop page layout", () => {
     expect(matches).toContain("match.lobbyPlace")
   })
 
-  it("uses League role art and shows player mastery throughout reviews", () => {
+  it("uses League role art and shows interactive rune pages throughout reviews", () => {
     const roles = read("src/helpers/roles.ts")
     const review = read("src/pages/ReviewPage.vue")
 
     expect(roles).toContain("rcp-fe-lol-champ-select")
     expect(roles).toContain("position-${position ? INFO[position].asset")
-    expect(review).toContain("row.left.mastery.championLevel")
-    expect(review).toContain("row.right.mastery.championPoints")
-    expect(review).toContain('class="compare-mastery"')
+    expect(review).toContain('<RunePage :participant="row.left"')
+    expect(review).toContain('<RunePage :participant="row.right"')
+    expect(review).toContain('class="compare-stats"')
+    expect(review).not.toContain('class="compare-bar')
     expect(review).toContain("positionIconUrl(row.position)")
   })
 

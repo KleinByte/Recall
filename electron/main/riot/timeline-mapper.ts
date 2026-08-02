@@ -1,4 +1,4 @@
-export const TIMELINE_MAPPER_VERSION = 5
+export const TIMELINE_MAPPER_VERSION = 6
 
 export type TimelineEventCategory =
   | "kill"
@@ -52,6 +52,8 @@ export interface CompactTimelineEvent {
   shutdownBounty?: number
   wardType?: string
   laneType?: string
+  actorName?: string
+  targetName?: string
   position?: { x: number; y: number }
   approximate?: boolean
 }
@@ -172,6 +174,8 @@ function eventIdentity(event: Omit<CompactTimelineEvent, "eventId">) {
     event.shutdownBounty ?? null,
     event.wardType ?? null,
     event.laneType ?? null,
+    event.actorName ?? null,
+    event.targetName ?? null,
     event.position?.x ?? null,
     event.position?.y ?? null,
   ])

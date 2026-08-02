@@ -34,6 +34,7 @@ const riotKeyMessage = ref("")
 const riotHistory = ref<RiotHistoryBackfillState>()
 const trust = ref<DataTrustReport>()
 const trustBusy = ref(false)
+const launchAtLogin = ref(true)
 
 const riotHistoryMessage = computed(() => {
   const history = riotHistory.value
@@ -74,7 +75,15 @@ onMounted(() => {
   })
   void loadTrust()
   events.on("data-trust:updated", () => void loadTrust())
+  void api.getSetting<boolean>("launch-at-login").then((value) => {
+    launchAtLogin.value = value !== false
+  })
 })
+
+function setLaunchAtLogin(value: boolean) {
+  launchAtLogin.value = value
+  api.setSetting("launch-at-login", value)
+}
 
 async function loadTrust(check = false) {
   trustBusy.value = true
@@ -242,6 +251,15 @@ const formatDate = (value?: number) =>
           "
         />
         <span>Show champion names under icons</span>
+      </label>
+
+      <label class="setting">
+        <input type="checkbox" :checked="launchAtLogin"
+          @change="setLaunchAtLogin(($event.target as HTMLInputElement).checked)" />
+        <span>
+          Start Recall with Windows
+          <span class="muted hint">Opens hidden in the notification area so game recording is ready.</span>
+        </span>
       </label>
     </section>
 

@@ -28,10 +28,11 @@ import {
   sampleTimelineEvents,
 } from "../helpers/timeline-chart"
 import GradeBadge from "../components/GradeBadge.vue"
+import RunePage from "../components/RunePage.vue"
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
-import { faChevronDown } from "@fortawesome/free-solid-svg-icons"
+import { faChevronDown, faSkullCrossbones } from "@fortawesome/free-solid-svg-icons"
 import type { Champion } from "../types/lol"
-import type { ChampionMasterySnapshot, MatchRow } from "../types/stats"
+import type { MatchRow } from "../types/stats"
 import type { TrackedMode } from "../types/stats"
 import type {
   AnnotationTag,
@@ -61,6 +62,7 @@ const experimentChampionIds = ref<number[]>([])
 const experimentModes = ref<TrackedMode[]>([])
 const timelineFilter = ref<"all" | "you" | "kills" | "objectives" | "items" | "levels" | "vision">("all")
 const timelineFilters = ["all", "you", "kills", "objectives", "items", "levels", "vision"] as const
+const timelineCursorTimestamp = ref<number>()
 const assets = ref<GameAssetCatalog>({ version: "latest", items: {}, augments: {}, abilities: {} })
 const augmentSummary = ref<Record<number, OwnerAugmentSummary>>({})
 let saveTimer: ReturnType<typeof setTimeout> | undefined
@@ -76,24 +78,6 @@ const teams = computed(() => [100, 200].map((teamId) => ({
 const showsRoles = computed(() =>
   review.value?.match.modeFamily === "sr" || review.value?.match.modeFamily === "classic",
 )
-
-const masteryProgress = (mastery?: ChampionMasterySnapshot) => {
-  if (!mastery) return undefined
-  const span = mastery.championPointsSinceLastLevel + mastery.championPointsUntilNextLevel
-  return span > 0 ? mastery.championPointsSinceLastLevel / span : undefined
-}
-
-const masteryProgressPercent = (mastery?: ChampionMasterySnapshot) =>
-  (masteryProgress(mastery) ?? 0) * 100
-
-const masteryDetail = (mastery?: ChampionMasterySnapshot) => {
-  if (!mastery) return "Mastery unavailable"
-  return [
-    `${mastery.championPoints.toLocaleString()} points`,
-    mastery.tokensEarned ? `${mastery.tokensEarned} tokens` : undefined,
-    mastery.highestGrade ? `highest grade ${mastery.highestGrade}` : undefined,
-  ].filter(Boolean).join(" · ")
-}
 
 /** Every row stays independently open so two lanes can be compared at once. */
 const openMatchups = ref<Record<string, boolean>>({})
@@ -242,22 +226,22 @@ function participant(participantId?: number) {
   return review.value?.scoreboard.find((entry) => entry.participantId === participantId)
 }
 
-/**
- * Mayhem timelines currently report killerId 0. When the victim's opposing
- * team has exactly one member not listed as an assist, that missing member is
- * the killer; otherwise the event remains honestly unattributed.
- */
-function killActor(event: TimelineEvent) {
-  const direct = participant(event.participantId)
-  if (direct) return direct
-  const victim = participant(event.targetId)
-  if (!victim) return undefined
-  const assists = new Set(event.assistingParticipantIds ?? [])
-  const candidates = review.value?.scoreboard.filter((entry) =>
-    entry.teamId !== victim.teamId && !assists.has(entry.participantId),
-  ) ?? []
-  return candidates.length === 1 ? candidates[0] : undefined
+function participantByName(name?: string) {
+  const normalized = name?.trim().toLocaleLowerCase()
+  if (!normalized) return undefined
+  return review.value?.scoreboard.find((entry) => {
+    const candidate = entry.summonerName?.trim().toLocaleLowerCase()
+    return candidate === normalized || candidate?.split("#")[0] === normalized.split("#")[0]
+  })
 }
+
+function killActor(event: TimelineEvent) {
+  return participant(event.participantId) ?? participantByName(event.actorName)
+}
+
+const killTarget = (event: TimelineEvent) => participant(event.targetId) ?? participantByName(event.targetName)
+const killActorName = (event: TimelineEvent) => killActor(event)?.summonerName ?? event.actorName ?? "Unknown killer"
+const killTargetName = (event: TimelineEvent) => killTarget(event)?.summonerName ?? event.targetName ?? `Player ${event.targetId ?? "unknown"}`
 
 function eventTime(timestamp: number) {
   return `${Math.floor(timestamp / 60_000)}:${String(Math.floor(timestamp / 1_000) % 60).padStart(2, "0")}`
@@ -323,10 +307,8 @@ function timelineMarkerTitle(event: TimelineEvent) {
   const time = `${event.approximate ? "≈" : ""}${eventTime(event.timestamp)}`
   if (event.category === "kill") {
     const killer = killActor(event)?.summonerName
-    const victim = participant(event.targetId)?.summonerName ?? `Player ${event.targetId}`
-    return killer
-      ? `${time} · ${killer} killed ${victim}`
-      : `${time} · Mayhem takedown on ${victim}`
+    const victim = killTargetName(event)
+    return `${time} · ${killer ?? event.actorName ?? "Unknown killer"} killed ${victim}`
   }
   if (event.category === "item") {
     const player = participant(event.participantId)?.summonerName ?? `Player ${event.participantId}`
@@ -348,6 +330,45 @@ function timelineEventDescription(event: TimelineEvent) {
     return `reached level ${event.level ?? "?"}${event.approximate ? " by this snapshot" : ""}`
   }
   return objectiveName(event.objective || event.type)
+}
+
+const timelineCursor = computed(() => {
+  const timestamp = timelineCursorTimestamp.value
+  const summary = review.value?.timeline.summary
+  if (timestamp === undefined || !summary) return undefined
+  const blueGold = timelineTeamGoldAt(timestamp, summary.frames, 100)
+  const redGold = timelineTeamGoldAt(timestamp, summary.frames, 200)
+  let blueKills = 0
+  let redKills = 0
+  for (const event of summary.events) {
+    if (event.timestamp > timestamp || event.type !== "CHAMPION_KILL") continue
+    const teamId = event.teamId ?? killActor(event)?.teamId
+    if (teamId === 100) blueKills += 1
+    if (teamId === 200) redKills += 1
+  }
+  return {
+    timestamp,
+    x: timelineChartX(timestamp, timelineDomain.value),
+    blueGold,
+    redGold,
+    blueY: timelineTeamGoldY(blueGold, timelineDomain.value),
+    redY: timelineTeamGoldY(redGold, timelineDomain.value),
+    blueKills,
+    redKills,
+  }
+})
+
+function setTimelineCursor(event: PointerEvent) {
+  const target = event.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
+  timelineCursorTimestamp.value = ratio * timelineDomain.value.maximumTimestamp
+}
+
+function moveTimelineCursor(direction: number) {
+  const step = 60_000
+  const current = timelineCursorTimestamp.value ?? 0
+  timelineCursorTimestamp.value = Math.max(0, Math.min(timelineDomain.value.maximumTimestamp, current + direction * step))
 }
 
 function augmentName(augmentId: number) {
@@ -644,21 +665,19 @@ onBeforeUnmount(() => {
 
           <article v-for="row in matchups" :key="row.key" class="matchup"
             :class="{ open: openMatchups[row.key] }">
-            <button class="matchup-row" :aria-expanded="openMatchups[row.key] === true"
-              @click="toggleMatchup(row.key)">
+            <div class="matchup-row" role="button" tabindex="0" :aria-expanded="openMatchups[row.key] === true"
+              @click="toggleMatchup(row.key)" @keydown.enter.prevent="toggleMatchup(row.key)"
+              @keydown.space.prevent="toggleMatchup(row.key)">
               <div class="seat left" :class="{ owner: row.left?.isPlayer, vacant: !row.left }">
                 <template v-if="row.left">
                   <div class="seat-body">
                     <strong class="name">{{ row.left.summonerName || championNameById(champions, row.left.championId) }}</strong>
-                    <span v-if="row.left.mastery" class="mastery-line" :title="masteryDetail(row.left.mastery)">
-                      <strong>M{{ row.left.mastery.championLevel }}</strong>
-                      {{ row.left.mastery.championPoints.toLocaleString() }} pts
-                    </span>
                     <span class="muted seat-line">
                       {{ row.left.kills }}/{{ row.left.deaths }}/{{ row.left.assists }} ·
                       {{ row.left.totalMinionsKilled + row.left.neutralMinions }} CS ·
                       {{ row.left.damageToChampions.toLocaleString() }} dmg
                     </span>
+                    <RunePage :participant="row.left" :classic="review.match.modeFamily === 'classic'" align="left" />
                     <div class="loadout" aria-label="Final items">
                       <img v-for="(id, index) in row.left.items.filter(Boolean)" :key="`${id}-${index}`"
                         :src="assets.items[id]?.icon || itemIconUrl(id, assets.version)"
@@ -685,15 +704,12 @@ onBeforeUnmount(() => {
                   <GradeBadge :grade="row.right.grade" />
                   <div class="seat-body">
                     <strong class="name">{{ row.right.summonerName || championNameById(champions, row.right.championId) }}</strong>
-                    <span v-if="row.right.mastery" class="mastery-line" :title="masteryDetail(row.right.mastery)">
-                      <strong>M{{ row.right.mastery.championLevel }}</strong>
-                      {{ row.right.mastery.championPoints.toLocaleString() }} pts
-                    </span>
                     <span class="muted seat-line">
                       {{ row.right.kills }}/{{ row.right.deaths }}/{{ row.right.assists }} ·
                       {{ row.right.totalMinionsKilled + row.right.neutralMinions }} CS ·
                       {{ row.right.damageToChampions.toLocaleString() }} dmg
                     </span>
+                    <RunePage :participant="row.right" :classic="review.match.modeFamily === 'classic'" align="right" />
                     <div class="loadout" aria-label="Final items">
                       <img v-for="(id, index) in row.right.items.filter(Boolean)" :key="`${id}-${index}`"
                         :src="assets.items[id]?.icon || itemIconUrl(id, assets.version)"
@@ -705,26 +721,20 @@ onBeforeUnmount(() => {
               </div>
 
               <FontAwesomeIcon :icon="faChevronDown" class="matchup-chevron" aria-hidden="true" />
-            </button>
+            </div>
 
             <div v-if="openMatchups[row.key]" class="comparison">
-              <div v-for="stat in compareMatchup(row.left, row.right)" :key="stat.key"
-                class="compare-row">
+              <div class="compare-stats">
+                <article v-for="stat in compareMatchup(row.left, row.right)" :key="stat.key"
+                  class="compare-stat">
                 <span class="numeric compare-value" :class="{ ahead: stat.leads === 'left' }">
                   {{ stat.left.toLocaleString() }}
                 </span>
-                <span class="compare-bar left">
-                  <span class="compare-fill" :class="{ ahead: stat.leads === 'left' }"
-                    :style="{ width: `${stat.leftShare * 100}%` }" />
-                </span>
                 <span class="compare-label muted">{{ stat.label }}</span>
-                <span class="compare-bar">
-                  <span class="compare-fill" :class="{ ahead: stat.leads === 'right' }"
-                    :style="{ width: `${stat.rightShare * 100}%` }" />
-                </span>
                 <span class="numeric compare-value" :class="{ ahead: stat.leads === 'right' }">
                   {{ stat.right.toLocaleString() }}
                 </span>
+                </article>
               </div>
 
               <div v-if="row.left?.augments?.length || row.right?.augments?.length" class="compare-augments">
@@ -745,29 +755,6 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <div v-if="row.left?.mastery || row.right?.mastery" class="compare-mastery">
-                <div class="mastery-card" :class="{ unavailable: !row.left?.mastery }">
-                  <template v-if="row.left?.mastery">
-                    <strong>Mastery {{ row.left.mastery.championLevel }}</strong>
-                    <span>{{ masteryDetail(row.left.mastery) }}</span>
-                    <span v-if="masteryProgress(row.left.mastery) !== undefined" class="mastery-track">
-                      <span :style="{ width: `${masteryProgressPercent(row.left.mastery)}%` }" />
-                    </span>
-                  </template>
-                  <span v-else>Unavailable</span>
-                </div>
-                <span class="compare-label muted">Champion mastery</span>
-                <div class="mastery-card right" :class="{ unavailable: !row.right?.mastery }">
-                  <template v-if="row.right?.mastery">
-                    <strong>Mastery {{ row.right.mastery.championLevel }}</strong>
-                    <span>{{ masteryDetail(row.right.mastery) }}</span>
-                    <span v-if="masteryProgress(row.right.mastery) !== undefined" class="mastery-track">
-                      <span :style="{ width: `${masteryProgressPercent(row.right.mastery)}%` }" />
-                    </span>
-                  </template>
-                  <span v-else>Unavailable</span>
-                </div>
-              </div>
             </div>
           </article>
         </div>
@@ -834,7 +821,10 @@ onBeforeUnmount(() => {
           <span class="muted">Events and periodic snapshots from the connected League Client</span>
         </div>
         <div v-if="review.timeline.status === 'ready' && review.timeline.summary">
-          <div class="gold-chart-wrap">
+          <div class="gold-chart-wrap" tabindex="0" aria-label="Interactive team gold chart. Use left and right arrow keys to inspect each minute."
+            @pointermove="setTimelineCursor" @pointerleave="timelineCursorTimestamp = undefined"
+            @focus="timelineCursorTimestamp ??= timelineDomain.maximumTimestamp"
+            @keydown.left.prevent="moveTimelineCursor(-1)" @keydown.right.prevent="moveTimelineCursor(1)">
             <svg class="gold-chart" viewBox="0 0 100 100" preserveAspectRatio="none"
               aria-label="Blue and Red team total gold across the match">
               <line class="grid-line top" x1="0" y1="25" x2="100" y2="25" />
@@ -843,6 +833,17 @@ onBeforeUnmount(() => {
               <polyline class="blue-series" :points="timelineBluePoints" />
               <polyline class="red-series" :points="timelineRedPoints" />
             </svg>
+            <template v-if="timelineCursor">
+              <span class="chart-crosshair" :style="{ left: `${timelineCursor.x}%` }" />
+              <span class="cursor-dot blue" :style="{ left: `${timelineCursor.x}%`, top: `${timelineCursor.blueY}%` }" />
+              <span class="cursor-dot red" :style="{ left: `${timelineCursor.x}%`, top: `${timelineCursor.redY}%` }" />
+              <output class="chart-tooltip" :class="{ flip: timelineCursor.x > 68 }" :style="{ left: `${timelineCursor.x}%` }">
+                <strong>{{ eventTime(timelineCursor.timestamp) }}</strong>
+                <span class="blue">Blue {{ timelineCursor.blueGold.toLocaleString() }}g · {{ timelineCursor.blueKills }} kills</span>
+                <span class="red">Red {{ timelineCursor.redGold.toLocaleString() }}g · {{ timelineCursor.redKills }} kills</span>
+                <small>{{ Math.abs(timelineCursor.blueGold - timelineCursor.redGold).toLocaleString() }}g {{ timelineCursor.blueGold >= timelineCursor.redGold ? "Blue" : "Red" }} lead</small>
+              </output>
+            </template>
             <span
               v-for="tick in timelineGoldTicks"
               :key="tick.gold"
@@ -901,14 +902,14 @@ onBeforeUnmount(() => {
               :key="event.eventId" class="event-row" :class="event.category">
               <time>{{ event.approximate ? "≈" : "" }}{{ eventTime(event.timestamp) }}</time>
               <template v-if="event.category === 'kill'">
-                <img :src="championIconUrl(killActor(event)?.championId || participant(event.targetId)?.championId || 0)" alt="" />
-                <div><strong>{{ killActor(event)?.summonerName || "Mayhem takedown" }}</strong>
-                  <span>{{ killActor(event) ? "killed" : "on" }} <strong>{{ participant(event.targetId)?.summonerName || `Player ${event.targetId}` }}</strong>
+                <img :src="championIconUrl(killActor(event)?.championId || 0)" :alt="killActorName(event)" />
+                <div><strong>{{ killActorName(event) }}</strong>
+                  <span class="kill-summary"><FontAwesomeIcon :icon="faSkullCrossbones" class="kill-feed-icon" aria-label="killed" /> <strong>{{ killTargetName(event) }}</strong>
                     <template v-if="event.assistingParticipantIds?.length">
                       · assisted by {{ event.assistingParticipantIds.map(id => participant(id)?.summonerName || `Player ${id}`).join(", ") }}
                     </template>
                   </span></div>
-                <img class="victim" :src="championIconUrl(participant(event.targetId)?.championId || 0)" alt="" />
+                <img class="victim" :src="championIconUrl(killTarget(event)?.championId || 0)" :alt="killTargetName(event)" />
               </template>
               <template v-else-if="event.category === 'item'">
                 <img :src="itemIcon(event)" :alt="itemName(event)" />
@@ -1071,7 +1072,7 @@ h2 { margin: 0; }
 .matchup-columns { display: grid; grid-template-columns: var(--matchup-grid); gap: 8px; padding: 0 10px 2px; font-family: var(--font-heading); font-size: 10px; letter-spacing: .8px; text-transform: uppercase; }
 .side-title.blue { color: #7fb2e0; }.side-title.red { color: #e0918f; }
 .side-title.red, .lane-title { text-align: center; }.side-title.red { text-align: right; }
-.matchup { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface-0); overflow: hidden; }
+.matchup { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface-0); overflow: visible; }
 .matchup.open { border-color: var(--border-strong); }
 .matchup-row { width: 100%; display: grid; grid-template-columns: var(--matchup-grid); align-items: center; gap: 8px; padding: 8px 10px; background: transparent; border: 0; color: inherit; text-align: left; font: inherit; font-size: 11px; cursor: pointer; }
 .matchup-row:hover { background: var(--surface-2); }
@@ -1083,33 +1084,23 @@ h2 { margin: 0; }
 .seat-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
 .seat.right .seat-body { align-items: flex-end; }
 .seat-line { font-size: 10px; }
-.mastery-line { display: flex; align-items: baseline; gap: 4px; color: var(--gold); font-size: 9px; }
-.mastery-line strong { color: var(--gold-bright); font-family: var(--font-heading); }
 .seat.right .loadout { justify-content: flex-end; }
 .lane { display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--text-secondary); font-family: var(--font-heading); font-size: 10px; letter-spacing: .6px; text-transform: uppercase; }
 .lane-icon { width: 22px; height: 22px; opacity: .84; }
 .matchup-chevron { color: var(--text-muted); font-size: 10px; transition: transform .15s ease; }
 .matchup.open .matchup-chevron { transform: rotate(180deg); }
-.comparison { display: grid; gap: 1px; padding: var(--space-2) 10px var(--space-3); border-top: 1px solid var(--border-subtle); background: var(--surface-1); }
-.compare-row, .compare-augments { display: grid; grid-template-columns: 62px minmax(0, 1fr) 150px minmax(0, 1fr) 62px; align-items: center; gap: 8px; font-size: 11px; }
+.comparison { display: grid; gap: 7px; padding: var(--space-2) 10px var(--space-3); border-top: 1px solid var(--border-subtle); background: linear-gradient(180deg, var(--surface-1), var(--surface-0)); }
+.compare-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px; }
+.compare-stat { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 7px; padding: 7px 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface-2); font-size: 10px; }
+.compare-stat .compare-value:last-child { text-align: left; }
+.compare-augments { display: grid; grid-template-columns: 62px minmax(0, 1fr) 150px minmax(0, 1fr) 62px; align-items: center; gap: 8px; font-size: 11px; }
 .compare-augments { padding-top: var(--space-2); }
 .compare-augments .augment-loadout:first-of-type { grid-column: 1 / 3; }
 .compare-augments .augment-loadout:last-of-type { grid-column: 4 / 6; justify-content: flex-end; }
-.compare-mastery { display: grid; grid-template-columns: minmax(0, 1fr) 150px minmax(0, 1fr); align-items: center; gap: 8px; padding-top: var(--space-2); }
-.mastery-card { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 7px 9px; border: 1px solid rgba(200, 170, 109, .3); border-radius: var(--radius-sm); background: rgba(200, 170, 109, .06); font-size: 9px; color: var(--text-secondary); }
-.mastery-card.right { text-align: right; align-items: flex-end; }
-.mastery-card strong { color: var(--gold-bright); font: 10px var(--font-heading); }
-.mastery-card.unavailable { border-color: var(--border-subtle); background: var(--surface-2); color: var(--text-muted); }
-.mastery-track { display: block; width: 100%; height: 3px; overflow: hidden; border-radius: 2px; background: var(--surface-3); }
-.mastery-track > span { display: block; height: 100%; background: var(--gold); }
 .compare-label { text-align: center; font-size: 10px; }
 .compare-value { color: var(--text-secondary); }
 .compare-value:first-child { text-align: right; }
 .compare-value.ahead { color: var(--gold-bright); }
-.compare-bar { height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; display: flex; }
-.compare-bar.left { justify-content: flex-end; }
-.compare-fill { height: 100%; background: var(--gold-faint); }
-.compare-fill.ahead { background: var(--gold); }
 .champion-portrait { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; }.name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .loadout, .augment-loadout { display: flex; gap: 2px; flex-wrap: wrap; }.loadout img, .augment-loadout img { width: 22px; height: 22px; border-radius: 3px; object-fit: cover; background: var(--surface-3); }
 .augment-loadout { max-width: 76px; }.augment-loadout button { display: contents; cursor: pointer; }
@@ -1118,18 +1109,23 @@ textarea { width: 100%; box-sizing: border-box; min-height: 110px; resize: verti
 .tag-list, .inline, .experiment-outcome, .session-games { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-2); }.tag { border: 1px solid var(--border-subtle); background: var(--surface-2); color: var(--text-secondary); border-radius: 99px; padding: 4px 9px; }.tag.selected { color: var(--gold-bright); border-color: var(--gold); }
 .inline input { flex: 1; }.experiment-outcome { justify-content: space-between; align-items: center; }.outcome-note { flex-basis: 100%; }
 .gold-chart-wrap { position: relative; height: 238px; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: linear-gradient(180deg, color-mix(in srgb, var(--surface-2) 82%, #0b2742) 0%, var(--surface-0) 58%, color-mix(in srgb, var(--surface-2) 84%, #35131c) 100%); }
+.gold-chart-wrap:focus-visible { outline: 1px solid var(--gold); outline-offset: 2px; }
 .gold-chart { display: block; width: 100%; height: 100%; }.gold-chart line { stroke: var(--border-strong); stroke-width: .35; stroke-dasharray: 2 2; }.gold-chart .grid-line.top, .gold-chart .grid-line.bottom { stroke: var(--border-subtle); }.gold-chart polyline { fill: none; stroke-width: 2.2; vector-effect: non-scaling-stroke; }.gold-chart .blue-series { stroke: #35b9dd; filter: drop-shadow(0 0 4px rgba(53, 185, 221, .45)); }.gold-chart .red-series { stroke: #e45868; filter: drop-shadow(0 0 4px rgba(228, 88, 104, .38)); }
 .chart-marker { position: absolute; z-index: 2; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; transform: translate(-50%, -50%); border: 2px solid var(--surface-0); border-radius: 50%; background: var(--surface-3); color: var(--gold-bright); box-shadow: 0 2px 7px rgba(0, 0, 0, .5); cursor: help; transition: width .12s ease, height .12s ease, z-index .12s ease; }.chart-marker:hover, .chart-marker:focus-visible { z-index: 5; width: 30px; height: 30px; outline: 2px solid var(--gold); }.chart-marker img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }.chart-marker span { font: 10px var(--font-heading); }.chart-marker.objective { border-color: var(--gold); }.chart-marker.item { border-radius: var(--radius-sm); border-color: var(--win); }.chart-marker.game { border-color: var(--loss); }
 .gold-axis-label { position: absolute; left: 7px; z-index: 1; transform: translateY(-50%); color: var(--text-muted); font-size: 8px; font-variant-numeric: tabular-nums; pointer-events: none; }.time-axis { position: absolute; bottom: 5px; z-index: 1; color: var(--text-muted); font-size: 8px; pointer-events: none; }.time-axis.start { left: 7px; }.time-axis.end { right: 7px; }.gold-legend { display: flex; align-items: center; gap: var(--space-3); min-height: 34px; padding: 6px 9px; border: 1px solid var(--border-subtle); border-top: 0; border-radius: 0 0 var(--radius-md) var(--radius-md); background: var(--surface-2); color: var(--text-secondary); font-size: 10px; }.gold-legend > span { display: inline-flex; align-items: center; gap: 5px; }.gold-legend i { width: 14px; height: 3px; border-radius: 2px; }.gold-legend .blue i { background: #35b9dd; }.gold-legend .red i { background: #e45868; }.gold-legend strong { color: var(--text-primary); }.gold-legend .difference { margin-left: auto; }.gold-legend .difference.blue { color: #60cbea; }.gold-legend .difference.red { color: #ef7b88; }
+.chart-crosshair { position: absolute; z-index: 3; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,.48); pointer-events: none; }
+.cursor-dot { position: absolute; z-index: 4; width: 9px; height: 9px; transform: translate(-50%,-50%); border: 2px solid var(--surface-0); border-radius: 50%; pointer-events: none; }.cursor-dot.blue { background: #35b9dd; }.cursor-dot.red { background: #e45868; }
+.chart-tooltip { position: absolute; z-index: 8; top: 10px; display: flex; flex-direction: column; gap: 2px; min-width: 154px; padding: 8px 9px; transform: translateX(8px); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: rgba(5,12,24,.95); box-shadow: 0 8px 24px rgba(0,0,0,.45); color: var(--text-secondary); font-size: 9px; pointer-events: none; }.chart-tooltip.flip { transform: translateX(calc(-100% - 8px)); }.chart-tooltip strong { color: var(--gold-bright); }.chart-tooltip .blue { color: #60cbea; }.chart-tooltip .red { color: #ef7b88; }.chart-tooltip small { color: var(--text-muted); }
 .timeline-filters { display: flex; gap: var(--space-2); margin-top: var(--space-2); flex-wrap: wrap; }.timeline-filters button { padding: 4px 8px; font-size: 10px; }
 .timeline-filters button:disabled { opacity: .42; cursor: not-allowed; }.timeline-source-note { margin: var(--space-2) 0 0; color: var(--text-muted); font-size: 10px; }
 .events { max-height: 430px; overflow: auto; margin-top: var(--space-3); padding-left: 18px; font-size: 11px; color: var(--text-secondary); border-left: 1px solid var(--border-strong); }.event-row { position: relative; display: grid; grid-template-columns: 42px 30px minmax(0, 1fr) 28px; align-items: center; gap: 8px; min-height: 44px; padding: 4px 8px; border-bottom: 1px solid var(--border-subtle); background: color-mix(in srgb, var(--surface-1) 92%, transparent); }.event-row::before { content: ""; position: absolute; left: -22px; width: 7px; height: 7px; border: 2px solid var(--gold); border-radius: 50%; background: var(--surface-0); }.event-row time { color: var(--gold); font-variant-numeric: tabular-nums; }.event-row img { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }.event-row .victim { filter: grayscale(.35); }.event-row > div { min-width: 0; display: flex; flex-direction: column; }.event-row > div span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.event-glyph { display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid var(--border-strong); border-radius: 50%; color: var(--gold); }.turning-points { margin-top: var(--space-3); font-size: 12px; }
+.kill-summary { display: inline-flex; align-items: center; gap: 5px; }.kill-feed-icon { color: #c8aa6e; filter: drop-shadow(0 0 3px rgba(200,170,110,.45)); }
 .purchase-path { display: flex; align-items: end; gap: 6px; flex-wrap: wrap; margin-top: var(--space-3); font-size: 10px; }.purchase-path strong { flex-basis: 100%; }.purchase-path figure { margin: 0; text-align: center; }.purchase-path img { display: block; width: 34px; height: 34px; border: 1px solid var(--border-strong); border-radius: 4px; }.purchase-path figcaption { margin-top: 2px; color: var(--text-muted); }
 .session-list, .experiments-page { display: grid; gap: var(--space-3); }.session-head > div { display: flex; flex-direction: column; }.match-control { display: flex; align-items: center; position: relative; }.match-chip { display: flex; align-items: center; gap: 4px; background: var(--surface-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 3px; cursor: pointer; }.match-chip img { width: 30px; height: 30px; border-radius: var(--radius-sm); }.boundary summary { cursor: pointer; padding: 0 4px; }.boundary[open] { position: relative; }.boundary[open] > button { display: block; width: 110px; background: var(--surface-3); color: var(--text-primary); border: 1px solid var(--border-subtle); padding: 4px; font-size: 10px; cursor: pointer; }
 .experiments-page { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }.experiments-page .card:first-child { display: grid; gap: var(--space-2); }.status { margin-left: var(--space-2); color: var(--gold); text-transform: uppercase; font-size: 10px; }
 .scope-label { display: grid; gap: 4px; font-size: 11px; }.scope-label select { min-height: 72px; }.experiment-actions { display: flex; gap: var(--space-2); margin-top: var(--space-2); }.experiment-actions button { padding: 4px 8px; font-size: 10px; }
 .bookmark-row { width: 100%; display: grid; grid-template-columns: 34px 1fr 36px; align-items: center; gap: var(--space-2); padding: var(--space-2); background: var(--surface-2); color: var(--text-primary); border: 1px solid var(--border-subtle); text-align: left; }.bookmark-row img { width: 32px; height: 32px; border-radius: 50%; }
-@media (max-width: 1050px) { .matchups { --matchup-grid: minmax(0, 1fr) 84px minmax(0, 1fr) 18px; }.compare-row, .compare-augments { grid-template-columns: 54px minmax(0, 1fr) 118px minmax(0, 1fr) 54px; } }
+@media (max-width: 1050px) { .matchups { --matchup-grid: minmax(0, 1fr) 84px minmax(0, 1fr) 18px; }.compare-augments { grid-template-columns: 54px minmax(0, 1fr) 118px minmax(0, 1fr) 54px; } }
 @media (max-width: 800px) { .review-grid { grid-template-columns: 1fr; }.page-head, .hero { align-items: flex-start; flex-wrap: wrap; }.seat .loadout { display: none; }.section-heading { align-items: flex-start; flex-direction: column; }.event-row { grid-template-columns: 36px 26px minmax(0, 1fr); }.event-row .victim { display: none; } }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
 </style>

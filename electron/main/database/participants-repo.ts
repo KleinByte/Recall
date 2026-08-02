@@ -126,6 +126,7 @@ const COLUMNS = [
   "assigned_position",
   "detail_version",
   "extended_metrics_json",
+  "rune_selections_json",
 ] as const
 
 const TEAM_COLUMNS = [
@@ -153,8 +154,8 @@ const TEAM_COLUMNS = [
  * Raise this whenever the scoreboard gains fields worth going back for, and
  * games still inside the client's window will be read again to fill them in.
  */
-export const LOBBY_DETAIL_VERSION = 5
-export const PARTICIPANT_CAPTURE_VERSION = 5
+export const LOBBY_DETAIL_VERSION = 6
+export const PARTICIPANT_CAPTURE_VERSION = 6
 
 /**
  * Replaces rather than ignores, so a lobby captured under an earlier, narrower
@@ -258,6 +259,7 @@ function toValues(row: ParticipantRow) {
     row.assignedPosition ?? null,
     LOBBY_DETAIL_VERSION,
     JSON.stringify(row.extendedMetrics ?? {}),
+    JSON.stringify(row.runeSelections ?? []),
   ]
 }
 
@@ -289,6 +291,12 @@ function toParticipantRow(row: Record<string, never>): ParticipantRow {
   } catch {
     extendedMetrics = {}
   }
+  let runeSelections = [] as ParticipantRow["runeSelections"]
+  try {
+    runeSelections = JSON.parse(row.rune_selections_json ?? "[]")
+  } catch {
+    runeSelections = []
+  }
   return {
     gameId: row.game_id,
     participantPuuid: row.participant_puuid ?? (row.is_player === 1 ? row.puuid : undefined),
@@ -314,6 +322,7 @@ function toParticipantRow(row: Record<string, never>): ParticipantRow {
     perkPrimaryStyle: row.perk_primary_style,
     perkSubStyle: row.perk_sub_style,
     perks: [row.perk0, row.perk1, row.perk2, row.perk3, row.perk4, row.perk5],
+    runeSelections,
     champLevel: row.champ_level,
     kills: row.kills,
     deaths: row.deaths,

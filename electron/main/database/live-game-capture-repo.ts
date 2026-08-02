@@ -271,6 +271,7 @@ export class LiveGameCaptureRepository {
     const derived = deriveLiveTimelineEvents(
       this.listSnapshots(gameId, puuid),
       participants,
+      this.listEvents(gameId, puuid),
     )
     if (derived.length === 0) return timeline
 
@@ -279,8 +280,11 @@ export class LiveGameCaptureRepository {
         ? [`${event.participantId}:${event.level}`]
         : [],
     ))
+    const liveKills = derived.filter((event) => event.type === "CHAMPION_KILL")
     const retained = timeline.events.filter((event) =>
-      !(
+      !(event.type === "CHAMPION_KILL" && liveKills.some((live) =>
+        live.targetId === event.targetId && Math.abs(live.timestamp - event.timestamp) <= 2_000,
+      )) && !(
         event.approximate &&
         event.type === "LEVEL_UP" &&
         event.participantId &&
@@ -295,6 +299,10 @@ export class LiveGameCaptureRepository {
           existing.participantId === event.participantId &&
           existing.level === event.level,
         )
+      }
+      if (event.category === "kill") {
+        return !retained.some((existing) => existing.type === "CHAMPION_KILL" &&
+          existing.targetId === event.targetId && Math.abs(existing.timestamp - event.timestamp) <= 2_000)
       }
       return !retained.some((existing) =>
         existing.category === "item" &&
@@ -330,14 +338,37 @@ export class LiveGameCaptureRepository {
 export function deriveLiveTimelineEvents(
   snapshots: StoredLiveGameSnapshot[],
   participants: LiveCaptureParticipant[],
+  liveEvents: LiveGameEvent[] = [],
 ): CompactTimelineEvent[] {
   const owner = participants.find((participant) => participant.isPlayer === 1)
   const byName = new Map(participants.flatMap((participant) => {
     const name = identity(participant.summonerName)
-    return name ? [[name, participant] as const] : []
+    return name ? [name, name.split("#")[0]].map((alias) => [alias, participant] as const) : []
   }))
   const previous = new Map<number, LiveGamePlayer>()
   const events: CompactTimelineEvent[] = []
+
+  for (const event of liveEvents) {
+    if (event.name !== "ChampionKill" || !event.victimName) continue
+    const killer = byName.get(identity(event.killerName) ?? "")
+    const victim = byName.get(identity(event.victimName) ?? "")
+    const assists = event.assisters.flatMap((name) => {
+      const participant = byName.get(identity(name) ?? "")
+      return participant ? [participant.participantId] : []
+    })
+    events.push({
+      eventId: eventId("live-kill", [event.id, Math.round(event.time * 1_000)]),
+      timestamp: Math.max(0, Math.round(event.time * 1_000)),
+      type: "CHAMPION_KILL",
+      category: "kill",
+      participantId: killer?.participantId,
+      assistingParticipantIds: assists,
+      teamId: killer?.teamId,
+      targetId: victim?.participantId,
+      actorName: event.killerName,
+      targetName: event.victimName,
+    })
+  }
 
   for (const snapshot of snapshots) {
     const timestamp = Math.max(0, Math.round(snapshot.gameTime * 1_000))

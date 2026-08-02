@@ -1,6 +1,7 @@
 import { ref } from "vue"
 import { api } from "./api"
 import { itemAsset } from "./items"
+import spellCatalog from "../data/spell-catalog.json"
 
 /**
  * Item and spell art comes from Data Dragon, which is versioned by patch.
@@ -41,9 +42,12 @@ export const itemIconUrl = (itemId: number) =>
   itemId > 0 ? itemAsset(itemId).iconUrl : undefined
 
 export const summonerSpellIconUrl = (spellId: number) => {
+  if (BUNDLED_SUMMONER_SPELLS.has(spellId)) return `/game-data/spells/${spellId}.png`
   const key = SUMMONER_SPELLS[spellId]
   return key ? `${base()}/img/spell/${key}.png` : undefined
 }
+
+const BUNDLED_SUMMONER_SPELLS = new Set(spellCatalog.map((spell) => spell.id))
 
 /**
  * Data Dragon names summoner spell art by key rather than id, so the two have

@@ -1,0 +1,158 @@
+[
+  {
+    "id": 1,
+    "name": "Cleanse"
+  },
+  {
+    "id": 3,
+    "name": "Exhaust"
+  },
+  {
+    "id": 4,
+    "name": "Flash"
+  },
+  {
+    "id": 5,
+    "name": ""
+  },
+  {
+    "id": 6,
+    "name": "Ghost"
+  },
+  {
+    "id": 7,
+    "name": "Heal"
+  },
+  {
+    "id": 11,
+    "name": "Smite"
+  },
+  {
+    "id": 12,
+    "name": "Teleport"
+  },
+  {
+    "id": 13,
+    "name": "Clarity"
+  },
+  {
+    "id": 14,
+    "name": "Ignite"
+  },
+  {
+    "id": 21,
+    "name": "Barrier"
+  },
+  {
+    "id": 30,
+    "name": "To the King!"
+  },
+  {
+    "id": 31,
+    "name": "Poro Toss"
+  },
+  {
+    "id": 32,
+    "name": "Mark"
+  },
+  {
+    "id": 39,
+    "name": "Mark"
+  },
+  {
+    "id": 54,
+    "name": "Placeholder"
+  },
+  {
+    "id": 55,
+    "name": "Placeholder and Attack-Smite"
+  },
+  {
+    "id": 71,
+    "name": "Cleanse"
+  },
+  {
+    "id": 73,
+    "name": "Exhaust"
+  },
+  {
+    "id": 74,
+    "name": "Flash"
+  },
+  {
+    "id": 75,
+    "name": "Clairvoyance"
+  },
+  {
+    "id": 76,
+    "name": "Ghost"
+  },
+  {
+    "id": 77,
+    "name": "Heal"
+  },
+  {
+    "id": 705,
+    "name": "Fortify"
+  },
+  {
+    "id": 709,
+    "name": "Rally"
+  },
+  {
+    "id": 711,
+    "name": "Smite"
+  },
+  {
+    "id": 712,
+    "name": "Teleport"
+  },
+  {
+    "id": 713,
+    "name": "Clarity"
+  },
+  {
+    "id": 714,
+    "name": "Ignite"
+  },
+  {
+    "id": 716,
+    "name": "Surge"
+  },
+  {
+    "id": 720,
+    "name": "Promote"
+  },
+  {
+    "id": 721,
+    "name": "Barrier"
+  },
+  {
+    "id": 777,
+    "name": "Revive"
+  },
+  {
+    "id": 2201,
+    "name": "Flee"
+  },
+  {
+    "id": 2202,
+    "name": "Flash"
+  },
+  {
+    "id": 2203,
+    "name": "Flash"
+  },
+  {
+    "id": 4294967295,
+    "name": "Primal Smite"
+  },
+  {
+    "id": 4294967295,
+    "name": "Primal Smite"
+  },
+  {
+    "id": 4294967295,
+    "name": "Primal Smite"
+  }
+]

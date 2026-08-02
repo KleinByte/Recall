@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest"
 import { championNameById } from "../src/helpers/format"
 import { findingLabel, findingSummary } from "../src/helpers/insight-findings"
 import { itemAsset } from "../src/helpers/items"
+import { existsSync } from "node:fs"
+import { resolve } from "node:path"
+import { summonerSpellIconUrl } from "../src/helpers/ddragon"
+import runeCatalog from "../src/data/rune-catalog.json"
 
 describe("offline renderer assets", () => {
   it("uses a packaged-relative URL for a known item", () => {
@@ -29,5 +33,13 @@ describe("offline renderer assets", () => {
 
     expect(findingLabel(finding)).toBe("Sorcerer's Shoes")
     expect(findingSummary(finding)).toBe("Sorcerer's Shoes associated with higher grades.")
+  })
+
+  it("bundles modern and League Classic rune and spell art", () => {
+    expect(runeCatalog.modern).toHaveLength(103)
+    expect(runeCatalog.classic).toHaveLength(50)
+    expect(summonerSpellIconUrl(74)).toBe("/game-data/spells/74.png")
+    expect(existsSync(resolve("public/game-data/spells/74.png"))).toBe(true)
+    expect(existsSync(resolve("public/game-data/runes/775337.png"))).toBe(true)
   })
 })

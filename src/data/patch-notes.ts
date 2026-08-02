@@ -10,17 +10,50 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.14",
+    releasedAt: "2026-08-02",
+    title: "Rune pages and a sharper review",
+    summary:
+      "Recall makes match history denser, turns every modern player's runes into an explorable in-client-style page, and makes the gold timeline readable at a glance.",
+    sections: [
+      {
+        title: "Dense, dependable match history",
+        items: [
+          "Match cards use substantially less padding and vertical space while preserving builds, performance, both teams, and readable Riot IDs.",
+          "All modern and League Classic summoner-spell art is bundled with Recall, including the separate Jade spell IDs that Data Dragon does not carry.",
+          "Recall now starts hidden in the Windows notification area by default, with a Settings toggle for people who prefer manual startup.",
+        ],
+      },
+      {
+        title: "Real rune pages",
+        items: [
+          "Every modern scoreboard player shows their selected runes; hover, focus, or click opens the full primary and secondary trees with unselected choices dimmed.",
+          "Per-rune end-of-game counters explain damage, healing, gold, activations, and other effects using Riot's own metric descriptions.",
+          "Recall bundles all 50 League Classic rune definitions and their art. Historical Classic pages remain explicitly unavailable when Riot omits the selections instead of being guessed.",
+        ],
+      },
+      {
+        title: "Review and timeline polish",
+        items: [
+          "Expanded lane comparisons now use compact paired stat tiles instead of oversized bars, and the full scoreboard has clearer hierarchy and interaction states.",
+          "Kill events show killer champion, a takedown mark, and victim champion; named live events replace the misleading generic Mayhem copy.",
+          "Hover or keyboard-focus the gold chart to inspect time, both teams' gold, the current lead, and kill score at any point in the match.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.13",
     releasedAt: "2026-08-02",
     title: "See the game before opening it",
     summary:
-      "Recall brings richer match cards, player mastery, live resource confidence, Tempo, and both teams' gold curves into one sharper review experience.",
+      "Recall brings richer match cards, deeper scoreboards, live resource confidence, Tempo, and both teams' gold curves into one sharper review experience.",
     sections: [
       {
         title: "Richer match review",
         items: [
           "Match cards now surface the champion, result, role, build, KDA, CS, kill participation, teams, and standout labels without requiring a separate detail view.",
-          "Full reviews include champion mastery context for every available player, and Riot's recognizable position artwork replaces the generic role symbols.",
+          "Full reviews include complete lobby context, and Riot's recognizable position artwork replaces the generic role symbols.",
           "The match timeline plots Blue and Red team gold independently, keeps objective markers aligned to the relevant team, and summarizes the final resource difference.",
         ],
       },

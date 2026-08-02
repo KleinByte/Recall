@@ -759,6 +759,14 @@ export const migrations: Migration[] = [
         ON champion_mastery_cache (owner_puuid, updated_at);
     `,
   },
+  {
+    // Preserve full rune pages and the per-rune end-of-game counters supplied
+    // by Match-V5/LCU without widening the participant table for every slot.
+    version: 19,
+    up: `
+      ALTER TABLE match_participants ADD COLUMN rune_selections_json TEXT NOT NULL DEFAULT '[]';
+    `,
+  },
 ]
 
 export const latestSchemaVersion = migrations.at(-1)?.version ?? 0

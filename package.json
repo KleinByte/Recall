@@ -1,6 +1,6 @@
 {
   "name": "recall",
-  "version": "2.0.13",
+  "version": "2.0.14",
   "main": "dist-electron/main/index.js",
   "description": "League of Legends challenge and ARAM stat tracker that remembers what the client forgets.",
   "private": true,
@@ -23,6 +23,7 @@
     "build": "pnpm typecheck && vite build && electron-builder",
     "preview": "vite preview",
     "sync:classic-items": "node scripts/sync-classic-items.mjs",
+    "sync:rune-assets": "node scripts/sync-rune-assets.mjs",
     "rebuild:native": "electron-rebuild -f -w better-sqlite3",
     "postinstall": "electron-rebuild -f -w better-sqlite3",
     "test": "vitest run"

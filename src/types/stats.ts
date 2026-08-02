@@ -244,6 +244,7 @@ export interface ParticipantRow {
   perkPrimaryStyle: number
   perkSubStyle: number
   perks: number[]
+  runeSelections?: RuneSelection[]
   champLevel: number
   kills: number
   deaths: number
@@ -288,6 +289,16 @@ export interface ParticipantRow {
   augments?: AugmentSelection[]
   extendedMetrics?: Record<string, number | boolean | string>
   mastery?: ChampionMasterySnapshot
+}
+
+export interface RuneSelection {
+  runeId: number
+  slot: number
+  var1: number
+  var2: number
+  var3: number
+  count?: number
+  kind?: "modern" | "classic"
 }
 
 export interface ChampionMasterySnapshot {

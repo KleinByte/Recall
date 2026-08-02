@@ -133,6 +133,17 @@ const indexHtml = path.join(RENDERER_DIST, "index.html")
 let store: Store
 const RIOT_API_KEY_STORE = "riot-api-key-encrypted"
 const CHAMPION_CATALOG_STORE = "champion-catalog"
+const LAUNCH_AT_LOGIN_STORE = "launch-at-login"
+const START_HIDDEN_ARG = "--hidden"
+
+function configureLoginItem(enabled: boolean) {
+  if (!app.isPackaged || process.platform !== "win32") return
+  app.setLoginItemSettings({
+    openAtLogin: enabled,
+    path: process.execPath,
+    args: [START_HIDDEN_ARG],
+  })
+}
 
 function getDatabasePath() {
   return path.join(app.getPath("userData"), "stats.db")
@@ -523,7 +534,7 @@ function getReviewService(win: BrowserWindow) {
   return reviewService
 }
 
-async function createWindow() {
+async function createWindow(startHidden = false) {
   const win = new BrowserWindow({
     title: `Recall v${app.getVersion()}`,
     icon: path.join(process.env.VITE_PUBLIC, "favicon.ico"),
@@ -534,6 +545,7 @@ async function createWindow() {
     minWidth: 1080,
     minHeight: 700,
     backgroundColor: "#0a1428",
+    show: false,
     webPreferences: {
       preload,
       // The renderer reaches the client and database through IPC only, so it
@@ -550,6 +562,10 @@ async function createWindow() {
   } else {
     win.loadFile(indexHtml)
   }
+
+  win.once("ready-to-show", () => {
+    if (!startHidden) win.show()
+  })
 
   // Closing hides Recall so it can keep recording games. Minimising remains a
   // normal taskbar action; the custom title bar should behave like Windows.
@@ -1309,6 +1325,9 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
 
   ipcMain.on("store-set", (_event, key: string, value: unknown) => {
     store.set(key, value)
+    if (key === LAUNCH_AT_LOGIN_STORE && typeof value === "boolean") {
+      configureLoginItem(value)
+    }
   })
 
   ipcMain.handle("store-get", (_event, key: string) => store.get(key))
@@ -2230,6 +2249,10 @@ async function main() {
   // Constructing electron-store creates config.json, so it must happen only
   // after the previous installation has had a chance to copy that file.
   store = new Store()
+  if (store.get(LAUNCH_AT_LOGIN_STORE) === undefined) {
+    store.set(LAUNCH_AT_LOGIN_STORE, true)
+  }
+  configureLoginItem(store.get(LAUNCH_AT_LOGIN_STORE) !== false)
 
   // Open and validate persistent data before showing the renderer. If startup
   // cannot continue, a half-initialised window would only emit a wall of "No
@@ -2247,7 +2270,8 @@ async function main() {
     return
   }
 
-  const win = await createWindow()
+  const startHidden = app.isPackaged && process.argv.includes(START_HIDDEN_ARG)
+  const win = await createWindow(startHidden)
   createTray(win)
 
   const updater = createUpdaterService({

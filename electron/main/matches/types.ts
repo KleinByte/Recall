@@ -45,6 +45,7 @@ export interface ParticipantRow {
   perkPrimaryStyle: number
   perkSubStyle: number
   perks: number[]
+  runeSelections?: RuneSelection[]
   champLevel: number
   kills: number
   deaths: number
@@ -90,6 +91,16 @@ export interface ParticipantRow {
   extendedMetrics?: Record<string, number | boolean | string>
   /** Latest mastery snapshot Recall could read for this player/champion. */
   mastery?: ChampionMasterySnapshot
+}
+
+export interface RuneSelection {
+  runeId: number
+  slot: number
+  var1: number
+  var2: number
+  var3: number
+  count?: number
+  kind?: "modern" | "classic"
 }
 
 export interface ChampionMasterySnapshot {

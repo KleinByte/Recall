@@ -280,6 +280,8 @@ export interface TimelineEvent {
   shutdownBounty?: number
   wardType?: string
   laneType?: string
+  actorName?: string
+  targetName?: string
   position?: { x: number; y: number }
   /** First periodic frame that proves the event occurred, not an exact time. */
   approximate?: boolean

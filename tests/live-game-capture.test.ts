@@ -199,6 +199,21 @@ describe("LiveGameCaptureRepository", () => {
     ]))
   })
 
+  it("preserves the named killer and victim from the live kill feed", () => {
+    const events = deriveLiveTimelineEvents([], [
+      { participantId: 1, teamId: 100, isPlayer: 1, summonerName: "Warwick Main#NA1" },
+      { participantId: 6, teamId: 200, isPlayer: 0, summonerName: "Amumu Main#NA1" },
+    ], [{
+      id: 44, name: "ChampionKill", time: 412.3,
+      killerName: "Warwick Main", victimName: "Amumu Main", assisters: [],
+    }])
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "CHAMPION_KILL", participantId: 1, targetId: 6, teamId: 100,
+      actorName: "Warwick Main", targetName: "Amumu Main", timestamp: 412_300,
+    }))
+  })
+
   it("replaces coarser inferred levels when enriching a post-game timeline", () => {
     const db = new Database(":memory:")
     applyMigrations(db)

@@ -24,7 +24,7 @@ function participant(
     item0: 1001,
     perks: {
       styles: [
-        { style: 8100, selections: [{ perk: 8112 }, { perk: 8126 }] },
+        { style: 8100, selections: [{ perk: 8112, var1: 2840, var2: 12 }, { perk: 8126 }] },
         { style: 8300, selections: [{ perk: 8345 }] },
       ],
     },
@@ -95,6 +95,9 @@ describe("mapRiotMatch", () => {
       perkPrimaryStyle: 8100,
       perkSubStyle: 8300,
       perks: [8112, 8126, 8345, 0, 0, 0],
+      runeSelections: expect.arrayContaining([
+        expect.objectContaining({ runeId: 8112, var1: 2840, var2: 12 }),
+      ]),
     })
     expect(result.teams[0]).toMatchObject({
       firstBlood: 1,

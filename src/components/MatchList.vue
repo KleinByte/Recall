@@ -76,6 +76,8 @@ const patchLabel = (version: string) => {
 
 const displayName = (row: ParticipantRow) =>
   row.summonerName ?? championNameById(props.champions, row.championId)
+
+const compactName = (row: ParticipantRow) => displayName(row).split("#")[0]
 </script>
 
 <template>
@@ -127,6 +129,7 @@ const displayName = (row: ParticipantRow) =>
               <img
                 v-for="spell in spells(match)"
                 :key="spell"
+                v-show="summonerSpellIconUrl(spell)"
                 :src="summonerSpellIconUrl(spell)"
                 alt=""
               />
@@ -180,7 +183,7 @@ const displayName = (row: ParticipantRow) =>
                   :src="positionIconUrl(participantPosition(match, row))"
                   alt=""
                 />
-                <span class="roster-name">{{ displayName(row) }}</span>
+                <span class="roster-name">{{ compactName(row) }}</span>
               </span>
             </div>
           </section>
@@ -233,7 +236,7 @@ const displayName = (row: ParticipantRow) =>
 
 .card-head {
   display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
-  padding: 8px 14px; border-bottom: 1px solid var(--border-subtle);
+  padding: 5px 10px; border-bottom: 1px solid var(--border-subtle);
   background: color-mix(in srgb, var(--surface-3) 42%, transparent);
   font-size: 11px;
 }
@@ -245,45 +248,45 @@ const displayName = (row: ParticipantRow) =>
 
 .card-main {
   display: grid;
-  grid-template-columns: 176px 110px 100px 140px minmax(142px, .9fr) minmax(240px, 1.2fr);
-  align-items: center; gap: clamp(10px, 1.5vw, 24px); padding: 14px 16px;
+  grid-template-columns: 142px 92px 82px 108px minmax(116px, .75fr) minmax(330px, 1.45fr);
+  align-items: center; gap: clamp(6px, .8vw, 13px); padding: 7px 10px;
 }
-.champion-block { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.champion-block { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .portrait-wrap { position: relative; flex: 0 0 auto; }
-.champion-icon { width: 58px; height: 58px; border: 2px solid var(--border-strong); border-radius: 50%; object-fit: cover; }
+.champion-icon { width: 48px; height: 48px; border: 2px solid var(--border-strong); border-radius: 50%; object-fit: cover; }
 .portrait-role {
-  position: absolute; right: -4px; bottom: -4px; width: 21px; height: 21px; padding: 3px;
+  position: absolute; right: -3px; bottom: -3px; width: 18px; height: 18px; padding: 3px;
   border: 1px solid var(--gold); border-radius: 50%; background: var(--surface-0);
 }
-.spells { display: grid; grid-template-columns: repeat(2, 24px); gap: 3px; }
-.spells img { width: 24px; height: 24px; border-radius: 3px; }
+.spells { display: grid; grid-template-columns: repeat(2, 20px); gap: 2px; }
+.spells img { width: 20px; height: 20px; border-radius: 3px; }
 
 .stat-block { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; }
-.stat-block strong { color: var(--text-primary); font-size: 14px; }
+.stat-block strong { color: var(--text-primary); font-size: 12px; }
 .stat-block span { font-size: 10px; }
-.kda-line { font-size: 16px !important; }
+.kda-line { font-size: 14px !important; }
 .kda-line span { color: var(--text-muted); font-size: 12px; }
 .accent { color: var(--win); font-weight: 700; }
 
-.build { display: grid; grid-template-columns: repeat(4, 32px); gap: 4px; align-content: center; justify-content: center; }
-.build img, .item-empty { width: 32px; height: 32px; border-radius: 4px; background: var(--surface-3); }
+.build { display: grid; grid-template-columns: repeat(4, 27px); gap: 3px; align-content: center; justify-content: center; }
+.build img, .item-empty { width: 27px; height: 27px; border-radius: 3px; background: var(--surface-3); }
 .build img { border: 1px solid var(--border-subtle); object-fit: cover; }
 .item-empty { opacity: .42; }
 
-.rosters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; min-width: 0; }
-.team-roster { display: grid; gap: 3px; min-width: 0; }
-.roster-player { display: grid; grid-template-columns: 22px 13px minmax(0, 1fr); align-items: center; gap: 4px; min-width: 0; color: var(--text-secondary); font-size: 10px; }
+.rosters { display: grid; grid-template-columns: repeat(2, minmax(150px, 1fr)); gap: 7px; min-width: 0; }
+.team-roster { display: grid; gap: 1px; min-width: 0; }
+.roster-player { display: grid; grid-template-columns: 17px 11px minmax(72px, 1fr); align-items: center; gap: 3px; min-width: 0; color: var(--text-secondary); font-size: 9px; line-height: 1; }
 .roster-player.me { color: var(--gold-bright); }
-.roster-champion { width: 22px; height: 22px; border: 1px solid var(--border-subtle); border-radius: 50%; object-fit: cover; }
-.roster-role { width: 13px; height: 13px; opacity: .76; }
+.roster-champion { width: 17px; height: 17px; border: 1px solid var(--border-subtle); border-radius: 50%; object-fit: cover; }
+.roster-role { width: 11px; height: 11px; opacity: .76; }
 .roster-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.card-foot { display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 7px 14px 9px; flex-wrap: wrap; }
+.card-foot { display: flex; align-items: center; gap: 4px; min-height: 22px; padding: 3px 10px 5px; flex-wrap: wrap; }
 .game-label, .tag-chip, .place-chip, .annotation {
   display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px;
   border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--surface-0) 74%, transparent); color: var(--text-secondary);
-  font-size: 9px; line-height: 1; white-space: nowrap;
+  font-size: 8px; line-height: 1; white-space: nowrap;
 }
 .game-label { border-color: rgba(200, 170, 110, .3); color: var(--gold-bright); }
 .place-chip { color: var(--text-primary); }
@@ -293,9 +296,7 @@ const displayName = (row: ParticipantRow) =>
 .empty { padding: var(--space-5); text-align: center; font-size: 12px; }
 
 @media (max-width: 1320px) {
-  .card-main { grid-template-columns: 170px 100px 88px 120px minmax(136px, 1fr); }
-  .rosters { grid-column: 1 / -1; padding-top: 10px; border-top: 1px solid var(--border-subtle); }
-  .team-roster { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .card-main { grid-template-columns: 138px 86px 78px 102px minmax(112px, .8fr) minmax(300px, 1.4fr); }
 }
 
 @media (max-width: 850px) {

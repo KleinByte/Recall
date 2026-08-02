@@ -13,8 +13,9 @@ import type {
 interface RiotPerks {
   styles?: {
     style?: number
-    selections?: { perk?: number }[]
+    selections?: { perk?: number; var1?: number; var2?: number; var3?: number }[]
   }[]
+  statPerks?: { offense?: number; flex?: number; defense?: number }
 }
 
 export interface RiotMatchParticipant {
@@ -311,6 +312,21 @@ export function mapRiotMatch(
     const perks = styles.flatMap((style) =>
       (style.selections ?? []).map((selection) => int(selection.perk)),
     )
+    const runeSelections = [
+      ...styles.flatMap((style) => style.selections ?? []).map((selection, slot) => ({
+        runeId: int(selection.perk),
+        slot,
+        var1: int(selection.var1),
+        var2: int(selection.var2),
+        var3: int(selection.var3),
+        kind: "modern" as const,
+      })),
+      ...[
+        participant.perks?.statPerks?.offense,
+        participant.perks?.statPerks?.flex,
+        participant.perks?.statPerks?.defense,
+      ].map((runeId, index) => ({ runeId: int(runeId), slot: 6 + index, var1: 0, var2: 0, var3: 0, kind: "modern" as const })),
+    ].filter((selection) => selection.runeId > 0)
 
     return {
       gameId: info.gameId!,
@@ -337,6 +353,7 @@ export function mapRiotMatch(
       perkPrimaryStyle: int(styles[0]?.style),
       perkSubStyle: int(styles[1]?.style),
       perks: Array.from({ length: 6 }, (_, perk) => perks[perk] ?? 0),
+      runeSelections,
       champLevel: int(participant.champLevel),
       kills: int(participant.kills),
       deaths: int(participant.deaths),
