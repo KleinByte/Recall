@@ -73,6 +73,7 @@ const teams = computed(() => [100, 200].map((teamId) => ({
   teamId,
   players: review.value?.scoreboard.filter((player) => player.teamId === teamId) ?? [],
 })))
+const showsRoles = computed(() => review.value?.match.modeFamily === "sr")
 
 /** Every row stays independently open so two lanes can be compared at once. */
 const openMatchups = ref<Record<string, boolean>>({})
@@ -81,7 +82,11 @@ const toggleMatchup = (key: string) => {
 }
 
 const matchups = computed(() =>
-  laneMatchups(teams.value[0].players, teams.value[1].players))
+  laneMatchups(
+    teams.value[0].players,
+    teams.value[1].players,
+    showsRoles.value,
+  ))
 
 const teamKills = (teamId: number) =>
   teams.value.find((team) => team.teamId === teamId)?.players
@@ -591,13 +596,13 @@ onBeforeUnmount(() => {
       <section class="card">
         <div class="section-heading">
           <div><span class="eyebrow">Complete lobby</span><h2 class="section-title">Scoreboard</h2></div>
-          <span class="muted">Each row is a lane matchup · open as many as you like to compare</span>
+          <span v-if="showsRoles" class="muted">Each row is a lane matchup · open as many as you like to compare</span>
         </div>
 
-        <div class="matchups">
+        <div class="matchups" :class="{ roleless: !showsRoles }">
           <div class="matchup-columns muted">
             <span class="side-title blue">Blue team · {{ teamKills(100) }} kills</span>
-            <span class="lane-title">Role</span>
+            <span class="lane-title">{{ showsRoles ? "Role" : "" }}</span>
             <span class="side-title red">Red team · {{ teamKills(200) }} kills</span>
             <span />
           </div>
@@ -628,10 +633,11 @@ onBeforeUnmount(() => {
                 <span v-else class="muted">No player</span>
               </div>
 
-              <span class="lane">
+              <span v-if="showsRoles && row.position" class="lane">
                 <FontAwesomeIcon :icon="positionIcon(row.position)" aria-hidden="true" />
                 <span>{{ positionLabel(row.position) }}</span>
               </span>
+              <span v-else class="lane" aria-hidden="true" />
 
               <div class="seat right" :class="{ owner: row.right?.isPlayer, vacant: !row.right }">
                 <template v-if="row.right">
@@ -978,6 +984,7 @@ h2 { margin: 0; }
 .highlight { display: flex; flex-direction: column; padding: var(--space-2); background: var(--surface-2); border-radius: var(--radius-sm); font-size: 12px; }
 .baseline > div { display: grid; grid-template-columns: 1fr 70px 100px; gap: var(--space-2); font-size: 12px; }.positive { color: var(--win); }.negative, .error { color: var(--loss); }
 .matchups { --matchup-grid: minmax(0, 1fr) 108px minmax(0, 1fr) 18px; display: grid; gap: var(--space-1); }
+.matchups.roleless { --matchup-grid: minmax(0, 1fr) 0 minmax(0, 1fr) 18px; }
 .matchup-columns { display: grid; grid-template-columns: var(--matchup-grid); gap: 8px; padding: 0 10px 2px; font-family: var(--font-heading); font-size: 10px; letter-spacing: .8px; text-transform: uppercase; }
 .side-title.blue { color: #7fb2e0; }.side-title.red { color: #e0918f; }
 .side-title.red, .lane-title { text-align: center; }.side-title.red { text-align: right; }

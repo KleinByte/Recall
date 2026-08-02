@@ -90,21 +90,33 @@ describe("laneMatchups", () => {
       team(["TOP", "JUNGLE"]),
     )
 
-    expect(rows[0]).toMatchObject({ position: "TOP", right: { name: "p0" } })
-    expect(rows[0].left).toBeUndefined()
-    expect(rows[1]).toMatchObject({ position: "JUNGLE", right: { name: "p1" } })
-    expect(rows[2].position).toBeUndefined()
-    expect(rows[2].left?.name).toBe("p0")
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toMatchObject({ left: { name: "p0" }, right: { name: "p0" } })
+    expect(rows[1]).toMatchObject({ left: { name: "p1" }, right: { name: "p1" } })
+    expect(rows.every((row) => row.position === undefined)).toBe(true)
   })
 
   it("seats nobody in a position two of a team both claim", () => {
     const rows = laneMatchups(team(["TOP", "TOP"]), team(["TOP", "JUNGLE"]))
 
-    expect(rows.find((row) => row.position === "TOP")?.left).toBeUndefined()
-    expect(rows.filter((row) => !row.position).map((row) => row.left?.name)).toEqual([
-      "p0",
-      "p1",
+    expect(rows.map((row) => row.left?.name)).toEqual(["p0", "p1"])
+    expect(rows.map((row) => row.right?.name)).toEqual(["p0", "p1"])
+    expect(rows.every((row) => row.position === undefined)).toBe(true)
+  })
+
+  it("keeps Riot's order and exposes no positions for roleless modes", () => {
+    const rows = laneMatchups(
+      team(["TOP", "JUNGLE", "MIDDLE"]),
+      team(["MIDDLE", "TOP", "JUNGLE"]),
+      false,
+    )
+
+    expect(rows.map((row) => [row.left?.name, row.right?.name])).toEqual([
+      ["p0", "p0"],
+      ["p1", "p1"],
+      ["p2", "p2"],
     ])
+    expect(rows.every((row) => row.position === undefined)).toBe(true)
   })
 
   it("keeps all ten when the client calls the whole team junglers", () => {

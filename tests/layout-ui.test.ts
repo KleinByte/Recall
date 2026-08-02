@@ -71,7 +71,10 @@ describe("desktop page layout", () => {
   it("sets the review scoreboard out as lane matchups that open independently", () => {
     const review = read("src/pages/ReviewPage.vue")
 
-    expect(review).toContain("laneMatchups(teams.value[0].players, teams.value[1].players)")
+    expect(review).toContain("laneMatchups(")
+    expect(review).toContain("showsRoles.value")
+    expect(review).toContain('v-if="showsRoles && row.position"')
+    expect(review).toContain('.matchups.roleless')
     expect(review).toContain('class="seat left"')
     expect(review).toContain('class="seat right"')
     expect(review).toContain(':aria-expanded="openMatchups[row.key] === true"')

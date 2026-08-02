@@ -48,34 +48,56 @@ interface Positioned {
 }
 
 /**
- * Pairs each player against the enemy who played their position, so a lane can
- * be read straight across the row. Anyone whose position is unknown, missing or
- * contested inside a team keeps their listed order in the leftover rows.
+ * Pairs each player against the enemy who played their position when Riot gave
+ * both teams a complete, unambiguous set. If even one position is unresolved,
+ * the whole lobby stays in Riot's participant order; partially sorting a team
+ * makes the unknown player appear to move to the bottom and invents matchups.
+ * Roleless modes always use that original order.
  */
 export function laneMatchups<T extends Positioned>(
   left: T[],
   right: T[],
+  usePositions = true,
 ): Matchup<T>[] {
   const take = (players: T[]) => {
     const claimed = new Map<Position, T>()
-    const rest: T[] = []
     const found = players.map((player) =>
       resolvePosition(player.lane, player.role, player.assignedPosition),
     )
+    const listed = found.map((position) =>
+      position !== undefined && found.indexOf(position) === found.lastIndexOf(position)
+        ? position
+        : undefined,
+    )
+    const complete = listed.every((position) => position !== undefined)
 
     players.forEach((player, index) => {
-      const position = found[index]
-      // One player holds a position per team, so a contested one is a misread.
-      const sole = position && found.indexOf(position) === found.lastIndexOf(position)
-      if (sole) claimed.set(position, player)
-      else rest.push(player)
+      const position = listed[index]
+      if (position) claimed.set(position, player)
     })
 
-    return { claimed, rest }
+    return { claimed, listed, complete }
   }
 
   const first = take(left)
   const second = take(right)
+
+  if (!usePositions || !first.complete || !second.complete) {
+    return Array.from({ length: Math.max(left.length, right.length) }, (_, index) => {
+      const leftPosition = first.listed[index]
+      const rightPosition = second.listed[index]
+      return {
+        key: `listed-${index}`,
+        position:
+          usePositions && leftPosition === rightPosition
+            ? leftPosition
+            : undefined,
+        left: left[index],
+        right: right[index],
+      }
+    })
+  }
+
   const rows: Matchup<T>[] = []
 
   for (const position of POSITIONS) {
@@ -83,15 +105,6 @@ export function laneMatchups<T extends Positioned>(
     const other = second.claimed.get(position)
     if (!one && !other) continue
     rows.push({ key: position, position, left: one, right: other })
-  }
-
-  const leftovers = Math.max(first.rest.length, second.rest.length)
-  for (let index = 0; index < leftovers; index += 1) {
-    rows.push({
-      key: `unpaired-${index}`,
-      left: first.rest[index],
-      right: second.rest[index],
-    })
   }
 
   return rows
