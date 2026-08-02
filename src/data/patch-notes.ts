@@ -10,6 +10,23 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.12",
+    releasedAt: "2026-08-02",
+    title: "League Classic joins Recall",
+    summary:
+      "League Classic is now a first-class game mode with its own Recall grades, records, RVI profile, filters, and analysis instead of being filed under Other.",
+    sections: [
+      {
+        title: "Complete Classic support",
+        items: [
+          "Current Jade queues and previously recorded Classic games are recognized and kept separate from modern Summoner's Rift, while Classic Co-op vs. AI remains outside performance statistics.",
+          "Complete 5v5 Classic lobbies receive lane-aware Recall grades, role comparisons, performance labels, timelines, playstyle measurements, and RVI analysis.",
+          "League Classic now appears throughout Matches, Skill, Progress records, dashboard profiles, champion breakdowns, live recommendations, reviews, and practice experiments.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.11",
     releasedAt: "2026-08-02",
     title: "Enemy roles restored",
