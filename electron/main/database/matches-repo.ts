@@ -750,7 +750,12 @@ export class MatchesRepository {
                 ), '') AS label_names,
                 (SELECT COUNT(*) FROM match_experiments me
                  WHERE me.game_id = matches.game_id AND me.puuid = matches.puuid)
-                  AS experiment_count
+                  AS experiment_count,
+                (SELECT mp.assigned_position FROM match_participants mp
+                 WHERE mp.game_id = matches.game_id AND mp.puuid = matches.puuid
+                   AND mp.is_player = 1)
+                  AS assigned_position,
+                ${LOBBY_PLACE_SQL}
          FROM matches ${clause}
          ORDER BY ${orderBy(query)}
          LIMIT ? OFFSET ?`,
@@ -815,8 +820,14 @@ export class MatchesRepository {
   }
 
   deleteAll(puuid: string): number {
-    return this.db.prepare("DELETE FROM matches WHERE puuid = ?").run(puuid)
-      .changes
+    return this.db.transaction(() => {
+      // Live captures intentionally have no match foreign key because they
+      // are written before the post-game match row exists.
+      this.db.prepare("DELETE FROM live_game_events WHERE puuid = ?").run(puuid)
+      this.db.prepare("DELETE FROM live_game_snapshots WHERE puuid = ?").run(puuid)
+      return this.db.prepare("DELETE FROM matches WHERE puuid = ?").run(puuid)
+        .changes
+    })()
   }
 }
 
@@ -833,6 +844,33 @@ const SORT_COLUMNS: Record<string, string> = {
   grade: "grade_score",
   duration: "duration_secs",
 }
+
+/**
+ * Where the player finished among the ten, ranked by Recall grade.
+ *
+ * Mirrors `lobbyStandings` in the renderer, including its refusal to place
+ * anyone in a lobby that is not graded end to end: a partial order would
+ * flatter whoever happens to have a grade. Zero means no placement.
+ */
+const LOBBY_PLACE_SQL = `
+  COALESCE((
+    SELECT CASE
+      WHEN COUNT(*) < 2 OR SUM(lobby.grade_score IS NULL) > 0 THEN 0
+      ELSE SUM(
+        lobby.grade_score > me.grade_score
+        OR (lobby.grade_score = me.grade_score
+            AND lobby.participant_id < me.participant_id)
+      ) + 1
+    END
+    FROM match_participants lobby
+    JOIN match_participants me
+      ON me.game_id = lobby.game_id AND me.puuid = lobby.puuid AND me.is_player = 1
+    WHERE lobby.game_id = matches.game_id AND lobby.puuid = matches.puuid
+  ), 0) AS lobby_place,
+  COALESCE((
+    SELECT COUNT(*) FROM match_participants mp
+    WHERE mp.game_id = matches.game_id AND mp.puuid = matches.puuid
+  ), 0) AS lobby_size`
 
 function orderBy(query: MatchQuery): string {
   const column = SORT_COLUMNS[query.sortBy ?? "played_at"] ?? "played_at"
@@ -1065,6 +1103,7 @@ function toMatchRow(row: Record<string, never>): MatchRow {
     isRanked: row.is_ranked,
     lane: row.lane ?? undefined,
     role: row.role ?? undefined,
+    assignedPosition: row.assigned_position ?? undefined,
     neutralMinions: row.neutral_minions,
     wardsPlaced: row.wards_placed,
     wardsKilled: row.wards_killed,
@@ -1087,5 +1126,7 @@ function toMatchRow(row: Record<string, never>): MatchRow {
       ? (row.label_names as unknown as string).split(" · ")
       : undefined,
     experimentCount: row.experiment_count ?? undefined,
+    lobbyPlace: row.lobby_place || undefined,
+    lobbySize: row.lobby_size || undefined,
   }
 }

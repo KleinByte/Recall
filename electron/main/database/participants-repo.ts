@@ -122,6 +122,7 @@ const COLUMNS = [
   "first_tower",
   "lane",
   "role",
+  "assigned_position",
   "detail_version",
   "extended_metrics_json",
 ] as const
@@ -252,6 +253,7 @@ function toValues(row: ParticipantRow) {
     row.firstTower,
     row.lane ?? null,
     row.role ?? null,
+    row.assignedPosition ?? null,
     LOBBY_DETAIL_VERSION,
     JSON.stringify(row.extendedMetrics ?? {}),
   ]
@@ -348,6 +350,7 @@ function toParticipantRow(row: Record<string, never>): ParticipantRow {
     gradeScore: row.grade_score ?? undefined,
     lane: row.lane ?? undefined,
     role: row.role ?? undefined,
+    assignedPosition: row.assigned_position ?? undefined,
     extendedMetrics,
   }
 }

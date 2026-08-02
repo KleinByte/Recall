@@ -281,6 +281,8 @@ export interface TimelineEvent {
   wardType?: string
   laneType?: string
   position?: { x: number; y: number }
+  /** First periodic frame that proves the event occurred, not an exact time. */
+  approximate?: boolean
 }
 
 export interface TimelineSummary {

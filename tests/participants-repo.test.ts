@@ -199,6 +199,22 @@ describe("ParticipantsRepository", () => {
     expect(row.champLevel).toBe(18)
   })
 
+  it("keeps the champion select assignment beside Riot's lane and role", () => {
+    repo.insertMany([
+      participant({ isPlayer: 1, assignedPosition: "UTILITY" }),
+      participant({ participantId: 2 }),
+    ])
+
+    const rows = repo.getMatchDetail(1, PUUID).participants
+
+    expect(rows[0]).toMatchObject({
+      lane: "MIDDLE",
+      role: "SOLO",
+      assignedPosition: "UTILITY",
+    })
+    expect(rows[1].assignedPosition).toBeUndefined()
+  })
+
   it("orders the scoreboard by team", () => {
     repo.insertMany(lobby(1, 30000))
 

@@ -71,8 +71,19 @@ rough night does not get flattened into a lifetime average.
 Recall captures recent timelines from the authenticated local League Client and
 caches a compact summary. The exact event families vary with what the current
 client build exposes; periodic gold, experience, position, kill, and structure
-data are kept when available. Raw timeline responses are not stored, and no
-developer key is used for normal timeline requests.
+data are kept when available. The original response is retained locally beside
+the compact summary so later Recall versions can reprocess fields from the
+unsupported, changing LCU schema. No developer key is used for normal timeline
+requests. Final builds and ward totals come from the complementary local game
+summary; Recall does not infer individual ward events when the timeline omits
+them.
+
+While a game is running, Recall also captures the loopback Live Client Data
+feed. It stores a full player-state snapshot every 15 seconds and immediately
+when an inventory or level changes, while cumulative live events are stored
+once by Riot's event id. These local captures can restore approximate item and
+level timing to the post-game review when match history omits those events.
+Games played while Recall is closed cannot be reconstructed this way.
 
 ## How history syncing works
 

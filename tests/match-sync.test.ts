@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest"
 import { applyMigrations } from "../electron/main/database/migrations.js"
 import { MatchesRepository } from "../electron/main/database/matches-repo.js"
 import { ParticipantsRepository } from "../electron/main/database/participants-repo.js"
+import { ChampSelectRepository } from "../electron/main/database/champ-select-repo.js"
 import { MatchSync } from "../electron/main/match-sync.js"
 import type { LcuGame } from "../electron/main/matches/types.js"
 
@@ -160,9 +161,10 @@ function buildLobby(gameId: number) {
 
 let repo: MatchesRepository
 let participants: ParticipantsRepository
+let db: InstanceType<typeof Database>
 
 beforeEach(() => {
-  const db = new Database(":memory:")
+  db = new Database(":memory:")
   applyMigrations(db)
   repo = new MatchesRepository(db)
   participants = new ParticipantsRepository(db)
@@ -332,6 +334,35 @@ describe("MatchSync", () => {
 
     expect(result.lobbies).toBe(1)
     expect(participants.countGamesWithLobby(PUUID)).toBe(1)
+  })
+
+  it("stamps champion select assignments onto the player's own team", async () => {
+    const client = new FakeClient([riftGame(1)])
+    client.buildDetail = (gameId) => {
+      const detail = buildLobby(gameId)
+      detail.participants.forEach((participant, index) => {
+        Object.assign(participant, { championId: 100 + index })
+      })
+      return detail
+    }
+    const champSelect = new ChampSelectRepository(db)
+    // Champion 105 sits on the enemy team, so its assignment must be ignored.
+    champSelect.record(1, PUUID, [
+      { championId: 100, position: "UTILITY" },
+      { championId: 105, position: "TOP" },
+    ])
+
+    await new MatchSync(
+      client as never,
+      repo,
+      PUUID,
+      participants,
+      champSelect,
+    ).syncNow()
+
+    const stored = participants.getMatchDetail(1, PUUID).participants
+    expect(stored.find((row) => row.championId === 100)?.assignedPosition).toBe("UTILITY")
+    expect(stored.find((row) => row.championId === 105)?.assignedPosition).toBeUndefined()
   })
 
   it("records the queue name the client reports", async () => {

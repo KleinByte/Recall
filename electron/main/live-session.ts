@@ -11,6 +11,8 @@ export interface LivePlayer {
   summonerId?: number
   displayName?: string
   puuid?: string
+  /** The client's own champion select assignment: TOP, JUNGLE, MIDDLE, BOTTOM or UTILITY. */
+  assignedPosition?: string
 }
 
 export interface LiveSession {
@@ -73,6 +75,7 @@ function player(entry: Record<string, unknown>): LivePlayer {
           text(entry.summonerName) ??
           text(entry.name),
     puuid: text(entry.puuid),
+    assignedPosition: text(entry.assignedPosition)?.toUpperCase(),
   }
 }
 

@@ -1,4 +1,4 @@
-export const TIMELINE_MAPPER_VERSION = 4
+export const TIMELINE_MAPPER_VERSION = 5
 
 export type TimelineEventCategory =
   | "kill"
@@ -53,6 +53,7 @@ export interface CompactTimelineEvent {
   wardType?: string
   laneType?: string
   position?: { x: number; y: number }
+  approximate?: boolean
 }
 
 export interface CompactTimeline {
@@ -117,6 +118,7 @@ const KEPT_EVENTS = new Set([
   "ITEM_UNDO",
   "ITEM_DESTROYED",
   "ITEM_TRANSFORM",
+  "ITEM_TRANSFORMED",
   "LEVEL_UP",
   "SKILL_LEVEL_UP",
   "ELITE_MONSTER_KILL",
@@ -173,6 +175,52 @@ function eventIdentity(event: Omit<CompactTimelineEvent, "eventId">) {
     event.position?.x ?? null,
     event.position?.y ?? null,
   ])
+}
+
+/**
+ * The League Client's local timeline route currently omits LEVEL_UP events,
+ * even though every periodic participant frame still contains the champion's
+ * level. Reconstruct the missing milestones at the first frame that proves a
+ * participant reached them. These timestamps are therefore approximate.
+ */
+function inferLevelEvents(
+  frames: CompactTimelineFrame[],
+  events: CompactTimelineEvent[],
+): CompactTimelineEvent[] {
+  const previousLevels = new Map<number, number>()
+  const recordedLevels = new Set(events.flatMap((event) =>
+    event.type === "LEVEL_UP" && event.participantId && event.level
+      ? [`${event.participantId}:${event.level}`]
+      : [],
+  ))
+  const inferred: CompactTimelineEvent[] = []
+
+  for (const frame of frames) {
+    for (const participant of frame.participants) {
+      const previous = previousLevels.get(participant.participantId)
+      const current = participant.level
+      previousLevels.set(participant.participantId, current)
+      if (previous === undefined || current <= previous) continue
+
+      for (let level = previous + 1; level <= current; level += 1) {
+        const key = `${participant.participantId}:${level}`
+        if (recordedLevels.has(key)) continue
+        recordedLevels.add(key)
+        inferred.push({
+          eventId: `inferred-level:${frame.timestamp}:${participant.participantId}:${level}`,
+          timestamp: frame.timestamp,
+          type: "LEVEL_UP",
+          category: "level",
+          participantId: participant.participantId,
+          teamId: participant.teamId,
+          level,
+          approximate: true,
+        })
+      }
+    }
+  }
+
+  return inferred
 }
 
 export function mapTimeline(
@@ -279,7 +327,8 @@ export function mapTimeline(
   }
   return {
     frames: compactFrames,
-    events: events.sort((a, b) => a.timestamp - b.timestamp),
+    events: [...events, ...inferLevelEvents(compactFrames, events)]
+      .sort((a, b) => a.timestamp - b.timestamp),
     turningPoints: findTurningPoints(compactFrames),
   }
 }

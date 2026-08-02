@@ -1,4 +1,5 @@
 import type { MatchesRepository } from "./database/matches-repo.js"
+import type { ChampSelectRepository } from "./database/champ-select-repo.js"
 import type { ParticipantsRepository } from "./database/participants-repo.js"
 import type { LcuClient } from "./lcu-client.js"
 import { gradeLobby, type GradeInput } from "./matches/grade.js"
@@ -61,6 +62,7 @@ export class MatchSync {
     private readonly repository: MatchesRepository,
     private readonly puuid: string,
     private readonly participants?: ParticipantsRepository,
+    private readonly champSelect?: ChampSelectRepository,
   ) {}
 
   async syncNow(): Promise<SyncResult> {
@@ -141,6 +143,8 @@ export class MatchSync {
 
     const rows = mapParticipants(detail, this.puuid)
     if (rows.length === 0) return false
+
+    this.champSelect?.stamp(detail.gameId, this.puuid, rows)
 
     const stored = this.participants.insertMany(rows) > 0
     const teams = mapTeams(detail, this.puuid)

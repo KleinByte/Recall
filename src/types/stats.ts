@@ -280,6 +280,8 @@ export interface ParticipantRow {
   gradeScore?: number
   lane?: string
   role?: string
+  /** The position champion select assigned, kept apart from Riot's post-game guess. */
+  assignedPosition?: string
   augments?: AugmentSelection[]
   extendedMetrics?: Record<string, number | boolean | string>
 }
@@ -488,6 +490,8 @@ export interface MatchRow {
   isRanked: number
   lane?: string
   role?: string
+  /** The position champion select assigned, kept apart from Riot's post-game guess. */
+  assignedPosition?: string
   neutralMinions: number
   wardsPlaced: number
   wardsKilled: number
@@ -506,6 +510,9 @@ export interface MatchRow {
   tagNames?: string[]
   labelNames?: string[]
   experimentCount?: number
+  /** Rank among the lobby by Recall grade; absent unless every player is graded. */
+  lobbyPlace?: number
+  lobbySize?: number
 }
 
 export interface StatsMeta {

@@ -1,5 +1,6 @@
 import type { MatchesRepository } from "../database/matches-repo.js"
 import type { ParticipantsRepository } from "../database/participants-repo.js"
+import type { ChampSelectRepository } from "../database/champ-select-repo.js"
 import {
   RiotBackfillRepository,
   type RiotBackfillState,
@@ -24,6 +25,7 @@ interface BackfillOptions {
   }
   onProgress?: (state: RiotBackfillState) => void
   onAccountResolved?: (matchPuuid: string) => void
+  champSelect?: ChampSelectRepository
 }
 
 const gameIdFromMatchId = (matchId: string) => {
@@ -43,6 +45,7 @@ export class RiotHistoryBackfill {
   private readonly riotId: BackfillOptions["riotId"]
   private readonly onProgress: (state: RiotBackfillState) => void
   private readonly onAccountResolved: (matchPuuid: string) => void
+  private readonly champSelect?: ChampSelectRepository
 
   constructor(
     private readonly apiKey: string,
@@ -60,6 +63,7 @@ export class RiotHistoryBackfill {
     this.riotId = options.riotId
     this.onProgress = options.onProgress ?? (() => undefined)
     this.onAccountResolved = options.onAccountResolved ?? (() => undefined)
+    this.champSelect = options.champSelect
   }
 
   async run(restart: boolean, signal?: AbortSignal) {
@@ -186,6 +190,7 @@ export class RiotHistoryBackfill {
           }
 
           imported += this.matches.insertMany([mapped.match])
+          this.champSelect?.stamp(mapped.match.gameId, this.puuid, mapped.participants)
           this.participants.insertMany(mapped.participants)
           this.participants.insertTeams(mapped.teams)
           this.participants.recordCapture(

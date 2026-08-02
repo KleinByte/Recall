@@ -68,6 +68,32 @@ describe("desktop page layout", () => {
     expect(review).toContain("killActor(event)")
   })
 
+  it("sets the review scoreboard out as lane matchups that open independently", () => {
+    const review = read("src/pages/ReviewPage.vue")
+
+    expect(review).toContain("laneMatchups(teams.value[0].players, teams.value[1].players)")
+    expect(review).toContain('class="seat left"')
+    expect(review).toContain('class="seat right"')
+    expect(review).toContain(':aria-expanded="openMatchups[row.key] === true"')
+    // A record rather than one open row, so both lanes can be read at once.
+    expect(review).toContain("openMatchups = ref<Record<string, boolean>>({})")
+    expect(review).toContain("compareMatchup(row.left, row.right)")
+    expect(review).not.toContain('class="team-grid"')
+  })
+
+  it("gives the match list a header aligned to its rows", () => {
+    const matches = read("src/components/MatchList.vue")
+
+    expect(matches).toMatch(/\.match-list \{[\s\S]*--match-grid:/)
+    expect(matches).toMatch(/\.columns \{[\s\S]*grid-template-columns: var\(--match-grid\)/)
+    expect(matches).toMatch(/\.row \{[\s\S]*grid-template-columns: var\(--match-grid\)/)
+    expect(matches).toContain('<span class="col-role">Role</span>')
+    expect(matches).toContain('<span class="col-cs">CS</span>')
+    expect(matches).toContain('<span class="col-rank">Rank</span>')
+    expect(matches).toContain("resolvePosition(match.lane, match.role, match.assignedPosition)")
+    expect(matches).toContain("match.lobbySize")
+  })
+
   it("pairs recent form with a responsive Dial gauge", () => {
     const dashboard = read("src/pages/DashboardPage.vue")
     const gauge = read("src/components/MomentumGauge.vue")

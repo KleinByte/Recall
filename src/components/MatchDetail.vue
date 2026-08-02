@@ -1,18 +1,36 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
-import { faChevronDown } from "@fortawesome/free-solid-svg-icons"
+import {
+  faBug,
+  faChessRook,
+  faChevronDown,
+  faCrown,
+  faDragon,
+  faFlag,
+} from "@fortawesome/free-solid-svg-icons"
 import GradeBadge from "./GradeBadge.vue"
-import { championIconUrl, championNameById, formatCompact } from "../helpers/format"
+import {
+  championIconUrl,
+  championNameById,
+  formatCompact,
+  formatPercent,
+} from "../helpers/format"
 import { itemIconUrl, summonerSpellIconUrl } from "../helpers/ddragon"
+import { positionIcon, positionLabel, resolvePosition } from "../helpers/roles"
 import {
   formatMilestone,
   formatOptionalText,
   formatStat,
   formatStatDuration,
   groupMatchSides,
+  killParticipation,
+  lobbyStandings,
+  teamComparison,
+  teamTotals,
   toggleExpandedParticipant,
   type ExpandedByTeam,
+  type TeamComparisonRow,
 } from "../helpers/match-detail"
 import type { Champion } from "../types/lol"
 import type { MatchDetail, ParticipantRow, TeamRow } from "../types/stats"
@@ -24,6 +42,41 @@ const props = defineProps<{
 }>()
 
 const sides = computed(() => props.detail ? groupMatchSides(props.detail) : [])
+
+/** Lobby places by Recall grade: 1 is the MVP, and 0 means the lobby is ungraded. */
+const standings = computed(() => lobbyStandings(props.detail?.participants ?? []))
+
+const placeOf = (row: ParticipantRow) =>
+  standings.value.get(row.participantId)?.place ?? 0
+
+const positionOf = (row: ParticipantRow) =>
+  resolvePosition(row.lane, row.role, row.assignedPosition)
+
+const placeTitle = (row: ParticipantRow) => {
+  const standing = standings.value.get(row.participantId)
+  if (!standing) return ""
+  return standing.place === 1
+    ? `Best Recall grade of the ${standing.of} players in this lobby`
+    : `Recall grade place ${standing.place} of ${standing.of} in this lobby`
+}
+
+const totalsByTeam = computed(() =>
+  new Map(sides.value.map((side) => [side.teamId, teamTotals(side.players)])))
+
+const killShare = (row: ParticipantRow) =>
+  killParticipation(row, totalsByTeam.value.get(row.teamId)?.kills ?? 0)
+
+/** Head-to-head totals, with the player's team on the left. */
+const comparison = computed(() => {
+  const totals = sides.value.map((side) => totalsByTeam.value.get(side.teamId))
+  if (totals.length !== 2 || !totals[0] || !totals[1]) return []
+  return teamComparison(totals[0], totals[1])
+})
+
+const comparisonValue = (row: TeamComparisonRow, value: number) =>
+  row.compact ? formatCompact(value) : formatStat(value)
+
+const sideName = (teamId: number) => teamId === 100 ? "Blue side" : "Red side"
 
 /** The biggest damage figure on the board, so the bars stay comparable. */
 const topDamage = computed(() =>
@@ -82,12 +135,35 @@ const kdaOf = (row: ParticipantRow) =>
             {{ side.won ? "Victory" : "Defeat" }}
           </span>
 
-          <span v-if="side.team" class="muted objectives">
-            <span v-if="side.team.towerKills">{{ side.team.towerKills }} towers</span>
-            <span v-if="side.team.dragonKills">{{ side.team.dragonKills }} dragons</span>
-            <span v-if="side.team.baronKills">{{ side.team.baronKills }} barons</span>
-            <span v-if="side.team.heraldKills">{{ side.team.heraldKills }} heralds</span>
-            <span v-if="side.team.hordeKills">{{ side.team.hordeKills }} grubs</span>
+          <span class="numeric side-totals">
+            {{ totalsByTeam.get(side.teamId)?.kills ?? 0 }}
+            <span class="muted">kills</span>
+            <span class="muted separator">·</span>
+            {{ formatCompact(totalsByTeam.get(side.teamId)?.gold ?? 0) }}
+            <span class="muted">gold</span>
+          </span>
+
+          <span v-if="side.team" class="objectives">
+            <span v-if="side.team.towerKills" class="objective" title="Towers">
+              <FontAwesomeIcon :icon="faChessRook" aria-hidden="true" />
+              <span class="numeric">{{ side.team.towerKills }}</span>
+            </span>
+            <span v-if="side.team.dragonKills" class="objective" title="Dragons">
+              <FontAwesomeIcon :icon="faDragon" aria-hidden="true" />
+              <span class="numeric">{{ side.team.dragonKills }}</span>
+            </span>
+            <span v-if="side.team.baronKills" class="objective" title="Barons">
+              <FontAwesomeIcon :icon="faCrown" aria-hidden="true" />
+              <span class="numeric">{{ side.team.baronKills }}</span>
+            </span>
+            <span v-if="side.team.heraldKills" class="objective" title="Rift heralds">
+              <FontAwesomeIcon :icon="faFlag" aria-hidden="true" />
+              <span class="numeric">{{ side.team.heraldKills }}</span>
+            </span>
+            <span v-if="side.team.hordeKills" class="objective" title="Void grubs">
+              <FontAwesomeIcon :icon="faBug" aria-hidden="true" />
+              <span class="numeric">{{ side.team.hordeKills }}</span>
+            </span>
           </span>
 
           <span v-if="bansOf(side.team).length" class="bans">
@@ -103,17 +179,46 @@ const kdaOf = (row: ParticipantRow) =>
           </span>
         </header>
 
+        <div class="columns muted" aria-hidden="true">
+          <span>Player</span>
+          <span class="to-center">KDA</span>
+          <span class="to-center">KP</span>
+          <span class="to-center">Grade</span>
+          <span class="to-center">CS</span>
+          <span class="to-center">Damage</span>
+          <span class="to-center col-items">Items</span>
+          <span />
+        </div>
+
         <ul class="players">
           <template v-for="row in side.players" :key="row.participantId">
           <li class="player" :class="{ me: row.isPlayer === 1 }">
             <div class="who">
-              <img
-                :src="championIconUrl(row.championId)"
-                :alt="championName(row.championId)"
-                :title="championName(row.championId)"
-                class="portrait"
+              <FontAwesomeIcon
+                v-if="positionOf(row)"
+                :icon="positionIcon(positionOf(row))"
+                class="position"
+                :title="positionLabel(positionOf(row))"
               />
-              <span class="level">{{ row.champLevel }}</span>
+              <span v-else class="position" />
+
+              <span class="avatar">
+                <img
+                  :src="championIconUrl(row.championId)"
+                  :alt="championName(row.championId)"
+                  :title="championName(row.championId)"
+                  class="portrait"
+                />
+                <span class="level">{{ row.champLevel }}</span>
+                <span
+                  v-if="placeOf(row)"
+                  class="place numeric"
+                  :class="{ mvp: placeOf(row) === 1 }"
+                  :title="placeTitle(row)"
+                >
+                  {{ placeOf(row) }}
+                </span>
+              </span>
 
               <span class="spells">
                 <img
@@ -128,9 +233,15 @@ const kdaOf = (row: ParticipantRow) =>
               <span class="name" :title="row.summonerName ?? ''">
                 {{ row.summonerName ?? championName(row.championId) }}
               </span>
+
+              <span v-if="placeOf(row) === 1" class="mvp-tag" :title="placeTitle(row)">MVP</span>
             </div>
 
             <span class="numeric kda">{{ kdaOf(row) }}</span>
+
+            <span class="numeric kp" title="Kill participation">
+              {{ formatPercent(killShare(row)) }}
+            </span>
 
             <GradeBadge :grade="row.grade" />
 
@@ -257,6 +368,36 @@ const kdaOf = (row: ParticipantRow) =>
           </template>
         </ul>
       </section>
+
+      <section v-if="comparison.length" class="team-stats">
+        <header class="stats-head">
+          <span class="stats-side" :class="sides[0].won ? 'win' : 'loss'">
+            {{ sideName(sides[0].teamId) }}
+          </span>
+          <h4 class="stats-title">Team totals</h4>
+          <span class="stats-side to-right" :class="sides[1].won ? 'win' : 'loss'">
+            {{ sideName(sides[1].teamId) }}
+          </span>
+        </header>
+
+        <ul class="compare-rows">
+          <li v-for="row in comparison" :key="row.key" class="compare">
+            <span class="numeric compare-value" :class="{ ahead: row.left >= row.right }">
+              {{ comparisonValue(row, row.left) }}
+            </span>
+            <span class="meter to-right">
+              <span class="meter-fill mine" :style="{ width: `${row.leftShare * 100}%` }" />
+            </span>
+            <span class="compare-label">{{ row.label }}</span>
+            <span class="meter">
+              <span class="meter-fill" :style="{ width: `${(1 - row.leftShare) * 100}%` }" />
+            </span>
+            <span class="numeric compare-value to-right" :class="{ ahead: row.right > row.left }">
+              {{ comparisonValue(row, row.right) }}
+            </span>
+          </li>
+        </ul>
+      </section>
     </div>
   </div>
 </template>
@@ -265,7 +406,8 @@ const kdaOf = (row: ParticipantRow) =>
 .detail {
   padding: var(--space-3) var(--space-4) var(--space-4);
   background: var(--surface-1);
-  border-top: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
 }
 
 .note {
@@ -278,6 +420,13 @@ const kdaOf = (row: ParticipantRow) =>
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+}
+
+.side {
+  /* One track list keeps the header strip and every player row on the same columns. */
+  --score-grid:
+    minmax(140px, 1.5fr) 62px 44px 44px 56px minmax(88px, 1fr) 118px 26px;
+  --score-gap: var(--space-2);
 }
 
 .side-head {
@@ -303,10 +452,41 @@ const kdaOf = (row: ParticipantRow) =>
   color: var(--loss);
 }
 
+.side-totals {
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.side-totals .muted {
+  font-family: var(--font-body);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.side-totals .separator {
+  margin: 0 var(--space-1);
+}
+
 .objectives {
   display: flex;
-  gap: var(--space-3);
-  font-size: 11px;
+  gap: var(--space-1);
+}
+
+.objective {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.objective .numeric {
+  color: var(--text-primary);
 }
 
 .bans {
@@ -341,13 +521,28 @@ const kdaOf = (row: ParticipantRow) =>
 
 .player {
   display: grid;
-  grid-template-columns: minmax(150px, 1.4fr) 66px 36px 62px minmax(90px, 1fr) auto 28px;
+  grid-template-columns: var(--score-grid);
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--score-gap);
   padding: 3px var(--space-2);
   border-radius: var(--radius-sm);
   font-size: 12px;
 }
+
+.columns {
+  display: grid;
+  grid-template-columns: var(--score-grid);
+  gap: var(--score-gap);
+  padding: 0 var(--space-2) var(--space-1);
+  margin-bottom: var(--space-1);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 9px;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+}
+
+.to-right { text-align: right; }
+.to-center { text-align: center; }
 
 .players .me {
   background: var(--surface-3);
@@ -358,7 +553,23 @@ const kdaOf = (row: ParticipantRow) =>
   align-items: center;
   gap: var(--space-1);
   min-width: 0;
+}
+
+.position {
+  flex: 0 0 14px;
+  width: 14px;
+  font-size: 11px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.avatar {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  flex: 0 0 auto;
 }
 
 .portrait {
@@ -370,8 +581,8 @@ const kdaOf = (row: ParticipantRow) =>
 
 .level {
   position: absolute;
-  left: 16px;
-  top: 14px;
+  right: -4px;
+  top: 12px;
   background: var(--surface-0);
   border-radius: 50%;
   font-size: 9px;
@@ -380,11 +591,42 @@ const kdaOf = (row: ParticipantRow) =>
   color: var(--text-secondary);
 }
 
+.place {
+  min-width: 18px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-0);
+  color: var(--text-secondary);
+  font-size: 9px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.place.mvp {
+  border-color: var(--gold);
+  background: rgba(200, 170, 109, 0.16);
+  color: var(--gold-bright);
+}
+
+.mvp-tag {
+  flex: 0 0 auto;
+  margin-left: var(--space-1);
+  padding: 0 5px;
+  border: 1px solid var(--gold);
+  border-radius: 999px;
+  background: rgba(200, 170, 109, 0.14);
+  color: var(--gold-bright);
+  font-family: var(--font-heading);
+  font-size: 9px;
+  letter-spacing: 1px;
+}
+
 .spells {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  margin-left: var(--space-2);
+  margin-left: var(--space-1);
+  align-self: flex-start;
 }
 
 .spell {
@@ -407,8 +649,14 @@ const kdaOf = (row: ParticipantRow) =>
 
 .kda,
 .cs {
-  text-align: right;
+  text-align: center;
   color: var(--text-primary);
+}
+
+.kp {
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 11px;
 }
 
 .cs {
@@ -448,7 +696,8 @@ const kdaOf = (row: ParticipantRow) =>
 }
 
 .items {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(6, 18px);
   gap: 2px;
 }
 
@@ -476,7 +725,6 @@ const kdaOf = (row: ParticipantRow) =>
   color: var(--text-muted);
   cursor: pointer;
 }
-
 .expand:hover,
 .expand:focus-visible {
   color: var(--gold);
@@ -558,17 +806,112 @@ const kdaOf = (row: ParticipantRow) =>
   grid-template-columns: 1fr;
 }
 
+.team-stats {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-0);
+}
+
+.stats-head {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--space-3);
+  padding-bottom: var(--space-2);
+  margin-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.stats-side {
+  font-family: var(--font-heading);
+  font-size: 10px;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+}
+
+.stats-side.win { color: var(--win); }
+.stats-side.loss { color: var(--loss); }
+
+.stats-title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--gold);
+  text-align: center;
+}
+
+.compare-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.compare {
+  display: grid;
+  grid-template-columns: 60px minmax(0, 1fr) 104px minmax(0, 1fr) 60px;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: 11px;
+}
+
+.compare-value {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.compare-value.ahead {
+  color: var(--text-primary);
+}
+
+.compare-label {
+  text-align: center;
+  font-size: 9px;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.meter {
+  display: flex;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.meter.to-right {
+  justify-content: flex-end;
+}
+
+.meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--loss);
+}
+
+.meter-fill.mine {
+  background: var(--gold);
+}
+
 .stat-grid .runes dd {
   overflow-wrap: anywhere;
   text-align: left;
 }
 
 @media (max-width: 850px) {
-  .player {
-    grid-template-columns: minmax(130px, 1fr) 60px 36px 54px minmax(75px, 1fr) 28px;
+  .side {
+    --score-grid: minmax(130px, 1.5fr) 62px 44px 44px 56px minmax(80px, 1fr) 26px;
   }
 
-  .items {
+  .items,
+  .col-items {
     display: none;
   }
 }

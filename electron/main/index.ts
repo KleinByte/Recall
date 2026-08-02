@@ -32,6 +32,8 @@ import {
 import type { ChallengeRow } from "./challenges/types.js"
 import { ProfileRepository } from "./database/profile-repo.js"
 import { ParticipantsRepository } from "./database/participants-repo.js"
+import { LiveGameCaptureRepository } from "./database/live-game-capture-repo.js"
+import { ChampSelectRepository } from "./database/champ-select-repo.js"
 import { RankedRepository } from "./database/ranked-repo.js"
 import { GoalsRepository, type GoalInput } from "./database/goals-repo.js"
 import { rankToPoints, formatRank } from "./ranked/rank.js"
@@ -177,6 +179,9 @@ let liveSession: LiveSession = {
   updatedAt: Date.now(),
 }
 
+/** Positions champion select gave our team, by cell, until the game id arrives. */
+const assignedPositions = new Map<number, { championId: number; position: string }>()
+
 /** Champion names from the durable catalog, refreshed whenever the client connects. */
 let championNames: Map<number, string> | undefined
 
@@ -192,6 +197,8 @@ let repository: MatchesRepository | undefined
 let challenges: ChallengesRepository | undefined
 let profiles: ProfileRepository | undefined
 let participants: ParticipantsRepository | undefined
+let liveGameCaptures: LiveGameCaptureRepository | undefined
+let champSelect: ChampSelectRepository | undefined
 let rankedHistory: RankedRepository | undefined
 let goals: GoalsRepository | undefined
 let insights: InsightsRepository | undefined
@@ -320,6 +327,20 @@ function readRiotApiKey(): string | undefined {
   }
 }
 
+function getLiveGameCaptures() {
+  if (!liveGameCaptures) {
+    liveGameCaptures = new LiveGameCaptureRepository(getDatabase())
+  }
+  return liveGameCaptures
+}
+
+function getChampSelect() {
+  if (!champSelect) {
+    champSelect = new ChampSelectRepository(getDatabase())
+  }
+  return champSelect
+}
+
 function saveRiotAccount(
   summoner: Summoner,
   matchPuuid: string,
@@ -378,6 +399,7 @@ function getTimelineService(win: BrowserWindow) {
         getRepository().replacePerformanceLabels(gameId, puuid, labels)
         broadcast(win, "stats:updated", { inserted: 0, labelsUpdated: 1 })
       },
+      getLiveGameCaptures(),
     )
   }
   return timelineService
@@ -528,6 +550,7 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
     getRepository(),
     summoner.puuid,
     getParticipants(),
+    getChampSelect(),
   )
   const challengeSync = new ChallengeSync(
     client,
@@ -607,8 +630,31 @@ function stopSession(win: BrowserWindow) {
 
 function clearLiveSession(win: BrowserWindow) {
   liveRevision += 1
+  assignedPositions.clear()
   liveSession = { phase: "Idle", benchChampionIds: [], allies: [], enemies: [], updatedAt: Date.now() }
   broadcast(win, "live:updated", liveSession)
+}
+
+/**
+ * Champion select is the only place the client states the position it gave
+ * each of our players, and it is gone by the time the game id is known, so the
+ * roster is held by cell until the match it belongs to can be named.
+ */
+function rememberAssignedPositions(champSelectSession: LiveSession) {
+  for (const player of champSelectSession.allies) {
+    const championId = player.championId || player.championPickIntent
+    if (!championId || !player.assignedPosition) continue
+    assignedPositions.set(player.cellId, {
+      championId,
+      position: player.assignedPosition,
+    })
+  }
+}
+
+function storeAssignedPositions(gameId: number | undefined) {
+  if (!session || !gameId || assignedPositions.size === 0) return
+  getChampSelect().record(gameId, session.summoner.puuid, [...assignedPositions.values()])
+  assignedPositions.clear()
 }
 
 /** Reads a new, self-contained live snapshot without letting stale requests win. */
@@ -622,9 +668,13 @@ async function refreshLiveSession(win: BrowserWindow, phase: LivePhase) {
       session.summoner.puuid,
     )
     if (revision !== liveRevision) return
+    if (phase === "ChampSelect") rememberAssignedPositions(next)
     liveSession = next
     broadcast(win, "live:updated", liveSession)
-    if (phase === "InProgress") void refreshLiveGameData(win)
+    if (phase === "InProgress") {
+      storeAssignedPositions(next.gameId)
+      void refreshLiveGameData(win)
+    }
   } catch (error) {
     console.warn(`Could not refresh live game: ${(error as Error).message}`)
   }
@@ -647,6 +697,13 @@ async function refreshLiveGameData(win: BrowserWindow) {
       liveSession.phase !== "InProgress" ||
       liveSession.gameId !== expectedGameId
     ) return
+    if (expectedGameId !== undefined) {
+      getLiveGameCaptures().record(
+        expectedGameId,
+        session.summoner.puuid,
+        game,
+      )
+    }
     liveSession = {
       ...liveSession,
       game,
@@ -752,6 +809,7 @@ async function startRiotHistoryBackfill(
     queues,
     getRiotBackfills(),
     {
+      champSelect: getChampSelect(),
       riotId: {
         gameName: active.summoner.gameName,
         tagLine: active.summoner.tagLine,
@@ -1910,7 +1968,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
       title: "Delete recorded history",
       message: "Delete all recorded match history?",
       detail:
-        "This removes local matches, scoreboards, and Riot import progress. " +
+        "This removes local matches, scoreboards, live captures, and Riot import progress. " +
         "Saving an API key again can re-import matches Riot still exposes.",
     })
 
@@ -1922,6 +1980,8 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     const activeBackfill = riotBackfillTask
     if (activeBackfill) await activeBackfill.catch(() => undefined)
     riotBackfillTask = undefined
+    getLiveGameCaptures().deleteAll(puuid)
+    getChampSelect().deleteAll(puuid)
     getParticipants().deleteAll(puuid)
     getRiotBackfills().deleteAll(puuid)
     const deleted = getRepository().deleteAll(puuid)

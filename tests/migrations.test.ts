@@ -44,14 +44,13 @@ describe("applyMigrations", () => {
 
   it("marks already-recorded bot queues as ineligible without deleting them", () => {
     const db = new Database(":memory:")
-    applyMigrations(db)
+    for (const migration of migrations.slice(0, 11)) db.exec(migration.up)
+    db.pragma("user_version = 11")
     const repo = new MatchesRepository(db)
     repo.insertMany([
       buildMatchRow({ gameId: 1, queueId: 890, isMatched: 1 }),
       buildMatchRow({ gameId: 2, queueId: 450, isMatched: 1 }),
     ])
-
-    db.pragma("user_version = 11")
     applyMigrations(db)
 
     expect(
@@ -120,11 +119,19 @@ describe("applyMigrations", () => {
       "augment_catalog",
       "match_capture_manifests",
       "augment_enrichment_jobs",
+      "live_game_snapshots",
+      "live_game_events",
+      "champ_select_positions",
     ]))
     const participantColumns = (
       db.pragma("table_info(match_participants)") as { name: string }[]
     ).map((column) => column.name)
     expect(participantColumns).toContain("extended_metrics_json")
+    expect(participantColumns).toContain("assigned_position")
+    const timelineColumns = (
+      db.pragma("table_info(match_timeline_cache)") as { name: string }[]
+    ).map((column) => column.name)
+    expect(timelineColumns).toContain("raw_json")
   })
 
   it("upgrades an existing database without losing recorded games", () => {

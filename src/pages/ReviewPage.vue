@@ -17,6 +17,8 @@ import {
   type GameAssetCatalog,
 } from "../helpers/game-assets"
 import { focusReviewGameId } from "../helpers/navigation"
+import { laneMatchups, positionIcon, positionLabel } from "../helpers/roles"
+import { compareMatchup } from "../helpers/matchup"
 import {
   timelineChartDomain,
   timelineChartPoints,
@@ -26,6 +28,8 @@ import {
   sampleTimelineEvents,
 } from "../helpers/timeline-chart"
 import GradeBadge from "../components/GradeBadge.vue"
+import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
+import { faChevronDown } from "@fortawesome/free-solid-svg-icons"
 import type { Champion } from "../types/lol"
 import type { MatchRow } from "../types/stats"
 import type { TrackedMode } from "../types/stats"
@@ -56,6 +60,7 @@ const experimentHypothesis = ref("")
 const experimentChampionIds = ref<number[]>([])
 const experimentModes = ref<TrackedMode[]>([])
 const timelineFilter = ref<"all" | "you" | "kills" | "objectives" | "items" | "levels" | "vision">("all")
+const timelineFilters = ["all", "you", "kills", "objectives", "items", "levels", "vision"] as const
 const assets = ref<GameAssetCatalog>({ version: "latest", items: {}, augments: {}, abilities: {} })
 const augmentSummary = ref<Record<number, OwnerAugmentSummary>>({})
 let saveTimer: ReturnType<typeof setTimeout> | undefined
@@ -68,6 +73,19 @@ const teams = computed(() => [100, 200].map((teamId) => ({
   teamId,
   players: review.value?.scoreboard.filter((player) => player.teamId === teamId) ?? [],
 })))
+
+/** Every row stays independently open so two lanes can be compared at once. */
+const openMatchups = ref<Record<string, boolean>>({})
+const toggleMatchup = (key: string) => {
+  openMatchups.value = { ...openMatchups.value, [key]: !openMatchups.value[key] }
+}
+
+const matchups = computed(() =>
+  laneMatchups(teams.value[0].players, teams.value[1].players))
+
+const teamKills = (teamId: number) =>
+  teams.value.find((team) => team.teamId === teamId)?.players
+    .reduce((sum, player) => sum + player.kills, 0) ?? 0
 const timelineDomain = computed(() => {
   const summary = review.value?.timeline.summary
   return timelineChartDomain(summary?.frames ?? [], summary?.events ?? [])
@@ -88,9 +106,19 @@ const timelineMarkers = computed(() => {
       event.category === "objective" ||
       event.category === "game" ||
       (
+        event.category === "level" &&
+        event.participantId === ownerId
+      ) ||
+      (
         event.category === "item" &&
         event.participantId === ownerId &&
-        ["ITEM_PURCHASED", "ITEM_TRANSFORMED", "ITEM_DESTROYED"].includes(event.type)
+        [
+          "ITEM_PURCHASED",
+          "ITEM_TRANSFORM",
+          "ITEM_TRANSFORMED",
+          "ITEM_ACQUIRED",
+          "ITEM_OBSERVED",
+        ].includes(event.type)
       ),
     )
     : filteredTimelineEvents.value
@@ -114,7 +142,11 @@ const timelineMarkers = computed(() => {
 })
 const filteredTimelineEvents = computed(() => {
   const events = review.value?.timeline.summary?.events ?? []
-  if (timelineFilter.value === "all") return events
+  if (timelineFilter.value === "all") {
+    return events.filter((event) =>
+      event.category !== "level" || event.participantId === owner.value?.participantId,
+    )
+  }
   if (timelineFilter.value === "you") {
     return events.filter((event) =>
       event.participantId === owner.value?.participantId ||
@@ -134,6 +166,37 @@ const filteredTimelineEvents = computed(() => {
   if (timelineFilter.value === "levels") return events.filter((event) => event.category === "level")
   return events.filter((event) => event.category === "vision")
 })
+const timelineEventCounts = computed(() => {
+  const counts = { kills: 0, objectives: 0, items: 0, levels: 0, vision: 0 }
+  for (const event of review.value?.timeline.summary?.events ?? []) {
+    if (event.category === "kill") counts.kills += 1
+    if (event.category === "objective") counts.objectives += 1
+    if (event.category === "item") counts.items += 1
+    if (event.category === "level") counts.levels += 1
+    if (event.category === "vision") counts.vision += 1
+  }
+  return counts
+})
+const missingTimelineCategories = computed(() => [
+  timelineEventCounts.value.items === 0 ? "item" : undefined,
+  timelineEventCounts.value.vision === 0 ? "vision" : undefined,
+].filter((category): category is string => Boolean(category)))
+const hasApproximateLevels = computed(() =>
+  review.value?.timeline.summary?.events.some((event) =>
+    event.category === "level" && event.approximate,
+  ) ?? false,
+)
+
+function timelineFilterAvailable(filter: typeof timelineFilters[number]) {
+  if (filter === "all" || filter === "you") return true
+  return timelineEventCounts.value[filter] > 0
+}
+
+function timelineFilterTitle(filter: typeof timelineFilters[number]) {
+  return timelineFilterAvailable(filter)
+    ? `${timelineEventCounts.value[filter as keyof typeof timelineEventCounts.value] ?? ""} ${filter} events`.trim()
+    : `The League Client did not include ${filter} events for this match.`
+}
 
 function participant(participantId?: number) {
   return review.value?.scoreboard.find((entry) => entry.participantId === participantId)
@@ -217,7 +280,7 @@ function timelineMarkerGlyph(event: TimelineEvent) {
 }
 
 function timelineMarkerTitle(event: TimelineEvent) {
-  const time = eventTime(event.timestamp)
+  const time = `${event.approximate ? "≈" : ""}${eventTime(event.timestamp)}`
   if (event.category === "kill") {
     const killer = killActor(event)?.summonerName
     const victim = participant(event.targetId)?.summonerName ?? `Player ${event.targetId}`
@@ -241,7 +304,9 @@ function timelineEventDescription(event: TimelineEvent) {
   if (event.type === "SKILL_LEVEL_UP") {
     return `ranked ${abilityAsset(event)?.name ?? abilityKey(event.skillSlot)} (${abilityKey(event.skillSlot)})`
   }
-  if (event.type === "LEVEL_UP") return `reached level ${event.level ?? "?"}`
+  if (event.type === "LEVEL_UP") {
+    return `reached level ${event.level ?? "?"}${event.approximate ? " by this snapshot" : ""}`
+  }
   return objectiveName(event.objective || event.type)
 }
 
@@ -261,6 +326,8 @@ async function loadAugmentSummary(augmentId: number) {
 async function load(gameId?: number) {
   busy.value = true
   error.value = ""
+  timelineFilter.value = "all"
+  openMatchups.value = {}
   try {
     const overview = await api.getReviewOverview()
     const target = gameId ?? focusReviewGameId.value ?? overview.latest?.match.gameId
@@ -524,42 +591,114 @@ onBeforeUnmount(() => {
       <section class="card">
         <div class="section-heading">
           <div><span class="eyebrow">Complete lobby</span><h2 class="section-title">Scoreboard</h2></div>
-          <span class="muted">Items and augments are captured for every visible participant</span>
+          <span class="muted">Each row is a lane matchup · open as many as you like to compare</span>
         </div>
-        <div class="team-grid">
-          <div v-for="team in teams" :key="team.teamId" class="score-team"
-            :class="team.teamId === 100 ? 'blue' : 'red'">
-            <div class="team-head">
-              <strong>{{ team.teamId === 100 ? "Blue team" : "Red team" }}</strong>
-              <span>{{ team.players.reduce((sum, player) => sum + player.kills, 0) }} kills</span>
-            </div>
-            <article v-for="player in team.players" :key="player.participantId"
-              class="score-row" :class="{ owner: player.isPlayer }">
-              <img class="champion-portrait" :src="championIconUrl(player.championId)"
-                :alt="championNameById(champions, player.championId)" />
-              <div class="player-block">
-                <strong class="name">{{ player.summonerName || `Player ${player.participantId}` }}</strong>
-                <span class="muted">Level {{ player.champLevel }} · {{ player.totalMinionsKilled + player.neutralMinions }} CS</span>
-              </div>
-              <div class="kda"><strong>{{ player.kills }}/{{ player.deaths }}/{{ player.assists }}</strong>
-                <span>{{ player.damageToChampions.toLocaleString() }} damage</span></div>
-              <div class="loadout" aria-label="Final items">
-                <img v-for="(id, index) in player.items.filter(Boolean)" :key="`${id}-${index}`"
-                  :src="assets.items[id]?.icon || itemIconUrl(id, assets.version)"
-                  :title="assets.items[id]?.name || `Item ${id}`" alt="" />
-              </div>
-              <div v-if="player.augments?.length" class="augment-loadout" aria-label="Selected augments">
-                <button v-for="augment in player.augments" :key="augment.slot"
-                  :title="augmentName(augment.augmentId)"
-                  @click="player.isPlayer && loadAugmentSummary(augment.augmentId)">
-                  <img :src="augmentIcon(augment.augmentId, augment.iconPath)" alt="" />
-                </button>
-              </div>
-              <div v-else class="augment-missing" title="This source did not include augments">—</div>
-              <GradeBadge :grade="player.grade" />
-            </article>
+
+        <div class="matchups">
+          <div class="matchup-columns muted">
+            <span class="side-title blue">Blue team · {{ teamKills(100) }} kills</span>
+            <span class="lane-title">Role</span>
+            <span class="side-title red">Red team · {{ teamKills(200) }} kills</span>
+            <span />
           </div>
+
+          <article v-for="row in matchups" :key="row.key" class="matchup"
+            :class="{ open: openMatchups[row.key] }">
+            <button class="matchup-row" :aria-expanded="openMatchups[row.key] === true"
+              @click="toggleMatchup(row.key)">
+              <div class="seat left" :class="{ owner: row.left?.isPlayer, vacant: !row.left }">
+                <template v-if="row.left">
+                  <div class="seat-body">
+                    <strong class="name">{{ row.left.summonerName || championNameById(champions, row.left.championId) }}</strong>
+                    <span class="muted seat-line">
+                      {{ row.left.kills }}/{{ row.left.deaths }}/{{ row.left.assists }} ·
+                      {{ row.left.totalMinionsKilled + row.left.neutralMinions }} CS ·
+                      {{ row.left.damageToChampions.toLocaleString() }} dmg
+                    </span>
+                    <div class="loadout" aria-label="Final items">
+                      <img v-for="(id, index) in row.left.items.filter(Boolean)" :key="`${id}-${index}`"
+                        :src="assets.items[id]?.icon || itemIconUrl(id, assets.version)"
+                        :title="assets.items[id]?.name || `Item ${id}`" alt="" />
+                    </div>
+                  </div>
+                  <GradeBadge :grade="row.left.grade" />
+                  <img class="champion-portrait" :src="championIconUrl(row.left.championId)"
+                    :alt="championNameById(champions, row.left.championId)" />
+                </template>
+                <span v-else class="muted">No player</span>
+              </div>
+
+              <span class="lane">
+                <FontAwesomeIcon :icon="positionIcon(row.position)" aria-hidden="true" />
+                <span>{{ positionLabel(row.position) }}</span>
+              </span>
+
+              <div class="seat right" :class="{ owner: row.right?.isPlayer, vacant: !row.right }">
+                <template v-if="row.right">
+                  <img class="champion-portrait" :src="championIconUrl(row.right.championId)"
+                    :alt="championNameById(champions, row.right.championId)" />
+                  <GradeBadge :grade="row.right.grade" />
+                  <div class="seat-body">
+                    <strong class="name">{{ row.right.summonerName || championNameById(champions, row.right.championId) }}</strong>
+                    <span class="muted seat-line">
+                      {{ row.right.kills }}/{{ row.right.deaths }}/{{ row.right.assists }} ·
+                      {{ row.right.totalMinionsKilled + row.right.neutralMinions }} CS ·
+                      {{ row.right.damageToChampions.toLocaleString() }} dmg
+                    </span>
+                    <div class="loadout" aria-label="Final items">
+                      <img v-for="(id, index) in row.right.items.filter(Boolean)" :key="`${id}-${index}`"
+                        :src="assets.items[id]?.icon || itemIconUrl(id, assets.version)"
+                        :title="assets.items[id]?.name || `Item ${id}`" alt="" />
+                    </div>
+                  </div>
+                </template>
+                <span v-else class="muted">No player</span>
+              </div>
+
+              <FontAwesomeIcon :icon="faChevronDown" class="matchup-chevron" aria-hidden="true" />
+            </button>
+
+            <div v-if="openMatchups[row.key]" class="comparison">
+              <div v-for="stat in compareMatchup(row.left, row.right)" :key="stat.key"
+                class="compare-row">
+                <span class="numeric compare-value" :class="{ ahead: stat.leads === 'left' }">
+                  {{ stat.left.toLocaleString() }}
+                </span>
+                <span class="compare-bar left">
+                  <span class="compare-fill" :class="{ ahead: stat.leads === 'left' }"
+                    :style="{ width: `${stat.leftShare * 100}%` }" />
+                </span>
+                <span class="compare-label muted">{{ stat.label }}</span>
+                <span class="compare-bar">
+                  <span class="compare-fill" :class="{ ahead: stat.leads === 'right' }"
+                    :style="{ width: `${stat.rightShare * 100}%` }" />
+                </span>
+                <span class="numeric compare-value" :class="{ ahead: stat.leads === 'right' }">
+                  {{ stat.right.toLocaleString() }}
+                </span>
+              </div>
+
+              <div v-if="row.left?.augments?.length || row.right?.augments?.length" class="compare-augments">
+                <div class="augment-loadout" aria-label="Selected augments">
+                  <button v-for="augment in row.left?.augments ?? []" :key="augment.slot"
+                    :title="augmentName(augment.augmentId)"
+                    @click="row.left?.isPlayer && loadAugmentSummary(augment.augmentId)">
+                    <img :src="augmentIcon(augment.augmentId, augment.iconPath)" alt="" />
+                  </button>
+                </div>
+                <span class="compare-label muted">Augments</span>
+                <div class="augment-loadout" aria-label="Selected augments">
+                  <button v-for="augment in row.right?.augments ?? []" :key="augment.slot"
+                    :title="augmentName(augment.augmentId)"
+                    @click="row.right?.isPlayer && loadAugmentSummary(augment.augmentId)">
+                    <img :src="augmentIcon(augment.augmentId, augment.iconPath)" alt="" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </article>
         </div>
+
         <div v-if="owner?.augments?.length" class="owner-augment-context">
           <article v-for="augment in owner.augments" :key="augment.slot">
             <img :src="augmentIcon(augment.augmentId, augment.iconPath)" alt="" />
@@ -619,7 +758,7 @@ onBeforeUnmount(() => {
       <section class="card">
         <div class="section-heading">
           <div><span class="eyebrow">Match chronology</span><h2 class="section-title">Timeline</h2></div>
-          <span class="muted">Named events from Riot Match‑V5</span>
+          <span class="muted">Events and periodic snapshots from the connected League Client</span>
         </div>
         <div v-if="review.timeline.status === 'ready' && review.timeline.summary">
           <div class="gold-chart-wrap">
@@ -652,16 +791,27 @@ onBeforeUnmount(() => {
             <span class="chart-label red">Red lead</span>
           </div>
           <div class="timeline-filters">
-            <button v-for="filter in (['all', 'you', 'kills', 'objectives', 'items', 'levels', 'vision'] as const)"
+            <button v-for="filter in timelineFilters"
               :key="filter" class="league-button" :class="{ active: timelineFilter === filter }"
+              :disabled="!timelineFilterAvailable(filter)"
+              :title="timelineFilterTitle(filter)"
               @click="timelineFilter = filter">
               {{ filter[0].toUpperCase() + filter.slice(1) }}
             </button>
           </div>
+          <p v-if="missingTimelineCategories.length || hasApproximateLevels" class="timeline-source-note">
+            <template v-if="missingTimelineCategories.length">
+              The League Client did not include {{ missingTimelineCategories.join(" or ") }} event timing for this match.
+              Final builds and vision totals are shown in the scoreboard above.
+            </template>
+            <template v-if="hasApproximateLevels">
+              Level times are reconstructed from periodic snapshots and marked ≈.
+            </template>
+          </p>
           <div class="events">
             <article v-for="event in filteredTimelineEvents.slice(0, 160)"
               :key="event.eventId" class="event-row" :class="event.category">
-              <time>{{ eventTime(event.timestamp) }}</time>
+              <time>{{ event.approximate ? "≈" : "" }}{{ eventTime(event.timestamp) }}</time>
               <template v-if="event.category === 'kill'">
                 <img :src="championIconUrl(killActor(event)?.championId || participant(event.targetId)?.championId || 0)" alt="" />
                 <div><strong>{{ killActor(event)?.summonerName || "Mayhem takedown" }}</strong>
@@ -685,7 +835,9 @@ onBeforeUnmount(() => {
               </template>
             </article>
           </div>
-          <div class="purchase-path">
+          <div v-if="review.timeline.summary.events.some(event =>
+            event.participantId === owner?.participantId && event.type.startsWith('ITEM_')
+          )" class="purchase-path">
             <strong>Your purchase path</strong>
             <figure v-for="event in review.timeline.summary.events.filter(event =>
               event.participantId === owner?.participantId && event.type.startsWith('ITEM_')
@@ -825,16 +977,42 @@ h2 { margin: 0; }
 .component div:first-child { display: flex; flex-direction: column; font-size: 12px; }.numeric { text-align: right; font-variant-numeric: tabular-nums; }
 .highlight { display: flex; flex-direction: column; padding: var(--space-2); background: var(--surface-2); border-radius: var(--radius-sm); font-size: 12px; }
 .baseline > div { display: grid; grid-template-columns: 1fr 70px 100px; gap: var(--space-2); font-size: 12px; }.positive { color: var(--win); }.negative, .error { color: var(--loss); }
-.team-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
-.score-team { overflow: hidden; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface-0); }
-.score-team.blue { border-top: 2px solid #3b82c4; }.score-team.red { border-top: 2px solid #c95d65; }
-.team-head { display: flex; justify-content: space-between; padding: 8px 10px; background: var(--surface-2); color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: .7px; }
-.score-row { display: grid; grid-template-columns: 38px minmax(92px, 1fr) 92px minmax(96px, 1fr) auto 34px; align-items: center; gap: 8px; min-height: 52px; padding: 6px 8px; font-size: 11px; border-bottom: 1px solid var(--border-subtle); }
-.score-row:last-child { border-bottom: 0; }.score-row.owner { background: color-mix(in srgb, var(--gold) 13%, transparent); box-shadow: inset 3px 0 var(--gold); }
+.matchups { --matchup-grid: minmax(0, 1fr) 108px minmax(0, 1fr) 18px; display: grid; gap: var(--space-1); }
+.matchup-columns { display: grid; grid-template-columns: var(--matchup-grid); gap: 8px; padding: 0 10px 2px; font-family: var(--font-heading); font-size: 10px; letter-spacing: .8px; text-transform: uppercase; }
+.side-title.blue { color: #7fb2e0; }.side-title.red { color: #e0918f; }
+.side-title.red, .lane-title { text-align: center; }.side-title.red { text-align: right; }
+.matchup { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface-0); overflow: hidden; }
+.matchup.open { border-color: var(--border-strong); }
+.matchup-row { width: 100%; display: grid; grid-template-columns: var(--matchup-grid); align-items: center; gap: 8px; padding: 8px 10px; background: transparent; border: 0; color: inherit; text-align: left; font: inherit; font-size: 11px; cursor: pointer; }
+.matchup-row:hover { background: var(--surface-2); }
+.seat { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 6px; border-radius: var(--radius-sm); }
+.seat.right { flex-direction: row; justify-content: flex-end; text-align: right; }
+.seat.owner { background: color-mix(in srgb, var(--gold) 13%, transparent); box-shadow: inset 3px 0 var(--gold); }
+.seat.right.owner { box-shadow: inset -3px 0 var(--gold); }
+.seat.vacant { justify-content: center; }
+.seat-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.seat.right .seat-body { align-items: flex-end; }
+.seat-line { font-size: 10px; }
+.seat.right .loadout { justify-content: flex-end; }
+.lane { display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--text-secondary); font-family: var(--font-heading); font-size: 10px; letter-spacing: .6px; text-transform: uppercase; }
+.matchup-chevron { color: var(--text-muted); font-size: 10px; transition: transform .15s ease; }
+.matchup.open .matchup-chevron { transform: rotate(180deg); }
+.comparison { display: grid; gap: 1px; padding: var(--space-2) 10px var(--space-3); border-top: 1px solid var(--border-subtle); background: var(--surface-1); }
+.compare-row, .compare-augments { display: grid; grid-template-columns: 62px minmax(0, 1fr) 150px minmax(0, 1fr) 62px; align-items: center; gap: 8px; font-size: 11px; }
+.compare-augments { padding-top: var(--space-2); }
+.compare-augments .augment-loadout:first-of-type { grid-column: 1 / 3; }
+.compare-augments .augment-loadout:last-of-type { grid-column: 4 / 6; justify-content: flex-end; }
+.compare-label { text-align: center; font-size: 10px; }
+.compare-value { color: var(--text-secondary); }
+.compare-value:first-child { text-align: right; }
+.compare-value.ahead { color: var(--gold-bright); }
+.compare-bar { height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; display: flex; }
+.compare-bar.left { justify-content: flex-end; }
+.compare-fill { height: 100%; background: var(--gold-faint); }
+.compare-fill.ahead { background: var(--gold); }
 .champion-portrait { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; }.name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.player-block, .kda { min-width: 0; display: flex; flex-direction: column; }.kda span { color: var(--text-muted); font-size: 10px; }
 .loadout, .augment-loadout { display: flex; gap: 2px; flex-wrap: wrap; }.loadout img, .augment-loadout img { width: 22px; height: 22px; border-radius: 3px; object-fit: cover; background: var(--surface-3); }
-.augment-loadout { max-width: 76px; }.augment-loadout button { display: contents; cursor: pointer; }.augment-missing { color: var(--text-muted); }
+.augment-loadout { max-width: 76px; }.augment-loadout button { display: contents; cursor: pointer; }
 .owner-augment-context { display: flex; gap: var(--space-2); flex-wrap: wrap; padding-top: var(--space-3); }.owner-augment-context article { display: flex; gap: 8px; align-items: center; min-width: 200px; padding: 7px 9px; border: 1px solid var(--border-subtle); background: var(--surface-2); border-radius: var(--radius-sm); }.owner-augment-context article > img { width: 34px; height: 34px; border-radius: 50%; }.owner-augment-context article div { display: flex; flex-direction: column; }.text-button { padding: 0; border: 0; background: transparent; color: var(--gold); text-align: left; cursor: pointer; font-size: 10px; }.policy-note { flex-basis: 100%; margin: 2px 0 0; color: var(--text-muted); font-size: 10px; }
 textarea { width: 100%; box-sizing: border-box; min-height: 110px; resize: vertical; background: var(--surface-0); color: var(--text-primary); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: var(--space-3); font: 12px var(--font-body); }
 .tag-list, .inline, .experiment-outcome, .session-games { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-2); }.tag { border: 1px solid var(--border-subtle); background: var(--surface-2); color: var(--text-secondary); border-radius: 99px; padding: 4px 9px; }.tag.selected { color: var(--gold-bright); border-color: var(--gold); }
@@ -844,13 +1022,14 @@ textarea { width: 100%; box-sizing: border-box; min-height: 110px; resize: verti
 .chart-marker { position: absolute; z-index: 2; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; transform: translate(-50%, -50%); border: 2px solid var(--surface-0); border-radius: 50%; background: var(--surface-3); color: var(--gold-bright); box-shadow: 0 2px 7px rgba(0, 0, 0, .5); cursor: help; transition: width .12s ease, height .12s ease, z-index .12s ease; }.chart-marker:hover, .chart-marker:focus-visible { z-index: 5; width: 30px; height: 30px; outline: 2px solid var(--gold); }.chart-marker img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }.chart-marker span { font: 10px var(--font-heading); }.chart-marker.objective { border-color: var(--gold); }.chart-marker.item { border-radius: var(--radius-sm); border-color: var(--win); }.chart-marker.game { border-color: var(--loss); }
 .chart-label { position: absolute; left: 8px; z-index: 1; padding: 2px 5px; border-radius: 999px; background: color-mix(in srgb, var(--surface-0) 82%, transparent); font-size: 8px; letter-spacing: .8px; text-transform: uppercase; pointer-events: none; }.chart-label.blue { top: 7px; color: var(--win); }.chart-label.red { bottom: 7px; color: var(--loss); }
 .timeline-filters { display: flex; gap: var(--space-2); margin-top: var(--space-2); flex-wrap: wrap; }.timeline-filters button { padding: 4px 8px; font-size: 10px; }
+.timeline-filters button:disabled { opacity: .42; cursor: not-allowed; }.timeline-source-note { margin: var(--space-2) 0 0; color: var(--text-muted); font-size: 10px; }
 .events { max-height: 430px; overflow: auto; margin-top: var(--space-3); padding-left: 18px; font-size: 11px; color: var(--text-secondary); border-left: 1px solid var(--border-strong); }.event-row { position: relative; display: grid; grid-template-columns: 42px 30px minmax(0, 1fr) 28px; align-items: center; gap: 8px; min-height: 44px; padding: 4px 8px; border-bottom: 1px solid var(--border-subtle); background: color-mix(in srgb, var(--surface-1) 92%, transparent); }.event-row::before { content: ""; position: absolute; left: -22px; width: 7px; height: 7px; border: 2px solid var(--gold); border-radius: 50%; background: var(--surface-0); }.event-row time { color: var(--gold); font-variant-numeric: tabular-nums; }.event-row img { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }.event-row .victim { filter: grayscale(.35); }.event-row > div { min-width: 0; display: flex; flex-direction: column; }.event-row > div span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.event-glyph { display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid var(--border-strong); border-radius: 50%; color: var(--gold); }.turning-points { margin-top: var(--space-3); font-size: 12px; }
 .purchase-path { display: flex; align-items: end; gap: 6px; flex-wrap: wrap; margin-top: var(--space-3); font-size: 10px; }.purchase-path strong { flex-basis: 100%; }.purchase-path figure { margin: 0; text-align: center; }.purchase-path img { display: block; width: 34px; height: 34px; border: 1px solid var(--border-strong); border-radius: 4px; }.purchase-path figcaption { margin-top: 2px; color: var(--text-muted); }
 .session-list, .experiments-page { display: grid; gap: var(--space-3); }.session-head > div { display: flex; flex-direction: column; }.match-control { display: flex; align-items: center; position: relative; }.match-chip { display: flex; align-items: center; gap: 4px; background: var(--surface-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 3px; cursor: pointer; }.match-chip img { width: 30px; height: 30px; border-radius: var(--radius-sm); }.boundary summary { cursor: pointer; padding: 0 4px; }.boundary[open] { position: relative; }.boundary[open] > button { display: block; width: 110px; background: var(--surface-3); color: var(--text-primary); border: 1px solid var(--border-subtle); padding: 4px; font-size: 10px; cursor: pointer; }
 .experiments-page { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }.experiments-page .card:first-child { display: grid; gap: var(--space-2); }.status { margin-left: var(--space-2); color: var(--gold); text-transform: uppercase; font-size: 10px; }
 .scope-label { display: grid; gap: 4px; font-size: 11px; }.scope-label select { min-height: 72px; }.experiment-actions { display: flex; gap: var(--space-2); margin-top: var(--space-2); }.experiment-actions button { padding: 4px 8px; font-size: 10px; }
 .bookmark-row { width: 100%; display: grid; grid-template-columns: 34px 1fr 36px; align-items: center; gap: var(--space-2); padding: var(--space-2); background: var(--surface-2); color: var(--text-primary); border: 1px solid var(--border-subtle); text-align: left; }.bookmark-row img { width: 32px; height: 32px; border-radius: 50%; }
-@media (max-width: 1050px) { .team-grid { grid-template-columns: 1fr; } }
-@media (max-width: 800px) { .review-grid { grid-template-columns: 1fr; }.page-head, .hero { align-items: flex-start; flex-wrap: wrap; }.score-row { grid-template-columns: 38px 1fr 82px 34px; }.score-row .loadout, .score-row .augment-loadout { display: none; }.section-heading { align-items: flex-start; flex-direction: column; }.event-row { grid-template-columns: 36px 26px minmax(0, 1fr); }.event-row .victim { display: none; } }
+@media (max-width: 1050px) { .matchups { --matchup-grid: minmax(0, 1fr) 84px minmax(0, 1fr) 18px; }.compare-row, .compare-augments { grid-template-columns: 54px minmax(0, 1fr) 118px minmax(0, 1fr) 54px; } }
+@media (max-width: 800px) { .review-grid { grid-template-columns: 1fr; }.page-head, .hero { align-items: flex-start; flex-wrap: wrap; }.seat .loadout { display: none; }.section-heading { align-items: flex-start; flex-direction: column; }.event-row { grid-template-columns: 36px 26px minmax(0, 1fr); }.event-row .victim { display: none; } }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
 </style>

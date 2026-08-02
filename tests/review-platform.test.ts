@@ -132,6 +132,22 @@ describe("timeline mapping", () => {
     expect(timeline.events[1].category).toBe("vision")
   })
 
+  it("accepts both historical item transform event names", () => {
+    const timeline = mapTimeline([{
+      timestamp: 60_000,
+      events: [
+        { type: "ITEM_TRANSFORM", participantId: 1, beforeId: 1001, afterId: 3006 },
+        { type: "ITEM_TRANSFORMED", participantId: 2, beforeId: 1001, afterId: 3006 },
+      ],
+    }], 1, new Map([[1, 100], [2, 100]]))
+
+    expect(timeline.events.map((event) => event.type)).toEqual([
+      "ITEM_TRANSFORM",
+      "ITEM_TRANSFORMED",
+    ])
+    expect(timeline.events.every((event) => event.category === "item")).toBe(true)
+  })
+
   it("deduplicates repeated LCU events and drops synthetic undefined ward placements", () => {
     const duplicatedWard = {
       type: "WARD_PLACED",
@@ -158,6 +174,58 @@ describe("timeline mapping", () => {
       participantId: 1,
       wardType: "YELLOW_TRINKET",
     })
+  })
+
+  it("reconstructs missing level milestones from periodic participant frames", () => {
+    const timeline = mapTimeline([
+      {
+        timestamp: 0,
+        participantFrames: {
+          "1": { participantId: 1, level: 1 },
+          "6": { participantId: 6, level: 1 },
+        },
+      },
+      {
+        timestamp: 60_000,
+        participantFrames: {
+          "1": { participantId: 1, level: 3 },
+          "6": { participantId: 6, level: 2 },
+        },
+      },
+    ], 1, new Map([[1, 100], [6, 200]]))
+
+    expect(timeline.events).toEqual([
+      expect.objectContaining({
+        type: "LEVEL_UP",
+        category: "level",
+        participantId: 1,
+        teamId: 100,
+        level: 2,
+        timestamp: 60_000,
+        approximate: true,
+      }),
+      expect.objectContaining({ participantId: 1, level: 3 }),
+      expect.objectContaining({ participantId: 6, teamId: 200, level: 2 }),
+    ])
+  })
+
+  it("does not duplicate an exact level event reconstructed from a frame", () => {
+    const timeline = mapTimeline([
+      {
+        timestamp: 0,
+        participantFrames: { "1": { participantId: 1, level: 1 } },
+      },
+      {
+        timestamp: 60_000,
+        participantFrames: { "1": { participantId: 1, level: 2 } },
+        events: [{ type: "LEVEL_UP", participantId: 1, level: 2, timestamp: 55_000 }],
+      },
+    ], 1, new Map([[1, 100]]))
+
+    expect(timeline.events.filter((event) =>
+      event.type === "LEVEL_UP" && event.participantId === 1 && event.level === 2,
+    )).toHaveLength(1)
+    expect(timeline.events[0].approximate).toBeUndefined()
   })
 
   it("selects at most three separated two-minute gold swings", () => {

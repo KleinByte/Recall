@@ -1,4 +1,5 @@
 import type { Database } from "better-sqlite3"
+import type { LiveGameCaptureRepository } from "./database/live-game-capture-repo.js"
 import { LcuRequestError, type LcuClient } from "./lcu-client.js"
 import {
   mapTimeline,
@@ -36,6 +37,7 @@ export class LcuTimelineService {
       puuid: string,
       summary: CompactTimeline,
     ) => void | Promise<void>,
+    private readonly liveCaptures?: LiveGameCaptureRepository,
   ) {}
 
   get(gameId: number, puuid: string) {
@@ -86,19 +88,21 @@ export class LcuTimelineService {
       )
       const frames = Array.isArray(dto) ? dto : dto.frames ?? dto.info?.frames
       const participants = this.db.prepare(
-        `SELECT participant_id AS participantId, team_id AS teamId, is_player AS isPlayer
+        `SELECT participant_id AS participantId, team_id AS teamId,
+                is_player AS isPlayer, summoner_name AS summonerName
          FROM match_participants WHERE game_id = ? AND puuid = ?`,
       ).all(gameId, puuid) as {
         participantId: number
         teamId: number
         isPlayer: number
+        summonerName?: string
       }[]
       const owner = participants.find((participant) => participant.isPlayer === 1)
       if (!owner || !frames?.length) {
         throw new Error("League Client timeline data is incomplete")
       }
 
-      const summary = mapTimeline(
+      let summary = mapTimeline(
         frames,
         owner.participantId,
         new Map(participants.map((participant) => [
@@ -106,9 +110,16 @@ export class LcuTimelineService {
           participant.teamId,
         ])),
       )
+      summary = this.liveCaptures?.enrichTimeline(
+        gameId,
+        puuid,
+        summary,
+        participants,
+      ) ?? summary
       this.write(gameId, puuid, match.riotMatchId, "ready", {
         fetchedAt: Date.now(),
         data: summary,
+        raw: dto,
       })
       try {
         await this.onReady?.(gameId, puuid, summary)
@@ -172,13 +183,18 @@ export class LcuTimelineService {
     puuid: string,
     riotMatchId: string | undefined,
     status: TimelineStatus,
-    values: { fetchedAt?: number; error?: string; data?: CompactTimeline } = {},
+    values: {
+      fetchedAt?: number
+      error?: string
+      data?: CompactTimeline
+      raw?: LcuTimelineResponse
+    } = {},
   ) {
     this.db.prepare(
       `INSERT INTO match_timeline_cache
        (game_id, puuid, riot_match_id, status, mapper_version,
-        fetched_at, last_error, data_json, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        fetched_at, last_error, data_json, raw_json, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(game_id, puuid) DO UPDATE SET
          riot_match_id = excluded.riot_match_id,
          status = excluded.status,
@@ -186,6 +202,7 @@ export class LcuTimelineService {
          fetched_at = excluded.fetched_at,
          last_error = excluded.last_error,
          data_json = excluded.data_json,
+         raw_json = COALESCE(excluded.raw_json, match_timeline_cache.raw_json),
          updated_at = excluded.updated_at`,
     ).run(
       gameId,
@@ -196,6 +213,7 @@ export class LcuTimelineService {
       values.fetchedAt ?? null,
       values.error ?? null,
       values.data ? JSON.stringify(values.data) : null,
+      values.raw ? JSON.stringify(values.raw) : null,
       Date.now(),
     )
   }

@@ -7,12 +7,30 @@ import { buildMatchRow, buildMatchSequence } from "./fixtures/matches.js"
 const PUUID = "test-puuid"
 
 let repo: MatchesRepository
+let db: InstanceType<typeof Database>
 
 beforeEach(() => {
-  const db = new Database(":memory:")
+  db = new Database(":memory:")
   applyMigrations(db)
   repo = new MatchesRepository(db)
 })
+
+/** Ten players for game 1, graded in the given order, with the owner first. */
+const storeLobby = (scores: (number | undefined)[]) => {
+  const insert = db.prepare(
+    `INSERT INTO match_participants
+     (game_id, puuid, participant_id, team_id, is_player, champion_id, win,
+      kills, deaths, assists, gold_earned, damage_to_champions, damage_taken,
+      damage_self_mitigated, total_heal, time_ccing_others,
+      total_minions_killed, neutral_minions, vision_score, damage_objectives,
+      grade_score, assigned_position)
+     VALUES (1, ?, ?, 100, ?, 84, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ?, ?)`,
+  )
+  scores.forEach((score, index) => {
+    insert.run(PUUID, index + 1, index === 0 ? 1 : 0, score ?? null,
+      index === 0 ? "UTILITY" : null)
+  })
+}
 
 describe("listMatches", () => {
   it("pages through history newest first", () => {
@@ -222,5 +240,26 @@ describe("listMatches", () => {
     expect(repo.getPlayedChampionIds(PUUID).sort((a, b) => a - b)).toEqual([
       22, 84,
     ])
+  })
+
+  it("places the player in the lobby and carries their assigned position", () => {
+    repo.insertMany([buildMatchRow({ gameId: 1 })])
+    storeLobby([9, 8, 10, 7, 6, 5, 4, 3, 2, 1])
+
+    const [row] = repo.listMatches({ puuid: PUUID }, 1, 25).rows
+
+    expect(row.lobbyPlace).toBe(2)
+    expect(row.lobbySize).toBe(10)
+    expect(row.assignedPosition).toBe("UTILITY")
+  })
+
+  it("withholds a placement while any of the ten is ungraded", () => {
+    repo.insertMany([buildMatchRow({ gameId: 1 })])
+    storeLobby([9, 8, 10, 7, 6, 5, 4, 3, 2, undefined])
+
+    const [row] = repo.listMatches({ puuid: PUUID }, 1, 25).rows
+
+    expect(row.lobbyPlace).toBeUndefined()
+    expect(row.lobbySize).toBe(10)
   })
 })

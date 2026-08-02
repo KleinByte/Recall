@@ -1,9 +1,17 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
+import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
+import { faMedal } from "@fortawesome/free-solid-svg-icons"
 import GradeBadge from "./GradeBadge.vue"
 import MatchDetail from "./MatchDetail.vue"
 import StyleRadar from "./StyleRadar.vue"
+import MiniBar from "./ui/MiniBar.vue"
+import Panel from "./ui/Panel.vue"
+import StatTile from "./ui/StatTile.vue"
 import { api } from "../helpers/api"
+import { labelIcon } from "../helpers/label-icons"
+import { lobbyStandings } from "../helpers/match-detail"
+import { positionIcon, positionLabel, resolvePosition } from "../helpers/roles"
 import { closeMatch, reviewMatch } from "../helpers/navigation"
 import {
   championIconUrl,
@@ -19,6 +27,7 @@ import type {
   MatchDetail as MatchDetailData,
   MatchRow,
   ParticipantRow,
+  PerformanceLabel,
   StyleAxis,
 } from "../types/stats"
 
@@ -118,6 +127,46 @@ const kda = computed(() =>
     ? props.match.kills + props.match.assists
     : (props.match.kills + props.match.assists) / props.match.deaths,
 )
+
+// Only the Rift assigns positions; ARAM and Arena would report noise.
+const position = computed(() =>
+  props.match.modeFamily === "sr"
+    ? resolvePosition(props.match.lane, props.match.role, props.match.assignedPosition)
+    : undefined,
+)
+
+/** Where this game placed the player among the ten Recall graded. */
+const standing = computed(() => {
+  const rows = detail.value?.participants ?? []
+  const me = rows.find((row) => row.isPlayer === 1)
+  if (!me) return undefined
+  return lobbyStandings(rows).get(me.participantId)
+})
+
+/**
+ * MVP is decided in the renderer from the stored lobby grades, so it stays
+ * consistent with the places shown on the scoreboard.
+ */
+const labels = computed<PerformanceLabel[]>(() => {
+  const stored = detail.value?.labels ?? []
+  const place = standing.value
+  if (place?.place !== 1) return stored
+
+  return [{
+    id: "mvp",
+    name: "MVP",
+    category: "Lobby",
+    polarity: "positive",
+    tooltip: `Best Recall grade of the ${place.of} players in this lobby.`,
+    evidence: { lobbyPlace: place.place, players: place.of },
+    source: "match_v5",
+    confidence: "exact",
+    priority: 1_000,
+  }, ...stored]
+})
+
+const evidenceOf = (label: PerformanceLabel) =>
+  Object.entries(label.evidence).map(([key, value]) => `${key}: ${value}`).join(", ")
 </script>
 
 <template>
@@ -132,11 +181,18 @@ const kda = computed(() =>
             <span class="outcome" :class="match.win ? 'win-text' : 'loss-text'">
               {{ match.win ? "Victory" : "Defeat" }}
             </span>
+            <span v-if="standing?.place === 1" class="mvp-badge">
+              <FontAwesomeIcon :icon="faMedal" aria-hidden="true" /> MVP
+            </span>
           </h2>
           <p class="muted line">
             {{ match.queueName ?? modeLabel(match.mode) }} ·
             {{ formatDuration(match.durationSecs) }} ·
             {{ formatRelativeDate(match.playedAt) }}
+          </p>
+          <p v-if="position" class="muted line role-line">
+            <FontAwesomeIcon :icon="positionIcon(position)" aria-hidden="true" />
+            {{ positionLabel(position) }}
           </p>
         </div>
 
@@ -147,48 +203,50 @@ const kda = computed(() =>
       </header>
 
       <div class="kpis">
-        <div class="kpi">
-          <span class="muted kpi-label">KDA</span>
-          <span class="numeric kpi-value">
-            {{ match.kills }}/{{ match.deaths }}/{{ match.assists }}
-          </span>
-          <span class="muted kpi-hint">{{ formatDecimal(kda, 2) }}</span>
-        </div>
-        <div class="kpi">
-          <span class="muted kpi-label">Damage</span>
-          <span class="numeric kpi-value">
-            {{ formatCompact(match.damageToChampions) }}
-          </span>
-        </div>
-        <div class="kpi">
-          <span class="muted kpi-label">Gold</span>
-          <span class="numeric kpi-value">
-            {{ formatCompact(match.goldEarned) }}
-          </span>
-        </div>
-        <div class="kpi">
-          <span class="muted kpi-label">Creep score</span>
-          <span class="numeric kpi-value">
-            {{ match.totalMinionsKilled + match.neutralMinions }}
-          </span>
-        </div>
+        <StatTile
+          label="KDA"
+          :value="`${match.kills}/${match.deaths}/${match.assists}`"
+          :hint="`${formatDecimal(kda, 2)} ratio`"
+          :tone="match.win ? 'win' : 'loss'"
+        />
+        <StatTile label="Damage" :value="formatCompact(match.damageToChampions)" />
+        <StatTile label="Gold" :value="formatCompact(match.goldEarned)" />
+        <StatTile
+          label="Creep score"
+          :value="(match.totalMinionsKilled + match.neutralMinions).toString()"
+          :hint="`${formatDecimal(match.csPerMin ?? 0, 1)} per minute`"
+        />
+        <StatTile
+          v-if="standing"
+          label="Lobby place"
+          :value="standing.place.toString()"
+          :hint="`of ${standing.of} by Recall grade`"
+        />
       </div>
 
-      <section v-if="detail?.labels.length" class="game-labels" aria-label="Game labels">
-        <article
-          v-for="label in detail.labels"
-          :key="label.id"
-          class="game-label"
-          :class="label.polarity"
-          :title="`${label.tooltip} Evidence: ${Object.entries(label.evidence).map(([key, value]) => `${key}: ${value}`).join(', ')}`"
-        >
-          <span class="label-name">{{ label.name }}</span>
-          <span class="label-tooltip">{{ label.tooltip }}</span>
-        </article>
+      <section v-if="labels.length" class="labels" aria-label="Game labels">
+        <h3 class="block-title">Game labels</h3>
+        <div class="label-chips">
+          <article
+            v-for="label in labels"
+            :key="label.id"
+            class="game-label"
+            :class="label.polarity"
+            :title="`${label.tooltip} Evidence: ${evidenceOf(label)}`"
+          >
+            <span class="label-badge">
+              <FontAwesomeIcon :icon="labelIcon(label.id)" aria-hidden="true" />
+            </span>
+            <span class="label-text">
+              <span class="label-name">{{ label.name }}</span>
+              <span class="label-tooltip">{{ label.tooltip }}</span>
+            </span>
+          </article>
+        </div>
       </section>
 
       <div class="body">
-        <div class="chart-side">
+        <Panel title="Play style" class="chart-side">
           <StyleRadar
             v-if="gameAxes.length"
             :axes="gameAxes"
@@ -206,23 +264,16 @@ const kda = computed(() =>
           <p v-if="gameAxes.length" class="muted footnote">
             Gold is this game. Blue is how you usually play this mode.
           </p>
-        </div>
+        </Panel>
 
-        <div class="placing-side">
-          <h3 class="block-title">Placed in this lobby</h3>
-
+        <Panel title="Placed in this lobby" class="placing-side">
           <ul v-if="placings.length" class="placings">
             <li v-for="row in placings" :key="row.key">
               <span class="axis-label">{{ row.label }}</span>
-              <span class="track">
-                <span
-                  class="fill"
-                  :class="{ strong: row.place <= 3 }"
-                  :style="{
-                    width: `${((row.of - row.place) / (row.of - 1)) * 100}%`,
-                  }"
-                />
-              </span>
+              <MiniBar
+                :value="(row.of - row.place) / (row.of - 1)"
+                :strong="row.place <= 3"
+              />
               <span class="numeric place">
                 {{ row.place % 1 === 0 ? row.place : row.place.toFixed(1) }}
                 <span class="muted">/ {{ row.of }}</span>
@@ -234,7 +285,7 @@ const kda = computed(() =>
             The lobby for this game was not available from the League client or
             Riot API.
           </p>
-        </div>
+        </Panel>
       </div>
 
       <MatchDetail
@@ -265,12 +316,18 @@ const kda = computed(() =>
   flex-direction: column;
   gap: var(--space-4);
   padding: var(--space-4) var(--space-5) var(--space-5);
+  background:
+    radial-gradient(120% 140% at 0% 0%, rgba(200, 170, 109, 0.09), transparent 46%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.014), transparent 42%),
+    var(--surface-0);
 }
 
 .sheet-head {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .portrait {
@@ -302,9 +359,30 @@ const kda = computed(() =>
   text-transform: uppercase;
 }
 
+.mvp-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 1px var(--space-2);
+  border: 1px solid var(--gold);
+  border-radius: 999px;
+  background: rgba(200, 170, 109, 0.16);
+  color: var(--gold-bright);
+  font-family: var(--font-heading);
+  font-size: 10px;
+  letter-spacing: 1.4px;
+}
+
 .line {
   margin: 2px 0 0;
   font-size: 12px;
+}
+
+.role-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
 }
 
 .close {
@@ -330,60 +408,83 @@ const kda = computed(() =>
   gap: var(--space-3);
 }
 
-.kpi {
-  background: var(--surface-2);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: var(--space-2) var(--space-3);
+.labels {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-2);
 }
 
-.kpi-label {
-  font-size: 10px;
-  letter-spacing: 1.2px;
-  text-transform: uppercase;
-}
-
-.kpi-value {
-  font-size: 17px;
-  color: var(--text-primary);
-}
-
-.kpi-hint {
-  font-size: 11px;
-}
-
-.game-labels {
+.label-chips {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(240px, 300px));
+  justify-content: start;
   gap: var(--space-2);
 }
 
 .game-label {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
   min-width: 0;
   padding: var(--space-2) var(--space-3);
   border: 1px solid rgba(200, 170, 110, 0.35);
   border-left-width: 3px;
-  border-radius: var(--radius-sm);
-  background: rgba(200, 170, 110, 0.06);
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(120deg, rgba(200, 170, 110, 0.1), transparent 62%),
+    var(--surface-2);
 }
 
 .game-label.positive { border-left-color: var(--win); }
 .game-label.negative { border-left-color: var(--loss); }
 .game-label.mixed { border-left-color: var(--gold-bright); }
-.label-name { color: var(--text-primary); font-family: var(--font-heading); font-size: 12px; }
-.label-tooltip { color: var(--text-secondary); font-size: 10px; line-height: 1.35; }
+
+.label-badge {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-0);
+  color: var(--gold);
+  font-size: 18px;
+}
+
+.game-label.positive .label-badge { color: var(--win); }
+.game-label.negative .label-badge { color: var(--loss); }
+
+.label-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.label-name {
+  color: var(--text-primary);
+  font-family: var(--font-heading);
+  font-size: 15px;
+  letter-spacing: 0.4px;
+  line-height: 1.2;
+}
+
+.label-tooltip {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
 
 .body {
   display: grid;
   grid-template-columns: minmax(0, 1.3fr) minmax(260px, 0.8fr);
-  gap: var(--space-5);
-  align-items: center;
+  gap: var(--space-4);
+  align-items: stretch;
 }
 
 .block-title {

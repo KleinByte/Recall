@@ -6,6 +6,10 @@ import {
   formatStat,
   formatStatDuration,
   groupMatchSides,
+  killParticipation,
+  lobbyStandings,
+  teamComparison,
+  teamTotals,
   toggleExpandedParticipant,
 } from "../src/helpers/match-detail.js"
 import type { MatchDetail, ParticipantRow } from "../src/types/stats.js"
@@ -87,6 +91,72 @@ describe("groupMatchSides", () => {
   })
 })
 
+describe("team totals", () => {
+  it("adds up every contribution on a side", () => {
+    const totals = teamTotals([participant(1, 100), participant(2, 100)])
+
+    expect(totals.kills).toBe(2)
+    expect(totals.gold).toBe(24_690)
+    expect(totals.damage).toBe(40_000)
+    expect(totals.cs).toBe(220)
+    expect(totals.vision).toBe(40)
+  })
+
+  it("splits each bar by the pair's share and marks compact figures", () => {
+    const left = teamTotals([participant(1, 100)])
+    const right = teamTotals([participant(6, 200), participant(7, 200)])
+
+    const rows = teamComparison(left, right)
+    const kills = rows.find((row) => row.key === "kills")
+
+    expect(kills).toMatchObject({ left: 1, right: 2, leftShare: 1 / 3, compact: false })
+    expect(rows.find((row) => row.key === "gold")?.compact).toBe(true)
+  })
+
+  it("splits the bar evenly when neither side scored", () => {
+    const empty = teamTotals([])
+
+    expect(teamComparison(empty, empty)[0].leftShare).toBe(0.5)
+  })
+
+  it("caps kill participation and survives a team without kills", () => {
+    const row = participant(1, 100)
+
+    expect(killParticipation(row, 8)).toBe(0.5)
+    expect(killParticipation(row, 1)).toBe(1)
+    expect(killParticipation(row, 0)).toBe(0)
+  })
+})
+
+describe("lobbyStandings", () => {
+  const graded = (participantId: number, gradeScore: number) => ({
+    ...participant(participantId, participantId <= 5 ? 100 : 200),
+    gradeScore,
+  })
+
+  it("places the best graded player first and the worst last", () => {
+    const rows = [graded(1, -0.4), graded(2, 1.8), graded(6, 0.5)]
+
+    const standings = lobbyStandings(rows)
+
+    expect(standings.get(2)).toEqual({ place: 1, of: 3 })
+    expect(standings.get(6)?.place).toBe(2)
+    expect(standings.get(1)).toEqual({ place: 3, of: 3 })
+  })
+
+  it("breaks ties without giving two players the same place", () => {
+    const standings = lobbyStandings([graded(6, 0.5), graded(1, 0.5)])
+
+    expect([...standings.values()].map((entry) => entry.place)).toEqual([1, 2])
+  })
+
+  it("stays empty when any player in the lobby is ungraded", () => {
+    const rows = [graded(1, 1.2), participant(2, 100)]
+
+    expect(lobbyStandings(rows).size).toBe(0)
+  })
+})
+
 describe("toggleExpandedParticipant", () => {
   it("replaces the expanded player only on the same team", () => {
     let state = toggleExpandedParticipant({}, 100, 1)
@@ -143,5 +213,23 @@ describe("match detail component contract", () => {
 
     expect(scoreboard).toContain("watch(() => props.detail")
     expect(scoreboard).toContain("expanded.value = {}")
+  })
+
+  it("shows the lobby place under each portrait and marks the MVP", () => {
+    const scoreboard = readFileSync("src/components/MatchDetail.vue", "utf8")
+    const sheet = readFileSync("src/components/MatchSheet.vue", "utf8")
+
+    expect(scoreboard).toContain('v-if="placeOf(row)"')
+    expect(scoreboard).toContain('placeOf(row) === 1')
+    expect(scoreboard).toContain("mvp-tag")
+    expect(sheet).toContain('id: "mvp"')
+  })
+
+  it("labels the scoreboard columns and compares the two teams", () => {
+    const scoreboard = readFileSync("src/components/MatchDetail.vue", "utf8")
+
+    expect(scoreboard).toContain('class="columns muted"')
+    expect(scoreboard).toContain("Kill participation")
+    expect(scoreboard).toContain("Team totals")
   })
 })

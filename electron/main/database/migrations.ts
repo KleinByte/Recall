@@ -639,6 +639,68 @@ export const migrations: Migration[] = [
         ON match_performance_labels (puuid, game_id, priority DESC);
     `,
   },
+  {
+    // Keep the authenticated local-client response beside the compact model.
+    // The LCU schema is unsupported and changes over time; retaining the raw
+    // payload lets a later mapper recover newly-understood fields without
+    // requiring the match to remain in the client's rolling history window.
+    version: 14,
+    up: `
+      ALTER TABLE match_timeline_cache ADD COLUMN raw_json TEXT;
+    `,
+  },
+  {
+    // Port 2999 disappears after a match. Keep bounded periodic snapshots and
+    // deduplicated live events while the game is running so post-game mapping
+    // can recover item and level timing the LCU timeline often omits.
+    version: 15,
+    up: `
+      CREATE TABLE live_game_snapshots (
+        game_id       INTEGER NOT NULL,
+        puuid         TEXT    NOT NULL,
+        game_time_ms  INTEGER NOT NULL,
+        captured_at   INTEGER NOT NULL,
+        reason        TEXT    NOT NULL CHECK (reason IN ('first', 'periodic', 'state_change')),
+        snapshot_json TEXT    NOT NULL,
+        PRIMARY KEY (game_id, puuid, game_time_ms)
+      );
+
+      CREATE TABLE live_game_events (
+        game_id       INTEGER NOT NULL,
+        puuid         TEXT    NOT NULL,
+        event_id      INTEGER NOT NULL,
+        event_time_ms INTEGER NOT NULL,
+        event_name    TEXT    NOT NULL,
+        captured_at   INTEGER NOT NULL,
+        event_json    TEXT    NOT NULL,
+        PRIMARY KEY (game_id, puuid, event_id)
+      );
+
+      CREATE INDEX idx_live_snapshots_owner
+        ON live_game_snapshots (puuid, game_id, game_time_ms);
+      CREATE INDEX idx_live_events_owner
+        ON live_game_events (puuid, game_id, event_time_ms);
+    `,
+  },
+  {
+    // Riot classifies lane and role after the fact, so swaps and off-meta
+    // setups are sometimes misread. Champion select states the position the
+    // client actually assigned, but only for the local team and only while it
+    // is on screen, so it is captured then and kept against the game id.
+    version: 16,
+    up: `
+      ALTER TABLE match_participants ADD COLUMN assigned_position TEXT;
+
+      CREATE TABLE champ_select_positions (
+        game_id     INTEGER NOT NULL,
+        puuid       TEXT    NOT NULL,
+        champion_id INTEGER NOT NULL,
+        position    TEXT    NOT NULL,
+        captured_at INTEGER NOT NULL,
+        PRIMARY KEY (game_id, puuid, champion_id)
+      );
+    `,
+  },
 ]
 
 export const latestSchemaVersion = migrations.at(-1)?.version ?? 0

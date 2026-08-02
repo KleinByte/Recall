@@ -37,6 +37,26 @@ describe("readLiveSession", () => {
     expect(live.enemies[0].championPickIntent).toBe(157)
   })
 
+  it("keeps the position the client assigned in champion select", async () => {
+    const live = await readLiveSession(client({
+      "/lol-gameflow/v1/session": {
+        gameData: { gameId: 77, gameMode: "CLASSIC", mapId: 11, queue: { id: 420 } },
+      },
+      "/lol-champ-select/v1/session": {
+        localPlayerCellId: 0,
+        myTeam: [
+          { cellId: 0, championId: 64, assignedPosition: "jungle" },
+          { cellId: 1, championId: 17, assignedPosition: "" },
+        ],
+        theirTeam: [{ cellId: 5, championId: 0, assignedPosition: "utility" }],
+      },
+    }) as never, "ChampSelect")
+
+    expect(live.allies[0].assignedPosition).toBe("JUNGLE")
+    expect(live.allies[1].assignedPosition).toBeUndefined()
+    expect(live.enemies[0].assignedPosition).toBe("UTILITY")
+  })
+
   it("keeps Mayhem separate from normal ARAM", async () => {
     const live = await readLiveSession(client({
       "/lol-gameflow/v1/session": {
