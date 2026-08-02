@@ -10,6 +10,47 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.9",
+    releasedAt: "2026-08-01",
+    title: "Roles read the way you played them",
+    summary:
+      "Recall now believes the position Riot states over the lane it guesses, which stops top laners being filed as junglers and empties the seats nobody actually played.",
+    sections: [
+      {
+        title: "Correct positions",
+        items: [
+          "The League Client reports most of a team as JUNGLE while naming the real position in a separate field. Recall reads that field first, matching how the Skill page has always filtered.",
+          "A duo hint arriving without a lane no longer counts as support. Short games come back with all ten players marked that way, and Recall now says it does not know rather than guessing.",
+          "No two players on a team can hold the same position, so when the classification contests one, neither player is seated there and both keep their place on the scoreboard.",
+        ],
+      },
+    ],
+  },
+  {
+    version: "2.0.8",
+    releasedAt: "2026-08-01",
+    title: "Every player's role, and lane matchups in review",
+    summary:
+      "Recall captures the position champion select assigned, keeps it beside Riot's own classification, and rebuilds the match and review scoreboards around it.",
+    sections: [
+      {
+        title: "Role tracking",
+        items: [
+          "Champion select states the position the client assigned, but only for your team and only while it is on screen, so Recall captures it there and holds it until the game it belongs to can be named.",
+          "The assignment is stored beside Riot's lane and role rather than replacing them, so nothing Riot reported is thrown away.",
+        ],
+      },
+      {
+        title: "Scoreboards",
+        items: [
+          "The matches list gains an aligned header with role, CS and its per-minute pace, damage, and your rank among the ten.",
+          "Full review lays the scoreboard out as lane matchups, with your opponent mirrored on the opposite side and any number of rows open at once.",
+          "Opening a matchup compares both players across every recorded statistic.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.7",
     releasedAt: "2026-08-01",
     title: "Momentum and richer match timelines",

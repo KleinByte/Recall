@@ -1012,15 +1012,19 @@ function buildFilter(filter: StatsFilter) {
   return { clause: `WHERE ${conditions.join(" AND ")}`, params }
 }
 
-/** Normalizes Match-V5 positions and older LCU lane/role pairs. */
+/**
+ * Normalizes Match-V5 positions and older LCU lane/role pairs. Twin of
+ * `resolvePosition` in the renderer, and must be changed alongside it.
+ */
 function normalizedRole(alias = ""): string {
   const prefix = alias ? `${alias}.` : ""
   return `CASE
     WHEN UPPER(COALESCE(${prefix}role, '')) IN ('TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY')
       THEN UPPER(${prefix}role)
-    WHEN UPPER(COALESCE(${prefix}role, '')) IN ('SUPPORT', 'DUO_SUPPORT') THEN 'UTILITY'
-    WHEN UPPER(COALESCE(${prefix}role, '')) IN ('CARRY', 'DUO_CARRY') THEN 'BOTTOM'
-    WHEN UPPER(COALESCE(${prefix}lane, '')) IN ('TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM')
+    WHEN UPPER(COALESCE(${prefix}lane, '')) IN ('BOTTOM', 'BOT') THEN
+      CASE WHEN UPPER(COALESCE(${prefix}role, '')) IN ('SUPPORT', 'DUO_SUPPORT')
+        THEN 'UTILITY' ELSE 'BOTTOM' END
+    WHEN UPPER(COALESCE(${prefix}lane, '')) IN ('TOP', 'JUNGLE', 'MIDDLE')
       THEN UPPER(${prefix}lane)
     ELSE NULL
   END`

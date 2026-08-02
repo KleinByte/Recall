@@ -43,13 +43,20 @@ const ALIASES: Record<string, Position> = {
   DUO_SUPPORT: "UTILITY",
 }
 
+const CANONICAL = new Set<string>(POSITIONS)
+
 /**
- * Riot reports the position differently per source: Match-V5 stores a canonical
- * team position in `role`, while League Client history stores a lane plus a
- * duo hint. Both are folded into one value here so the two can be compared.
+ * Riot reports the position differently per source: Match-V5 states a canonical
+ * team position in `role`, while League Client history stores a lane plus a duo
+ * hint. Both are folded into one value here so the two can be compared.
  *
- * Champion select, where we have it, wins: lane and role are classified after
- * the game and misread swaps, double junglers and other off-meta setups.
+ * Order matters and mirrors `normalizedRole` in the matches repository. Match-V5
+ * is taken at its word; the client's lane is only consulted after, because it
+ * reports the whole team as JUNGLE often enough to hide the real top laner.
+ * A duo hint on its own means nothing without a lane to place it in: short games
+ * come back with every player marked SUPPORT and no lane at all.
+ *
+ * Champion select, where we have it, beats both.
  */
 export function resolvePosition(
   lane?: string,
@@ -59,15 +66,14 @@ export function resolvePosition(
   const assignedKey = ALIASES[assigned?.toUpperCase() ?? ""]
   if (assignedKey) return assignedKey
 
-  const laneKey = lane?.toUpperCase() ?? ""
   const roleKey = role?.toUpperCase() ?? ""
-  const direct = ALIASES[roleKey]
+  if (CANONICAL.has(roleKey)) return roleKey as Position
 
-  if (laneKey === "BOTTOM" || laneKey === "BOT") {
-    return direct === "UTILITY" ? "UTILITY" : "BOTTOM"
-  }
+  const laneName = ALIASES[lane?.toUpperCase() ?? ""]
+  if (!laneName) return undefined
+  if (laneName === "BOTTOM") return ALIASES[roleKey] === "UTILITY" ? "UTILITY" : "BOTTOM"
 
-  return ALIASES[laneKey] ?? direct
+  return laneName
 }
 
 export const positionLabel = (position?: Position) =>
@@ -92,7 +98,7 @@ interface Positioned {
 /**
  * Pairs each player against the enemy who played their position, so a lane can
  * be read straight across the row. Anyone whose position is unknown, missing or
- * duplicated inside a team keeps their listed order in the leftover rows.
+ * contested inside a team keeps their listed order in the leftover rows.
  */
 export function laneMatchups<T extends Positioned>(
   left: T[],
@@ -101,12 +107,17 @@ export function laneMatchups<T extends Positioned>(
   const take = (players: T[]) => {
     const claimed = new Map<Position, T>()
     const rest: T[] = []
+    const found = players.map((player) =>
+      resolvePosition(player.lane, player.role, player.assignedPosition),
+    )
 
-    for (const player of players) {
-      const position = resolvePosition(player.lane, player.role, player.assignedPosition)
-      if (position && !claimed.has(position)) claimed.set(position, player)
+    players.forEach((player, index) => {
+      const position = found[index]
+      // One player holds a position per team, so a contested one is a misread.
+      const sole = position && found.indexOf(position) === found.lastIndexOf(position)
+      if (sole) claimed.set(position, player)
       else rest.push(player)
-    }
+    })
 
     return { claimed, rest }
   }

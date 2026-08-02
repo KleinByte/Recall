@@ -91,11 +91,19 @@ describe("getSummary", () => {
   it("normalizes legacy carry and support role labels", () => {
     repo.insertMany([
       buildMatchRow({ gameId: 1, role: "CARRY", lane: "BOTTOM" }),
-      buildMatchRow({ gameId: 2, role: "SUPPORT", lane: "NONE" }),
+      buildMatchRow({ gameId: 2, role: "SUPPORT", lane: "BOTTOM" }),
     ])
 
     expect(repo.getSummary({ puuid: PUUID, roles: ["BOTTOM"] }).games).toBe(1)
     expect(repo.getSummary({ puuid: PUUID, roles: ["UTILITY"] }).games).toBe(1)
+  })
+
+  it("files a duo hint with no lane under no role at all", () => {
+    // Short games come back with every player marked SUPPORT and no lane, so
+    // the hint on its own is not evidence of anyone having played support.
+    repo.insertMany([buildMatchRow({ gameId: 1, role: "SUPPORT", lane: "NONE" })])
+
+    expect(repo.getSummary({ puuid: PUUID, roles: ["UTILITY"] }).games).toBe(0)
   })
 
   // The Matches page shows these totals directly above the games they
