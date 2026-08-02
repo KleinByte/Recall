@@ -136,6 +136,7 @@ export function mapParticipants(
 
     return {
       gameId,
+      participantPuuid: player?.puuid,
       puuid,
       participantId: participant.participantId,
       teamId: participant.teamId,

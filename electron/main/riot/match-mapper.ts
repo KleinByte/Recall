@@ -314,6 +314,7 @@ export function mapRiotMatch(
 
     return {
       gameId: info.gameId!,
+      participantPuuid: participant.puuid,
       puuid: ownerPuuid,
       participantId: int(participant.participantId) || index + 1,
       teamId: int(participant.teamId),

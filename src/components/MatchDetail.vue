@@ -17,7 +17,7 @@ import {
   formatPercent,
 } from "../helpers/format"
 import { itemIconUrl, summonerSpellIconUrl } from "../helpers/ddragon"
-import { positionIcon, positionLabel, resolvePosition } from "../helpers/roles"
+import { positionIconUrl, positionLabel, resolvePosition } from "../helpers/roles"
 import {
   formatMilestone,
   formatOptionalText,
@@ -194,11 +194,12 @@ const kdaOf = (row: ParticipantRow) =>
           <template v-for="row in side.players" :key="row.participantId">
           <li class="player" :class="{ me: row.isPlayer === 1 }">
             <div class="who">
-              <FontAwesomeIcon
+              <img
                 v-if="positionOf(row)"
-                :icon="positionIcon(positionOf(row))"
+                :src="positionIconUrl(positionOf(row))"
                 class="position"
                 :title="positionLabel(positionOf(row))"
+                alt=""
               />
               <span v-else class="position" />
 
@@ -558,6 +559,7 @@ const kdaOf = (row: ParticipantRow) =>
 .position {
   flex: 0 0 14px;
   width: 14px;
+  height: 14px;
   font-size: 11px;
   text-align: center;
   color: var(--text-muted);

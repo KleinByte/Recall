@@ -60,6 +60,7 @@ export interface AugmentCatalogEntry {
 
 const COLUMNS = [
   "game_id",
+  "participant_puuid",
   "puuid",
   "participant_id",
   "team_id",
@@ -152,8 +153,8 @@ const TEAM_COLUMNS = [
  * Raise this whenever the scoreboard gains fields worth going back for, and
  * games still inside the client's window will be read again to fill them in.
  */
-export const LOBBY_DETAIL_VERSION = 4
-export const PARTICIPANT_CAPTURE_VERSION = 4
+export const LOBBY_DETAIL_VERSION = 5
+export const PARTICIPANT_CAPTURE_VERSION = 5
 
 /**
  * Replaces rather than ignores, so a lobby captured under an earlier, narrower
@@ -202,6 +203,7 @@ const METRICS: { key: string; label: string; expression: string; roleScoped?: bo
 function toValues(row: ParticipantRow) {
   return [
     row.gameId,
+    row.participantPuuid ?? null,
     row.puuid,
     row.participantId,
     row.teamId,
@@ -289,6 +291,7 @@ function toParticipantRow(row: Record<string, never>): ParticipantRow {
   }
   return {
     gameId: row.game_id,
+    participantPuuid: row.participant_puuid ?? (row.is_player === 1 ? row.puuid : undefined),
     puuid: row.puuid,
     participantId: row.participant_id,
     teamId: row.team_id,

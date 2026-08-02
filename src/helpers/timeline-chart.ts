@@ -1,11 +1,13 @@
 import type { TimelineEvent, TimelineFrame } from "../types/review"
 
 const X_INSET = 2
-const Y_AMPLITUDE = 42
+const Y_TOP = 8
+const Y_BOTTOM = 90
 
 export interface TimelineChartDomain {
   maximumTimestamp: number
   maximumDifference: number
+  maximumGold: number
 }
 
 export function timelineChartDomain(
@@ -22,6 +24,10 @@ export function timelineChartDomain(
       1_000,
       ...frames.map((frame) => Math.abs(frame.blueGold - frame.redGold)),
     ),
+    maximumGold: Math.max(
+      1_000,
+      ...frames.flatMap((frame) => [frame.blueGold, frame.redGold]),
+    ) * 1.04,
   }
 }
 
@@ -37,21 +43,40 @@ export function timelineChartY(
   difference: number,
   domain: TimelineChartDomain,
 ): number {
-  return 50 - difference * Y_AMPLITUDE / domain.maximumDifference
+  return 50 - difference * 42 / domain.maximumDifference
 }
 
+export function timelineTeamGoldY(
+  gold: number,
+  domain: TimelineChartDomain,
+) {
+  const progress = Math.max(0, Math.min(1, gold / domain.maximumGold))
+  return Y_BOTTOM - progress * (Y_BOTTOM - Y_TOP)
+}
+
+export function timelineTeamGoldPoints(
+  frames: TimelineFrame[],
+  domain: TimelineChartDomain,
+  team: "blue" | "red",
+): string {
+  return frames
+    .map((frame) => {
+      const x = timelineChartX(frame.timestamp, domain)
+      const y = timelineTeamGoldY(
+        team === "blue" ? frame.blueGold : frame.redGold,
+        domain,
+      )
+      return `${x},${y}`
+    })
+    .join(" ")
+}
+
+/** Backward-compatible alias for consumers that need the Blue series. */
 export function timelineChartPoints(
   frames: TimelineFrame[],
   domain: TimelineChartDomain,
 ): string {
-  return frames
-    .map((frame) => {
-      const difference = frame.blueGold - frame.redGold
-      const x = timelineChartX(frame.timestamp, domain)
-      const y = timelineChartY(difference, domain)
-      return `${x},${y}`
-    })
-    .join(" ")
+  return timelineTeamGoldPoints(frames, domain, "blue")
 }
 
 export function timelineGoldDifferenceAt(
@@ -65,6 +90,22 @@ export function timelineGoldDifferenceAt(
       : best,
   )
   return closest.blueGold - closest.redGold
+}
+
+export function timelineTeamGoldAt(
+  timestamp: number,
+  frames: TimelineFrame[],
+  teamId?: number,
+): number {
+  if (frames.length === 0) return 0
+  const closest = frames.reduce((best, frame) =>
+    Math.abs(frame.timestamp - timestamp) < Math.abs(best.timestamp - timestamp)
+      ? frame
+      : best,
+  )
+  if (teamId === 100) return closest.blueGold
+  if (teamId === 200) return closest.redGold
+  return (closest.blueGold + closest.redGold) / 2
 }
 
 /**

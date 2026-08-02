@@ -1,13 +1,4 @@
 import {
-  faChessRook,
-  faCrosshairs,
-  faHandHoldingHeart,
-  faShieldHalved,
-  faTree,
-  faWandMagicSparkles,
-} from "@fortawesome/free-solid-svg-icons"
-import type { IconDefinition } from "@fortawesome/free-solid-svg-icons"
-import {
   POSITIONS,
   resolvePosition,
   type Position,
@@ -17,22 +8,26 @@ export { POSITIONS, resolvePosition, type Position } from "./position-core"
 
 export interface PositionInfo {
   label: string
-  icon: IconDefinition
+  asset: string
 }
 
 const INFO: Record<Position, PositionInfo> = {
-  TOP: { label: "Top", icon: faShieldHalved },
-  JUNGLE: { label: "Jungle", icon: faTree },
-  MIDDLE: { label: "Mid", icon: faWandMagicSparkles },
-  BOTTOM: { label: "Bot", icon: faCrosshairs },
-  UTILITY: { label: "Support", icon: faHandHoldingHeart },
+  TOP: { label: "Top", asset: "top" },
+  JUNGLE: { label: "Jungle", asset: "jungle" },
+  MIDDLE: { label: "Mid", asset: "middle" },
+  BOTTOM: { label: "Bot", asset: "bottom" },
+  UTILITY: { label: "Support", asset: "utility" },
 }
+
+const POSITION_ASSET_ROOT =
+  "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-champ-select/global/default/svg"
 
 export const positionLabel = (position?: Position) =>
   position ? INFO[position].label : "Unknown"
 
-export const positionIcon = (position?: Position) =>
-  position ? INFO[position].icon : faChessRook
+/** Riot's own champ-select position art, exported through CommunityDragon. */
+export const positionIconUrl = (position?: Position) =>
+  `${POSITION_ASSET_ROOT}/position-${position ? INFO[position].asset : "lane"}.svg`
 
 export interface Matchup<T> {
   key: string

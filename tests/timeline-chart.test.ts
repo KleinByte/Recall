@@ -3,6 +3,8 @@ import {
   timelineChartDomain,
   timelineChartPoints,
   timelineChartX,
+  timelineTeamGoldPoints,
+  timelineTeamGoldY,
   sampleTimelineEvents,
 } from "../src/helpers/timeline-chart.js"
 import type { TimelineEvent, TimelineFrame } from "../src/types/review.js"
@@ -35,6 +37,19 @@ describe("timeline chart geometry", () => {
       timelineChartX(60_000, domain),
     )
     expect(Number(points[1].split(",")[0])).toBeCloseTo(34)
+  })
+
+  it("plots Blue and Red as independent absolute-gold series", () => {
+    const frames = [frame(0, 0), frame(60_000, 1_500)]
+    const domain = timelineChartDomain(frames, [])
+    const blue = timelineTeamGoldPoints(frames, domain, "blue").split(" ")
+    const red = timelineTeamGoldPoints(frames, domain, "red").split(" ")
+
+    expect(blue[0]).toBe(red[0])
+    expect(Number(blue[1].split(",")[1])).toBeLessThan(
+      Number(red[1].split(",")[1]),
+    )
+    expect(timelineTeamGoldY(domain.maximumGold, domain)).toBeCloseTo(8)
   })
 
   it("includes end-of-game events in the time scale", () => {

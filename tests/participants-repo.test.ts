@@ -149,12 +149,12 @@ describe("ParticipantsRepository", () => {
     expect(repo.getMatchDetail(1, PUUID).participants).toHaveLength(10)
   })
 
-  it("keeps no names or identifiers for the other players", () => {
+  it("stores the participant PUUID needed for mastery lookups without account IDs", () => {
     repo.insertMany(lobby(1, 30000))
 
     const columns = repo.columnNames()
 
-    expect(columns).not.toContain("participant_puuid")
+    expect(columns).toContain("participant_puuid")
     expect(columns).not.toContain("account_id")
   })
 

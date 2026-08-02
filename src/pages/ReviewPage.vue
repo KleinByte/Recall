@@ -17,21 +17,21 @@ import {
   type GameAssetCatalog,
 } from "../helpers/game-assets"
 import { focusReviewGameId } from "../helpers/navigation"
-import { laneMatchups, positionIcon, positionLabel } from "../helpers/roles"
+import { laneMatchups, positionIconUrl, positionLabel } from "../helpers/roles"
 import { compareMatchup } from "../helpers/matchup"
 import {
   timelineChartDomain,
-  timelineChartPoints,
   timelineChartX,
-  timelineChartY,
-  timelineGoldDifferenceAt,
+  timelineTeamGoldAt,
+  timelineTeamGoldPoints,
+  timelineTeamGoldY,
   sampleTimelineEvents,
 } from "../helpers/timeline-chart"
 import GradeBadge from "../components/GradeBadge.vue"
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
 import { faChevronDown } from "@fortawesome/free-solid-svg-icons"
 import type { Champion } from "../types/lol"
-import type { MatchRow } from "../types/stats"
+import type { ChampionMasterySnapshot, MatchRow } from "../types/stats"
 import type { TrackedMode } from "../types/stats"
 import type {
   AnnotationTag,
@@ -77,6 +77,24 @@ const showsRoles = computed(() =>
   review.value?.match.modeFamily === "sr" || review.value?.match.modeFamily === "classic",
 )
 
+const masteryProgress = (mastery?: ChampionMasterySnapshot) => {
+  if (!mastery) return undefined
+  const span = mastery.championPointsSinceLastLevel + mastery.championPointsUntilNextLevel
+  return span > 0 ? mastery.championPointsSinceLastLevel / span : undefined
+}
+
+const masteryProgressPercent = (mastery?: ChampionMasterySnapshot) =>
+  (masteryProgress(mastery) ?? 0) * 100
+
+const masteryDetail = (mastery?: ChampionMasterySnapshot) => {
+  if (!mastery) return "Mastery unavailable"
+  return [
+    `${mastery.championPoints.toLocaleString()} points`,
+    mastery.tokensEarned ? `${mastery.tokensEarned} tokens` : undefined,
+    mastery.highestGrade ? `highest grade ${mastery.highestGrade}` : undefined,
+  ].filter(Boolean).join(" · ")
+}
+
 /** Every row stays independently open so two lanes can be compared at once. */
 const openMatchups = ref<Record<string, boolean>>({})
 const toggleMatchup = (key: string) => {
@@ -97,11 +115,26 @@ const timelineDomain = computed(() => {
   const summary = review.value?.timeline.summary
   return timelineChartDomain(summary?.frames ?? [], summary?.events ?? [])
 })
-const timelinePoints = computed(() => {
+const timelineBluePoints = computed(() => {
   const frames = review.value?.timeline.summary?.frames ?? []
   if (frames.length < 2) return ""
-  return timelineChartPoints(frames, timelineDomain.value)
+  return timelineTeamGoldPoints(frames, timelineDomain.value, "blue")
 })
+const timelineRedPoints = computed(() => {
+  const frames = review.value?.timeline.summary?.frames ?? []
+  if (frames.length < 2) return ""
+  return timelineTeamGoldPoints(frames, timelineDomain.value, "red")
+})
+const finalTimelineFrame = computed(() => review.value?.timeline.summary?.frames.at(-1))
+const finalGoldDifference = computed(() =>
+  (finalTimelineFrame.value?.blueGold ?? 0) - (finalTimelineFrame.value?.redGold ?? 0),
+)
+const timelineGoldTicks = computed(() => [
+  timelineDomain.value.maximumGold,
+  timelineDomain.value.maximumGold / 2,
+  0,
+].map((gold) => ({ gold, y: timelineTeamGoldY(gold, timelineDomain.value) })))
+const compactGold = (gold: number) => `${(gold / 1_000).toFixed(gold >= 10_000 ? 0 : 1)}k`
 const timelineMarkers = computed(() => {
   const summary = review.value?.timeline.summary
   if (!summary?.frames.length) return []
@@ -133,8 +166,8 @@ const timelineMarkers = computed(() => {
 
   return sampleTimelineEvents(source, 90).map((event) => {
     const x = timelineChartX(event.timestamp, timelineDomain.value)
-    const difference = timelineGoldDifferenceAt(event.timestamp, frames)
-    const lineY = timelineChartY(difference, timelineDomain.value)
+    const gold = timelineTeamGoldAt(event.timestamp, frames, event.teamId)
+    const lineY = timelineTeamGoldY(gold, timelineDomain.value)
     const bucket = Math.round(x / 2)
     const lane = laneByBucket.get(bucket) ?? 0
     laneByBucket.set(bucket, lane + 1)
@@ -617,6 +650,10 @@ onBeforeUnmount(() => {
                 <template v-if="row.left">
                   <div class="seat-body">
                     <strong class="name">{{ row.left.summonerName || championNameById(champions, row.left.championId) }}</strong>
+                    <span v-if="row.left.mastery" class="mastery-line" :title="masteryDetail(row.left.mastery)">
+                      <strong>M{{ row.left.mastery.championLevel }}</strong>
+                      {{ row.left.mastery.championPoints.toLocaleString() }} pts
+                    </span>
                     <span class="muted seat-line">
                       {{ row.left.kills }}/{{ row.left.deaths }}/{{ row.left.assists }} ·
                       {{ row.left.totalMinionsKilled + row.left.neutralMinions }} CS ·
@@ -636,7 +673,7 @@ onBeforeUnmount(() => {
               </div>
 
               <span v-if="showsRoles && row.position" class="lane">
-                <FontAwesomeIcon :icon="positionIcon(row.position)" aria-hidden="true" />
+                <img :src="positionIconUrl(row.position)" class="lane-icon" alt="" />
                 <span>{{ positionLabel(row.position) }}</span>
               </span>
               <span v-else class="lane" aria-hidden="true" />
@@ -648,6 +685,10 @@ onBeforeUnmount(() => {
                   <GradeBadge :grade="row.right.grade" />
                   <div class="seat-body">
                     <strong class="name">{{ row.right.summonerName || championNameById(champions, row.right.championId) }}</strong>
+                    <span v-if="row.right.mastery" class="mastery-line" :title="masteryDetail(row.right.mastery)">
+                      <strong>M{{ row.right.mastery.championLevel }}</strong>
+                      {{ row.right.mastery.championPoints.toLocaleString() }} pts
+                    </span>
                     <span class="muted seat-line">
                       {{ row.right.kills }}/{{ row.right.deaths }}/{{ row.right.assists }} ·
                       {{ row.right.totalMinionsKilled + row.right.neutralMinions }} CS ·
@@ -701,6 +742,30 @@ onBeforeUnmount(() => {
                     @click="row.right?.isPlayer && loadAugmentSummary(augment.augmentId)">
                     <img :src="augmentIcon(augment.augmentId, augment.iconPath)" alt="" />
                   </button>
+                </div>
+              </div>
+
+              <div v-if="row.left?.mastery || row.right?.mastery" class="compare-mastery">
+                <div class="mastery-card" :class="{ unavailable: !row.left?.mastery }">
+                  <template v-if="row.left?.mastery">
+                    <strong>Mastery {{ row.left.mastery.championLevel }}</strong>
+                    <span>{{ masteryDetail(row.left.mastery) }}</span>
+                    <span v-if="masteryProgress(row.left.mastery) !== undefined" class="mastery-track">
+                      <span :style="{ width: `${masteryProgressPercent(row.left.mastery)}%` }" />
+                    </span>
+                  </template>
+                  <span v-else>Unavailable</span>
+                </div>
+                <span class="compare-label muted">Champion mastery</span>
+                <div class="mastery-card right" :class="{ unavailable: !row.right?.mastery }">
+                  <template v-if="row.right?.mastery">
+                    <strong>Mastery {{ row.right.mastery.championLevel }}</strong>
+                    <span>{{ masteryDetail(row.right.mastery) }}</span>
+                    <span v-if="masteryProgress(row.right.mastery) !== undefined" class="mastery-track">
+                      <span :style="{ width: `${masteryProgressPercent(row.right.mastery)}%` }" />
+                    </span>
+                  </template>
+                  <span v-else>Unavailable</span>
                 </div>
               </div>
             </div>
@@ -771,12 +836,19 @@ onBeforeUnmount(() => {
         <div v-if="review.timeline.status === 'ready' && review.timeline.summary">
           <div class="gold-chart-wrap">
             <svg class="gold-chart" viewBox="0 0 100 100" preserveAspectRatio="none"
-              aria-label="Team gold difference across the match">
+              aria-label="Blue and Red team total gold across the match">
               <line class="grid-line top" x1="0" y1="25" x2="100" y2="25" />
               <line class="grid-line" x1="0" y1="50" x2="100" y2="50" />
               <line class="grid-line bottom" x1="0" y1="75" x2="100" y2="75" />
-              <polyline :points="timelinePoints" />
+              <polyline class="blue-series" :points="timelineBluePoints" />
+              <polyline class="red-series" :points="timelineRedPoints" />
             </svg>
+            <span
+              v-for="tick in timelineGoldTicks"
+              :key="tick.gold"
+              class="gold-axis-label"
+              :style="{ top: `${tick.y}%` }"
+            >{{ compactGold(tick.gold) }}</span>
             <span
               v-for="marker in timelineMarkers"
               :key="marker.event.eventId"
@@ -795,8 +867,16 @@ onBeforeUnmount(() => {
               />
               <span v-else>{{ timelineMarkerGlyph(marker.event) }}</span>
             </span>
-            <span class="chart-label blue">Blue lead</span>
-            <span class="chart-label red">Red lead</span>
+            <span class="time-axis start">0:00</span>
+            <span class="time-axis end">{{ formatDuration(timelineDomain.maximumTimestamp / 1_000) }}</span>
+          </div>
+          <div v-if="finalTimelineFrame" class="gold-legend" aria-label="Final team gold totals">
+            <span class="blue"><i />Blue <strong>{{ compactGold(finalTimelineFrame.blueGold) }}</strong></span>
+            <span class="red"><i />Red <strong>{{ compactGold(finalTimelineFrame.redGold) }}</strong></span>
+            <span class="difference" :class="finalGoldDifference >= 0 ? 'blue' : 'red'">
+              {{ finalGoldDifference >= 0 ? "Blue" : "Red" }} finished
+              {{ Math.abs(finalGoldDifference).toLocaleString() }}g ahead
+            </span>
           </div>
           <div class="timeline-filters">
             <button v-for="filter in timelineFilters"
@@ -1003,8 +1083,11 @@ h2 { margin: 0; }
 .seat-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
 .seat.right .seat-body { align-items: flex-end; }
 .seat-line { font-size: 10px; }
+.mastery-line { display: flex; align-items: baseline; gap: 4px; color: var(--gold); font-size: 9px; }
+.mastery-line strong { color: var(--gold-bright); font-family: var(--font-heading); }
 .seat.right .loadout { justify-content: flex-end; }
 .lane { display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--text-secondary); font-family: var(--font-heading); font-size: 10px; letter-spacing: .6px; text-transform: uppercase; }
+.lane-icon { width: 22px; height: 22px; opacity: .84; }
 .matchup-chevron { color: var(--text-muted); font-size: 10px; transition: transform .15s ease; }
 .matchup.open .matchup-chevron { transform: rotate(180deg); }
 .comparison { display: grid; gap: 1px; padding: var(--space-2) 10px var(--space-3); border-top: 1px solid var(--border-subtle); background: var(--surface-1); }
@@ -1012,6 +1095,13 @@ h2 { margin: 0; }
 .compare-augments { padding-top: var(--space-2); }
 .compare-augments .augment-loadout:first-of-type { grid-column: 1 / 3; }
 .compare-augments .augment-loadout:last-of-type { grid-column: 4 / 6; justify-content: flex-end; }
+.compare-mastery { display: grid; grid-template-columns: minmax(0, 1fr) 150px minmax(0, 1fr); align-items: center; gap: 8px; padding-top: var(--space-2); }
+.mastery-card { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 7px 9px; border: 1px solid rgba(200, 170, 109, .3); border-radius: var(--radius-sm); background: rgba(200, 170, 109, .06); font-size: 9px; color: var(--text-secondary); }
+.mastery-card.right { text-align: right; align-items: flex-end; }
+.mastery-card strong { color: var(--gold-bright); font: 10px var(--font-heading); }
+.mastery-card.unavailable { border-color: var(--border-subtle); background: var(--surface-2); color: var(--text-muted); }
+.mastery-track { display: block; width: 100%; height: 3px; overflow: hidden; border-radius: 2px; background: var(--surface-3); }
+.mastery-track > span { display: block; height: 100%; background: var(--gold); }
 .compare-label { text-align: center; font-size: 10px; }
 .compare-value { color: var(--text-secondary); }
 .compare-value:first-child { text-align: right; }
@@ -1027,10 +1117,10 @@ h2 { margin: 0; }
 textarea { width: 100%; box-sizing: border-box; min-height: 110px; resize: vertical; background: var(--surface-0); color: var(--text-primary); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: var(--space-3); font: 12px var(--font-body); }
 .tag-list, .inline, .experiment-outcome, .session-games { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-2); }.tag { border: 1px solid var(--border-subtle); background: var(--surface-2); color: var(--text-secondary); border-radius: 99px; padding: 4px 9px; }.tag.selected { color: var(--gold-bright); border-color: var(--gold); }
 .inline input { flex: 1; }.experiment-outcome { justify-content: space-between; align-items: center; }.outcome-note { flex-basis: 100%; }
-.gold-chart-wrap { position: relative; height: 220px; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: linear-gradient(180deg, color-mix(in srgb, var(--win-dim) 18%, var(--surface-0)) 0 50%, color-mix(in srgb, var(--loss-dim) 18%, var(--surface-0)) 50% 100%); }
-.gold-chart { display: block; width: 100%; height: 100%; }.gold-chart line { stroke: var(--border-strong); stroke-width: .35; stroke-dasharray: 2 2; }.gold-chart .grid-line.top, .gold-chart .grid-line.bottom { stroke: var(--border-subtle); }.gold-chart polyline { fill: none; stroke: var(--gold); stroke-width: 2; vector-effect: non-scaling-stroke; filter: drop-shadow(0 0 3px rgba(200, 170, 109, .35)); }
+.gold-chart-wrap { position: relative; height: 238px; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: linear-gradient(180deg, color-mix(in srgb, var(--surface-2) 82%, #0b2742) 0%, var(--surface-0) 58%, color-mix(in srgb, var(--surface-2) 84%, #35131c) 100%); }
+.gold-chart { display: block; width: 100%; height: 100%; }.gold-chart line { stroke: var(--border-strong); stroke-width: .35; stroke-dasharray: 2 2; }.gold-chart .grid-line.top, .gold-chart .grid-line.bottom { stroke: var(--border-subtle); }.gold-chart polyline { fill: none; stroke-width: 2.2; vector-effect: non-scaling-stroke; }.gold-chart .blue-series { stroke: #35b9dd; filter: drop-shadow(0 0 4px rgba(53, 185, 221, .45)); }.gold-chart .red-series { stroke: #e45868; filter: drop-shadow(0 0 4px rgba(228, 88, 104, .38)); }
 .chart-marker { position: absolute; z-index: 2; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; transform: translate(-50%, -50%); border: 2px solid var(--surface-0); border-radius: 50%; background: var(--surface-3); color: var(--gold-bright); box-shadow: 0 2px 7px rgba(0, 0, 0, .5); cursor: help; transition: width .12s ease, height .12s ease, z-index .12s ease; }.chart-marker:hover, .chart-marker:focus-visible { z-index: 5; width: 30px; height: 30px; outline: 2px solid var(--gold); }.chart-marker img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }.chart-marker span { font: 10px var(--font-heading); }.chart-marker.objective { border-color: var(--gold); }.chart-marker.item { border-radius: var(--radius-sm); border-color: var(--win); }.chart-marker.game { border-color: var(--loss); }
-.chart-label { position: absolute; left: 8px; z-index: 1; padding: 2px 5px; border-radius: 999px; background: color-mix(in srgb, var(--surface-0) 82%, transparent); font-size: 8px; letter-spacing: .8px; text-transform: uppercase; pointer-events: none; }.chart-label.blue { top: 7px; color: var(--win); }.chart-label.red { bottom: 7px; color: var(--loss); }
+.gold-axis-label { position: absolute; left: 7px; z-index: 1; transform: translateY(-50%); color: var(--text-muted); font-size: 8px; font-variant-numeric: tabular-nums; pointer-events: none; }.time-axis { position: absolute; bottom: 5px; z-index: 1; color: var(--text-muted); font-size: 8px; pointer-events: none; }.time-axis.start { left: 7px; }.time-axis.end { right: 7px; }.gold-legend { display: flex; align-items: center; gap: var(--space-3); min-height: 34px; padding: 6px 9px; border: 1px solid var(--border-subtle); border-top: 0; border-radius: 0 0 var(--radius-md) var(--radius-md); background: var(--surface-2); color: var(--text-secondary); font-size: 10px; }.gold-legend > span { display: inline-flex; align-items: center; gap: 5px; }.gold-legend i { width: 14px; height: 3px; border-radius: 2px; }.gold-legend .blue i { background: #35b9dd; }.gold-legend .red i { background: #e45868; }.gold-legend strong { color: var(--text-primary); }.gold-legend .difference { margin-left: auto; }.gold-legend .difference.blue { color: #60cbea; }.gold-legend .difference.red { color: #ef7b88; }
 .timeline-filters { display: flex; gap: var(--space-2); margin-top: var(--space-2); flex-wrap: wrap; }.timeline-filters button { padding: 4px 8px; font-size: 10px; }
 .timeline-filters button:disabled { opacity: .42; cursor: not-allowed; }.timeline-source-note { margin: var(--space-2) 0 0; color: var(--text-muted); font-size: 10px; }
 .events { max-height: 430px; overflow: auto; margin-top: var(--space-3); padding-left: 18px; font-size: 11px; color: var(--text-secondary); border-left: 1px solid var(--border-strong); }.event-row { position: relative; display: grid; grid-template-columns: 42px 30px minmax(0, 1fr) 28px; align-items: center; gap: 8px; min-height: 44px; padding: 4px 8px; border-bottom: 1px solid var(--border-subtle); background: color-mix(in srgb, var(--surface-1) 92%, transparent); }.event-row::before { content: ""; position: absolute; left: -22px; width: 7px; height: 7px; border: 2px solid var(--gold); border-radius: 50%; background: var(--surface-0); }.event-row time { color: var(--gold); font-variant-numeric: tabular-nums; }.event-row img { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }.event-row .victim { filter: grayscale(.35); }.event-row > div { min-width: 0; display: flex; flex-direction: column; }.event-row > div span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.event-glyph { display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid var(--border-strong); border-radius: 50%; color: var(--gold); }.turning-points { margin-top: var(--space-3); font-size: 12px; }

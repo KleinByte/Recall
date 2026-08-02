@@ -32,6 +32,7 @@ import {
 import type { ChallengeRow } from "./challenges/types.js"
 import { ProfileRepository } from "./database/profile-repo.js"
 import { ParticipantsRepository } from "./database/participants-repo.js"
+import { MasteryRepository } from "./database/mastery-repo.js"
 import { LiveGameCaptureRepository } from "./database/live-game-capture-repo.js"
 import { ChampSelectRepository } from "./database/champ-select-repo.js"
 import { RankedRepository } from "./database/ranked-repo.js"
@@ -56,11 +57,17 @@ import { LcuEvents as LcuEventStream } from "./lcu-events.js"
 import { MatchSync } from "./match-sync.js"
 import { syncUntilRecorded } from "./post-game-sync.js"
 import { buildStyleProfile } from "./matches/style.js"
-import type { ModeFamily, TrackedMode } from "./matches/types.js"
+import type {
+  ChampionMasterySnapshot,
+  ModeFamily,
+  ParticipantRow,
+  TrackedMode,
+} from "./matches/types.js"
 import { migrateLegacyUserData } from "./migrate-user-data.js"
 import { createSingleFlightRefresh } from "./full-refresh.js"
 import { readLiveSession, type LivePhase, type LiveSession } from "./live-session.js"
 import { GameClient, readLiveGameSnapshot } from "./game-client.js"
+import { LiveTempoTracker } from "./live-analysis.js"
 import { fetchQueues } from "./matches/queues.js"
 import { RiotHistoryBackfill } from "./riot/history-backfill.js"
 import { canonicalPlatformId, regionalRouteFor } from "./riot/routing.js"
@@ -197,7 +204,9 @@ let repository: MatchesRepository | undefined
 let challenges: ChallengesRepository | undefined
 let profiles: ProfileRepository | undefined
 let participants: ParticipantsRepository | undefined
+let masteryHistory: MasteryRepository | undefined
 let liveGameCaptures: LiveGameCaptureRepository | undefined
+const liveTempoTracker = new LiveTempoTracker()
 let champSelect: ChampSelectRepository | undefined
 let rankedHistory: RankedRepository | undefined
 let goals: GoalsRepository | undefined
@@ -252,6 +261,102 @@ function getProfiles(): ProfileRepository {
 function getParticipants(): ParticipantsRepository {
   if (!participants) participants = new ParticipantsRepository(getDatabase())
   return participants
+}
+
+function getMasteryHistory() {
+  if (!masteryHistory) masteryHistory = new MasteryRepository(getDatabase())
+  return masteryHistory
+}
+
+const MASTERY_CACHE_MAX_AGE_MS = 6 * 60 * 60_000
+
+interface LcuChampionMastery {
+  championId?: number
+  championLevel?: number
+  championPoints?: number
+  championPointsSinceLastLevel?: number
+  championPointsUntilNextLevel?: number
+  tokensEarned?: number
+  highestGrade?: string
+}
+
+const masteryKey = (participantPuuid: string, championId: number) =>
+  `${participantPuuid}:${championId}`
+
+function integerOrZero(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, Math.trunc(value))
+    : 0
+}
+
+function attachCachedMasteries(ownerPuuid: string, rows: ParticipantRow[]) {
+  return rows.map((row) => {
+    const participantPuuid = row.participantPuuid ??
+      (row.isPlayer === 1 ? ownerPuuid : undefined)
+    const mastery = participantPuuid
+      ? getMasteryHistory().get(ownerPuuid, participantPuuid, row.championId)
+      : undefined
+    return { ...row, participantPuuid, mastery }
+  })
+}
+
+/**
+ * Adds small, cached mastery projections to a review scoreboard.
+ *
+ * Riot's match payload says who played; the authenticated LCU mastery route
+ * says how experienced that player is on the champion. Missing identities,
+ * old matches, privacy/service failures and a closed client all degrade to an
+ * ordinary scoreboard rather than making the review fail.
+ */
+async function attachPlayerMasteries(ownerPuuid: string, rows: ParticipantRow[]) {
+  const cached = attachCachedMasteries(ownerPuuid, rows)
+  if (!session) return cached
+
+  const refresh = new Map<string, { participantPuuid: string; championId: number }>()
+  const now = Date.now()
+  for (const row of cached) {
+    if (!row.participantPuuid) continue
+    if (row.mastery && now - row.mastery.updatedAt < MASTERY_CACHE_MAX_AGE_MS) continue
+    refresh.set(masteryKey(row.participantPuuid, row.championId), {
+      participantPuuid: row.participantPuuid,
+      championId: row.championId,
+    })
+  }
+
+  await Promise.allSettled([...refresh.values()].map(async (entry) => {
+    const payload = await session!.client.request<
+      LcuChampionMastery[] | Record<string, LcuChampionMastery>
+    >(`/lol-champion-mastery/v1/${encodeURIComponent(entry.participantPuuid)}/champion-mastery`)
+    const masteries = Array.isArray(payload) ? payload : Object.values(payload ?? {})
+    const found = masteries.find((mastery) => mastery.championId === entry.championId)
+    if (!found) return
+
+    const snapshot: ChampionMasterySnapshot = {
+      championId: entry.championId,
+      championLevel: integerOrZero(found.championLevel),
+      championPoints: integerOrZero(found.championPoints),
+      championPointsSinceLastLevel: integerOrZero(found.championPointsSinceLastLevel),
+      championPointsUntilNextLevel: integerOrZero(found.championPointsUntilNextLevel),
+      tokensEarned: integerOrZero(found.tokensEarned),
+      highestGrade: typeof found.highestGrade === "string"
+        ? found.highestGrade
+        : undefined,
+      updatedAt: now,
+    }
+    getMasteryHistory().upsert(ownerPuuid, entry.participantPuuid, snapshot)
+  }))
+
+  return attachCachedMasteries(ownerPuuid, rows)
+}
+
+function attachMatchCardDetails<T extends { gameId: number }>(
+  ownerPuuid: string,
+  rows: T[],
+) {
+  return rows.map((row) => ({
+    ...row,
+    participants: getParticipants().getMatchDetail(row.gameId, ownerPuuid).participants,
+  }))
 }
 
 function getRankedHistory(): RankedRepository {
@@ -636,6 +741,7 @@ function stopSession(win: BrowserWindow) {
 
 function clearLiveSession(win: BrowserWindow) {
   liveRevision += 1
+  liveTempoTracker.reset()
   assignedPositions.clear()
   liveSession = { phase: "Idle", benchChampionIds: [], allies: [], enemies: [], updatedAt: Date.now() }
   broadcast(win, "live:updated", liveSession)
@@ -706,6 +812,7 @@ async function refreshLiveGameData(win: BrowserWindow) {
       liveSession.phase !== "InProgress" ||
       liveSession.gameId !== expectedGameId
     ) return
+    game.analysis = liveTempoTracker.update(game)
     if (expectedGameId !== undefined) {
       getLiveGameCaptures().record(
         expectedGameId,
@@ -1301,12 +1408,17 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     })
     return getParticipants().cacheAugmentCatalog(dataVersion, entries)
   })
-  ipcMain.handle("review:match", (_event, rawGameId: unknown) =>
-    getReviewService(win).match(
+  ipcMain.handle("review:match", async (_event, rawGameId: unknown) => {
+    const puuid = withPuuid().puuid
+    const review = getReviewService(win).match(
       integer(rawGameId, "Game id"),
-      withPuuid().puuid,
-    ),
-  )
+      puuid,
+    )
+    return {
+      ...review,
+      scoreboard: await attachPlayerMasteries(puuid, review.scoreboard),
+    }
+  })
   ipcMain.handle(
     "review:sessions",
     (_event, rawPage: unknown, rawPageSize: unknown) =>
@@ -1579,8 +1691,13 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
 
   ipcMain.handle(
     "stats:matches",
-    (_event, filter: Partial<StatsFilter>, limit: number) =>
-      getRepository().getRecentMatches(withPuuid(filter), limit),
+    (_event, filter: Partial<StatsFilter>, limit: number) => {
+      const scoped = withPuuid(filter)
+      return attachMatchCardDetails(
+        scoped.puuid,
+        getRepository().getRecentMatches(scoped, limit),
+      )
+    },
   )
 
   ipcMain.handle(
@@ -1603,12 +1720,18 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
 
   ipcMain.handle(
     "matches:list",
-    (_event, query: Record<string, unknown>, page: number, pageSize: number) =>
-      getRepository().listMatches(
-        { ...query, puuid: withPuuid().puuid },
+    (_event, query: Record<string, unknown>, page: number, pageSize: number) => {
+      const puuid = withPuuid().puuid
+      const result = getRepository().listMatches(
+        { ...query, puuid },
         page,
         pageSize,
-      ),
+      )
+      return {
+        ...result,
+        rows: attachMatchCardDetails(puuid, result.rows),
+      }
+    },
   )
 
   ipcMain.handle("matches:champions", () =>
@@ -1991,6 +2114,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     riotBackfillTask = undefined
     getLiveGameCaptures().deleteAll(puuid)
     getChampSelect().deleteAll(puuid)
+    getMasteryHistory().deleteAll(puuid)
     getParticipants().deleteAll(puuid)
     getRiotBackfills().deleteAll(puuid)
     const deleted = getRepository().deleteAll(puuid)

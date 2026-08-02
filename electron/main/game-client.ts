@@ -1,4 +1,5 @@
 import { Agent, request } from "node:https"
+import type { LiveGameAnalysis } from "./live-analysis.js"
 
 export interface LiveGameItem {
   itemId: number
@@ -59,6 +60,8 @@ export interface LiveGameSnapshot {
   allies: LiveGamePlayer[]
   enemies: LiveGamePlayer[]
   events: LiveGameEvent[]
+  /** Local, explainable estimates derived from fields available to both teams. */
+  analysis?: LiveGameAnalysis
   updatedAt: number
   error?: string
 }

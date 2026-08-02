@@ -29,6 +29,8 @@ export interface ModeInfo {
  */
 export interface ParticipantRow {
   gameId: number
+  /** The scoreboard participant's identity, when Riot exposed it. */
+  participantPuuid?: string
   puuid: string
   participantId: number
   teamId: number
@@ -86,6 +88,19 @@ export interface ParticipantRow {
   assignedPosition?: string
   augments?: AugmentSelection[]
   extendedMetrics?: Record<string, number | boolean | string>
+  /** Latest mastery snapshot Recall could read for this player/champion. */
+  mastery?: ChampionMasterySnapshot
+}
+
+export interface ChampionMasterySnapshot {
+  championId: number
+  championLevel: number
+  championPoints: number
+  championPointsSinceLastLevel: number
+  championPointsUntilNextLevel: number
+  tokensEarned: number
+  highestGrade?: string
+  updatedAt: number
 }
 
 export interface AugmentSelection {
@@ -250,6 +265,8 @@ export interface MatchRow {
   /** Rank among the lobby by Recall grade; absent unless every player is graded. */
   lobbyPlace?: number
   lobbySize?: number
+  /** Scoreboard rows attached only for rich match-card responses. */
+  participants?: ParticipantRow[]
 }
 
 export type PerformanceLabelPolarity = "positive" | "negative" | "mixed"

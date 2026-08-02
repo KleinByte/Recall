@@ -47,12 +47,21 @@ describe("desktop page layout", () => {
 
   it("uses distinct champion-select and in-game live layouts", () => {
     const live = read("src/pages/LiveGamePage.vue")
+    const tempo = read("src/components/TempoGauge.vue")
 
     expect(live).toContain("live.phase === 'ChampSelect'")
     expect(live).toContain('class="choice-table"')
     expect(live).toContain("composition-card")
     expect(live).toContain("live-scoreboard")
     expect(live).toContain("live.game.activePlayer")
+    expect(live).toContain('class="live-intelligence"')
+    expect(live).toContain("Estimated team gold")
+    expect(live).toContain("Win confidence")
+    expect(live).toContain("<TempoGauge")
+    expect(tempo).toContain('type: "gauge"')
+    expect(tempo).toContain('class="velocity-ring"')
+    expect(tempo).toContain('class="tempo-needle"')
+    expect(tempo).toContain("prefers-reduced-motion")
   })
 
   it("places event icons directly on the timeline graph", () => {
@@ -66,6 +75,10 @@ describe("desktop page layout", () => {
     expect(review).toContain("timelineObjectiveIconUrl")
     expect(review).toContain("abilityAsset(event)")
     expect(review).toContain("killActor(event)")
+    expect(review).toContain('class="blue-series"')
+    expect(review).toContain('class="red-series"')
+    expect(review).toContain("timelineTeamGoldPoints")
+    expect(review).toContain("finalTimelineFrame.blueGold")
   })
 
   it("sets the review scoreboard out as lane matchups that open independently", () => {
@@ -84,17 +97,30 @@ describe("desktop page layout", () => {
     expect(review).not.toContain('class="team-grid"')
   })
 
-  it("gives the match list a header aligned to its rows", () => {
+  it("shows a dense at-a-glance match card with builds and both teams", () => {
     const matches = read("src/components/MatchList.vue")
 
-    expect(matches).toMatch(/\.match-list \{[\s\S]*--match-grid:/)
-    expect(matches).toMatch(/\.columns \{[\s\S]*grid-template-columns: var\(--match-grid\)/)
-    expect(matches).toMatch(/\.row \{[\s\S]*grid-template-columns: var\(--match-grid\)/)
-    expect(matches).toContain('<span class="col-role">Role</span>')
-    expect(matches).toContain('<span class="col-cs">CS</span>')
-    expect(matches).toContain('<span class="col-rank">Rank</span>')
-    expect(matches).toContain("resolvePosition(match.lane, match.role, match.assignedPosition)")
-    expect(matches).toContain("match.lobbySize")
+    expect(matches).toContain('class="card-main"')
+    expect(matches).toContain('class="build"')
+    expect(matches).toContain('class="rosters"')
+    expect(matches).toContain('class="team-roster"')
+    expect(matches).toContain("killParticipation(match)")
+    expect(matches).toContain("player(match)?.items")
+    expect(matches).toContain("match.participants")
+    expect(matches).toContain("positionIconUrl")
+    expect(matches).toContain("match.lobbyPlace")
+  })
+
+  it("uses League role art and shows player mastery throughout reviews", () => {
+    const roles = read("src/helpers/roles.ts")
+    const review = read("src/pages/ReviewPage.vue")
+
+    expect(roles).toContain("rcp-fe-lol-champ-select")
+    expect(roles).toContain("position-${position ? INFO[position].asset")
+    expect(review).toContain("row.left.mastery.championLevel")
+    expect(review).toContain("row.right.mastery.championPoints")
+    expect(review).toContain('class="compare-mastery"')
+    expect(review).toContain("positionIconUrl(row.position)")
   })
 
   it("pairs recent form with a responsive Dial gauge", () => {

@@ -53,6 +53,34 @@ export interface LiveGameEvent {
   result?: string
 }
 
+export interface LiveResourceAnalysis {
+  allyGold: number
+  enemyGold: number
+  difference: number
+  quality: "building" | "fair" | "strong"
+  source: "estimated"
+}
+
+export interface LiveWinConfidence {
+  percent: number
+  label: "Strongly favored" | "Favored" | "Even" | "Under pressure" | "Long shot"
+  factors: string[]
+}
+
+export interface LiveTempoAnalysis {
+  score: number
+  label: "Surging" | "Building" | "Stable" | "Slipping" | "Collapsing"
+  direction: "up" | "steady" | "down"
+  leadDelta: number
+  factors: string[]
+}
+
+export interface LiveGameAnalysis {
+  resources: LiveResourceAnalysis
+  winConfidence: LiveWinConfidence
+  tempo: LiveTempoAnalysis
+}
+
 export interface LiveGameSnapshot {
   available: boolean
   gameTime: number
@@ -70,6 +98,7 @@ export interface LiveGameSnapshot {
   allies: LiveGamePlayer[]
   enemies: LiveGamePlayer[]
   events: LiveGameEvent[]
+  analysis?: LiveGameAnalysis
   updatedAt: number
   error?: string
 }

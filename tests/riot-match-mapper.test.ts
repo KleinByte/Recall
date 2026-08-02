@@ -132,6 +132,7 @@ describe("mapRiotMatch", () => {
     expect(result.match.puuid).toBe("local-client-uuid")
     expect(result.participants[0]).toMatchObject({
       puuid: "local-client-uuid",
+      participantPuuid: PUUID,
       isPlayer: 1,
     })
   })

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
+import TempoGauge from "../components/TempoGauge.vue"
 import { api } from "../helpers/api"
 import { useApiEvents } from "../helpers/use-api-events"
 import {
@@ -273,6 +274,23 @@ const recentEvents = computed(() =>
     .sort((left, right) => right.time - left.time)
     .slice(0, 8),
 )
+
+const analysis = computed(() => live.value.game?.analysis)
+const allyResourceShare = computed(() => {
+  const resources = analysis.value?.resources
+  if (!resources) return 50
+  const total = resources.allyGold + resources.enemyGold
+  return total > 0 ? resources.allyGold / total * 100 : 50
+})
+const compactLiveGold = (value: number) =>
+  `${(value / 1_000).toFixed(value >= 10_000 ? 1 : 2)}k`
+const signedLiveGold = (value: number) =>
+  `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(Math.round(value)).toLocaleString()}g`
+const estimateQualityLabel = (quality: "building" | "fair" | "strong") => ({
+  building: "Building estimate",
+  fair: "Fair estimate",
+  strong: "Strong estimate",
+})[quality]
 
 function eventLabel(name: string) {
   const labels: Record<string, string> = {
@@ -549,6 +567,68 @@ function eventLabel(name: string) {
         </article>
       </section>
 
+      <section v-if="analysis" class="live-intelligence">
+        <article class="card resource-card">
+          <div class="section-head compact">
+            <div>
+              <p class="eyebrow">Resource control</p>
+              <h2 class="section-title">Estimated team gold</h2>
+            </div>
+            <span class="estimate-quality" :class="analysis.resources.quality">
+              {{ estimateQualityLabel(analysis.resources.quality) }}
+            </span>
+          </div>
+          <div class="resource-totals">
+            <div class="ally"><span>Your team</span><strong>{{ compactLiveGold(analysis.resources.allyGold) }}</strong></div>
+            <div class="resource-lead" :class="analysis.resources.difference >= 0 ? 'ahead' : 'behind'">
+              <span>{{ analysis.resources.difference >= 0 ? "Lead" : "Deficit" }}</span>
+              <strong>{{ signedLiveGold(analysis.resources.difference) }}</strong>
+            </div>
+            <div class="enemy"><span>Opponents</span><strong>{{ compactLiveGold(analysis.resources.enemyGold) }}</strong></div>
+          </div>
+          <div class="resource-track" aria-label="Estimated team resource share">
+            <span class="ally-fill" :style="{ width: `${allyResourceShare}%` }" />
+            <i class="midpoint" />
+          </div>
+          <div class="win-outlook" :class="{
+            favored: analysis.winConfidence.percent >= 56,
+            danger: analysis.winConfidence.percent < 45,
+          }">
+            <div>
+              <span>Win confidence</span>
+              <strong>{{ analysis.winConfidence.percent }}%</strong>
+            </div>
+            <div class="confidence-copy">
+              <strong>{{ analysis.winConfidence.label }}</strong>
+              <span>{{ analysis.winConfidence.factors.join(" · ") }}</span>
+            </div>
+          </div>
+          <p class="estimate-note">
+            Estimated from symmetric live-feed signals; Riot does not expose exact team gold during play.
+          </p>
+        </article>
+
+        <article class="card tempo-card">
+          <div class="section-head compact">
+            <div>
+              <p class="eyebrow">Recent execution</p>
+              <h2 class="section-title">Tempo</h2>
+            </div>
+            <span class="tempo-direction" :class="analysis.tempo.direction">
+              {{ analysis.tempo.direction === "up" ? "↗ Rising" : analysis.tempo.direction === "down" ? "↘ Falling" : "→ Steady" }}
+            </span>
+          </div>
+          <TempoGauge
+            :score="analysis.tempo.score"
+            :label="analysis.tempo.label"
+            :direction="analysis.tempo.direction"
+          />
+          <div class="tempo-factors">
+            <span v-for="factor in analysis.tempo.factors" :key="factor">{{ factor }}</span>
+          </div>
+        </article>
+      </section>
+
       <section v-if="!live.game" class="card game-connecting">
         <span class="pulse"></span>
         <div>
@@ -710,6 +790,12 @@ function eventLabel(name: string) {
 .live-summary { display: grid; grid-template-columns: repeat(6, minmax(110px, 1fr)); gap: var(--space-3); }
 .metric-card { display: flex; flex-direction: column; gap: 3px; padding: var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: linear-gradient(145deg, var(--surface-2), var(--surface-1)); }
 .metric-card span { color: var(--text-secondary); font-size: 9px; letter-spacing: 1px; text-transform: uppercase; }.metric-card strong { color: var(--gold-bright); font: 21px var(--font-display); }.metric-card.score strong { color: var(--win); }.metric-card.score i { color: var(--text-muted); font-style: normal; }
+.live-intelligence { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(310px, .72fr); gap: var(--space-4); align-items: stretch; }
+.resource-card, .tempo-card { padding: var(--space-4); overflow: hidden; }.resource-card { background: radial-gradient(circle at 8% 0, rgba(36, 164, 203, .12), transparent 38%), linear-gradient(145deg, var(--surface-2), var(--surface-1)); }.tempo-card { background: radial-gradient(circle at 50% 36%, rgba(34, 188, 176, .09), transparent 43%), linear-gradient(160deg, var(--surface-2), var(--surface-1)); }
+.estimate-quality, .tempo-direction { padding: 4px 7px; border: 1px solid var(--border-subtle); border-radius: 999px; color: var(--text-secondary); font-size: 8px; letter-spacing: .7px; text-transform: uppercase; }.estimate-quality.strong { color: var(--win); border-color: var(--win-dim); }.estimate-quality.fair { color: var(--gold); }.tempo-direction.up { color: #39d8b0; border-color: rgba(57, 216, 176, .35); }.tempo-direction.down { color: var(--loss); border-color: var(--loss-dim); }
+.resource-totals { display: grid; grid-template-columns: 1fr auto 1fr; align-items: end; gap: var(--space-4); margin-top: var(--space-4); }.resource-totals > div { display: flex; flex-direction: column; }.resource-totals span { color: var(--text-secondary); font-size: 9px; letter-spacing: .8px; text-transform: uppercase; }.resource-totals strong { color: var(--text-primary); font: 27px var(--font-display); }.resource-totals .enemy { text-align: right; }.resource-totals .ally strong { color: #59c8e5; }.resource-totals .enemy strong { color: #ed7784; }.resource-lead { align-items: center; padding: 4px 11px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface-0); }.resource-lead strong { font-size: 16px; }.resource-lead.ahead strong { color: var(--win); }.resource-lead.behind strong { color: var(--loss); }
+.resource-track { position: relative; height: 9px; margin-top: var(--space-3); overflow: hidden; border-radius: 1px; background: linear-gradient(90deg, rgba(53, 185, 221, .28), rgba(228, 88, 104, .5)); box-shadow: inset 0 0 0 1px var(--border-subtle); }.ally-fill { display: block; height: 100%; background: linear-gradient(90deg, #16799a, #41c0df); transition: width .45s ease; }.midpoint { position: absolute; inset: -2px auto -2px 50%; width: 1px; background: #e8d69d; box-shadow: 0 0 5px rgba(232, 214, 157, .7); }
+.win-outlook { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--space-4); margin-top: var(--space-4); padding: var(--space-3); border-left: 3px solid var(--gold); background: color-mix(in srgb, var(--gold-dim) 12%, var(--surface-0)); }.win-outlook.favored { border-left-color: var(--win); }.win-outlook.danger { border-left-color: var(--loss); }.win-outlook > div:first-child { display: flex; flex-direction: column; min-width: 88px; }.win-outlook span { color: var(--text-secondary); font-size: 9px; }.win-outlook > div:first-child > span { letter-spacing: .9px; text-transform: uppercase; }.win-outlook > div:first-child strong { color: var(--gold-bright); font: 29px var(--font-display); }.confidence-copy { display: flex; flex-direction: column; gap: 2px; }.confidence-copy strong { color: var(--text-primary); font: 12px var(--font-heading); }.estimate-note { margin: var(--space-2) 0 0; color: var(--text-muted); font-size: 9px; }.tempo-factors { display: flex; justify-content: center; gap: 5px; flex-wrap: wrap; margin-top: var(--space-1); }.tempo-factors span { padding: 3px 6px; border: 1px solid var(--border-subtle); border-radius: 999px; background: var(--surface-0); color: var(--text-secondary); font-size: 8px; }
 .pulse { width: 13px; height: 13px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 0 0 rgba(200, 170, 109, .4); animation: pulse 1.6s infinite; }
 .in-game-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; align-items: start; gap: var(--space-4); }
 .live-team + .live-team { margin-top: var(--space-4); }.live-team h3 { margin: 0 0 var(--space-2); color: var(--win); font: 10px var(--font-heading); letter-spacing: 1.2px; text-transform: uppercase; }.live-team + .live-team h3 { color: var(--loss); }
@@ -728,11 +814,13 @@ function eventLabel(name: string) {
   .choice-row { grid-template-columns: minmax(200px, 1.3fr) 90px 145px 90px minmax(180px, 1fr); }
   .lobby-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
   .live-summary { grid-template-columns: repeat(3, minmax(110px, 1fr)); }
+  .live-intelligence { grid-template-columns: minmax(0, 1fr) 310px; }
   .in-game-grid { grid-template-columns: 1fr; }.game-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 860px) {
   .choice-head { display: none; }.choice-row { grid-template-columns: minmax(190px, 1.3fr) 78px 130px; }.choice-row > * { padding: var(--space-2); }.choice-row .confidence-cell { display: none; }.choice-row .reason-cell { grid-column: 1 / -1; padding-top: 0; }
   .prep-grid { grid-template-columns: 1fr; }.selected-stats { grid-template-columns: repeat(2, 1fr); }
+  .live-intelligence { grid-template-columns: 1fr; }.tempo-card { min-height: 230px; }
   .live-player { grid-template-columns: 34px minmax(120px, 1fr) 58px minmax(120px, .8fr); }.live-player .live-cs { display: none; }
 }
 @media (max-width: 620px) {
@@ -740,7 +828,8 @@ function eventLabel(name: string) {
   .objective-row { width: 100%; grid-template-columns: 1fr; }.objective-row .loading-label { grid-column: auto; }
   .choice-row { grid-template-columns: 1fr 70px; }.choice-row .record-cell { grid-column: 1 / -1; padding-top: 0; }.champion-cell { grid-template-columns: 22px 36px minmax(0, 1fr); }.champion-cell img { width: 34px; height: 34px; }.current-tag { display: none; }
   .live-summary { grid-template-columns: repeat(2, minmax(100px, 1fr)); }.game-rail { grid-template-columns: 1fr; }
+  .resource-totals { gap: var(--space-2); }.resource-totals strong { font-size: 21px; }.resource-lead { padding: 4px 7px; }.resource-lead strong { font-size: 13px; }.win-outlook { grid-template-columns: 1fr; gap: var(--space-2); }
   .live-player { grid-template-columns: 32px minmax(100px, 1fr) 52px; }.live-player .live-items { display: none; }
 }
-@media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none; }.ally-fill { transition: none; } }
 </style>

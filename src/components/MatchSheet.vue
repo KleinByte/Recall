@@ -11,7 +11,7 @@ import StatTile from "./ui/StatTile.vue"
 import { api } from "../helpers/api"
 import { labelIcon } from "../helpers/label-icons"
 import { lobbyStandings } from "../helpers/match-detail"
-import { positionIcon, positionLabel, resolvePosition } from "../helpers/roles"
+import { positionIconUrl, positionLabel, resolvePosition } from "../helpers/roles"
 import { closeMatch, reviewMatch } from "../helpers/navigation"
 import {
   championIconUrl,
@@ -191,7 +191,7 @@ const evidenceOf = (label: PerformanceLabel) =>
             {{ formatRelativeDate(match.playedAt) }}
           </p>
           <p v-if="position" class="muted line role-line">
-            <FontAwesomeIcon :icon="positionIcon(position)" aria-hidden="true" />
+            <img :src="positionIconUrl(position)" class="role-icon" alt="" />
             {{ positionLabel(position) }}
           </p>
         </div>
@@ -384,6 +384,8 @@ const evidenceOf = (label: PerformanceLabel) =>
   gap: 6px;
   color: var(--text-secondary);
 }
+
+.role-icon { width: 15px; height: 15px; opacity: .82; }
 
 .close {
   margin-left: auto;

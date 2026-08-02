@@ -124,6 +124,7 @@ describe("mapParticipants", () => {
 
     expect(rows[3].summonerName).toBe("Player3#NA1")
     expect(rows[3].profileIcon).toBe(503)
+    expect(rows[3].participantPuuid).toBe("other-3")
   })
 
   it("falls back to a summoner name when there is no Riot ID", () => {

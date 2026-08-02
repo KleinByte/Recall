@@ -2,11 +2,12 @@
 import GradeBadge from "./GradeBadge.vue"
 import { faChevronRight } from "@fortawesome/free-solid-svg-icons"
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
-import type { MatchRow } from "../types/stats"
+import type { MatchRow, ParticipantRow } from "../types/stats"
 import type { Champion } from "../types/lol"
 import { openMatch } from "../helpers/navigation"
 import { labelIcon } from "../helpers/label-icons"
-import { positionIcon, positionLabel, resolvePosition } from "../helpers/roles"
+import { itemIconUrl, summonerSpellIconUrl } from "../helpers/ddragon"
+import { positionIconUrl, positionLabel, resolvePosition } from "../helpers/roles"
 import {
   championIconUrl,
   championNameById,
@@ -17,327 +18,300 @@ import {
   modeLabel,
 } from "../helpers/format"
 
-defineProps<{
+const props = defineProps<{
   matches: MatchRow[]
   champions: Champion[] | null
 }>()
+
+const player = (match: MatchRow) =>
+  match.participants?.find((row) => row.isPlayer === 1)
+
+const spells = (match: MatchRow) => {
+  const owner = player(match)
+  return [owner?.spell1Id, owner?.spell2Id]
+    .filter((spell): spell is number => typeof spell === "number" && spell > 0)
+}
 
 const kda = (match: MatchRow) =>
   match.deaths === 0
     ? match.kills + match.assists
     : (match.kills + match.assists) / match.deaths
 
-// Lane-based modes assign positions; ARAM and Arena would report noise.
-const position = (match: MatchRow) =>
+const position = (match: MatchRow) => {
+  if (match.modeFamily !== "sr" && match.modeFamily !== "classic") return undefined
+  const owner = player(match)
+  return resolvePosition(
+    owner?.lane ?? match.lane,
+    owner?.role ?? match.role,
+    owner?.assignedPosition ?? match.assignedPosition,
+  )
+}
+
+const participantPosition = (match: MatchRow, row: ParticipantRow) =>
   match.modeFamily === "sr" || match.modeFamily === "classic"
-    ? resolvePosition(match.lane, match.role, match.assignedPosition)
+    ? resolvePosition(row.lane, row.role, row.assignedPosition)
     : undefined
 
 const creepScore = (match: MatchRow) =>
   match.totalMinionsKilled + match.neutralMinions
+
+const side = (match: MatchRow, teamId: number) =>
+  (match.participants ?? []).filter((row) => row.teamId === teamId)
+
+const teamKills = (match: MatchRow, teamId?: number) =>
+  teamId
+    ? side(match, teamId).reduce((sum, row) => sum + row.kills, 0)
+    : 0
+
+const killParticipation = (match: MatchRow) => {
+  const owner = player(match)
+  const kills = teamKills(match, owner?.teamId)
+  return kills > 0 ? (match.kills + match.assists) / kills : 0
+}
+
+const patchLabel = (version: string) => {
+  const [major, minor] = version.split(".")
+  return major && minor ? `${major}.${minor}` : version
+}
+
+const displayName = (row: ParticipantRow) =>
+  row.summonerName ?? championNameById(props.champions, row.championId)
 </script>
 
 <template>
   <div class="match-list">
-    <div v-if="matches.length" class="columns muted" aria-hidden="true">
-      <span></span>
-      <span></span>
-      <span>Champion</span>
-      <span class="col-role">Role</span>
-      <span class="col-result">Result</span>
-      <span class="col-kda">K / D / A</span>
-      <span class="col-cs">CS</span>
-      <span class="col-damage">Damage</span>
-      <span class="col-rank">Rank</span>
-      <span class="col-date">Played</span>
-      <span></span>
-    </div>
-
-    <div
+    <article
       v-for="match in matches"
       :key="match.gameId"
-      class="match"
+      class="match-card"
       :class="match.win ? 'won' : 'lost'"
     >
-      <button class="row" @click="openMatch(match)">
-        <GradeBadge :grade="match.grade" />
-
-        <img
-          class="icon"
-          :src="championIconUrl(match.championId)"
-          :alt="championNameById(champions, match.championId)"
-          loading="lazy"
-        />
-
-        <div class="identity">
-          <div class="champ">
-            {{ championNameById(champions, match.championId) }}
-          </div>
-          <div class="meta muted">
-            <span class="mode-tag">{{ match.queueName ?? modeLabel(match.mode) }}</span>
-            <span>{{ formatDuration(match.durationSecs) }}</span>
-            <span v-if="match.bookmarked" title="Bookmarked">★</span>
-            <span v-if="match.hasNote" title="Has note">Note</span>
-            <span v-if="match.experimentCount" title="Practice experiment">Experiment</span>
-          </div>
-          <div v-if="match.labelNames?.length" class="row-labels">
-            <span v-for="label in match.labelNames.slice(0, 3)" :key="label" class="game-label">
-              <FontAwesomeIcon :icon="labelIcon(label)" class="label-icon" aria-hidden="true" />
-              {{ label }}
+      <button class="card-button" @click="openMatch(match)">
+        <header class="card-head">
+          <div class="headline">
+            <span class="outcome" :class="match.win ? 'win-text' : 'loss-text'">
+              {{ match.win ? "Victory" : "Defeat" }}
             </span>
+            <strong>{{ match.queueName ?? modeLabel(match.mode) }}</strong>
+            <span class="muted">{{ formatRelativeDate(match.playedAt) }}</span>
+            <span class="dot">·</span>
+            <span class="muted">{{ formatDuration(match.durationSecs) }}</span>
+            <span class="dot">·</span>
+            <span class="muted">Patch {{ patchLabel(match.gameVersion) }}</span>
           </div>
-          <div v-else-if="match.tagNames?.length" class="row-tags muted">
-            {{ match.tagNames.join(" · ") }}
-          </div>
+          <span class="details-link">
+            Match details
+            <FontAwesomeIcon :icon="faChevronRight" aria-hidden="true" />
+          </span>
+        </header>
+
+        <div class="card-main">
+          <section class="champion-block">
+            <span class="portrait-wrap">
+              <img
+                class="champion-icon"
+                :src="championIconUrl(match.championId)"
+                :alt="championNameById(champions, match.championId)"
+                loading="lazy"
+              />
+              <img
+                v-if="position(match)"
+                class="portrait-role"
+                :src="positionIconUrl(position(match))"
+                :title="positionLabel(position(match))"
+                alt=""
+              />
+            </span>
+
+            <span class="spells" aria-label="Summoner spells">
+              <img
+                v-for="spell in spells(match)"
+                :key="spell"
+                :src="summonerSpellIconUrl(spell)"
+                alt=""
+              />
+            </span>
+
+            <GradeBadge :grade="match.grade" />
+          </section>
+
+          <section class="stat-block kda-block">
+            <strong class="numeric kda-line">
+              {{ match.kills }} <span>/</span> {{ match.deaths }} <span>/</span> {{ match.assists }}
+            </strong>
+            <span class="accent numeric">{{ formatDecimal(kda(match), 2) }} KDA</span>
+          </section>
+
+          <section class="stat-block">
+            <strong class="numeric">{{ creepScore(match) }} CS</strong>
+            <span class="muted numeric">{{ formatDecimal(match.csPerMin ?? 0, 1) }} per min</span>
+          </section>
+
+          <section class="stat-block contribution">
+            <strong class="numeric">{{ formatDecimal(killParticipation(match) * 100, 1) }}% KP</strong>
+            <span class="muted numeric">{{ formatCompact(match.damageToChampions) }} champion dmg</span>
+          </section>
+
+          <section class="build" aria-label="Final build">
+            <template v-for="(item, index) in player(match)?.items ?? []" :key="index">
+              <img
+                v-if="itemIconUrl(item)"
+                :src="itemIconUrl(item)"
+                :title="`Item ${item}`"
+                alt=""
+              />
+              <span v-else class="item-empty" />
+            </template>
+          </section>
+
+          <section v-if="match.participants?.length" class="rosters" aria-label="Match roster">
+            <div v-for="teamId in [100, 200]" :key="teamId" class="team-roster">
+              <span
+                v-for="row in side(match, teamId)"
+                :key="row.participantId"
+                class="roster-player"
+                :class="{ me: row.isPlayer === 1 }"
+                :title="`${displayName(row)} — ${row.kills}/${row.deaths}/${row.assists}`"
+              >
+                <img class="roster-champion" :src="championIconUrl(row.championId)" alt="" />
+                <img
+                  v-if="participantPosition(match, row)"
+                  class="roster-role"
+                  :src="positionIconUrl(participantPosition(match, row))"
+                  alt=""
+                />
+                <span class="roster-name">{{ displayName(row) }}</span>
+              </span>
+            </div>
+          </section>
         </div>
 
-        <div class="role" :class="{ muted: !position(match) }">
-          <template v-if="position(match)">
-            <FontAwesomeIcon :icon="positionIcon(position(match))" aria-hidden="true" />
-            {{ positionLabel(position(match)) }}
-          </template>
-          <template v-else>—</template>
-        </div>
-
-        <div class="result" :class="match.win ? 'win-text' : 'loss-text'">
-          {{ match.win ? "Victory" : "Defeat" }}
-        </div>
-
-        <div class="kda numeric">
-          {{ match.kills }} / {{ match.deaths }} / {{ match.assists }}
-          <span class="muted ratio">{{ formatDecimal(kda(match), 2) }} KDA</span>
-        </div>
-
-        <div class="cs numeric">
-          {{ creepScore(match) }}
-          <span class="muted sub">{{ formatDecimal(match.csPerMin ?? 0, 1) }}/m</span>
-        </div>
-
-        <div class="damage numeric muted">
-          {{ formatCompact(match.damageToChampions) }}
-        </div>
-
-        <div class="rank numeric" :class="{ muted: !match.lobbyPlace }">
-          <template v-if="match.lobbyPlace">
-            <span :class="{ mvp: match.lobbyPlace === 1 }">{{ match.lobbyPlace }}</span>
-            <span class="muted sub">of {{ match.lobbySize }}</span>
-          </template>
-          <template v-else>—</template>
-        </div>
-
-        <div class="date muted">{{ formatRelativeDate(match.playedAt) }}</div>
-        <FontAwesomeIcon :icon="faChevronRight" class="open-indicator" />
+        <footer class="card-foot">
+          <span v-if="match.lobbyPlace" class="place-chip" :class="{ mvp: match.lobbyPlace === 1 }">
+            {{ match.lobbyPlace === 1 ? "MVP" : `Lobby #${match.lobbyPlace}` }}
+          </span>
+          <span
+            v-for="label in match.labelNames?.slice(0, 5) ?? []"
+            :key="label"
+            class="game-label"
+          >
+            <FontAwesomeIcon :icon="labelIcon(label)" aria-hidden="true" />
+            {{ label }}
+          </span>
+          <span v-for="tag in match.tagNames ?? []" :key="tag" class="tag-chip">{{ tag }}</span>
+          <span v-if="match.bookmarked" class="annotation" title="Bookmarked">★</span>
+          <span v-if="match.hasNote" class="annotation">Note</span>
+          <span v-if="match.experimentCount" class="annotation">Experiment</span>
+        </footer>
       </button>
-    </div>
+    </article>
 
-    <p v-if="matches.length === 0" class="muted empty">
-      No matches recorded yet.
-    </p>
+    <p v-if="matches.length === 0" class="muted empty">No matches recorded yet.</p>
   </div>
 </template>
 
 <style scoped>
-.match-list {
-  --match-grid: 34px 40px minmax(150px, 1.6fr) 78px 72px 116px 76px 72px 60px 82px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
+.match-list { display: flex; flex-direction: column; gap: var(--space-2); }
 
-/*
- * The header carries the row's borders as transparent so both boxes place
- * their first column on the same pixel.
- */
-.columns {
-  display: grid;
-  grid-template-columns: var(--match-grid);
-  align-items: end;
-  gap: var(--space-3);
-  padding: 0 var(--space-3) var(--space-1);
-  border: 1px solid transparent;
-  border-left-width: 3px;
-  font-family: var(--font-heading);
-  font-size: 10px;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
-}
-
-.columns .col-kda,
-.columns .col-cs,
-.columns .col-damage,
-.columns .col-rank {
-  text-align: center;
-}
-
-.columns .col-date {
-  text-align: right;
-}
-
-.match {
-  border: 1px solid var(--border-subtle);
-  border-left-width: 3px;
-  border-radius: var(--radius-sm);
-  background: var(--surface-1);
+.match-card {
   overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-left: 4px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(100deg, color-mix(in srgb, var(--surface-2) 88%, transparent), var(--surface-1));
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .12);
 }
+.match-card.won { border-left-color: var(--win); }
+.match-card.lost { border-left-color: var(--loss); }
 
-.match.won {
-  border-left-color: var(--win);
+.card-button {
+  width: 100%; padding: 0; border: 0; background: transparent; color: inherit;
+  text-align: left; font: inherit; cursor: pointer;
 }
+.card-button:hover { background: color-mix(in srgb, var(--surface-3) 52%, transparent); }
 
-.match.lost {
-  border-left-color: var(--loss);
+.card-head {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  padding: 8px 14px; border-bottom: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-3) 42%, transparent);
+  font-size: 11px;
 }
+.headline { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.headline strong { color: var(--text-primary); font: 11px var(--font-heading); letter-spacing: .55px; text-transform: uppercase; }
+.outcome { font: 10px var(--font-heading); letter-spacing: .8px; text-transform: uppercase; }
+.dot { color: var(--text-muted); }
+.details-link { flex: 0 0 auto; display: flex; align-items: center; gap: 7px; color: var(--gold-bright); font-size: 10px; }
 
-.row {
-  width: 100%;
+.card-main {
   display: grid;
-  grid-template-columns: var(--match-grid);
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  background: transparent;
-  border: none;
-  color: inherit;
-  text-align: left;
-  font-family: var(--font-body);
-  font-size: 13px;
-  cursor: pointer;
+  grid-template-columns: 176px 110px 100px 140px minmax(142px, .9fr) minmax(240px, 1.2fr);
+  align-items: center; gap: clamp(10px, 1.5vw, 24px); padding: 14px 16px;
+}
+.champion-block { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.portrait-wrap { position: relative; flex: 0 0 auto; }
+.champion-icon { width: 58px; height: 58px; border: 2px solid var(--border-strong); border-radius: 50%; object-fit: cover; }
+.portrait-role {
+  position: absolute; right: -4px; bottom: -4px; width: 21px; height: 21px; padding: 3px;
+  border: 1px solid var(--gold); border-radius: 50%; background: var(--surface-0);
+}
+.spells { display: grid; grid-template-columns: repeat(2, 24px); gap: 3px; }
+.spells img { width: 24px; height: 24px; border-radius: 3px; }
+
+.stat-block { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; }
+.stat-block strong { color: var(--text-primary); font-size: 14px; }
+.stat-block span { font-size: 10px; }
+.kda-line { font-size: 16px !important; }
+.kda-line span { color: var(--text-muted); font-size: 12px; }
+.accent { color: var(--win); font-weight: 700; }
+
+.build { display: grid; grid-template-columns: repeat(4, 32px); gap: 4px; align-content: center; justify-content: center; }
+.build img, .item-empty { width: 32px; height: 32px; border-radius: 4px; background: var(--surface-3); }
+.build img { border: 1px solid var(--border-subtle); object-fit: cover; }
+.item-empty { opacity: .42; }
+
+.rosters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; min-width: 0; }
+.team-roster { display: grid; gap: 3px; min-width: 0; }
+.roster-player { display: grid; grid-template-columns: 22px 13px minmax(0, 1fr); align-items: center; gap: 4px; min-width: 0; color: var(--text-secondary); font-size: 10px; }
+.roster-player.me { color: var(--gold-bright); }
+.roster-champion { width: 22px; height: 22px; border: 1px solid var(--border-subtle); border-radius: 50%; object-fit: cover; }
+.roster-role { width: 13px; height: 13px; opacity: .76; }
+.roster-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.card-foot { display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 7px 14px 9px; flex-wrap: wrap; }
+.game-label, .tag-chip, .place-chip, .annotation {
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px;
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-0) 74%, transparent); color: var(--text-secondary);
+  font-size: 9px; line-height: 1; white-space: nowrap;
+}
+.game-label { border-color: rgba(200, 170, 110, .3); color: var(--gold-bright); }
+.place-chip { color: var(--text-primary); }
+.place-chip.mvp { border-color: var(--gold); background: rgba(200, 170, 109, .16); color: var(--gold-bright); font-weight: 700; }
+.tag-chip { color: var(--cyan); }
+.annotation { color: var(--text-muted); }
+.empty { padding: var(--space-5); text-align: center; font-size: 12px; }
+
+@media (max-width: 1320px) {
+  .card-main { grid-template-columns: 170px 100px 88px 120px minmax(136px, 1fr); }
+  .rosters { grid-column: 1 / -1; padding-top: 10px; border-top: 1px solid var(--border-subtle); }
+  .team-roster { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 }
 
-.row:hover {
-  background: var(--surface-2);
+@media (max-width: 850px) {
+  .card-head { align-items: flex-start; }
+  .headline { flex-wrap: wrap; }
+  .details-link { font-size: 0; }
+  .details-link svg { font-size: 11px; }
+  .card-main { grid-template-columns: 1.3fr repeat(3, minmax(72px, .7fr)); }
+  .build { grid-column: 1 / -1; display: flex; justify-content: flex-start; }
+  .rosters { display: none; }
+  .champion-block { grid-row: span 2; }
 }
 
-.icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  border: 1px solid var(--border-subtle);
-}
-
-.champ {
-  color: var(--text-primary);
-}
-
-.meta {
-  display: flex;
-  gap: var(--space-2);
-  font-size: 11px;
-}
-
-.mode-tag {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  padding: 0 var(--space-1);
-}
-
-.row-tags { font-size: 10px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.row-labels { display: flex; gap: 4px; margin-top: 3px; overflow: hidden; }
-.game-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  flex: 0 0 auto;
-  padding: 1px 5px;
-  border: 1px solid rgba(200, 170, 110, 0.34);
-  border-radius: 999px;
-  background: rgba(200, 170, 110, 0.08);
-  color: var(--gold-bright);
-  font-size: 9px;
-  line-height: 1.35;
-  white-space: nowrap;
-}
-
-.result {
-  font-family: var(--font-heading);
-  font-size: 12px;
-  letter-spacing: 0.8px;
-}
-
-.role {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.kda,
-.cs,
-.damage,
-.rank {
-  text-align: center;
-}
-
-.cs,
-.rank {
-  color: var(--text-primary);
-}
-
-.sub {
-  margin-left: 4px;
-  font-size: 11px;
-}
-
-.mvp {
-  color: var(--gold-bright);
-  font-family: var(--font-heading);
-}
-
-.ratio {
-  margin-left: var(--space-2);
-  font-size: 11px;
-}
-
-.date {
-  text-align: right;
-  font-size: 11px;
-}
-
-.open-indicator {
-  color: var(--text-muted);
-  font-size: 11px;
-}
-
-@media (max-width: 1120px) {
-  .match-list {
-    --match-grid: 34px 40px minmax(140px, 1.6fr) 78px 72px 116px 76px 60px 82px 14px;
-  }
-
-  .col-damage,
-  .damage {
-    display: none;
-  }
-}
-
-@media (max-width: 900px) {
-  .match-list {
-    --match-grid: 34px 36px minmax(110px, 1fr) 116px 82px 14px;
-    gap: var(--space-2);
-  }
-
-  .col-role,
-  .role,
-  .col-result,
-  .result,
-  .col-cs,
-  .cs,
-  .col-rank,
-  .rank {
-    display: none;
-  }
-
-  .icon {
-    width: 36px;
-    height: 36px;
-  }
-}
-
-.empty {
-  font-size: 12px;
-  text-align: center;
-  padding: var(--space-5);
+@media (max-width: 580px) {
+  .card-main { grid-template-columns: 1fr 1fr; }
+  .champion-block { grid-column: 1 / -1; grid-row: auto; }
+  .contribution { display: none; }
 }
 </style>

@@ -725,6 +725,40 @@ export const migrations: Migration[] = [
       WHERE queue_id IN (4320, 4321);
     `,
   },
+  {
+    // Keep the participant identity needed for player-scoped LCU resources,
+    // and cache the small mastery projection shown in match reviews. The
+    // owner key keeps cached data scoped to the account whose history caused
+    // it to be read and lets "delete all history" remove it completely.
+    version: 18,
+    up: `
+      ALTER TABLE match_participants ADD COLUMN participant_puuid TEXT;
+
+      UPDATE match_participants
+      SET participant_puuid = puuid
+      WHERE is_player = 1;
+
+      CREATE INDEX idx_participants_identity
+        ON match_participants (participant_puuid, champion_id);
+
+      CREATE TABLE champion_mastery_cache (
+        owner_puuid                       TEXT    NOT NULL,
+        participant_puuid                 TEXT    NOT NULL,
+        champion_id                       INTEGER NOT NULL,
+        champion_level                    INTEGER NOT NULL,
+        champion_points                   INTEGER NOT NULL,
+        champion_points_since_last_level  INTEGER NOT NULL,
+        champion_points_until_next_level  INTEGER NOT NULL,
+        tokens_earned                     INTEGER NOT NULL,
+        highest_grade                     TEXT,
+        updated_at                        INTEGER NOT NULL,
+        PRIMARY KEY (owner_puuid, participant_puuid, champion_id)
+      );
+
+      CREATE INDEX idx_mastery_owner
+        ON champion_mastery_cache (owner_puuid, updated_at);
+    `,
+  },
 ]
 
 export const latestSchemaVersion = migrations.at(-1)?.version ?? 0
