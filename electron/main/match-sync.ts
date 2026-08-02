@@ -1,6 +1,7 @@
 import type { MatchesRepository } from "./database/matches-repo.js"
 import type { ChampSelectRepository } from "./database/champ-select-repo.js"
 import type { ParticipantsRepository } from "./database/participants-repo.js"
+import type { LiveGameCaptureRepository } from "./database/live-game-capture-repo.js"
 import type { LcuClient } from "./lcu-client.js"
 import { gradeLobby, type GradeInput } from "./matches/grade.js"
 import {
@@ -64,6 +65,7 @@ export class MatchSync {
     private readonly puuid: string,
     private readonly participants?: ParticipantsRepository,
     private readonly champSelect?: ChampSelectRepository,
+    private readonly liveCaptures?: LiveGameCaptureRepository,
   ) {}
 
   async syncNow(): Promise<SyncResult> {
@@ -94,6 +96,7 @@ export class MatchSync {
           row !== undefined && row.isMatched === 1,
       )
 
+    this.liveCaptures?.repairStoredPositions(this.puuid)
     const inserted = this.repository.insertMany(rows)
     const graded = await this.gradePendingMatches()
     const lobbies = await this.backfillLobbies(rows)
@@ -145,6 +148,7 @@ export class MatchSync {
     const rows = mapParticipants(detail, this.puuid)
     if (rows.length === 0) return false
 
+    this.liveCaptures?.stampPositions(detail.gameId, this.puuid, rows)
     this.champSelect?.stamp(detail.gameId, this.puuid, rows)
 
     const stored = this.participants.insertMany(rows) > 0

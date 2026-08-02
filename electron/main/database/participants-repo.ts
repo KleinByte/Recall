@@ -152,8 +152,8 @@ const TEAM_COLUMNS = [
  * Raise this whenever the scoreboard gains fields worth going back for, and
  * games still inside the client's window will be read again to fill them in.
  */
-export const LOBBY_DETAIL_VERSION = 3
-export const PARTICIPANT_CAPTURE_VERSION = 3
+export const LOBBY_DETAIL_VERSION = 4
+export const PARTICIPANT_CAPTURE_VERSION = 4
 
 /**
  * Replaces rather than ignores, so a lobby captured under an earlier, narrower

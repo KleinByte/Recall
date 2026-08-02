@@ -8,6 +8,8 @@ import type {
   CompactTimeline,
   CompactTimelineEvent,
 } from "../riot/timeline-mapper.js"
+import type { ParticipantRow } from "../matches/types.js"
+import { resolvePosition } from "../matches/position.js"
 
 const PERIODIC_SNAPSHOT_MS = 15_000
 
@@ -50,6 +52,7 @@ function stateFingerprint(snapshot: Omit<LiveGameSnapshot, "events">) {
     [...snapshot.allies, ...snapshot.enemies]
       .map((player) => ({
         id: playerIdentity(player),
+        position: player.position,
         level: player.level,
         items: [...itemCounts(player)].sort((left, right) => left[0] - right[0]),
       }))
@@ -161,6 +164,83 @@ export class LiveGameCaptureRepository {
        ORDER BY event_time_ms, event_id`,
     ).all(gameId, puuid) as { eventJson: string }[])
       .map((row) => JSON.parse(row.eventJson) as LiveGameEvent)
+  }
+
+  /**
+   * Applies the documented in-game position to the post-game scoreboard.
+   *
+   * The LCU match-history payload can omit or misclassify the enemy team's
+   * lane, while Live Client Data exposes a canonical position for every
+   * player. Prefer the latest captured value and match remote players by Riot
+   * ID; the local player has an explicit marker and does not depend on a name.
+   */
+  stampPositions(gameId: number | undefined, puuid: string, rows: ParticipantRow[]) {
+    if (!gameId || rows.length === 0) return 0
+
+    const snapshots = this.listSnapshots(gameId, puuid)
+    const snapshot = [...snapshots].reverse().find((entry) =>
+      [...entry.allies, ...entry.enemies].some((player) =>
+        resolvePosition(undefined, player.position) !== undefined,
+      ),
+    )
+    if (!snapshot) return 0
+
+    const players = [...snapshot.allies, ...snapshot.enemies]
+    const localPosition = players.find((player) => player.isLocal)?.position
+    const positionsByName = new Map(
+      players.flatMap((player) => {
+        const name = identity(player.riotId)
+        const position = resolvePosition(undefined, player.position)
+        return name && position ? [[name, position] as const] : []
+      }),
+    )
+
+    let stamped = 0
+    for (const row of rows) {
+      const position = row.isPlayer === 1
+        ? resolvePosition(undefined, localPosition)
+        : positionsByName.get(identity(row.summonerName) ?? "")
+      if (!position) continue
+      row.role = position
+      stamped += 1
+    }
+    return stamped
+  }
+
+  /** Repairs lobbies captured before live positions were promoted post-game. */
+  repairStoredPositions(puuid: string) {
+    const games = this.db.prepare(
+      `SELECT DISTINCT game_id AS gameId
+       FROM live_game_snapshots
+       WHERE puuid = ?`,
+    ).all(puuid) as { gameId: number }[]
+    const read = this.db.prepare(
+      `SELECT participant_id AS participantId,
+              is_player AS isPlayer,
+              summoner_name AS summonerName,
+              role
+       FROM match_participants
+       WHERE game_id = ? AND puuid = ?`,
+    )
+    const update = this.db.prepare(
+      `UPDATE match_participants SET role = ?
+       WHERE game_id = ? AND puuid = ? AND participant_id = ?`,
+    )
+
+    return this.db.transaction(() => {
+      let repaired = 0
+      for (const { gameId } of games) {
+        const rows = read.all(gameId, puuid) as ParticipantRow[]
+        if (rows.length === 0) continue
+        const previous = new Map(rows.map((row) => [row.participantId, row.role]))
+        this.stampPositions(gameId, puuid, rows)
+        for (const row of rows) {
+          if (!row.role || row.role === previous.get(row.participantId)) continue
+          repaired += update.run(row.role, gameId, puuid, row.participantId).changes
+        }
+      }
+      return repaired
+    })()
   }
 
   deleteAll(puuid: string) {

@@ -5,7 +5,10 @@ import {
   LiveGameCaptureRepository,
 } from "../electron/main/database/live-game-capture-repo.js"
 import { applyMigrations } from "../electron/main/database/migrations.js"
+import { ParticipantsRepository } from "../electron/main/database/participants-repo.js"
 import type { LiveGameSnapshot } from "../electron/main/game-client.js"
+import type { ParticipantRow } from "../electron/main/matches/types.js"
+import { mapParticipants } from "../electron/main/matches/map-participants.js"
 import type { CompactTimeline } from "../electron/main/riot/timeline-mapper.js"
 
 function snapshot(
@@ -50,6 +53,70 @@ function snapshot(
 }
 
 describe("LiveGameCaptureRepository", () => {
+  it("stamps canonical positions onto allies and enemies from the live roster", () => {
+    const db = new Database(":memory:")
+    applyMigrations(db)
+    const repo = new LiveGameCaptureRepository(db as never)
+    const enemy = {
+      ...snapshot(4).allies[0],
+      championName: "Shaco",
+      riotId: "Enemy#NA1",
+      team: "CHAOS",
+      isLocal: false,
+      position: "JUNGLE",
+    }
+    repo.record(10, "owner", snapshot(2))
+    expect(repo.record(10, "owner", snapshot(4, {
+      allies: [{ ...snapshot(4).allies[0], position: "MIDDLE" }],
+      enemies: [enemy],
+    })).snapshotWritten).toBe(true)
+
+    const rows = [
+      { isPlayer: 1, summonerName: "Owner#NA1", role: "SOLO" },
+      { isPlayer: 0, summonerName: "enemy#na1", role: "SUPPORT" },
+      { isPlayer: 0, summonerName: "Unknown#NA1", role: "SOLO" },
+    ] as ParticipantRow[]
+
+    expect(repo.stampPositions(10, "owner", rows)).toBe(2)
+    expect(rows.map((row) => row.role)).toEqual(["MIDDLE", "JUNGLE", "SOLO"])
+  })
+
+  it("repairs positions in lobbies stored before live roles were applied", () => {
+    const db = new Database(":memory:")
+    applyMigrations(db)
+    const repo = new LiveGameCaptureRepository(db as never)
+    const participants = new ParticipantsRepository(db as never)
+    const rows = mapParticipants({
+      gameId: 10,
+      participantIdentities: [
+        { participantId: 1, player: { puuid: "owner", gameName: "Owner", tagLine: "NA1" } },
+        { participantId: 2, player: { puuid: "enemy", gameName: "Enemy", tagLine: "NA1" } },
+      ],
+      participants: [
+        { participantId: 1, teamId: 100, timeline: { role: "SOLO" } },
+        { participantId: 2, teamId: 200, timeline: { role: "SUPPORT" } },
+      ],
+    }, "owner")
+    participants.insertMany(rows)
+    repo.record(10, "owner", snapshot(4, {
+      allies: [{ ...snapshot(4).allies[0], position: "MIDDLE" }],
+      enemies: [{
+        ...snapshot(4).allies[0],
+        riotId: "Enemy#NA1",
+        team: "CHAOS",
+        isLocal: false,
+        position: "JUNGLE",
+      }],
+    }))
+
+    expect(repo.repairStoredPositions("owner")).toBe(2)
+    expect(
+      (db.prepare(
+        "SELECT role FROM match_participants WHERE game_id = 10 ORDER BY participant_id",
+      ).all() as { role: string }[]).map((row) => row.role),
+    ).toEqual(["MIDDLE", "JUNGLE"])
+  })
+
   it("stores bounded snapshots and deduplicates the cumulative event feed", () => {
     const db = new Database(":memory:")
     applyMigrations(db)

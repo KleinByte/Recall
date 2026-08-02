@@ -551,6 +551,7 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
     summoner.puuid,
     getParticipants(),
     getChampSelect(),
+    getLiveGameCaptures(),
   )
   const challengeSync = new ChallengeSync(
     client,
