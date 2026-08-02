@@ -10,6 +10,23 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.11",
+    releasedAt: "2026-08-02",
+    title: "Enemy roles restored",
+    summary:
+      "Recall now carries Riot's in-game position for both teams into match history, so enemy players stay in the correct matchup row.",
+    sections: [
+      {
+        title: "Complete role resolution",
+        items: [
+          "The canonical position exposed for every player by Riot's live game data now fills both allied and enemy post-game roles.",
+          "Matches already captured by Recall are repaired from their saved live snapshots, while recent games are recaptured and regraded with the recovered positions.",
+          "Position updates are treated as meaningful live-state changes, ensuring the final assignment is saved even when it changes shortly after loading into the game.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.10",
     releasedAt: "2026-08-02",
     title: "Roles that hold up, and League Classic item art",
