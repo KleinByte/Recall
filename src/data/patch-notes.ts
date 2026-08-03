@@ -10,6 +10,27 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.25",
+    releasedAt: "2026-08-03",
+    title: "Cleaner match rosters, dependable updates",
+    summary:
+      "Match history brings both teams together for faster scanning, while the release pipeline now confirms that every updater file is truly available before calling a release complete.",
+    sections: [
+      {
+        title: "Rosters that read as one matchup",
+        items: [
+          "The allied roster now sits farther from your final build and closer to the opposing roster, keeping items and player names visually distinct while making both teams easier to compare.",
+        ],
+      },
+      {
+        title: "Updates that finish the job",
+        items: [
+          "Release publishing now explicitly uploads and verifies the Windows installer, update manifest, and differential update map before reporting success.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.24",
     releasedAt: "2026-08-04",
     title: "Grades that mean something, dials that feel right",

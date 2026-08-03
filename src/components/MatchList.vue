@@ -279,8 +279,10 @@ const itemName = (itemId: number) => itemAsset(itemId).name
 .build img { border: 1px solid var(--border-subtle); object-fit: cover; }
 .item-empty { opacity: .42; }
 
-.rosters { display: grid; grid-template-columns: repeat(2, minmax(195px, 245px)); justify-content: start; gap: 20px; min-width: 0; }
-.team-roster { display: grid; grid-template-rows: repeat(5, 17px); gap: 0; min-width: 0; }
+.rosters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; min-width: 0; }
+.team-roster { display: grid; grid-template-rows: repeat(5, 17px); gap: 0; width: min(100%, 245px); min-width: 0; }
+.team-roster:first-child { justify-self: end; }
+.team-roster:last-child { justify-self: start; }
 .roster-player { display: grid; grid-template-columns: 17px 11px minmax(120px, 1fr); align-items: center; gap: 5px; min-width: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.15; }
 .roster-player.roleless { grid-template-columns: 17px minmax(0, 1fr); }
 .roster-player.me { color: var(--gold-bright); }
@@ -304,7 +306,8 @@ const itemName = (itemId: number) => itemAsset(itemId).name
 
 @media (max-width: 1320px) {
   .card-main { grid-template-columns: 136px minmax(225px, .9fr) 112px minmax(380px, 1.5fr); }
-  .rosters { grid-template-columns: repeat(2, minmax(175px, 220px)); gap: 12px; }
+  .rosters { gap: 10px; }
+  .team-roster { width: min(100%, 220px); }
   .roster-player { grid-template-columns: 17px 11px minmax(110px, 1fr); }
 }
 
