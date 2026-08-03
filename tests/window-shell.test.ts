@@ -22,29 +22,48 @@ describe("Recall desktop window shell", () => {
     expect(titlebar).toContain("v{{ currentAppVersion }}")
   })
 
-  it("uses the supplied special R as the first letter of Recall", () => {
+  it("keeps the letter mark in the sidebar and uses the full Recall logo elsewhere", () => {
     const mark = read("src/components/RecallMark.vue")
     const sidebar = read("src/components/AppSidebar.vue")
     const titlebar = read("src/components/WindowTitleBar.vue")
 
-    expect(mark).toContain(":src=\"publicAssetUrl('recall-icon.png')\"")
-    expect(sidebar).toContain('<RecallMark class="brand-logo" />')
+    expect(mark).toContain('props.variant === "letter" ? "recall-r.png" : "recall-icon.png"')
+    expect(mark).toContain("recall-mark-wave")
+    expect(sidebar).toContain('<RecallMark variant="letter" class="brand-logo" />')
     expect(sidebar).toContain('class="brand-mark">ECALL</span>')
-    expect(titlebar).toContain('<RecallMark class="titlebar-mark" />')
-    expect(titlebar).toContain('class="titlebar-wordmark">ECALL</span>')
+    expect(titlebar).toContain('<RecallMark animated class="titlebar-mark" />')
+    expect(titlebar).toContain('class="titlebar-wordmark">RECALL</span>')
   })
 
-  it("ships a transparent 512px UI mark and a multi-resolution favicon", () => {
+  it("ships a transparent 512px Recall logo, letter mark, and multi-resolution favicon", () => {
     const png = readFileSync("public/recall-icon.png")
+    const letter = readFileSync("public/recall-r.png")
     const ico = readFileSync("public/favicon.ico")
+    const builderIco = readFileSync("build/icon.ico")
 
     expect(png.subarray(1, 4).toString("ascii")).toBe("PNG")
     expect(png.readUInt32BE(16)).toBe(512)
     expect(png.readUInt32BE(20)).toBe(512)
     expect(png[25]).toBe(6)
 
+    expect(letter.subarray(1, 4).toString("ascii")).toBe("PNG")
+    expect(letter.readUInt32BE(16)).toBe(512)
+    expect(letter.readUInt32BE(20)).toBe(512)
+    expect(letter[25]).toBe(6)
+
     expect(ico.readUInt16LE(0)).toBe(0)
     expect(ico.readUInt16LE(2)).toBe(1)
     expect(ico.readUInt16LE(4)).toBeGreaterThanOrEqual(8)
+    expect(builderIco.equals(ico)).toBe(true)
+  })
+
+  it("routes the creative icon through the window, taskbar, tray, and installer", () => {
+    const main = read("electron/main/index.ts")
+    const builder = read("electron-builder.json")
+    const html = read("index.html")
+
+    expect(main.match(/path\.join\(process\.env\.VITE_PUBLIC, "favicon\.ico"\)/g)).toHaveLength(2)
+    expect(builder).toContain('"icon": "public/favicon.ico"')
+    expect(html).toContain('<link rel="icon" href="/favicon.ico" />')
   })
 })

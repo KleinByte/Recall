@@ -10,6 +10,38 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.18",
+    releasedAt: "2026-08-03",
+    title: "A clearer identity, fairer comparisons",
+    summary:
+      "Recall carries its full recall-platform mark across the desktop, while RVI now judges each champion against expectations shaped by their Riot class instead of one universal ceiling.",
+    sections: [
+      {
+        title: "The full Recall identity",
+        items: [
+          "The gold R, blue recall beam, and platform rings now identify Recall in the titlebar, taskbar, notification area, installer, and browser favicon.",
+          "The in-app titlebar adds a subtle animated recall pulse with a reduced-motion fallback, while the left navigation keeps the standalone R as the first letter of RECALL.",
+          "Windows receives a sharpened multi-resolution icon set so the mark remains recognizable from small tray icons through installer artwork.",
+        ],
+      },
+      {
+        title: "Champion-class-aware RVI",
+        items: [
+          "Damage, gold, farming, vision, crowd control, objective pressure, survivability, and ally support are measured against benchmarks shaped by the champion's primary Riot class.",
+          "Live client class tags take priority, with a bundled Data Dragon catalog keeping the model class-aware while offline and covering League Classic champion IDs.",
+          "RVI advances to algorithm version 2 so stored reports refresh under the fairer class-aware model.",
+        ],
+      },
+      {
+        title: "Model resilience",
+        items: [
+          "Adaptability no longer treats missing recent performance vectors as zero balance, preventing incomplete evidence from unfairly pulling the score down.",
+          "A repeatable champion-class sync command keeps the bundled offline catalog current as Riot's roster changes.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.17",
     releasedAt: "2026-08-03",
     title: "Form you can read, champions you can rank",

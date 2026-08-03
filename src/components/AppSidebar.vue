@@ -52,7 +52,7 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
     <div class="brand">
       <div class="brand-row">
         <div class="brand-title" aria-label="Recall">
-          <RecallMark class="brand-logo" />
+          <RecallMark variant="letter" class="brand-logo" />
           <span v-if="!collapsed" class="brand-mark">ECALL</span>
         </div>
         <button

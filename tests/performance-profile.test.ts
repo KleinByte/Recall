@@ -187,4 +187,58 @@ describe("Recall Vector Index performance profile", () => {
       .toBeLessThan(fighting.metrics.find((metric) => metric.key === "combat")!.weight)
     expect(fighting.metrics.reduce((total, metric) => total + metric.weight, 0)).toBeCloseTo(1)
   })
+
+  // Identical scoreboards on different champion classes: 54 is Malphite
+  // (tank) and 22 is Ashe (marksman) in the bundled Data Dragon snapshot.
+  const withShare = (games: number, championId: number) =>
+    observations(games).map((observation) => ({
+      ...observation,
+      championId,
+      metrics: { ...observation.metrics, teamDamageShare: .18 },
+    }))
+  const damageShareMetric = (profile: NonNullable<ReturnType<typeof buildPerformanceProfile>>) =>
+    profile.dimensions.find((dimension) => dimension.key === "fighting")!
+      .metrics.find((metric) => metric.key === "damageShare")!
+
+  it("judges damage share against the champion's own class ceiling", () => {
+    const tank = buildPerformanceProfile({
+      family: "sr",
+      observations: withShare(20, 54),
+      gradeComponentHistory: history(20),
+    })!
+    const marksman = buildPerformanceProfile({
+      family: "sr",
+      observations: withShare(20, 22),
+      gradeComponentHistory: history(20),
+    })!
+
+    expect(damageShareMetric(tank).score).toBeGreaterThan(damageShareMetric(marksman).score)
+    expect(damageShareMetric(tank).comparison).toBe("Class-aware display scale")
+  })
+
+  it("prefers live catalog classes over the bundled snapshot", () => {
+    const bundled = buildPerformanceProfile({
+      family: "sr",
+      observations: withShare(20, 22),
+      gradeComponentHistory: history(20),
+    })!
+    const overridden = buildPerformanceProfile({
+      family: "sr",
+      observations: withShare(20, 22),
+      gradeComponentHistory: history(20),
+      championRoles: new Map([[22, ["tank", "support"]]]),
+    })!
+
+    expect(damageShareMetric(overridden).score).toBeGreaterThan(damageShareMetric(bundled).score)
+  })
+
+  it("keeps unknown champions on the neutral base scale", () => {
+    const unknown = buildPerformanceProfile({
+      family: "sr",
+      observations: withShare(20, 999_999),
+      gradeComponentHistory: history(20),
+    })!
+
+    expect(damageShareMetric(unknown).score).toBe(Math.round(.18 / .35 * 100))
+  })
 })

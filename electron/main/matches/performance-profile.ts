@@ -3,9 +3,10 @@ import type {
   InsightObservation,
   RviTimelineObservation,
 } from "../database/insights-repo.js"
+import { CHAMPION_CLASSES, type ChampionClass } from "./champion-classes.js"
 import type { ModeFamily } from "./types.js"
 
-export const RVI_ALGORITHM_VERSION = 1
+export const RVI_ALGORITHM_VERSION = 2
 export const PERFORMANCE_PROFILE_VERSION = RVI_ALGORITHM_VERSION
 export const PERFORMANCE_RECENT_GAMES = 20
 
@@ -238,6 +239,40 @@ const ABYSS_DIMENSIONS: DimensionDefinition[] = [
   },
 ]
 
+const VALID_CLASSES: ReadonlySet<string> = new Set<ChampionClass>([
+  "assassin", "fighter", "mage", "marksman", "support", "tank",
+])
+
+/**
+ * Multipliers applied to each display scale's "excellent" benchmark by the
+ * champion's primary Riot class tag. A tank is not expected to match a
+ * marksman's damage share, and a marksman is not expected to match a tank's
+ * crowd control, so each class is measured against its own ceiling. Classes
+ * without an entry keep the base benchmark.
+ */
+const CLASS_SCALE: Record<string, Partial<Record<ChampionClass, number>>> = {
+  damageShare: { assassin: .9, fighter: .85, tank: .65, support: .55 },
+  kdaPace: { fighter: .9, tank: .8 },
+  deathRate: { fighter: 1.1, tank: 1.2 },
+  goldPace: { tank: .9, support: .7 },
+  csPace: { tank: .85, support: .4 },
+  objectivePace: { marksman: 1.15, assassin: .9, mage: .8, tank: .75, support: .5 },
+  visionPace: { support: 1.25, mage: .85, marksman: .75, assassin: .75 },
+  ccPace: { tank: 1.15, fighter: .75, mage: .65, assassin: .45, marksman: .35 },
+  allySupport: { support: 1, tank: .5, mage: .5, fighter: .4, assassin: .4, marksman: .4 },
+}
+
+type ClassResolver = (championId: number | undefined) => ChampionClass | undefined
+
+/** Live catalog roles win; the bundled Data Dragon snapshot covers offline. */
+function classResolver(catalogRoles?: ReadonlyMap<number, readonly string[]>): ClassResolver {
+  return (championId) => {
+    if (championId === undefined) return undefined
+    const live = catalogRoles?.get(championId)?.find((role) => VALID_CLASSES.has(role))
+    return (live as ChampionClass | undefined) ?? CHAMPION_CLASSES.get(championId)?.[0]
+  }
+}
+
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value))
 const roundScore = (value: number) => Math.round(Math.min(100, Math.max(0, value)))
 const mean = (values: number[]) => values.length
@@ -273,24 +308,30 @@ function styleValues(
   })
 }
 
-function observationMetric(observation: InsightObservation, key: string): number | undefined {
+function observationMetric(
+  observation: InsightObservation,
+  key: string,
+  championClass?: ChampionClass,
+): number | undefined {
   const metric = observation.metrics
+  const expected = (base: number) =>
+    base * ((championClass && CLASS_SCALE[key]?.[championClass]) ?? 1)
   const scales: Record<string, number | undefined> = {
-    damageShare: metric.teamDamageShare === undefined ? undefined : metric.teamDamageShare / .35,
-    kdaPace: metric.kda / 5,
+    damageShare: metric.teamDamageShare === undefined ? undefined : metric.teamDamageShare / expected(.35),
+    kdaPace: metric.kda / expected(5),
     damagePace: metric.damagePerMinute / 900,
-    ccPace: metric.ccPerMinute / 12,
-    deathRate: 1 - metric.deaths / 10,
-    goldPace: metric.goldPerMinute / (observation.family === "sr" || observation.family === "classic" ? 550 : 650),
-    csPace: metric.csPerMinute / (observation.family === "sr" || observation.family === "classic" ? 10 : 5),
+    ccPace: metric.ccPerMinute / expected(12),
+    deathRate: 1 - metric.deaths / expected(10),
+    goldPace: metric.goldPerMinute / expected(observation.family === "sr" || observation.family === "classic" ? 550 : 650),
+    csPace: metric.csPerMinute / expected(observation.family === "sr" || observation.family === "classic" ? 10 : 5),
     objectivePace: metric.objectiveDamagePerMinute === undefined
       ? undefined
-      : metric.objectiveDamagePerMinute / 350,
-    visionPace: metric.visionPerMinute === undefined ? undefined : metric.visionPerMinute / 2,
+      : metric.objectiveDamagePerMinute / expected(350),
+    visionPace: metric.visionPerMinute === undefined ? undefined : metric.visionPerMinute / expected(2),
     killParticipation: metric.killParticipation === undefined ? undefined : metric.killParticipation / .75,
     allySupport: metric.allyHealShieldPerMinute === undefined
       ? undefined
-      : metric.allyHealShieldPerMinute / 300,
+      : metric.allyHealShieldPerMinute / expected(300),
   }
   const value = scales[key]
   return typeof value === "number" && Number.isFinite(value) ? clamp01(value) : undefined
@@ -300,11 +341,12 @@ function observationValues(
   rows: GradeComponentObservation[],
   observations: ReadonlyMap<number, InsightObservation>,
   key: string,
+  resolveClass: ClassResolver,
 ) {
   return rows.flatMap((row) => {
     const observation = observations.get(row.gameId)
     if (!observation) return []
-    const value = observationMetric(observation, key)
+    const value = observationMetric(observation, key, resolveClass(observation.championId))
     return value === undefined ? [] : [value]
   })
 }
@@ -524,12 +566,13 @@ function buildMeasuredDimension(
   recentRows: GradeComponentObservation[],
   observations: ReadonlyMap<number, InsightObservation>,
   timelines: ReadonlyMap<number, RviTimelineObservation>,
+  resolveClass: ClassResolver,
 ): PerformanceDimensionScore | undefined {
   const measured = definition.metrics.flatMap((metric) => {
     const sourceKey = metric.sourceKey ?? metric.key
     const collect = (sourceRows: GradeComponentObservation[]) => {
       if (metric.kind === "style") return styleValues(sourceRows, observations, sourceKey)
-      if (metric.kind === "observation") return observationValues(sourceRows, observations, sourceKey)
+      if (metric.kind === "observation") return observationValues(sourceRows, observations, sourceKey, resolveClass)
       if (metric.kind === "timeline") return timelineValues(sourceRows, timelines, sourceKey)
       return componentValues(sourceRows, sourceKey)
     }
@@ -550,8 +593,10 @@ function buildMeasuredDimension(
     weight: entry.effectiveWeight / availableWeight,
     games: entry.values.length,
     description: entry.metric.description,
-    comparison: entry.metric.kind === "style" || entry.metric.kind === "observation"
-      ? "Recall display scale"
+    comparison: entry.metric.kind === "observation" && CLASS_SCALE[entry.metric.sourceKey ?? entry.metric.key]
+      ? "Class-aware display scale"
+      : entry.metric.kind === "style" || entry.metric.kind === "observation"
+        ? "Recall display scale"
       : entry.metric.kind === "timeline"
         ? "Cached timeline evidence"
       : comparisonFor(rows, entry.metric.sourceKey ?? entry.metric.key),
@@ -713,8 +758,11 @@ function adaptabilityDimension(
   const recentPerformance = (mean(recentRows.map((row) => clamp01(row.compositePercentile))) ?? .5) * 100
   const recentPrimary = primary.flatMap((dimension) =>
     dimension.recentScore === undefined ? [] : [dimension.recentScore / 100])
-  const recentBalance = quantile(recentPrimary, .25) * 100
-  const recentRaw = recentBreadth * .32 + recentPerformance * .36 + recentBalance * .32
+  // Without measurable recent vectors, balance must drop out rather than pull
+  // the recent score toward zero.
+  const recentRaw = recentPrimary.length
+    ? recentBreadth * .32 + recentPerformance * .36 + quantile(recentPrimary, .25) * 100 * .32
+    : recentBreadth * .47 + recentPerformance * .53
   const recentScore = stabilized(recentRaw, recentRows.length, 8)
 
   return {
@@ -742,6 +790,8 @@ export function buildPerformanceProfile(input: {
   observations: InsightObservation[]
   gradeComponentHistory: GradeComponentObservation[]
   timelineHistory?: RviTimelineObservation[]
+  /** Live champion catalog roles, keyed by champion id. */
+  championRoles?: ReadonlyMap<number, readonly string[]>
 }): PerformanceProfile | undefined {
   const rows = [...input.gradeComponentHistory]
     .sort((left, right) => left.playedAt - right.playedAt || left.gameId - right.gameId)
@@ -753,8 +803,9 @@ export function buildPerformanceProfile(input: {
   const definitions = input.family === "sr" || input.family === "classic"
     ? RIFT_DIMENSIONS
     : ABYSS_DIMENSIONS
+  const resolveClass = classResolver(input.championRoles)
   const primary = definitions.flatMap((definition) => {
-    const dimension = buildMeasuredDimension(definition, rows, recentRows, observations, timelines)
+    const dimension = buildMeasuredDimension(definition, rows, recentRows, observations, timelines, resolveClass)
     return dimension ? [dimension] : []
   })
   const stability = stabilityDimension(rows, observations)

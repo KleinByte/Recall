@@ -9,6 +9,7 @@ RVI is also Recall's player-identity surface. The existing named style classific
 - RVI uses up to 240 graded matches; recent movement uses the latest 20.
 - Same-role, team, and lobby percentiles anchor the model when available.
 - Transparent pace/share scales add distinct scoreboard signals such as KDA, damage share, gold, CS, vision, objective damage, crowd control, and ally support.
+- Pace/share scales are champion-class aware. Each champion's primary Riot class tag—assassin, fighter, mage, marksman, support, or tank—selects the benchmark the signal is measured against, so a tank's damage share is judged against a tank's ceiling rather than a marksman's, and a marksman's crowd control is judged against a marksman's ceiling rather than a tank's. Classes come from the live client catalog first, with a bundled Data Dragon snapshot covering offline and pre-connection use.
 - Cached local-client timelines add duel, skirmish, teamfight, pick, solo/teamfight/gank safety, early roam, forward-kill, fight-frequency, structure, Dragon, Baron, Herald, objective secure/setup, Baron conversion, lane-lead, phase-farm, and phase-proficiency signals. Ward and neutral-objective signals appear only when the client supplied those events.
 - Consistency adds performance floor, repeatability, and session fatigue resistance.
 - Versatility adds effective champion breadth, context performance, vector depth, losing-game steadiness, and timeline phase proficiency.

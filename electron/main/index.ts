@@ -1234,6 +1234,11 @@ function storedChampionCatalog(): ChampionCatalogEntry[] {
   return mergeChampionCatalog(store.get(CHAMPION_CATALOG_STORE))
 }
 
+/** Champion class tags from the durable catalog, for class-aware RVI scaling. */
+function storedChampionRoles(): ReadonlyMap<number, readonly string[]> {
+  return new Map(storedChampionCatalog().map((champion) => [champion.id, champion.roles]))
+}
+
 function rememberChampionCatalog(fetched: unknown): ChampionCatalogEntry[] {
   const merged = mergeChampionCatalog(storedChampionCatalog(), fetched)
   store.set(CHAMPION_CATALOG_STORE, merged)
@@ -1848,6 +1853,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
         observations: insightsRepo.getObservations(scoped),
         gradeComponentHistory: insightsRepo.getGradeComponentHistory(scoped, 240),
         timelineHistory: insightsRepo.getRviTimelineHistory(scoped, 240),
+        championRoles: storedChampionRoles(),
       })
     },
   )
@@ -1891,6 +1897,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
         gradeComponentHistory: insightsRepo.getGradeComponentHistory(scoped),
         performanceComponentHistory: insightsRepo.getGradeComponentHistory(scoped, 240),
         performanceTimelineHistory: insightsRepo.getRviTimelineHistory(scoped, 240),
+        championRoles: storedChampionRoles(),
       })
     },
   )

@@ -8,7 +8,7 @@ describe("Recall branding", () => {
     const sidebar = read("src/components/AppSidebar.vue")
 
     expect(sidebar).toContain('import RecallMark from "./RecallMark.vue"')
-    expect(sidebar).toContain('<RecallMark class="brand-logo" />')
+    expect(sidebar).toContain('<RecallMark variant="letter" class="brand-logo" />')
     expect(sidebar).toContain('aria-label="Recall"')
     expect(sidebar).toContain("ECALL")
     expect(sidebar).toContain('class="brand-row"')

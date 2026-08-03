@@ -1144,6 +1144,8 @@ export interface SkillReportInput {
   gradeComponentHistory: GradeComponentObservation[]
   performanceComponentHistory?: GradeComponentObservation[]
   performanceTimelineHistory?: RviTimelineObservation[]
+  /** Live champion catalog roles, keyed by champion id. */
+  championRoles?: ReadonlyMap<number, readonly string[]>
 }
 
 export interface SkillStyleReport {
@@ -1273,6 +1275,7 @@ export function buildSkillReport(input: SkillReportInput): SkillReportV2 {
     modes, family, generatedAt, summary, style, grades, lobby, contribution,
     pool, builds, observations, championStats, itemObservations, gradeComponentHistory,
     performanceComponentHistory, performanceTimelineHistory, duration, hours, weekdays,
+    championRoles,
   } = input
 
   const baseline = summary.avgGradeScore ?? 0
@@ -1315,6 +1318,7 @@ export function buildSkillReport(input: SkillReportInput): SkillReportV2 {
         observations,
         gradeComponentHistory: performanceComponentHistory ?? gradeComponentHistory ?? [],
         timelineHistory: performanceTimelineHistory,
+        championRoles,
       }),
       deathMap: buildDeathMap(family, performanceTimelineHistory),
       grades,
