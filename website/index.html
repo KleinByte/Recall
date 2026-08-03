@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#07111f" />
+    <meta
+      name="description"
+      content="Recall is a private, local-first League of Legends companion for permanent match history, live Tempo, challenges, performance grades, and deep game reviews."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Recall — The League companion that remembers" />
+    <meta
+      property="og:description"
+      content="Keep every match. Understand every performance. Improve with a League companion built around your own history."
+    />
+    <meta property="og:url" content="https://kleinbyte.github.io/Recall/" />
+    <meta property="og:image" content="https://kleinbyte.github.io/Recall/assets/recall-social.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Recall — The League companion that remembers" />
+    <meta
+      name="twitter:description"
+      content="Permanent match history, live Tempo, complete reviews, and challenge tracking—kept privately on your PC."
+    />
+    <meta name="twitter:image" content="https://kleinbyte.github.io/Recall/assets/recall-social.png" />
+    <link rel="icon" href="assets/recall-icon.png" />
+    <link rel="stylesheet" href="styles.css" />
+    <title>Recall — League Companion</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header" data-header>
+      <div class="nav-shell">
+        <a class="brand" href="#top" aria-label="Recall home">
+          <img src="assets/recall-r.png" alt="" />
+          <span class="brand-word">Recall</span>
+          <span class="brand-note">League companion</span>
+        </a>
+
+        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="primary-nav">
+          <span></span><span></span><span></span>
+          <span class="sr-only">Toggle navigation</span>
+        </button>
+
+        <nav id="primary-nav" class="primary-nav" aria-label="Primary navigation">
+          <a href="#features">Features</a>
+          <a href="#tour">Product tour</a>
+          <a href="#privacy">Privacy</a>
+          <a href="#faq">FAQ</a>
+          <a class="nav-download" href="https://github.com/KleinByte/Recall/releases/latest">Download</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <section id="top" class="hero section-shell">
+        <div class="hero-glow hero-glow-cyan" aria-hidden="true"></div>
+        <div class="hero-glow hero-glow-gold" aria-hidden="true"></div>
+
+        <div class="hero-copy">
+          <div class="eyebrow"><span class="status-dot"></span> Built for the games the client forgets</div>
+          <h1>Remember every match.<br /><span>Learn from every one.</span></h1>
+          <p class="hero-lede">
+            Recall is a private League companion that keeps your history on your PC, explains your performance,
+            follows the live game, and turns every session into something you can use.
+          </p>
+
+          <div class="hero-actions">
+            <a class="button button-primary" href="https://github.com/KleinByte/Recall/releases/latest">
+              <span class="windows-mark" aria-hidden="true">⊞</span>
+              Download for Windows
+            </a>
+            <a class="button button-secondary" href="#tour">See Recall in action <span aria-hidden="true">↓</span></a>
+          </div>
+
+          <div class="hero-meta" aria-label="Application requirements and privacy">
+            <span>Windows 10 / 11</span>
+            <span>Local-first</span>
+            <span>No Riot API key required</span>
+          </div>
+        </div>
+
+        <div class="hero-product" aria-label="Recall dashboard preview">
+          <div class="app-window">
+            <div class="window-bar">
+              <div class="window-brand"><img src="assets/recall-r.png" alt="" /> Recall</div>
+              <div class="window-controls" aria-hidden="true"><span>—</span><span>□</span><span>×</span></div>
+            </div>
+            <img src="assets/recall-dashboard.jpg" alt="Recall dashboard showing recent form, The Dial, and player statistics" />
+            <div class="screen-shade" aria-hidden="true"></div>
+          </div>
+
+          <div class="floating-card floating-grade">
+            <span class="floating-label">Last game</span>
+            <strong>A+</strong>
+            <span>Top 12% of lobby</span>
+          </div>
+
+          <div class="floating-card floating-tempo">
+            <div class="mini-dial" aria-hidden="true">
+              <div class="mini-dial-track"></div>
+              <div class="mini-dial-needle"></div>
+              <div class="mini-dial-pin"></div>
+            </div>
+            <div><span class="floating-label">Live Tempo</span><strong>78</strong><span>Teamfight won</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="mode-strip" aria-label="Supported League modes">
+        <div class="section-shell mode-strip-inner">
+          <span class="mode-intro">One history across every mode</span>
+          <div class="mode-list">
+            <span>Ranked</span><i></i><span>Normal</span><i></i><span>ARAM</span><i></i><span>Mayhem</span><i></i><span>League Classic</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="features" class="feature-intro section-shell page-section">
+        <div class="section-heading">
+          <span class="section-kicker">A better memory for League</span>
+          <h2>The whole game—not just the result.</h2>
+          <p>
+            The client gives you a scoreline. Recall gives you the session, the decisions, the trends, and the context
+            behind it—without turning your play into someone else’s dataset.
+          </p>
+        </div>
+
+        <div class="feature-bento">
+          <article class="feature-card feature-card-wide feature-card-review">
+            <div class="card-copy">
+              <span class="card-index">01 / Review</span>
+              <h3>One match. Every useful answer.</h3>
+              <p>
+                Move from your grade and lobby rank to a complete scoreboard, player stats, runes, gold timeline, and
+                win probability—all in one focused review.
+              </p>
+              <ul class="inline-checks">
+                <li>Visual grade explanation</li>
+                <li>Interactive timeline</li>
+                <li>Complete lobby comparison</li>
+              </ul>
+            </div>
+            <div class="review-mock" aria-hidden="true">
+              <div class="review-tabs"><b>Overview</b><span>Stats</span><span>Timeline</span><span>Win probability</span></div>
+              <div class="review-scoreline">
+                <div class="champion-orb">A+</div>
+                <div><small>Victory · Ranked Solo</small><strong>8 / 2 / 11</strong><span>5.7 KDA · 72% KP</span></div>
+                <div class="grade-pulse"><span>Recall grade</span><strong>A+</strong></div>
+              </div>
+              <div class="review-bars"><i style="--bar: 88%"></i><i style="--bar: 72%"></i><i style="--bar: 64%"></i></div>
+            </div>
+          </article>
+
+          <article class="feature-card feature-card-tempo">
+            <span class="card-index">02 / Live</span>
+            <h3>Feel the game swing.</h3>
+            <p>
+              Tempo reads teamfights, multikills, sprees, objectives, and resources so momentum is visible while the
+              game is still yours to change.
+            </p>
+            <div class="tempo-visual" aria-hidden="true">
+              <div class="tempo-arc"></div>
+              <div class="tempo-needle"></div>
+              <div class="tempo-center"><strong>82</strong><span>Advantage</span></div>
+              <div class="tempo-event"><b>+24</b> Objective secured</div>
+            </div>
+          </article>
+
+          <article class="feature-card feature-card-challenges">
+            <span class="card-index">03 / Progress</span>
+            <h3>Turn “almost” into done.</h3>
+            <p>Pin the challenges you’re chasing, see the champions you still need, and get the answer in champion select.</p>
+            <div class="challenge-stack" aria-hidden="true">
+              <div><span><b>A</b> ARAM Authority</span><strong>984 / 1,000</strong><i><em style="width: 88%"></em></i></div>
+              <div><span><b>G</b> All Random All Champions</span><strong>48 / 50</strong><i><em style="width: 72%"></em></i></div>
+              <div><span><b>P</b> Team Diff</span><strong>38 / 40</strong><i><em style="width: 64%"></em></i></div>
+            </div>
+          </article>
+
+          <article class="feature-card feature-card-history">
+            <span class="card-index">04 / History</span>
+            <div class="history-mark" aria-hidden="true">∞</div>
+            <h3>Your archive doesn’t roll off.</h3>
+            <p>
+              Recall keeps supported games locally after they disappear from the client’s recent-match window, with
+              filters, notes, bookmarks, and session context ready whenever you come back.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section id="tour" class="tour-section page-section">
+        <div class="section-shell">
+          <div class="section-heading section-heading-split">
+            <div>
+              <span class="section-kicker">Inside Recall</span>
+              <h2>Your performance, finally connected.</h2>
+            </div>
+            <p>Explore a few of the places where your matches become a useful picture of how you play.</p>
+          </div>
+
+          <div class="product-tour">
+            <div class="tour-tabs" role="tablist" aria-label="Recall product areas">
+              <button id="tab-dashboard" type="button" role="tab" aria-selected="true" aria-controls="panel-dashboard" data-tour="dashboard">
+                <span>01</span><b>Dashboard</b><small>Your form at a glance</small>
+              </button>
+              <button id="tab-matches" type="button" role="tab" aria-selected="false" aria-controls="panel-matches" data-tour="matches" tabindex="-1">
+                <span>02</span><b>Match history</b><small>Every game, still yours</small>
+              </button>
+              <button id="tab-challenges" type="button" role="tab" aria-selected="false" aria-controls="panel-challenges" data-tour="challenges" tabindex="-1">
+                <span>03</span><b>Challenges</b><small>Know what’s left</small>
+              </button>
+            </div>
+
+            <div class="tour-stage">
+              <div id="panel-dashboard" class="tour-panel is-active" role="tabpanel" aria-labelledby="tab-dashboard" data-panel="dashboard">
+                <img src="assets/recall-dashboard.jpg" alt="Recall dashboard with recent form, The Dial, and the Recall Vector Index" />
+              </div>
+              <div id="panel-matches" class="tour-panel" role="tabpanel" aria-labelledby="tab-matches" data-panel="matches" hidden>
+                <img src="assets/recall-matches.jpg" alt="Recall match history with filters, summary statistics, and compact game rows" />
+              </div>
+              <div id="panel-challenges" class="tour-panel" role="tabpanel" aria-labelledby="tab-challenges" data-panel="challenges" hidden>
+                <img src="assets/recall-challenges.jpg" alt="Recall challenge tracker with pinned goals and progress bars" />
+              </div>
+              <div class="tour-caption" aria-live="polite">
+                <span data-caption-index>01 / Dashboard</span>
+                <p data-caption-copy>See the session before the individual games: streak, recent form, The Dial, rank, records, and your mode-specific RVI.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="intelligence-section section-shell page-section">
+        <div class="intelligence-copy">
+          <span class="section-kicker">Personal, not generic</span>
+          <h2>Analysis built around <em>your</em> games.</h2>
+          <p>
+            Recall’s grades compare the complete lobby. Its RVI describes the way you play. Personal context only uses
+            matches that happened before the game you’re reviewing, so your history stays honest.
+          </p>
+
+          <div class="intelligence-points">
+            <div><span>RVI</span><p>Combat, tempo, economy, vision, durability, and teamplay in one mode-aware profile.</p></div>
+            <div><span>A+</span><p>Role-aware grades with the components and lobby percentile exposed—not hidden behind a mystery score.</p></div>
+            <div><span>↗</span><p>Personal baselines, session boundaries, experiments, and trends that make improvement measurable.</p></div>
+          </div>
+        </div>
+
+        <div class="radar-card" aria-label="Example Recall Vector Index profile">
+          <div class="radar-head"><span>Recall Vector Index</span><small>Ranked Solo · 20 games</small></div>
+          <div class="radar-visual" aria-hidden="true">
+            <div class="radar-ring ring-one"></div>
+            <div class="radar-ring ring-two"></div>
+            <div class="radar-ring ring-three"></div>
+            <div class="radar-shape"></div>
+            <span class="axis axis-combat">Combat <b>84</b></span>
+            <span class="axis axis-tempo">Tempo <b>76</b></span>
+            <span class="axis axis-economy">Economy <b>69</b></span>
+            <span class="axis axis-vision">Vision <b>58</b></span>
+            <span class="axis axis-teamplay">Teamplay <b>81</b></span>
+            <span class="axis axis-durability">Durability <b>72</b></span>
+          </div>
+          <div class="radar-foot"><strong>Vanguard</strong><span>Creates early pressure and converts teamfights.</span></div>
+        </div>
+      </section>
+
+      <section id="privacy" class="privacy-section page-section">
+        <div class="section-shell privacy-shell">
+          <div class="privacy-lock" aria-hidden="true"><div class="lock-shackle"></div><div class="lock-body"><i></i></div></div>
+          <div class="privacy-copy">
+            <span class="section-kicker">Local by design</span>
+            <h2>Your games belong to you.</h2>
+            <p>
+              Recall stores your match history, reviews, notes, and settings on your computer. Normal syncing talks
+              directly to the League client running on your machine. There is no Recall account and no analytics profile
+              built from the way you play.
+            </p>
+          </div>
+          <div class="privacy-facts">
+            <div><strong>100%</strong><span>Local match database</span></div>
+            <div><strong>0</strong><span>Accounts required</span></div>
+            <div><strong>You</strong><span>Control backups and restores</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="start-section section-shell page-section">
+        <div class="section-heading">
+          <span class="section-kicker">From install to insight</span>
+          <h2>Ready before your next queue.</h2>
+        </div>
+        <ol class="start-steps">
+          <li><span>01</span><div><h3>Install Recall</h3><p>Download the latest Windows release and launch the app.</p></div></li>
+          <li><span>02</span><div><h3>Open League</h3><p>Recall connects locally and begins saving the recent games the client can expose.</p></div></li>
+          <li><span>03</span><div><h3>Keep playing</h3><p>Your permanent history, live context, grades, and reviews grow automatically.</p></div></li>
+        </ol>
+      </section>
+
+      <section id="faq" class="faq-section section-shell page-section">
+        <div class="section-heading section-heading-split">
+          <div><span class="section-kicker">Good to know</span><h2>Questions before queue.</h2></div>
+          <p>Recall is an independent, open-source companion built for Windows and the locally running League client.</p>
+        </div>
+
+        <div class="faq-list">
+          <details>
+            <summary>Does Recall need my Riot password?<span>+</span></summary>
+            <p>No. Recall connects to the League client already running on your PC. It never asks for or stores your Riot password.</p>
+          </details>
+          <details>
+            <summary>Do I need a Riot API key?<span>+</span></summary>
+            <p>No key is needed for normal syncing, complete recent scoreboards, live capture, grades, or recent timelines. A personal Riot API key is optional for deeper Match-V5 history imports.</p>
+          </details>
+          <details>
+            <summary>Which game modes are supported?<span>+</span></summary>
+            <p>Recall treats Ranked Solo/Duo, Ranked Flex, Normal, Quickplay, Swiftplay, ARAM, ARAM: Mayhem, and League Classic as distinct modes.</p>
+          </details>
+          <details>
+            <summary>Why does Windows show a SmartScreen warning?<span>+</span></summary>
+            <p>The installer is not currently code-signed. Recall is open source, and the same public repository builds every GitHub release.</p>
+          </details>
+          <details>
+            <summary>Can Recall recover games from months ago?<span>+</span></summary>
+            <p>The local League client exposes only its recent window. Recall permanently saves games it sees. An optional Riot API key can import deeper supported Match-V5 history, subject to Riot’s availability and rate limits.</p>
+          </details>
+        </div>
+      </section>
+
+      <section class="final-cta section-shell">
+        <div class="final-glow" aria-hidden="true"></div>
+        <img src="assets/recall-r.png" alt="" />
+        <span class="section-kicker">Your next game is worth remembering</span>
+        <h2>Make your history useful.</h2>
+        <p>Download Recall for Windows and keep the context the League client leaves behind.</p>
+        <div class="hero-actions">
+          <a class="button button-primary" href="https://github.com/KleinByte/Recall/releases/latest"><span class="windows-mark" aria-hidden="true">⊞</span> Download latest release</a>
+          <a class="button button-secondary" href="https://github.com/KleinByte/Recall">View source on GitHub</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="section-shell footer-inner">
+        <div>
+          <a class="brand footer-brand" href="#top"><img src="assets/recall-r.png" alt="" /><span class="brand-word">Recall</span></a>
+          <p>Remember the game. Understand the player.</p>
+        </div>
+        <div class="footer-links">
+          <a href="https://github.com/KleinByte/Recall/releases/latest">Download</a>
+          <a href="https://github.com/KleinByte/Recall">GitHub</a>
+          <a href="#privacy">Privacy</a>
+          <a href="#faq">FAQ</a>
+        </div>
+        <p class="riot-note">
+          Recall is not endorsed by Riot Games and does not reflect the views or opinions of Riot Games or anyone
+          officially involved in producing or managing Riot Games properties. Riot Games and all associated properties
+          are trademarks or registered trademarks of Riot Games, Inc.
+        </p>
+        <span class="copyright">© <span data-year></span> Recall</span>
+      </div>
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
+</html>
