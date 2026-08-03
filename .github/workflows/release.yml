@@ -64,3 +64,12 @@ jobs:
           AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ vars.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME || secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
           AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ vars.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME || secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish release notes
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $releaseNotes = @(
+            git for-each-ref "refs/tags/${{ github.ref_name }}" --format="%(contents)"
+          ) -join [Environment]::NewLine
+          gh release edit "${{ github.ref_name }}" --notes $releaseNotes

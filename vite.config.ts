@@ -5,6 +5,11 @@ import electron from "vite-plugin-electron/simple"
 import pkg from "./package.json"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
 
+// Pure JavaScript dependencies used by the main process are bundled so their
+// transitive dependency trees cannot be pruned by the desktop packager. Keep
+// only native or intentionally external runtime modules here.
+const mainProcessExternals = ["better-sqlite3", "electron", "ws"]
+
 // https://vitejs.dev/config/
 export default defineConfig(({ command }) => {
   fs.rmSync("dist-electron", { recursive: true, force: true })
@@ -41,13 +46,7 @@ export default defineConfig(({ command }) => {
               minify: isBuild,
               outDir: "dist-electron/main",
               rollupOptions: {
-                // Some third-party Node.js libraries may not be built correctly by Vite, especially `C/C++` addons,
-                // we can use `external` to exclude them to ensure they work correctly.
-                // Others need to put them in `dependencies` to ensure they are collected into `app.asar` after the app is built.
-                // Of course, this is not absolute, just this way is relatively simple. :)
-                external: Object.keys(
-                  "dependencies" in pkg ? pkg.dependencies : {}
-                ),
+                external: mainProcessExternals,
               },
             },
           },
@@ -62,9 +61,7 @@ export default defineConfig(({ command }) => {
               minify: isBuild,
               outDir: "dist-electron/preload",
               rollupOptions: {
-                external: Object.keys(
-                  "dependencies" in pkg ? pkg.dependencies : {}
-                ),
+                external: ["electron"],
               },
             },
           },
