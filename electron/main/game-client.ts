@@ -41,6 +41,8 @@ export interface LiveGameEvent {
   victimName?: string
   assisters: string[]
   result?: string
+  /** Present on the Live Client Data `Multikill` event (2 through 5). */
+  multiKill?: number
 }
 
 export interface LiveGameSnapshot {
@@ -117,6 +119,7 @@ interface RawEvent {
   VictimName?: string
   Assisters?: string[]
   Result?: string
+  KillStreak?: number
 }
 
 const number = (value: unknown, fallback = 0) =>
@@ -226,6 +229,7 @@ export async function readLiveGameSnapshot(
         ? event.Assisters.filter((entry): entry is string => typeof entry === "string")
         : [],
       result: text(event.Result),
+      multiKill: number(event.KillStreak) || undefined,
     })),
     updatedAt: Date.now(),
   }

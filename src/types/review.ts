@@ -1,4 +1,10 @@
-import type { MatchRow, ParticipantRow, TrackedMode } from "./stats"
+import type {
+  MatchRow,
+  ParticipantRow,
+  PerformanceLabel,
+  TeamRow,
+  TrackedMode,
+} from "./stats"
 
 export type Confidence = "thin" | "fair" | "solid"
 export type DataTrustState =
@@ -143,6 +149,8 @@ export interface AnnotationTag {
 export interface MatchReview {
   match: MatchRow
   scoreboard: ParticipantRow[]
+  teams: TeamRow[]
+  labels: PerformanceLabel[]
   grade?: GradeBreakdown
   baseline?: PersonalBaseline
   highlights: ReviewHighlight[]

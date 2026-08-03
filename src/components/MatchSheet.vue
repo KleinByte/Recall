@@ -12,7 +12,7 @@ import { api } from "../helpers/api"
 import { labelIcon } from "../helpers/label-icons"
 import { lobbyStandings } from "../helpers/match-detail"
 import { positionIconUrl, positionLabel, resolvePosition } from "../helpers/roles"
-import { closeMatch, reviewMatch } from "../helpers/navigation"
+import { closeMatch } from "../helpers/navigation"
 import {
   championIconUrl,
   championNameById,
@@ -197,8 +197,6 @@ const evidenceOf = (label: PerformanceLabel) =>
         </div>
 
         <GradeBadge :grade="match.grade" size="lg" />
-        <button class="league-button review-action"
-          @click="closeMatch(); reviewMatch(match.gameId)">Full review</button>
         <button class="close" title="Close" @click="closeMatch()">×</button>
       </header>
 
@@ -292,6 +290,7 @@ const evidenceOf = (label: PerformanceLabel) =>
         :detail="detail"
         :loading="loading"
         :champions="champions"
+        :classic="match.modeFamily === 'classic'"
       />
     </div>
   </div>
@@ -402,7 +401,6 @@ const evidenceOf = (label: PerformanceLabel) =>
   color: var(--text-primary);
 }
 
-.review-action { padding: var(--space-2) var(--space-3); white-space: nowrap; }
 
 .kpis {
   display: grid;

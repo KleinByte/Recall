@@ -409,8 +409,11 @@ export const api = {
     return invoke("review:match", gameId)
   },
 
-  getOwnerAugmentSummaries(augmentId?: number): Promise<OwnerAugmentSummary[]> {
-    return invoke("augments:owner-summary", augmentId)
+  getOwnerAugmentSummaries(
+    augmentId?: number,
+    championId?: number,
+  ): Promise<OwnerAugmentSummary[]> {
+    return invoke("augments:owner-summary", augmentId, championId)
   },
 
   cacheAugmentCatalog(input: {

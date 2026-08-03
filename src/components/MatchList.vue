@@ -7,6 +7,7 @@ import type { Champion } from "../types/lol"
 import { openMatch } from "../helpers/navigation"
 import { labelIcon } from "../helpers/label-icons"
 import { itemIconUrl, summonerSpellIconUrl } from "../helpers/ddragon"
+import { itemAsset } from "../helpers/items"
 import { positionIconUrl, positionLabel, resolvePosition } from "../helpers/roles"
 import {
   championIconUrl,
@@ -76,6 +77,8 @@ const patchLabel = (version: string) => {
 
 const displayName = (row: ParticipantRow) =>
   row.summonerName ?? championNameById(props.champions, row.championId)
+
+const itemName = (itemId: number) => itemAsset(itemId).name
 
 </script>
 
@@ -161,7 +164,7 @@ const displayName = (row: ParticipantRow) =>
               <img
                 v-if="itemIconUrl(item)"
                 :src="itemIconUrl(item)"
-                :title="`Item ${item}`"
+                :title="itemName(item)"
                 alt=""
               />
               <span v-else class="item-empty" />
@@ -174,7 +177,7 @@ const displayName = (row: ParticipantRow) =>
                 v-for="row in side(match, teamId)"
                 :key="row.participantId"
                 class="roster-player"
-                :class="{ me: row.isPlayer === 1 }"
+                :class="{ me: row.isPlayer === 1, roleless: !participantPosition(match, row) }"
                 :title="`${displayName(row)} — ${row.kills}/${row.deaths}/${row.assists}`"
               >
                 <img class="roster-champion" :src="championIconUrl(row.championId)" alt="" />
@@ -279,6 +282,7 @@ const displayName = (row: ParticipantRow) =>
 .rosters { display: grid; grid-template-columns: repeat(2, minmax(195px, 245px)); justify-content: start; gap: 20px; min-width: 0; }
 .team-roster { display: grid; grid-template-rows: repeat(5, 17px); gap: 0; min-width: 0; }
 .roster-player { display: grid; grid-template-columns: 17px 11px minmax(120px, 1fr); align-items: center; gap: 5px; min-width: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.15; }
+.roster-player.roleless { grid-template-columns: 17px minmax(0, 1fr); }
 .roster-player.me { color: var(--gold-bright); }
 .roster-champion { width: 17px; height: 17px; border: 1px solid var(--border-subtle); border-radius: 50%; object-fit: cover; }
 .roster-role { width: 11px; height: 11px; opacity: .76; }

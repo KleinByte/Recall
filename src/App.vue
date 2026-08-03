@@ -16,7 +16,7 @@ import { useApiEvents } from "./helpers/use-api-events"
 import { loadDataDragonVersion } from "./helpers/ddragon"
 import {
   detailChampionId,
-  detailMatch,
+  goTo,
   page,
   reviewMatch,
 } from "./helpers/navigation"
@@ -28,7 +28,6 @@ import type { LiveSession } from "./types/live"
 import type { UpdateStatus } from "./types/update"
 
 const ChampionDetail = defineAsyncComponent(() => import("./components/ChampionDetail.vue"))
-const MatchSheet = defineAsyncComponent(() => import("./components/MatchSheet.vue"))
 const ChallengesPage = defineAsyncComponent(() => import("./pages/ChallengesPage.vue"))
 const ChampionsPage = defineAsyncComponent(() => import("./pages/ChampionsPage.vue"))
 const LiveGamePage = defineAsyncComponent(() => import("./pages/LiveGamePage.vue"))
@@ -155,7 +154,7 @@ onMounted(async () => {
     if (live.phase === "Idle") {
       hasFocusedLiveGame = false
     } else if (!hasFocusedLiveGame) {
-      page.value = "live"
+      goTo("live")
       hasFocusedLiveGame = true
     }
   })
@@ -186,7 +185,7 @@ onMounted(async () => {
         :refreshing="refreshing"
         :refresh-message="refreshMessage"
         :collapsed="sidebarCollapsed"
-        @update:page="page = $event"
+        @update:page="goTo"
         @update:collapsed="sidebarCollapsed = $event; persistSettings()"
         @refresh="refreshAll"
       />
@@ -279,12 +278,6 @@ onMounted(async () => {
       <ChampionDetail
         v-if="detailChampionId !== null"
         :champion-id="detailChampionId"
-        :champions="allChampions"
-      />
-
-      <MatchSheet
-        v-if="detailMatch"
-        :match="detailMatch"
         :champions="allChampions"
       />
 

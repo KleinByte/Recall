@@ -37,6 +37,21 @@ describe("performance momentum", () => {
     })
   })
 
+  it("hits the maximum after four wins with two S and two A grades", () => {
+    const result = performanceMomentum([
+      match(true, .4, 4),
+      match(true, .4, 3),
+      match(true, 1.2, 2),
+      match(true, 1.2, 1),
+    ])
+
+    expect(result).toMatchObject({
+      score: 100,
+      streak: 4,
+      overdriveTier: "emerald",
+    })
+  })
+
   it("falls to the bottom for a poor three-game losing streak", () => {
     const result = performanceMomentum([
       match(false, -1.55, 3),
@@ -151,5 +166,30 @@ describe("performance momentum", () => {
     expect(result.streak).toBe(-1)
     expect(result.overdriveTier).toBeUndefined()
     expect(result.score).toBeLessThan(100)
+  })
+
+  it("lets an awful latest game pull the active-session dial below neutral", () => {
+    const result = performanceMomentum([
+      match(false, -1.2, 4),
+      match(true, 1.2, 3),
+      match(true, 1.2, 2),
+      match(true, 1.2, 1),
+    ])
+
+    expect(result.streak).toBe(-1)
+    expect(result.score).toBeLessThan(50)
+  })
+
+  it("does not let an older hot session prop up a new poor session", () => {
+    const latestAt = 1_800_000_000_000
+    const result = performanceMomentum([
+      { ...match(false, -.8, 4), playedAt: latestAt, durationSecs: 1_800 },
+      { ...match(true, 1.2, 3), playedAt: latestAt - 2 * 60 * 60_000, durationSecs: 1_800 },
+      { ...match(true, 1.2, 2), playedAt: latestAt - 2.5 * 60 * 60_000, durationSecs: 1_800 },
+      { ...match(true, 1.2, 1), playedAt: latestAt - 3 * 60 * 60_000, durationSecs: 1_800 },
+    ], latestAt + 1_800_000)
+
+    expect(result).toMatchObject({ streak: -1, wins: 0, losses: 1 })
+    expect(result.score).toBeLessThan(50)
   })
 })

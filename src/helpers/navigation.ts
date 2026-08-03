@@ -1,4 +1,4 @@
-import { ref } from "vue"
+import { computed, ref } from "vue"
 import type { MatchRow } from "../types/stats"
 
 export type PageId =
@@ -32,13 +32,61 @@ export const detailChampionId = ref<number | null>(null)
 export const detailMatch = ref<MatchRow | null>(null)
 export const focusReviewGameId = ref<number | null>(null)
 
+export interface NavigationEntry {
+  page: PageId
+  reviewGameId?: number
+}
+
+const entries = ref<NavigationEntry[]>([{ page: "dashboard" }])
+const entryIndex = ref(0)
+
+export const canGoBack = computed(() => entryIndex.value > 0)
+export const canGoForward = computed(() => entryIndex.value < entries.value.length - 1)
+
+const sameEntry = (left: NavigationEntry, right: NavigationEntry) =>
+  left.page === right.page && left.reviewGameId === right.reviewGameId
+
+function applyEntry(entry: NavigationEntry) {
+  page.value = entry.page
+  focusReviewGameId.value = entry.page === "review"
+    ? entry.reviewGameId ?? null
+    : null
+}
+
+function navigate(entry: NavigationEntry) {
+  const current = entries.value[entryIndex.value]
+  if (current && sameEntry(current, entry)) {
+    applyEntry(entry)
+    return
+  }
+
+  entries.value = [
+    ...entries.value.slice(0, entryIndex.value + 1),
+    entry,
+  ]
+  entryIndex.value = entries.value.length - 1
+  applyEntry(entry)
+}
+
 export function goTo(target: PageId) {
-  page.value = target
+  navigate({ page: target })
+}
+
+export function goBack() {
+  if (!canGoBack.value) return
+  entryIndex.value -= 1
+  applyEntry(entries.value[entryIndex.value])
+}
+
+export function goForward() {
+  if (!canGoForward.value) return
+  entryIndex.value += 1
+  applyEntry(entries.value[entryIndex.value])
 }
 
 export function openChallenge(challengeId: number) {
   focusChallengeId.value = challengeId
-  page.value = "challenges"
+  navigate({ page: "challenges" })
 }
 
 export function openChampion(championId: number) {
@@ -50,12 +98,12 @@ export function closeChampion() {
 }
 
 export function openMatch(match: MatchRow) {
-  detailMatch.value = match
+  reviewMatch(match.gameId)
 }
 
 export function reviewMatch(gameId: number) {
-  focusReviewGameId.value = gameId
-  page.value = "review"
+  detailMatch.value = null
+  navigate({ page: "review", reviewGameId: gameId })
 }
 
 export function closeMatch() {

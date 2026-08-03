@@ -1,28 +1,73 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue"
+import { onBeforeUnmount, onMounted, ref } from "vue"
+import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
+import { faArrowLeft, faArrowRight } from "@fortawesome/free-solid-svg-icons"
 import { currentAppVersion } from "../data/patch-notes"
 import { api } from "../helpers/api"
+import {
+  canGoBack,
+  canGoForward,
+  goBack,
+  goForward,
+} from "../helpers/navigation"
 import { useApiEvents } from "../helpers/use-api-events"
 import RecallMark from "./RecallMark.vue"
 
 const isMaximized = ref(false)
 const events = useApiEvents()
 
+function handleHistoryShortcut(event: KeyboardEvent) {
+  if (!event.altKey || event.ctrlKey || event.metaKey) return
+  if (event.key === "ArrowLeft" && canGoBack.value) {
+    event.preventDefault()
+    goBack()
+  } else if (event.key === "ArrowRight" && canGoForward.value) {
+    event.preventDefault()
+    goForward()
+  }
+}
+
 onMounted(async () => {
+  window.addEventListener("keydown", handleHistoryShortcut)
   isMaximized.value = await api.isWindowMaximized()
   events.on("window:maximized", (value: boolean) => {
     isMaximized.value = value
   })
 })
+
+onBeforeUnmount(() => window.removeEventListener("keydown", handleHistoryShortcut))
 </script>
 
 <template>
   <header class="window-titlebar" @dblclick="api.toggleMaximizeWindow()">
-    <div class="titlebar-brand" aria-label="Recall">
-      <RecallMark class="titlebar-mark" />
-      <span class="titlebar-wordmark">ECALL</span>
-      <span class="titlebar-divider" aria-hidden="true" />
-      <span class="titlebar-version">v{{ currentAppVersion }}</span>
+    <div class="titlebar-left">
+      <div class="titlebar-brand" aria-label="Recall">
+        <RecallMark class="titlebar-mark" />
+        <span class="titlebar-wordmark">ECALL</span>
+        <span class="titlebar-divider" aria-hidden="true" />
+        <span class="titlebar-version">v{{ currentAppVersion }}</span>
+      </div>
+
+      <nav class="history-controls" aria-label="Page history" @dblclick.stop>
+        <button
+          type="button"
+          :disabled="!canGoBack"
+          aria-label="Go back to the previous page"
+          title="Back (Alt+Left)"
+          @click="goBack"
+        >
+          <FontAwesomeIcon :icon="faArrowLeft" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          :disabled="!canGoForward"
+          aria-label="Go forward to the next page"
+          title="Forward (Alt+Right)"
+          @click="goForward"
+        >
+          <FontAwesomeIcon :icon="faArrowRight" aria-hidden="true" />
+        </button>
+      </nav>
     </div>
 
     <div class="window-controls" @dblclick.stop>
@@ -85,6 +130,50 @@ onMounted(async () => {
   align-items: center;
   min-width: 0;
   height: 100%;
+}
+
+.titlebar-left {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 100%;
+}
+
+.history-controls {
+  -webkit-app-region: no-drag;
+  display: flex;
+  gap: 3px;
+  margin-left: 14px;
+}
+
+.history-controls button {
+  width: 30px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.history-controls button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: rgba(200, 170, 109, 0.08);
+  color: var(--gold-bright);
+}
+
+.history-controls button:focus-visible {
+  outline: 1px solid var(--cyan);
+  outline-offset: 1px;
+}
+
+.history-controls button:disabled {
+  opacity: 0.28;
+  cursor: default;
 }
 
 .titlebar-mark {

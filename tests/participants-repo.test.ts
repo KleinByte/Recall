@@ -118,6 +118,42 @@ describe("ParticipantsRepository", () => {
     expect(ownerSummary[0]).not.toHaveProperty("winRate")
   })
 
+  it("scopes owner augment performance to the selected champion", () => {
+    matches.insertMany([
+      buildMatchRow({ gameId: 1, championId: 84, durationSecs: 1200 }),
+      buildMatchRow({ gameId: 2, championId: 22, durationSecs: 1200 }),
+    ])
+    repo.insertMany([
+      participant({
+        gameId: 1,
+        championId: 84,
+        isPlayer: 1,
+        augments: [{ slot: 1, augmentId: 101, source: "match_v5" }],
+      }),
+      participant({
+        gameId: 2,
+        championId: 22,
+        isPlayer: 1,
+        augments: [{ slot: 1, augmentId: 101, source: "match_v5" }],
+      }),
+    ])
+    const setGrade = db.prepare(
+      "UPDATE match_participants SET grade_score = ? WHERE game_id = ? AND puuid = ?",
+    )
+    setGrade.run(1.2, 1, PUUID)
+    setGrade.run(-0.6, 2, PUUID)
+
+    const summary = repo.getOwnerAugmentSummaries(PUUID, undefined, 84)
+    expect(summary).toHaveLength(1)
+    expect(summary[0]).toMatchObject({
+      augmentId: 101,
+      games: 1,
+      averageGrade: 1.2,
+      champions: [{ championId: 84, games: 1 }],
+    })
+    expect(summary[0]).not.toHaveProperty("winRate")
+  })
+
   it("caches stable augment metadata and snapshots captured selections", () => {
     matches.insertMany([buildMatchRow({ gameId: 1 })])
     repo.insertMany([

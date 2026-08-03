@@ -1383,12 +1383,15 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
   ipcMain.handle("review:overview", () =>
     getReviewService(win).overview(withPuuid().puuid),
   )
-  ipcMain.handle("augments:owner-summary", (_event, rawAugmentId: unknown) =>
+  ipcMain.handle("augments:owner-summary", (_event, rawAugmentId: unknown, rawChampionId: unknown) =>
     getParticipants().getOwnerAugmentSummaries(
       withPuuid().puuid,
       rawAugmentId === undefined || rawAugmentId === null
         ? undefined
         : integer(rawAugmentId, "Augment id"),
+      rawChampionId === undefined || rawChampionId === null
+        ? undefined
+        : integer(rawChampionId, "Champion id"),
     ),
   )
   ipcMain.handle("augments:cache-catalog", (_event, rawInput: unknown) => {

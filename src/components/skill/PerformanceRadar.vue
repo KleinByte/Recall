@@ -9,6 +9,8 @@ import type { PerformanceDimensionScore } from "../../types/stats"
 const props = defineProps<{
   dimensions: PerformanceDimensionScore[]
   height?: string
+  primaryLabel?: string
+  secondaryLabel?: string
 }>()
 
 const option = computed<EChartsCoreOption>(() => {
@@ -20,7 +22,7 @@ const option = computed<EChartsCoreOption>(() => {
     itemStyle: { color: string }
     areaStyle: { color: string }
   }> = [{
-    name: "Recorded profile",
+    name: props.primaryLabel ?? "Recorded profile",
     value: props.dimensions.map((dimension) => dimension.score),
     lineStyle: { color: CHART_COLOURS.gold, width: 2 },
     itemStyle: { color: CHART_COLOURS.goldBright },
@@ -29,7 +31,7 @@ const option = computed<EChartsCoreOption>(() => {
 
   if (hasRecent) {
     series.push({
-      name: "Recent form",
+      name: props.secondaryLabel ?? "Recent form",
       value: props.dimensions.map((dimension) => dimension.recentScore ?? dimension.score),
       lineStyle: { color: CHART_COLOURS.cyan, width: 1.5 },
       itemStyle: { color: CHART_COLOURS.cyan },

@@ -10,6 +10,39 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.16",
+    releasedAt: "2026-08-02",
+    title: "One review, and Tempo that feels the fight",
+    summary:
+      "Recall unifies match analysis into one tabbed review, makes live Tempo react to the moments that swing a game, and gives ARAM Mayhem augments a polished, champion-aware home.",
+    sections: [
+      {
+        title: "One complete match review",
+        items: [
+          "Match Overview and Full Review are now one destination with Overview, Performance, Scoreboard, Stats, Timeline, and Win Probability tabs instead of duplicated pages.",
+          "The scoreboard follows a compact team-table layout, ARAM games receive their own Poro treatment, and the Stats table fits all ten champions on common desktop screens.",
+          "Timeline kills read instantly as killer, League takedown mark, and victim, while the interactive gold timeline keeps score and resource context together.",
+        ],
+      },
+      {
+        title: "Live Tempo swings with the game",
+        items: [
+          "Tempo now shares The Dial's visual language while prioritizing won teamfights, objective secures, killing sprees, shutdowns, and multikills over routine gold movement.",
+          "Double, triple, quadra, and pentakills drive Tempo to 100 with gold, green, blue, and purple surge states; enemy swing events can collapse it just as decisively.",
+          "The live screen has cleaner spacing, aligned team and resource panels, and champion-specific ARAM Mayhem augment recommendations based on your own Recall history.",
+        ],
+      },
+      {
+        title: "Navigation and fidelity",
+        items: [
+          "Back and forward controls preserve where you were inside Recall, including the selected review tab.",
+          "Match history, filters, and summary statistics share one restrained maximum width, with readable player names and item names instead of internal IDs.",
+          "Modern and Classic rune pages use their authentic layouts, remain visible inside review rows, and keep detailed rune performance available without breaking the scoreboard.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.15",
     releasedAt: "2026-08-02",
     title: "A review you can actually read",

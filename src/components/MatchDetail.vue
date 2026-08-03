@@ -39,6 +39,7 @@ const props = defineProps<{
   detail: MatchDetail | null
   loading: boolean
   champions: Champion[] | null
+  classic?: boolean
 }>()
 
 const sides = computed(() => props.detail ? groupMatchSides(props.detail) : [])
@@ -368,7 +369,7 @@ const kdaOf = (row: ParticipantRow) =>
                   </template>
                   <span><small>Summoner spells</small><strong>Selected loadout</strong></span>
                 </span>
-                <RunePage :participant="row" :align="row.teamId === 200 ? 'right' : 'left'" />
+                <RunePage :participant="row" :classic="classic" :align="row.teamId === 200 ? 'right' : 'left'" />
               </div>
             </section>
           </li>

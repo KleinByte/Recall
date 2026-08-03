@@ -51,6 +51,7 @@ export interface LiveGameEvent {
   victimName?: string
   assisters: string[]
   result?: string
+  multiKill?: number
 }
 
 export interface LiveResourceAnalysis {
@@ -69,10 +70,12 @@ export interface LiveWinConfidence {
 
 export interface LiveTempoAnalysis {
   score: number
-  label: "Surging" | "Building" | "Stable" | "Slipping" | "Collapsing"
+  label: "Surging" | "Building" | "Stable" | "Slipping" | "Collapsing" |
+    "Double Kill" | "Triple Kill" | "Quadra Kill" | "Pentakill"
   direction: "up" | "steady" | "down"
   leadDelta: number
   factors: string[]
+  surgeTier?: "gold" | "emerald" | "diamond" | "master"
 }
 
 export interface LiveGameAnalysis {

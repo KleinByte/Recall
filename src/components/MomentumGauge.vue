@@ -8,6 +8,8 @@ const props = defineProps<{
   label: string
   streak: number
   overdriveTier?: "gold" | "emerald" | "diamond" | "master"
+  title?: string
+  detail?: string
 }>()
 
 type GradientKey = readonly [position: number, color: string]
@@ -180,7 +182,7 @@ const option = computed<EChartsCoreOption>(() => ({
       class="gauge-chart"
       :option="option"
       height="148px"
-      :ariaLabel="`The Dial ${score} out of 100, ${label}`"
+      :ariaLabel="`${title ?? 'The Dial'} ${score} out of 100, ${label}`"
     />
     <svg class="needle" viewBox="0 0 160 24" aria-hidden="true">
       <path class="needle-edge" d="M0 8H91L105 2L160 12L105 22L91 16H0Z" />
@@ -191,7 +193,7 @@ const option = computed<EChartsCoreOption>(() => ({
     <div class="readout">
       <strong>{{ score }}</strong>
       <span>{{ label }}</span>
-      <small>{{ streak > 0 ? `${streak} win streak` : streak < 0 ? `${Math.abs(streak)} loss streak` : "No active streak" }}</small>
+      <small>{{ detail ?? (streak > 0 ? `${streak} win streak` : streak < 0 ? `${Math.abs(streak)} loss streak` : "No active streak") }}</small>
     </div>
   </div>
 </template>

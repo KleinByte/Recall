@@ -82,6 +82,8 @@ export class ReviewService {
     return {
       match,
       scoreboard: detail.participants,
+      teams: detail.teams,
+      labels: this.matches.getPerformanceLabels(gameId, puuid),
       grade,
       baseline,
       highlights: highlights(grade, baseline),

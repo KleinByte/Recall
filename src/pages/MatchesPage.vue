@@ -381,6 +381,8 @@ const averageGrade = computed(() => gradeFromScore(summary.value?.avgGradeScore)
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  width: min(100%, 1480px);
+  margin-inline: auto;
 }
 
 h1 {

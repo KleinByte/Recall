@@ -619,9 +619,18 @@ export class ParticipantsRepository {
   getOwnerAugmentSummaries(
     puuid: string,
     augmentId?: number,
+    championId?: number,
   ): OwnerAugmentSummary[] {
-    const filter = augmentId === undefined ? "" : "AND a.augment_id = ?"
-    const params = augmentId === undefined ? [puuid] : [puuid, augmentId]
+    const filters = [
+      augmentId === undefined ? undefined : "a.augment_id = ?",
+      championId === undefined ? undefined : "p.champion_id = ?",
+    ].filter((entry): entry is string => entry !== undefined)
+    const filter = filters.length ? `AND ${filters.join(" AND ")}` : ""
+    const params = [
+      puuid,
+      ...(augmentId === undefined ? [] : [augmentId]),
+      ...(championId === undefined ? [] : [championId]),
+    ]
     const rows = this.db.prepare(
       `SELECT a.augment_id AS augmentId, COUNT(DISTINCT a.game_id) AS games,
               MIN(m.played_at) AS firstPlayedAt,

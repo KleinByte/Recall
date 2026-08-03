@@ -76,6 +76,13 @@ describe("readLiveGameSnapshot", () => {
             VictimName: "Opponent",
             Assisters: ["Ally"],
           },
+          {
+            EventID: 10,
+            EventName: "Multikill",
+            EventTime: 719.1,
+            KillerName: "Recall Player",
+            KillStreak: 3,
+          },
         ],
       },
     }))
@@ -104,6 +111,11 @@ describe("readLiveGameSnapshot", () => {
       name: "ChampionKill",
       victimName: "Opponent",
       assisters: ["Ally"],
+    })
+    expect(snapshot.events[1]).toMatchObject({
+      id: 10,
+      name: "Multikill",
+      multiKill: 3,
     })
   })
 

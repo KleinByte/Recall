@@ -98,6 +98,10 @@ export function timelineObjectiveIconUrl(
   return undefined
 }
 
+/** League-client icons used to keep review feeds visually native to League. */
+export const timelineKillIconUrl = () => publicAssetUrl("game-data/ui/timeline-kill.png")
+export const aramPoroIconUrl = () => publicAssetUrl("game-data/ui/aram-poro.png")
+
 export function loadGameAssets(): Promise<GameAssetCatalog> {
   catalogPromise ??= (async () => {
     let version = "latest"

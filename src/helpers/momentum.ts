@@ -91,42 +91,53 @@ function labelFor(score: number, streak: number): PerformanceMomentum["label"] {
  * S+ performance reaches the 100-point redline by design.
  */
 export function performanceMomentum(source: MatchRow[], now = Date.now()): PerformanceMomentum {
-  const matches = source.slice(0, 10)
-  if (!matches.length) {
+  const recentMatches = source.slice(0, 10)
+  if (!recentMatches.length) {
     return { score: 50, label: "Ready", streak: 0, wins: 0, losses: 0 }
   }
+
+  const session = currentSession(recentMatches, now)
+  if (!session.matches.length) {
+    return {
+      score: 50,
+      label: "Ready",
+      streak: 0,
+      wins: 0,
+      losses: 0,
+    }
+  }
+
+  // The Dial describes the current session, not a blended ten-game history.
+  // Exponential recency makes the newest result decisive while still letting a
+  // sustained run build into Overdrive.
+  const matches = session.matches.slice(0, 8)
 
   let resultTotal = 0
   let resultWeight = 0
   let gradeTotal = 0
   let gradeWeight = 0
   for (const [index, match] of matches.entries()) {
-    const weight = Math.max(.45, 1 - index * .07)
+    const weight = .55 ** index
     resultTotal += (match.win === 1 ? 1 : -1) * weight
     resultWeight += weight
     if (typeof match.gradeScore === "number" && Number.isFinite(match.gradeScore)) {
-      gradeTotal += clamp(match.gradeScore / 1.55, -1, 1) * weight
+      gradeTotal += clamp(match.gradeScore / 1.2, -1, 1) * weight
       gradeWeight += weight
     }
   }
 
   const outcomeSignal = resultTotal / resultWeight
   const gradeSignal = gradeWeight > 0 ? gradeTotal / gradeWeight : 0
-  const session = currentSession(matches, now)
   const wins = matches.filter((match) => match.win === 1).length
-  if (!session.matches.length) {
-    return {
-      score: 50,
-      label: "Ready",
-      streak: 0,
-      wins,
-      losses: matches.length - wins,
-    }
-  }
-  const streak = currentStreak(session.matches)
+  const streak = currentStreak(matches)
   const streakSignal = clamp(streak / 3, -1, 1)
+  const extendedStreak = streak >= 4
+    ? Math.min(8, (streak - 3) * 4)
+    : streak <= -4
+      ? -Math.min(8, (Math.abs(streak) - 3) * 4)
+      : 0
   const calculatedScore = Math.round(clamp(
-    50 + gradeSignal * 32 + outcomeSignal * 14 + streakSignal * 18,
+    50 + gradeSignal * 26 + outcomeSignal * 16 + streakSignal * 18 + extendedStreak,
     0,
     100,
   ))
