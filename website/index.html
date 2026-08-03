@@ -15,14 +15,14 @@
       content="Keep every match. Understand every performance. Improve with a League companion built around your own history."
     />
     <meta property="og:url" content="https://kleinbyte.github.io/Recall/" />
-    <meta property="og:image" content="https://kleinbyte.github.io/Recall/assets/recall-social.png" />
+    <meta property="og:image" content="https://kleinbyte.github.io/Recall/assets/recall-dashboard.jpg" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Recall — The League companion that remembers" />
     <meta
       name="twitter:description"
       content="Permanent match history, live Tempo, complete reviews, and challenge tracking—kept privately on your PC."
     />
-    <meta name="twitter:image" content="https://kleinbyte.github.io/Recall/assets/recall-social.png" />
+    <meta name="twitter:image" content="https://kleinbyte.github.io/Recall/assets/recall-dashboard.jpg" />
     <link rel="icon" href="assets/recall-icon.png" />
     <link rel="stylesheet" href="styles.css" />
     <title>Recall — League Companion</title>
@@ -48,6 +48,7 @@
         <nav id="primary-nav" class="primary-nav" aria-label="Primary navigation">
           <a href="#features">Features</a>
           <a href="#tour">Product tour</a>
+          <a href="#skill">Skill</a>
           <a href="#privacy">Privacy</a>
           <a href="#faq">FAQ</a>
           <a class="nav-download" href="https://github.com/KleinByte/Recall/releases/latest">Download</a>
@@ -85,28 +86,9 @@
 
         <div class="hero-product" aria-label="Recall dashboard preview">
           <div class="app-window">
-            <div class="window-bar">
-              <div class="window-brand"><img src="assets/recall-r.png" alt="" /> Recall</div>
-              <div class="window-controls" aria-hidden="true"><span>—</span><span>□</span><span>×</span></div>
-            </div>
             <img src="assets/recall-dashboard.jpg" alt="Recall dashboard showing recent form, The Dial, and player statistics" />
-            <div class="screen-shade" aria-hidden="true"></div>
           </div>
 
-          <div class="floating-card floating-grade">
-            <span class="floating-label">Last game</span>
-            <strong>A+</strong>
-            <span>Top 12% of lobby</span>
-          </div>
-
-          <div class="floating-card floating-tempo">
-            <div class="mini-dial" aria-hidden="true">
-              <div class="mini-dial-track"></div>
-              <div class="mini-dial-needle"></div>
-              <div class="mini-dial-pin"></div>
-            </div>
-            <div><span class="floating-label">Live Tempo</span><strong>78</strong><span>Teamfight won</span></div>
-          </div>
         </div>
       </section>
 
@@ -144,15 +126,9 @@
                 <li>Complete lobby comparison</li>
               </ul>
             </div>
-            <div class="review-mock" aria-hidden="true">
-              <div class="review-tabs"><b>Overview</b><span>Stats</span><span>Timeline</span><span>Win probability</span></div>
-              <div class="review-scoreline">
-                <div class="champion-orb">A+</div>
-                <div><small>Victory · Ranked Solo</small><strong>8 / 2 / 11</strong><span>5.7 KDA · 72% KP</span></div>
-                <div class="grade-pulse"><span>Recall grade</span><strong>A+</strong></div>
-              </div>
-              <div class="review-bars"><i style="--bar: 88%"></i><i style="--bar: 72%"></i><i style="--bar: 64%"></i></div>
-            </div>
+            <figure class="real-ui-frame feature-shot feature-shot-review">
+              <img src="assets/recall-review.jpg" alt="The current Recall Match Review showing the game summary, review tabs, RVI profile, and scoreboard" loading="lazy" decoding="async" />
+            </figure>
           </article>
 
           <article class="feature-card feature-card-tempo">
@@ -162,33 +138,32 @@
               Tempo reads teamfights, multikills, sprees, objectives, and resources so momentum is visible while the
               game is still yours to change.
             </p>
-            <div class="tempo-visual" aria-hidden="true">
-              <div class="tempo-arc"></div>
-              <div class="tempo-needle"></div>
-              <div class="tempo-center"><strong>82</strong><span>Advantage</span></div>
-              <div class="tempo-event"><b>+24</b> Objective secured</div>
-            </div>
+            <figure class="real-ui-frame feature-shot feature-shot-tempo">
+              <img src="assets/recall-tempo.jpg" alt="Recall's current live Tempo gauge showing falling control after a lost teamfight, deaths, and an objective concession" loading="lazy" decoding="async" />
+            </figure>
           </article>
 
           <article class="feature-card feature-card-challenges">
             <span class="card-index">03 / Progress</span>
             <h3>Turn “almost” into done.</h3>
             <p>Pin the challenges you’re chasing, see the champions you still need, and get the answer in champion select.</p>
-            <div class="challenge-stack" aria-hidden="true">
-              <div><span><b>A</b> ARAM Authority</span><strong>984 / 1,000</strong><i><em style="width: 88%"></em></i></div>
-              <div><span><b>G</b> All Random All Champions</span><strong>48 / 50</strong><i><em style="width: 72%"></em></i></div>
-              <div><span><b>P</b> Team Diff</span><strong>38 / 40</strong><i><em style="width: 64%"></em></i></div>
-            </div>
+            <figure class="real-ui-frame feature-shot feature-shot-challenges">
+              <img src="assets/recall-challenges.jpg" alt="The current Recall Challenges page with filters, pinned goals, progress, and percentile placements" loading="lazy" decoding="async" />
+            </figure>
           </article>
 
-          <article class="feature-card feature-card-history">
-            <span class="card-index">04 / History</span>
-            <div class="history-mark" aria-hidden="true">∞</div>
-            <h3>Your archive doesn’t roll off.</h3>
-            <p>
-              Recall keeps supported games locally after they disappear from the client’s recent-match window, with
-              filters, notes, bookmarks, and session context ready whenever you come back.
-            </p>
+          <article class="feature-card feature-card-wide feature-card-history">
+            <div class="card-copy">
+              <span class="card-index">04 / History</span>
+              <h3>Your archive doesn’t roll off.</h3>
+              <p>
+                Recall keeps supported games locally after they disappear from the client’s recent-match window, with
+                filters, notes, bookmarks, and session context ready whenever you come back.
+              </p>
+            </div>
+            <figure class="real-ui-frame feature-shot feature-shot-history">
+              <img src="assets/recall-matches.jpg" alt="The current Recall match archive with mode filters, summary statistics, and compact match rows" loading="lazy" decoding="async" />
+            </figure>
           </article>
         </div>
       </section>
@@ -214,6 +189,9 @@
               <button id="tab-review" type="button" role="tab" aria-selected="false" aria-controls="panel-review" data-tour="review" tabindex="-1">
                 <span>03</span><b>Match review</b><small>One game, fully explained</small>
               </button>
+              <button id="tab-skill" type="button" role="tab" aria-selected="false" aria-controls="panel-skill" data-tour="skill" tabindex="-1">
+                <span>04</span><b>Skill</b><small>Evidence across your history</small>
+              </button>
             </div>
 
             <div class="tour-stage">
@@ -226,6 +204,9 @@
               <div id="panel-review" class="tour-panel" role="tabpanel" aria-labelledby="tab-review" data-panel="review" hidden>
                 <img src="assets/recall-review.jpg" alt="Recall match review with game summary, RVI profile, scoreboard, stats, timeline, and win probability tabs" />
               </div>
+              <div id="panel-skill" class="tour-panel" role="tabpanel" aria-labelledby="tab-skill" data-panel="skill" hidden>
+                <img src="assets/recall-skill-insights.jpg" alt="Recall Skill Insights showing performance fingerprint and Grade Journey" />
+              </div>
               <div class="tour-caption" aria-live="polite">
                 <span data-caption-index>01 / Dashboard</span>
                 <p data-caption-copy>See the session before the individual games: streak, recent form, The Dial, rank, records, and your mode-specific RVI.</p>
@@ -235,37 +216,49 @@
         </div>
       </section>
 
-      <section class="intelligence-section section-shell page-section">
-        <div class="intelligence-copy">
-          <span class="section-kicker">Personal, not generic</span>
-          <h2>Analysis built around <em>your</em> games.</h2>
-          <p>
-            Recall’s grades compare the complete lobby. Its RVI describes the way you play. Personal context only uses
-            matches that happened before the game you’re reviewing, so your history stays honest.
-          </p>
-
-          <div class="intelligence-points">
-            <div><span>RVI</span><p>Combat, tempo, economy, vision, durability, and teamplay in one mode-aware profile.</p></div>
-            <div><span>A+</span><p>Role-aware grades with the components and lobby percentile exposed—not hidden behind a mystery score.</p></div>
-            <div><span>↗</span><p>Personal baselines, session boundaries, experiments, and trends that make improvement measurable.</p></div>
+      <section id="skill" class="skill-section page-section">
+        <div class="section-shell">
+          <div class="section-heading section-heading-split">
+            <div>
+              <span class="section-kicker">The Skill tab</span>
+              <h2>Deep analysis from the games you actually played.</h2>
+            </div>
+            <p>Filter one body of evidence by mode, season, role, or champion, then move from summary to findings to an analysis lab built around repeatable patterns.</p>
           </div>
-        </div>
 
-        <div class="radar-card" aria-label="Example Recall Vector Index profile">
-          <div class="radar-head"><span>Recall Vector Index</span><small>Ranked Solo · 20 games</small></div>
-          <div class="radar-visual" aria-hidden="true">
-            <div class="radar-ring ring-one"></div>
-            <div class="radar-ring ring-two"></div>
-            <div class="radar-ring ring-three"></div>
-            <div class="radar-shape"></div>
-            <span class="axis axis-combat">Combat <b>84</b></span>
-            <span class="axis axis-tempo">Tempo <b>76</b></span>
-            <span class="axis axis-economy">Economy <b>69</b></span>
-            <span class="axis axis-vision">Vision <b>58</b></span>
-            <span class="axis axis-teamplay">Teamplay <b>81</b></span>
-            <span class="axis axis-durability">Durability <b>72</b></span>
+          <div class="skill-showcase">
+            <div class="skill-tabs" role="tablist" aria-label="Skill views">
+              <button id="skill-tab-overview" type="button" role="tab" aria-selected="true" aria-controls="skill-panel-overview" data-skill-tab="overview">Overview</button>
+              <button id="skill-tab-insights" type="button" role="tab" aria-selected="false" aria-controls="skill-panel-insights" data-skill-tab="insights" tabindex="-1">Insights</button>
+              <button id="skill-tab-analyze" type="button" role="tab" aria-selected="false" aria-controls="skill-panel-analyze" data-skill-tab="analyze" tabindex="-1">Analyze</button>
+            </div>
+
+            <div class="skill-stage">
+              <figure id="skill-panel-overview" class="skill-panel is-active" role="tabpanel" aria-labelledby="skill-tab-overview" data-skill-panel="overview">
+                <img src="assets/recall-skill-overview.jpg" alt="Recall Skill Overview with scoped filters, performance summary, rank history, and RVI" loading="lazy" decoding="async" />
+                <figcaption>
+                  <div><span>01 / Overview</span><h3>Scope every number to the games that matter.</h3><p>Mode, season, role, and champion filters drive the summary, rank history, outcome splits, RVI profile, and component evidence below them.</p></div>
+                  <ul><li>RVI performance vectors</li><li>Rank and outcome history</li><li>Role-aware summaries</li></ul>
+                </figcaption>
+              </figure>
+
+              <figure id="skill-panel-insights" class="skill-panel" role="tabpanel" aria-labelledby="skill-tab-insights" data-skill-panel="insights" hidden>
+                <img src="assets/recall-skill-insights.jpg" alt="Recall Skill Insights with performance fingerprint and Grade Journey" loading="lazy" decoding="async" />
+                <figcaption>
+                  <div><span>02 / Insights</span><h3>See the evidence behind your form.</h3><p>Follow Grade Journey and Grade DNA, then inspect schedule rhythm, match length, champion pool, repeatable findings, confidence, and predictive signals.</p></div>
+                  <ul><li>Grade Journey and DNA</li><li>Calendar and duration patterns</li><li>Confidence-aware evidence</li></ul>
+                </figcaption>
+              </figure>
+
+              <figure id="skill-panel-analyze" class="skill-panel" role="tabpanel" aria-labelledby="skill-tab-analyze" data-skill-panel="analyze" hidden>
+                <img src="assets/recall-skill-analyze.jpg" alt="Recall Skill Analyze with playstyle, current form, session rhythm, and death density heatmap" loading="lazy" decoding="async" />
+                <figcaption>
+                  <div><span>03 / Analyze</span><h3>Turn repeated patterns into review targets.</h3><p>Study death density, performance form, session endurance, match signatures, champion efficiency, and learning curves without leaving your recorded history.</p></div>
+                  <ul><li>Death-density heatmap</li><li>Session endurance</li><li>Champion learning curves</li></ul>
+                </figcaption>
+              </figure>
+            </div>
           </div>
-          <div class="radar-foot"><strong>Vanguard</strong><span>Creates early pressure and converts teamfights.</span></div>
         </div>
       </section>
 

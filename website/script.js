@@ -3,6 +3,8 @@ const navToggle = document.querySelector(".nav-toggle")
 const primaryNav = document.querySelector(".primary-nav")
 const tourTabs = [...document.querySelectorAll("[data-tour]")]
 const tourPanels = [...document.querySelectorAll("[data-panel]")]
+const skillTabs = [...document.querySelectorAll("[data-skill-tab]")]
+const skillPanels = [...document.querySelectorAll("[data-skill-panel]")]
 const captionIndex = document.querySelector("[data-caption-index]")
 const captionCopy = document.querySelector("[data-caption-copy]")
 
@@ -18,6 +20,10 @@ const tourContent = {
   review: {
     index: "03 / Match review",
     copy: "Open one complete review for the game summary, performance context, scoreboard, full stats, interactive timeline, and win probability.",
+  },
+  skill: {
+    index: "04 / Skill",
+    copy: "Scope your recorded history, follow Grade Journey and RVI, surface repeatable evidence, and explore the analysis lab without leaving Recall.",
   },
 }
 
@@ -51,6 +57,21 @@ function selectTour(name, moveFocus = false) {
   }
 }
 
+function selectSkill(name, moveFocus = false) {
+  skillTabs.forEach((tab) => {
+    const active = tab.dataset.skillTab === name
+    tab.setAttribute("aria-selected", String(active))
+    tab.tabIndex = active ? 0 : -1
+    if (active && moveFocus) tab.focus()
+  })
+
+  skillPanels.forEach((panel) => {
+    const active = panel.dataset.skillPanel === name
+    panel.hidden = !active
+    panel.classList.toggle("is-active", active)
+  })
+}
+
 setHeaderState()
 window.addEventListener("scroll", setHeaderState, { passive: true })
 
@@ -77,6 +98,20 @@ tourTabs.forEach((tab, index) => {
     if (event.key === "Home") nextIndex = 0
     if (event.key === "End") nextIndex = tourTabs.length - 1
     selectTour(tourTabs[nextIndex].dataset.tour, true)
+  })
+})
+
+skillTabs.forEach((tab, index) => {
+  tab.addEventListener("click", () => selectSkill(tab.dataset.skillTab))
+  tab.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return
+    event.preventDefault()
+    let nextIndex = index
+    if (event.key === "ArrowLeft") nextIndex = (index - 1 + skillTabs.length) % skillTabs.length
+    if (event.key === "ArrowRight") nextIndex = (index + 1) % skillTabs.length
+    if (event.key === "Home") nextIndex = 0
+    if (event.key === "End") nextIndex = skillTabs.length - 1
+    selectSkill(skillTabs[nextIndex].dataset.skillTab, true)
   })
 })
 
