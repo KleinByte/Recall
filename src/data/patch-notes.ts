@@ -10,6 +10,27 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.26",
+    releasedAt: "2026-08-03",
+    title: "A quieter Skill overview",
+    summary:
+      "Rank over time is temporarily tucked away from the Skill overview while Recall prepares a better home for it, and signed updates now carry the correct verified publisher identity.",
+    sections: [
+      {
+        title: "Skill page focus",
+        items: [
+          "Rank over time is hidden for now without removing its implementation or recorded history.",
+        ],
+      },
+      {
+        title: "Signed update identity",
+        items: [
+          "Release validation now rejects the publisher-name placeholder before it can create another installer that existing clients cannot verify.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.25",
     releasedAt: "2026-08-03",
     title: "Cleaner match rosters, dependable updates",

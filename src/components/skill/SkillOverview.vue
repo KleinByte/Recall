@@ -31,6 +31,7 @@ const props = defineProps<{
 const summary = computed(() => props.overview.summary)
 const detail = computed(() => props.overview.style?.career.detail)
 const averageGrade = computed(() => gradeFromScore(summary.value.avgGradeScore))
+const SHOW_RANKED_HISTORY = false
 
 const gradeBars = computed(() => {
   const byGrade = new Map(props.overview.grades.map((entry) => [entry.grade, entry.count]))
@@ -97,7 +98,7 @@ const rviIdentity = computed(() => props.overview.performance
     </section>
 
     <RankedHistoryPanel
-      v-if="ranked.length"
+      v-if="SHOW_RANKED_HISTORY && ranked.length"
       class="overview-rank"
       :histories="ranked"
       allow-season-selection
