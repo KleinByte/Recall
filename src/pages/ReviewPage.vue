@@ -19,6 +19,8 @@ import {
 import { focusReviewGameId } from "../helpers/navigation"
 import { laneMatchups, positionIconUrl, positionLabel } from "../helpers/roles"
 import { compareMatchup } from "../helpers/matchup"
+import { publicAssetUrl } from "../helpers/assets"
+import { summonerSpellIconUrl } from "../helpers/ddragon"
 import {
   timelineChartDomain,
   timelineChartX,
@@ -30,9 +32,16 @@ import {
 import GradeBadge from "../components/GradeBadge.vue"
 import RunePage from "../components/RunePage.vue"
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
-import { faChevronDown, faSkullCrossbones } from "@fortawesome/free-solid-svg-icons"
+import {
+  faArrowTrendDown,
+  faArrowTrendUp,
+  faBullseye,
+  faChevronDown,
+  faMedal,
+  faSkullCrossbones,
+} from "@fortawesome/free-solid-svg-icons"
 import type { Champion } from "../types/lol"
-import type { MatchRow } from "../types/stats"
+import type { MatchRow, ParticipantRow } from "../types/stats"
 import type { TrackedMode } from "../types/stats"
 import type {
   AnnotationTag,
@@ -41,6 +50,8 @@ import type {
   PracticeExperiment,
   ReviewSession,
   OwnerAugmentSummary,
+  BaselineMetric,
+  ReviewHighlight,
   TimelineEvent,
 } from "../types/review"
 
@@ -376,7 +387,7 @@ function augmentName(augmentId: number) {
 }
 
 function augmentIcon(augmentId: number, fallback?: string) {
-  return assets.value.augments[augmentId]?.icon || fallback || "/recall-icon.png"
+  return assets.value.augments[augmentId]?.icon || fallback || publicAssetUrl("recall-icon.png")
 }
 
 async function loadAugmentSummary(augmentId: number) {
@@ -525,6 +536,98 @@ function percent(value: number) {
   return `${Math.round(value * 100)}%`
 }
 
+const gradePercentile = computed(() => Math.round((review.value?.grade?.compositePercentile ?? 0) * 100))
+const gradeRingStyle = computed(() => ({
+  "--grade-percent": `${Math.max(0, Math.min(100, gradePercentile.value)) * 3.6}deg`,
+}))
+
+const baselineDirectional = (metric: BaselineMetric) =>
+  metric.difference * (metric.preferredDirection === "higher" ? 1 : -1)
+
+const baselineRelative = (metric: BaselineMetric) =>
+  baselineDirectional(metric) / Math.max(.01, Math.abs(metric.baseline))
+
+const baselineBarStyle = (metric: BaselineMetric) => {
+  const relative = Math.max(-.5, Math.min(.5, baselineRelative(metric)))
+  const width = Math.max(2, Math.abs(relative) * 100)
+  return {
+    left: relative >= 0 ? "50%" : `${50 - width}%`,
+    width: `${width}%`,
+  }
+}
+
+const signedDifference = (metric: BaselineMetric) => {
+  const directional = baselineDirectional(metric)
+  return `${directional > 0 ? "+" : directional < 0 ? "−" : ""}${Math.abs(metric.difference).toFixed(1)}`
+}
+
+const baselineSummary = computed(() => {
+  const metrics = review.value?.baseline?.metrics ?? []
+  return metrics.reduce((summary, metric) => {
+    const relative = baselineRelative(metric)
+    if (relative > .03) summary.improved += 1
+    else if (relative < -.03) summary.declined += 1
+    else summary.steady += 1
+    return summary
+  }, { improved: 0, declined: 0, steady: 0 })
+})
+
+const formatComparison = (value: number) => Math.abs(value) >= 1_000
+  ? Math.round(value).toLocaleString()
+  : value.toFixed(Math.abs(value) >= 100 ? 0 : 1)
+
+const highlightComponent = (highlight: ReviewHighlight) =>
+  review.value?.grade?.components.find((component) => component.key === highlight.metricKey)
+
+const highlightBaseline = (highlight: ReviewHighlight) =>
+  review.value?.baseline?.metrics.find((metric) => metric.key === highlight.metricKey)
+
+const highlightIcon = (highlight: ReviewHighlight) => {
+  if (highlight.kind === "strength") return faMedal
+  if (highlight.kind === "opportunity") return faBullseye
+  if (highlight.kind === "improvement") return faArrowTrendUp
+  return faArrowTrendDown
+}
+
+const highlightValue = (highlight: ReviewHighlight) => {
+  const component = highlightComponent(highlight)
+  if (component) return `${Math.round(component.percentile * 100)}th`
+  const metric = highlightBaseline(highlight)
+  return metric ? signedDifference(metric) : "—"
+}
+
+const highlightContext = (highlight: ReviewHighlight) => {
+  const component = highlightComponent(highlight)
+  if (component) return `${component.label} · lobby percentile`
+  const metric = highlightBaseline(highlight)
+  return metric ? `${metric.label} · versus your prior average` : highlight.title
+}
+
+const highlightMessage = (highlight: ReviewHighlight) => {
+  if (highlight.kind === "strength") return "Your clearest advantage in this lobby."
+  if (highlight.kind === "opportunity") return "The clearest place to recover value next game."
+  if (highlight.kind === "improvement") return "Meaningfully ahead of your recent baseline."
+  return "Below your recent baseline and worth reviewing."
+}
+
+const MATCHUP_GROUPS = [
+  { label: "Combat", keys: ["kills", "deaths", "assists", "damage", "physical", "magic", "true"] },
+  { label: "Resources", keys: ["champLevel", "cs", "goldEarned", "spree", "multiKill"] },
+  { label: "Durability", keys: ["damageTaken", "mitigated", "heal", "healedOthers"] },
+  { label: "Map impact", keys: ["cc", "vision", "wardsPlaced", "wardsKilled", "controlWards", "objectives", "turretDamage", "turretKills"] },
+] as const
+
+const matchupComparisonGroups = (left?: ParticipantRow, right?: ParticipantRow) => {
+  const comparisons = compareMatchup(left, right)
+  return MATCHUP_GROUPS.map((group) => ({
+    label: group.label,
+    rows: group.keys.flatMap((key) => {
+      const comparison = comparisons.find((entry) => entry.key === key)
+      return comparison ? [comparison] : []
+    }),
+  }))
+}
+
 watch(focusReviewGameId, (gameId) => {
   if (gameId) {
     tab.value = "review"
@@ -611,40 +714,84 @@ onBeforeUnmount(() => {
       </section>
 
       <div class="review-grid">
-        <section class="card">
-          <h2 class="section-title">Why this grade</h2>
+        <section class="card grade-card">
+          <div class="section-heading compact-heading">
+            <div><span class="eyebrow">Performance model</span><h2 class="section-title">Why this grade</h2></div>
+            <span v-if="review.grade" class="algorithm-label">Lobby-relative · weighted by role</span>
+          </div>
           <p v-if="review.grade?.unavailableReason" class="muted">{{ review.grade.unavailableReason }}</p>
-          <div v-else-if="review.grade" class="components">
-            <div v-for="component in review.grade.components" :key="component.key" class="component">
-              <div><strong>{{ component.label }}</strong>
-                <span class="muted">{{ percent(component.percentile) }} {{ component.scope }} · {{ Math.round(component.weight * 100) }}% weight</span></div>
-              <div class="track"><span class="fill" :style="{ width: percent(component.percentile) }" /></div>
-              <span class="numeric">+{{ component.contribution.toFixed(3) }}</span>
+          <div v-else-if="review.grade" class="grade-story">
+            <div class="grade-orbit" :style="gradeRingStyle">
+              <div>
+                <strong>{{ gradePercentile }}</strong>
+                <span>lobby score</span>
+              </div>
+            </div>
+            <div class="components">
+              <div v-for="component in review.grade.components" :key="component.key" class="component">
+                <div class="component-copy">
+                  <strong>{{ component.label }}</strong>
+                  <span>{{ Math.round(component.weight * 100) }}% influence</span>
+                </div>
+                <div class="track" :title="`${component.label}: ${percent(component.percentile)} ${component.scope} percentile`">
+                  <span class="fill" :style="{ width: percent(component.percentile) }" />
+                  <i class="median" aria-hidden="true" />
+                </div>
+                <strong class="component-percent">{{ percent(component.percentile) }}</strong>
+              </div>
             </div>
           </div>
-          <div class="highlights">
-            <article v-for="highlight in review.highlights" :key="highlight.kind" class="highlight">
-              <strong>{{ highlight.title }}</strong><span class="muted">{{ highlight.detail }}</span>
+          <div v-if="review.highlights.length" class="highlights">
+            <article v-for="highlight in review.highlights" :key="highlight.kind" class="highlight" :class="highlight.kind">
+              <span class="highlight-icon"><FontAwesomeIcon :icon="highlightIcon(highlight)" aria-hidden="true" /></span>
+              <span class="highlight-copy">
+                <span class="highlight-title">{{ highlight.title }}</span>
+                <strong>{{ highlightMessage(highlight) }}</strong>
+                <small>{{ highlightContext(highlight) }}</small>
+              </span>
+              <strong class="highlight-value">{{ highlightValue(highlight) }}</strong>
             </article>
           </div>
         </section>
 
-        <section class="card">
-          <h2 class="section-title">Against your prior games</h2>
-          <p v-if="review.baseline" class="muted">
-            {{ review.baseline.games }} earlier {{ review.baseline.scope.replace('_', ' ') }} games
-            · {{ review.baseline.confidence }} confidence
-          </p>
-          <div v-if="review.baseline" class="baseline">
-            <div v-for="metric in review.baseline.metrics" :key="metric.key">
-              <span>{{ metric.label }}</span>
-              <strong :class="{
-                positive: metric.difference * (metric.preferredDirection === 'higher' ? 1 : -1) > 0,
-                negative: metric.difference * (metric.preferredDirection === 'higher' ? 1 : -1) < 0,
-              }">{{ metric.current.toFixed(1) }}</strong>
-              <span class="muted">vs {{ metric.baseline.toFixed(1) }}</span>
-            </div>
+        <section class="card baseline-card">
+          <div class="section-heading compact-heading">
+            <div><span class="eyebrow">Personal context</span><h2 class="section-title">Against your prior games</h2></div>
+            <span v-if="review.baseline" class="sample-badge">
+              {{ review.baseline.games }} games · {{ review.baseline.confidence }} confidence
+            </span>
           </div>
+          <template v-if="review.baseline">
+            <div class="baseline-summary" aria-label="Comparison summary">
+              <span class="positive"><strong>{{ baselineSummary.improved }}</strong> improved</span>
+              <span><strong>{{ baselineSummary.steady }}</strong> close</span>
+              <span class="negative"><strong>{{ baselineSummary.declined }}</strong> declined</span>
+            </div>
+            <div class="baseline">
+              <article v-for="metric in review.baseline.metrics" :key="metric.key" class="baseline-row">
+                <header>
+                  <strong>{{ metric.label }}</strong>
+                  <span :class="{
+                    positive: baselineDirectional(metric) > 0,
+                    negative: baselineDirectional(metric) < 0,
+                  }">
+                    {{ baselineDirectional(metric) > 0 ? '▲' : baselineDirectional(metric) < 0 ? '▼' : '•' }}
+                    {{ signedDifference(metric) }}
+                  </span>
+                </header>
+                <div class="baseline-axis" aria-hidden="true">
+                  <i class="zero" />
+                  <span :class="baselineDirectional(metric) >= 0 ? 'positive' : 'negative'"
+                    :style="baselineBarStyle(metric)" />
+                </div>
+                <footer>
+                  <span><small>This match</small><strong>{{ formatComparison(metric.current) }}</strong></span>
+                  <span><small>Prior average</small><strong>{{ formatComparison(metric.baseline) }}</strong></span>
+                </footer>
+              </article>
+            </div>
+            <p class="baseline-scope muted">Compared with {{ review.baseline.scope.replaceAll('_', ' ') }} matches before this game.</p>
+          </template>
           <p v-else class="muted">No earlier matching games are available yet.</p>
         </section>
       </div>
@@ -671,17 +818,26 @@ onBeforeUnmount(() => {
               <div class="seat left" :class="{ owner: row.left?.isPlayer, vacant: !row.left }">
                 <template v-if="row.left">
                   <div class="seat-body">
-                    <strong class="name">{{ row.left.summonerName || championNameById(champions, row.left.championId) }}</strong>
-                    <span class="muted seat-line">
-                      {{ row.left.kills }}/{{ row.left.deaths }}/{{ row.left.assists }} ·
-                      {{ row.left.totalMinionsKilled + row.left.neutralMinions }} CS ·
-                      {{ row.left.damageToChampions.toLocaleString() }} dmg
-                    </span>
-                    <RunePage :participant="row.left" :classic="review.match.modeFamily === 'classic'" align="left" />
-                    <div class="loadout" aria-label="Final items">
-                      <img v-for="(id, index) in row.left.items.filter(Boolean)" :key="`${id}-${index}`"
-                        :src="assets.items[id]?.icon || itemIconUrl(id, assets.version)"
-                        :title="assets.items[id]?.name || `Item ${id}`" alt="" />
+                    <div class="seat-identity">
+                      <strong class="name" :title="row.left.summonerName">{{ row.left.summonerName || championNameById(champions, row.left.championId) }}</strong>
+                      <span class="muted seat-line">
+                        {{ row.left.kills }}/{{ row.left.deaths }}/{{ row.left.assists }} ·
+                        {{ row.left.totalMinionsKilled + row.left.neutralMinions }} CS ·
+                        {{ row.left.damageToChampions.toLocaleString() }} dmg
+                      </span>
+                    </div>
+                    <div class="seat-kit">
+                      <span class="score-spells" aria-label="Summoner spells">
+                        <template v-for="spell in [row.left.spell1Id, row.left.spell2Id]" :key="spell">
+                          <img v-if="summonerSpellIconUrl(spell)" :src="summonerSpellIconUrl(spell)" alt="" />
+                        </template>
+                      </span>
+                      <RunePage :participant="row.left" :classic="review.match.modeFamily === 'classic'" align="left" compact />
+                      <div class="loadout" aria-label="Final items">
+                        <img v-for="(id, index) in row.left.items.filter(Boolean)" :key="`${id}-${index}`"
+                          :src="assets.items[id]?.icon || itemIconUrl(id, assets.version)"
+                          :title="assets.items[id]?.name || `Item ${id}`" alt="" />
+                      </div>
                     </div>
                   </div>
                   <GradeBadge :grade="row.left.grade" />
@@ -703,17 +859,26 @@ onBeforeUnmount(() => {
                     :alt="championNameById(champions, row.right.championId)" />
                   <GradeBadge :grade="row.right.grade" />
                   <div class="seat-body">
-                    <strong class="name">{{ row.right.summonerName || championNameById(champions, row.right.championId) }}</strong>
-                    <span class="muted seat-line">
-                      {{ row.right.kills }}/{{ row.right.deaths }}/{{ row.right.assists }} ·
-                      {{ row.right.totalMinionsKilled + row.right.neutralMinions }} CS ·
-                      {{ row.right.damageToChampions.toLocaleString() }} dmg
-                    </span>
-                    <RunePage :participant="row.right" :classic="review.match.modeFamily === 'classic'" align="right" />
-                    <div class="loadout" aria-label="Final items">
-                      <img v-for="(id, index) in row.right.items.filter(Boolean)" :key="`${id}-${index}`"
-                        :src="assets.items[id]?.icon || itemIconUrl(id, assets.version)"
-                        :title="assets.items[id]?.name || `Item ${id}`" alt="" />
+                    <div class="seat-identity">
+                      <strong class="name" :title="row.right.summonerName">{{ row.right.summonerName || championNameById(champions, row.right.championId) }}</strong>
+                      <span class="muted seat-line">
+                        {{ row.right.kills }}/{{ row.right.deaths }}/{{ row.right.assists }} ·
+                        {{ row.right.totalMinionsKilled + row.right.neutralMinions }} CS ·
+                        {{ row.right.damageToChampions.toLocaleString() }} dmg
+                      </span>
+                    </div>
+                    <div class="seat-kit">
+                      <div class="loadout" aria-label="Final items">
+                        <img v-for="(id, index) in row.right.items.filter(Boolean)" :key="`${id}-${index}`"
+                          :src="assets.items[id]?.icon || itemIconUrl(id, assets.version)"
+                          :title="assets.items[id]?.name || `Item ${id}`" alt="" />
+                      </div>
+                      <RunePage :participant="row.right" :classic="review.match.modeFamily === 'classic'" align="right" compact />
+                      <span class="score-spells" aria-label="Summoner spells">
+                        <template v-for="spell in [row.right.spell1Id, row.right.spell2Id]" :key="spell">
+                          <img v-if="summonerSpellIconUrl(spell)" :src="summonerSpellIconUrl(spell)" alt="" />
+                        </template>
+                      </span>
                     </div>
                   </div>
                 </template>
@@ -724,17 +889,24 @@ onBeforeUnmount(() => {
             </div>
 
             <div v-if="openMatchups[row.key]" class="comparison">
-              <div class="compare-stats">
-                <article v-for="stat in compareMatchup(row.left, row.right)" :key="stat.key"
-                  class="compare-stat">
-                <span class="numeric compare-value" :class="{ ahead: stat.leads === 'left' }">
-                  {{ stat.left.toLocaleString() }}
-                </span>
-                <span class="compare-label muted">{{ stat.label }}</span>
-                <span class="numeric compare-value" :class="{ ahead: stat.leads === 'right' }">
-                  {{ stat.right.toLocaleString() }}
-                </span>
-                </article>
+              <header class="comparison-head">
+                <strong>{{ row.left?.summonerName || 'Blue player' }}</strong>
+                <span>{{ row.position ? `${positionLabel(row.position)} head-to-head` : 'Player comparison' }}</span>
+                <strong>{{ row.right?.summonerName || 'Red player' }}</strong>
+              </header>
+              <div class="comparison-sheet">
+                <section v-for="group in matchupComparisonGroups(row.left, row.right)" :key="group.label" class="compare-group">
+                  <h4>{{ group.label }}</h4>
+                  <div v-for="stat in group.rows" :key="stat.key" class="compare-row">
+                    <span class="numeric compare-value" :class="{ ahead: stat.leads === 'left' }">
+                      {{ stat.left.toLocaleString() }}
+                    </span>
+                    <span class="compare-label">{{ stat.label }}</span>
+                    <span class="numeric compare-value" :class="{ ahead: stat.leads === 'right' }">
+                      {{ stat.right.toLocaleString() }}
+                    </span>
+                  </div>
+                </section>
               </div>
 
               <div v-if="row.left?.augments?.length || row.right?.augments?.length" class="compare-augments">
@@ -1049,7 +1221,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.review-page { display: flex; flex-direction: column; gap: var(--space-4); max-width: 1180px; margin: 0 auto; }
+.review-page { display: flex; flex-direction: column; gap: var(--space-4); max-width: 1380px; margin: 0 auto; }
 .page-head, .hero, .session-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
 h1 { margin: 0; font: 22px var(--font-display); color: var(--gold-bright); }
 h2 { margin: 0; }
@@ -1061,12 +1233,48 @@ h2 { margin: 0; }
 .hero h2 { font: 20px var(--font-heading); color: var(--gold-bright); }.hero p { margin: 3px 0 0; }
 .compact-session { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); }.compact-session > div { display: flex; flex-direction: column; }.compact-session button { padding: var(--space-2) var(--space-3); }
 .review-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
+.grade-card, .baseline-card { min-height: 380px; }
 .components, .baseline, .highlights, .scoreboard, .events, .turning-points { display: grid; gap: var(--space-2); }
 .section-heading { display: flex; justify-content: space-between; align-items: end; gap: var(--space-3); margin-bottom: var(--space-3); }
-.component { display: grid; grid-template-columns: minmax(140px, 1fr) 1fr 58px; align-items: center; gap: var(--space-3); }
-.component div:first-child { display: flex; flex-direction: column; font-size: 12px; }.numeric { text-align: right; font-variant-numeric: tabular-nums; }
-.highlight { display: flex; flex-direction: column; padding: var(--space-2); background: var(--surface-2); border-radius: var(--radius-sm); font-size: 12px; }
-.baseline > div { display: grid; grid-template-columns: 1fr 70px 100px; gap: var(--space-2); font-size: 12px; }.positive { color: var(--win); }.negative, .error { color: var(--loss); }
+.compact-heading { align-items: start; margin-bottom: var(--space-3); }
+.algorithm-label, .sample-badge { padding: 4px 8px; border: 1px solid var(--border-subtle); border-radius: 999px; color: var(--text-muted); background: var(--surface-1); font-size: 9px; text-transform: uppercase; letter-spacing: .6px; white-space: nowrap; }
+.grade-story { display: grid; grid-template-columns: 104px minmax(0, 1fr); align-items: center; gap: var(--space-4); }
+.grade-orbit { display: grid; place-items: center; width: 94px; height: 94px; border-radius: 50%; background: conic-gradient(var(--gold-bright) var(--grade-percent), var(--surface-3) 0); box-shadow: 0 0 24px rgba(200,170,109,.16); }
+.grade-orbit::before { content: ""; grid-area: 1 / 1; width: 76px; height: 76px; border-radius: 50%; background: radial-gradient(circle at 50% 24%, var(--surface-2), var(--surface-0)); box-shadow: inset 0 0 0 1px var(--border-subtle); }
+.grade-orbit > div { z-index: 1; grid-area: 1 / 1; display: flex; flex-direction: column; align-items: center; }
+.grade-orbit strong { color: var(--gold-bright); font: 25px var(--font-display); line-height: 1; }
+.grade-orbit span { margin-top: 4px; color: var(--text-muted); font-size: 9px; text-transform: uppercase; letter-spacing: .7px; }
+.component { display: grid; grid-template-columns: minmax(76px, .8fr) 1.3fr 36px; align-items: center; gap: 8px; }
+.component-copy { display: flex; flex-direction: column; min-width: 0; }
+.component-copy strong { color: var(--text-secondary); font-size: 10px; }
+.component-copy span { color: var(--text-muted); font-size: 9px; }
+.component .track { position: relative; height: 6px; }
+.component .median { position: absolute; left: 50%; top: -2px; width: 1px; height: 10px; background: rgba(255,255,255,.28); }
+.component-percent { color: var(--text-primary); font-size: 10px; text-align: right; }
+.numeric { text-align: right; font-variant-numeric: tabular-nums; }
+.highlights { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: var(--space-4); }
+.highlight { position: relative; display: grid; grid-template-columns: 28px minmax(0,1fr); gap: 7px; min-height: 82px; padding: 9px; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: linear-gradient(140deg, var(--surface-2), var(--surface-1)); }
+.highlight::after { content: ""; position: absolute; right: -24px; bottom: -28px; width: 72px; height: 72px; border-radius: 50%; background: currentColor; opacity: .06; }
+.highlight.strength, .highlight.improvement { color: var(--win); }.highlight.opportunity, .highlight.regression { color: var(--loss); }
+.highlight-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: color-mix(in srgb, currentColor 14%, transparent); }
+.highlight-copy { display: flex; flex-direction: column; min-width: 0; }
+.highlight-title { color: currentColor; font-size: 9px; text-transform: uppercase; letter-spacing: .7px; }
+.highlight-copy strong { margin-top: 4px; color: var(--text-primary); font-size: 10px; line-height: 1.3; }
+.highlight-copy small { margin-top: 4px; color: var(--text-muted); font-size: 9px; line-height: 1.35; }
+.highlight-value { position: absolute; right: 8px; top: 7px; color: currentColor; font: 14px var(--font-heading); opacity: .92; }
+.baseline-summary { display: grid; grid-template-columns: repeat(3, 1fr); margin-bottom: var(--space-3); overflow: hidden; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); }
+.baseline-summary span { display: flex; justify-content: center; align-items: baseline; gap: 4px; padding: 7px; border-left: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 9px; text-transform: uppercase; letter-spacing: .45px; }
+.baseline-summary span:first-child { border-left: 0; }.baseline-summary strong { font-size: 13px; }
+.baseline { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 12px; }
+.baseline-row { display: grid; gap: 5px; padding-bottom: 7px; border-bottom: 1px solid var(--border-subtle); }
+.baseline-row header, .baseline-row footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.baseline-row header > strong { color: var(--text-secondary); font-size: 10px; }.baseline-row header > span { font-size: 10px; font-weight: 700; }
+.baseline-axis { position: relative; height: 5px; border-radius: 4px; background: var(--surface-3); }
+.baseline-axis .zero { position: absolute; z-index: 1; left: 50%; top: -2px; width: 1px; height: 9px; background: var(--text-muted); opacity: .7; }
+.baseline-axis > span { position: absolute; top: 0; height: 100%; border-radius: 4px; background: currentColor; }
+.baseline-row footer span { display: flex; align-items: baseline; gap: 4px; }.baseline-row footer small { color: var(--text-muted); font-size: 9px; }.baseline-row footer strong { color: var(--text-primary); font-size: 10px; }
+.baseline-scope { margin: var(--space-3) 0 0; font-size: 9px; text-align: right; }
+.positive { color: var(--win); }.negative, .error { color: var(--loss); }
 .matchups { --matchup-grid: minmax(0, 1fr) 108px minmax(0, 1fr) 18px; display: grid; gap: var(--space-1); }
 .matchups.roleless { --matchup-grid: minmax(0, 1fr) 0 minmax(0, 1fr) 18px; }
 .matchup-columns { display: grid; grid-template-columns: var(--matchup-grid); gap: 8px; padding: 0 10px 2px; font-family: var(--font-heading); font-size: 10px; letter-spacing: .8px; text-transform: uppercase; }
@@ -1074,35 +1282,45 @@ h2 { margin: 0; }
 .side-title.red, .lane-title { text-align: center; }.side-title.red { text-align: right; }
 .matchup { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface-0); overflow: visible; }
 .matchup.open { border-color: var(--border-strong); }
-.matchup-row { width: 100%; display: grid; grid-template-columns: var(--matchup-grid); align-items: center; gap: 8px; padding: 8px 10px; background: transparent; border: 0; color: inherit; text-align: left; font: inherit; font-size: 11px; cursor: pointer; }
+.matchup-row { width: 100%; display: grid; grid-template-columns: var(--matchup-grid); align-items: center; gap: 8px; min-height: 62px; padding: 5px 10px; background: transparent; border: 0; color: inherit; text-align: left; font: inherit; font-size: 11px; cursor: pointer; }
 .matchup-row:hover { background: var(--surface-2); }
-.seat { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 6px; border-radius: var(--radius-sm); }
+.seat { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 3px 6px; border-radius: var(--radius-sm); }
 .seat.right { flex-direction: row; justify-content: flex-end; text-align: right; }
 .seat.owner { background: color-mix(in srgb, var(--gold) 13%, transparent); box-shadow: inset 3px 0 var(--gold); }
 .seat.right.owner { box-shadow: inset -3px 0 var(--gold); }
 .seat.vacant { justify-content: center; }
-.seat-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.seat-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 auto; }
 .seat.right .seat-body { align-items: flex-end; }
-.seat-line { font-size: 10px; }
+.seat-identity { display: flex; align-items: baseline; gap: 7px; width: 100%; min-width: 0; }
+.seat.right .seat-identity { flex-direction: row-reverse; }
+.seat-identity .name { flex: 1 1 auto; min-width: 110px; color: var(--text-primary); font-size: 11px; }
+.seat-line { flex: 0 0 auto; font-size: 9px; white-space: nowrap; }
+.seat-kit { display: flex; align-items: center; gap: 4px; min-width: 0; width: 100%; }
+.seat.right .seat-kit { justify-content: flex-end; }
+.score-spells { display: grid; grid-template-columns: repeat(2, 16px); gap: 2px; flex: 0 0 auto; }
+.score-spells img { width: 16px; height: 16px; border-radius: 3px; object-fit: cover; }
 .seat.right .loadout { justify-content: flex-end; }
 .lane { display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--text-secondary); font-family: var(--font-heading); font-size: 10px; letter-spacing: .6px; text-transform: uppercase; }
 .lane-icon { width: 22px; height: 22px; opacity: .84; }
 .matchup-chevron { color: var(--text-muted); font-size: 10px; transition: transform .15s ease; }
 .matchup.open .matchup-chevron { transform: rotate(180deg); }
-.comparison { display: grid; gap: 7px; padding: var(--space-2) 10px var(--space-3); border-top: 1px solid var(--border-subtle); background: linear-gradient(180deg, var(--surface-1), var(--surface-0)); }
-.compare-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px; }
-.compare-stat { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 7px; padding: 7px 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface-2); font-size: 10px; }
-.compare-stat .compare-value:last-child { text-align: left; }
+.comparison { display: grid; gap: 10px; padding: 10px 14px 12px; border-top: 1px solid var(--border-subtle); background: linear-gradient(180deg, color-mix(in srgb, var(--surface-1) 86%, #102740), var(--surface-0)); }
+.comparison-head { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; padding-bottom: 7px; border-bottom: 1px solid var(--border-strong); font-size: 11px; }
+.comparison-head strong:last-child { text-align: right; }.comparison-head span { color: var(--gold); text-transform: uppercase; letter-spacing: .7px; }
+.comparison-sheet { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 24px; }
+.compare-group { min-width: 0; }.compare-group h4 { margin: 0 0 4px; padding-bottom: 4px; border-bottom: 1px solid var(--border-subtle); color: var(--gold); font: 10px var(--font-heading); letter-spacing: .8px; text-transform: uppercase; }
+.compare-row { display: grid; grid-template-columns: 72px minmax(0, 1fr) 72px; align-items: center; min-height: 24px; border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 50%, transparent); font-size: 10px; }
+.compare-row .compare-value:last-child { text-align: left; }
 .compare-augments { display: grid; grid-template-columns: 62px minmax(0, 1fr) 150px minmax(0, 1fr) 62px; align-items: center; gap: 8px; font-size: 11px; }
 .compare-augments { padding-top: var(--space-2); }
 .compare-augments .augment-loadout:first-of-type { grid-column: 1 / 3; }
 .compare-augments .augment-loadout:last-of-type { grid-column: 4 / 6; justify-content: flex-end; }
-.compare-label { text-align: center; font-size: 10px; }
+.compare-label { text-align: center; color: var(--text-muted); font-size: 9px; }
 .compare-value { color: var(--text-secondary); }
 .compare-value:first-child { text-align: right; }
 .compare-value.ahead { color: var(--gold-bright); }
-.champion-portrait { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; }.name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.loadout, .augment-loadout { display: flex; gap: 2px; flex-wrap: wrap; }.loadout img, .augment-loadout img { width: 22px; height: 22px; border-radius: 3px; object-fit: cover; background: var(--surface-3); }
+.champion-portrait { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; }.name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.loadout, .augment-loadout { display: flex; gap: 2px; flex-wrap: nowrap; }.loadout img, .augment-loadout img { width: 19px; height: 19px; border-radius: 3px; object-fit: cover; background: var(--surface-3); }
 .augment-loadout { max-width: 76px; }.augment-loadout button { display: contents; cursor: pointer; }
 .owner-augment-context { display: flex; gap: var(--space-2); flex-wrap: wrap; padding-top: var(--space-3); }.owner-augment-context article { display: flex; gap: 8px; align-items: center; min-width: 200px; padding: 7px 9px; border: 1px solid var(--border-subtle); background: var(--surface-2); border-radius: var(--radius-sm); }.owner-augment-context article > img { width: 34px; height: 34px; border-radius: 50%; }.owner-augment-context article div { display: flex; flex-direction: column; }.text-button { padding: 0; border: 0; background: transparent; color: var(--gold); text-align: left; cursor: pointer; font-size: 10px; }.policy-note { flex-basis: 100%; margin: 2px 0 0; color: var(--text-muted); font-size: 10px; }
 textarea { width: 100%; box-sizing: border-box; min-height: 110px; resize: vertical; background: var(--surface-0); color: var(--text-primary); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: var(--space-3); font: 12px var(--font-body); }

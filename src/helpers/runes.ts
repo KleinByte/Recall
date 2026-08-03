@@ -1,6 +1,7 @@
 import { shallowRef } from "vue"
 import type { RuneSelection } from "../types/stats"
 import catalog from "../data/rune-catalog.json"
+import { publicAssetUrl } from "./assets"
 
 export interface RuneMeta {
   id: number
@@ -30,10 +31,10 @@ export const runeStyles = shallowRef<Record<number, RuneStyle>>(Object.fromEntri
 let loading: Promise<void> | undefined
 
 export const runeIconUrl = (runeId: number) =>
-  runeMetadata.value[runeId] ? `/game-data/runes/${runeId}.png` : undefined
+  runeMetadata.value[runeId] ? publicAssetUrl(`game-data/runes/${runeId}.png`) : undefined
 
 export const runeStyleIconUrl = (styleId: number) =>
-  runeStyles.value[styleId] ? `/game-data/rune-styles/${styleId}.png` : undefined
+  runeStyles.value[styleId] ? publicAssetUrl(`game-data/rune-styles/${styleId}.png`) : undefined
 
 export function loadRuneMetadata() {
   if (loading) return loading
@@ -51,10 +52,13 @@ const compact = (value: number) => Math.abs(value) >= 1_000
 export function runeMetrics(selection: RuneSelection) {
   const meta = runeMetadata.value[selection.runeId]
   const values = [selection.var1, selection.var2, selection.var3]
-  const described = (meta?.endOfGameStatDescs ?? []).flatMap((description, index) => {
+  const described = (meta?.endOfGameStatDescs ?? []).flatMap((description) => {
     if (!description || description === "--") return []
-    const value = values[index] ?? 0
-    return [stripMarkup(description.replaceAll(`@eogvar${index + 1}@`, compact(value)))]
+    const rendered = values.reduce(
+      (text, value, valueIndex) => text.replaceAll(`@eogvar${valueIndex + 1}@`, compact(value)),
+      description,
+    )
+    return [stripMarkup(rendered)]
   })
   if (described.length) return described
   return values.flatMap((value, index) => value ? [`Metric ${index + 1}: ${compact(value)}`] : [])

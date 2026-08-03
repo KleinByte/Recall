@@ -10,6 +10,7 @@ import {
   faFlag,
 } from "@fortawesome/free-solid-svg-icons"
 import GradeBadge from "./GradeBadge.vue"
+import RunePage from "./RunePage.vue"
 import {
   championIconUrl,
   championNameById,
@@ -20,7 +21,6 @@ import { itemIconUrl, summonerSpellIconUrl } from "../helpers/ddragon"
 import { positionIconUrl, positionLabel, resolvePosition } from "../helpers/roles"
 import {
   formatMilestone,
-  formatOptionalText,
   formatStat,
   formatStatDuration,
   groupMatchSides,
@@ -355,15 +355,21 @@ const kdaOf = (row: ParticipantRow) =>
               </dl>
             </section>
 
-            <section class="stat-group">
-              <h4>Setup</h4>
-              <dl class="stat-grid">
-                <div><dt>Lane</dt><dd>{{ formatOptionalText(row.lane) }}</dd></div>
-                <div><dt>Role</dt><dd>{{ formatOptionalText(row.role) }}</dd></div>
-                <div><dt>Primary rune style</dt><dd>{{ formatStat(row.perkPrimaryStyle) }}</dd></div>
-                <div><dt>Secondary rune style</dt><dd>{{ formatStat(row.perkSubStyle) }}</dd></div>
-                <div class="runes"><dt>Runes</dt><dd>{{ row.perks.length ? row.perks.join(" · ") : "—" }}</dd></div>
-              </dl>
+            <section class="stat-group setup-group">
+              <h4>Player setup</h4>
+              <div class="setup-overview">
+                <span class="setup-role">
+                  <img v-if="positionOf(row)" :src="positionIconUrl(positionOf(row))" alt="" />
+                  <span><small>Position</small><strong>{{ positionOf(row) ? positionLabel(positionOf(row)) : "Unassigned" }}</strong></span>
+                </span>
+                <span class="setup-spells">
+                  <template v-for="spell in [row.spell1Id, row.spell2Id]" :key="spell">
+                    <img v-if="summonerSpellIconUrl(spell)" :src="summonerSpellIconUrl(spell)" alt="" />
+                  </template>
+                  <span><small>Summoner spells</small><strong>Selected loadout</strong></span>
+                </span>
+                <RunePage :participant="row" :align="row.teamId === 200 ? 'right' : 'left'" />
+              </div>
             </section>
           </li>
           </template>
@@ -744,13 +750,14 @@ const kdaOf = (row: ParticipantRow) =>
 
 .advanced {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: var(--space-2);
-  padding: var(--space-2);
+  grid-template-columns: 1.25fr .9fr .78fr 1fr 1fr;
+  gap: 0;
+  padding: 8px 10px 10px;
   margin-bottom: var(--space-1);
   border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--border-strong);
   border-radius: var(--radius-sm);
-  background: var(--surface-0);
+  background: linear-gradient(100deg, color-mix(in srgb, var(--surface-1) 90%, #102d46), var(--surface-0));
   overflow: hidden;
 }
 
@@ -760,10 +767,12 @@ const kdaOf = (row: ParticipantRow) =>
 
 .stat-group {
   min-width: 0;
-  padding: var(--space-2);
-  background: var(--surface-2);
-  border-radius: var(--radius-sm);
+  padding: 4px 12px 7px;
+  border-left: 1px solid var(--border-subtle);
+  background: transparent;
 }
+
+.stat-group:first-of-type { border-left: 0; }
 
 .stat-group h4 {
   margin: 0 0 var(--space-2);
@@ -806,6 +815,61 @@ const kdaOf = (row: ParticipantRow) =>
 
 .stat-grid .runes {
   grid-template-columns: 1fr;
+}
+
+.setup-group {
+  grid-column: 1 / -1;
+  margin-top: 7px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-strong);
+  border-left: 0;
+  background: transparent;
+}
+
+.setup-overview {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.setup-role,
+.setup-spells {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 120px;
+}
+
+.setup-role > img {
+  width: 26px;
+  height: 26px;
+}
+
+.setup-spells > img {
+  width: 24px;
+  height: 24px;
+  border-radius: 3px;
+}
+
+.setup-role > span,
+.setup-spells > span {
+  display: flex;
+  flex-direction: column;
+}
+
+.setup-role small,
+.setup-spells small {
+  color: var(--text-muted);
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: .6px;
+}
+
+.setup-role strong,
+.setup-spells strong {
+  color: var(--text-secondary);
+  font-size: 10px;
 }
 
 .team-stats {

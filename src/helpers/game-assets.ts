@@ -1,3 +1,5 @@
+import { publicAssetUrl } from "./assets"
+
 const DDRAGON = "https://ddragon.leagueoflegends.com"
 const COMMUNITY = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global"
 const MATCH_HISTORY = "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-match-history/global/default"
@@ -64,9 +66,9 @@ function communityIcon(path?: string) {
 }
 
 export function itemIconUrl(itemId?: number, version = "latest") {
-  if (!itemId) return "/recall-icon.png"
+  if (!itemId) return publicAssetUrl("recall-icon.png")
   return version === "latest"
-    ? "/recall-icon.png"
+    ? publicAssetUrl("recall-icon.png")
     : `${DDRAGON}/cdn/${version}/img/item/${itemId}.png`
 }
 
@@ -130,7 +132,7 @@ export function loadGameAssets(): Promise<GameAssetCatalog> {
           description: spell.description,
           icon: spell.image?.full
             ? `${DDRAGON}/cdn/${version}/img/spell/${spell.image.full}`
-            : "/recall-icon.png",
+            : publicAssetUrl("recall-icon.png"),
         }))
       }
     } catch {
@@ -146,7 +148,7 @@ export function loadGameAssets(): Promise<GameAssetCatalog> {
         items[itemId] = {
           name: item.name ?? `Item ${itemId}`,
           description: item.description,
-          icon: communityIcon(item.iconPath) || "/recall-icon.png",
+          icon: communityIcon(item.iconPath) || publicAssetUrl("recall-icon.png"),
         }
       }
     } catch {

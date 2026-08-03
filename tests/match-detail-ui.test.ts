@@ -198,6 +198,7 @@ describe("match detail component contract", () => {
 
   it("renders accessible controls and every advanced stat group", () => {
     const scoreboard = readFileSync("src/components/MatchDetail.vue", "utf8")
+    const runePage = readFileSync("src/components/RunePage.vue", "utf8")
 
     expect(scoreboard).toContain(":aria-expanded=")
     expect(scoreboard).toContain("Combat")
@@ -205,7 +206,12 @@ describe("match detail component contract", () => {
     expect(scoreboard).toContain("Vision")
     expect(scoreboard).toContain("Objectives")
     expect(scoreboard).toContain("Multikills &amp; survival")
-    expect(scoreboard).toContain("Setup")
+    expect(scoreboard).toContain("Player setup")
+    expect(scoreboard).toContain("<RunePage")
+    expect(runePage).toContain('<Teleport to="body">')
+    expect(runePage).toContain("window.addEventListener(\"scroll\", placePopover, true)")
+    expect(scoreboard).not.toContain("Primary rune style")
+    expect(scoreboard).not.toContain("row.perks.join")
   })
 
   it("resets expanded players when the displayed match changes", () => {

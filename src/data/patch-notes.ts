@@ -10,6 +10,31 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.15",
+    releasedAt: "2026-08-02",
+    title: "A review you can actually read",
+    summary:
+      "Recall rebuilds match history and Full Review around compact, visual comparisons while repairing every packaged rune, spell, and app-icon path.",
+    sections: [
+      {
+        title: "Compact match history",
+        items: [
+          "Match rows are substantially shorter, preserve full Riot IDs, and keep performance, build, and both rosters readable without acres of empty space.",
+          "Summoner-spell, rune, augment, and Recall artwork now resolve through the packaged app base instead of broken absolute file URLs.",
+          "Player setup now presents position, spells, and an explorable rune page as one coherent loadout instead of raw internal IDs and disconnected cards.",
+        ],
+      },
+      {
+        title: "A visual Full Review",
+        items: [
+          "The grade explanation now pairs a lobby-percentile dial with component meters and visual strength, opportunity, and trend callouts.",
+          "Prior-game comparisons use a centered improvement axis, explicit current and baseline values, and a confidence-aware summary instead of an empty text block.",
+          "The scoreboard is denser, shows complete player names and working rune pages, and turns expanded lane matchups into a scan-friendly comparison sheet rather than a row of cards.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.14",
     releasedAt: "2026-08-02",
     title: "Rune pages and a sharper review",

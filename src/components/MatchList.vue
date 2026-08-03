@@ -77,7 +77,6 @@ const patchLabel = (version: string) => {
 const displayName = (row: ParticipantRow) =>
   row.summonerName ?? championNameById(props.champions, row.championId)
 
-const compactName = (row: ParticipantRow) => displayName(row).split("#")[0]
 </script>
 
 <template>
@@ -138,21 +137,23 @@ const compactName = (row: ParticipantRow) => displayName(row).split("#")[0]
             <GradeBadge :grade="match.grade" />
           </section>
 
-          <section class="stat-block kda-block">
-            <strong class="numeric kda-line">
-              {{ match.kills }} <span>/</span> {{ match.deaths }} <span>/</span> {{ match.assists }}
-            </strong>
-            <span class="accent numeric">{{ formatDecimal(kda(match), 2) }} KDA</span>
-          </section>
+          <section class="performance" aria-label="Performance summary">
+            <span class="stat-block kda-block">
+              <strong class="numeric kda-line">
+                {{ match.kills }} <span>/</span> {{ match.deaths }} <span>/</span> {{ match.assists }}
+              </strong>
+              <span class="accent numeric">{{ formatDecimal(kda(match), 2) }} KDA</span>
+            </span>
 
-          <section class="stat-block">
-            <strong class="numeric">{{ creepScore(match) }} CS</strong>
-            <span class="muted numeric">{{ formatDecimal(match.csPerMin ?? 0, 1) }} per min</span>
-          </section>
+            <span class="stat-block">
+              <strong class="numeric">{{ creepScore(match) }} CS</strong>
+              <span class="muted numeric">{{ formatDecimal(match.csPerMin ?? 0, 1) }}/min</span>
+            </span>
 
-          <section class="stat-block contribution">
-            <strong class="numeric">{{ formatDecimal(killParticipation(match) * 100, 1) }}% KP</strong>
-            <span class="muted numeric">{{ formatCompact(match.damageToChampions) }} champion dmg</span>
+            <span class="stat-block contribution">
+              <strong class="numeric">{{ formatDecimal(killParticipation(match) * 100, 1) }}% KP</strong>
+              <span class="muted numeric">{{ formatCompact(match.damageToChampions) }} damage</span>
+            </span>
           </section>
 
           <section class="build" aria-label="Final build">
@@ -183,7 +184,7 @@ const compactName = (row: ParticipantRow) => displayName(row).split("#")[0]
                   :src="positionIconUrl(participantPosition(match, row))"
                   alt=""
                 />
-                <span class="roster-name">{{ compactName(row) }}</span>
+                <span class="roster-name">{{ displayName(row) }}</span>
               </span>
             </div>
           </section>
@@ -248,8 +249,8 @@ const compactName = (row: ParticipantRow) => displayName(row).split("#")[0]
 
 .card-main {
   display: grid;
-  grid-template-columns: 142px 92px 82px 108px minmax(116px, .75fr) minmax(330px, 1.45fr);
-  align-items: center; gap: clamp(6px, .8vw, 13px); padding: 7px 10px;
+  grid-template-columns: 140px minmax(238px, .78fr) 118px minmax(410px, 1.7fr);
+  align-items: center; gap: 10px; min-height: 85px; padding: 4px 10px;
 }
 .champion-block { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .portrait-wrap { position: relative; flex: 0 0 auto; }
@@ -261,7 +262,9 @@ const compactName = (row: ParticipantRow) => displayName(row).split("#")[0]
 .spells { display: grid; grid-template-columns: repeat(2, 20px); gap: 2px; }
 .spells img { width: 20px; height: 20px; border-radius: 3px; }
 
-.stat-block { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; }
+.performance { display: grid; grid-template-columns: 1.15fr .8fr 1fr; align-items: center; min-width: 0; }
+.stat-block { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; padding: 0 6px; border-left: 1px solid var(--border-subtle); }
+.stat-block:first-child { border-left: 0; }
 .stat-block strong { color: var(--text-primary); font-size: 12px; }
 .stat-block span { font-size: 10px; }
 .kda-line { font-size: 14px !important; }
@@ -273,9 +276,9 @@ const compactName = (row: ParticipantRow) => displayName(row).split("#")[0]
 .build img { border: 1px solid var(--border-subtle); object-fit: cover; }
 .item-empty { opacity: .42; }
 
-.rosters { display: grid; grid-template-columns: repeat(2, minmax(150px, 1fr)); gap: 7px; min-width: 0; }
-.team-roster { display: grid; gap: 1px; min-width: 0; }
-.roster-player { display: grid; grid-template-columns: 17px 11px minmax(72px, 1fr); align-items: center; gap: 3px; min-width: 0; color: var(--text-secondary); font-size: 9px; line-height: 1; }
+.rosters { display: grid; grid-template-columns: repeat(2, minmax(195px, 245px)); justify-content: start; gap: 20px; min-width: 0; }
+.team-roster { display: grid; grid-template-rows: repeat(5, 17px); gap: 0; min-width: 0; }
+.roster-player { display: grid; grid-template-columns: 17px 11px minmax(120px, 1fr); align-items: center; gap: 5px; min-width: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.15; }
 .roster-player.me { color: var(--gold-bright); }
 .roster-champion { width: 17px; height: 17px; border: 1px solid var(--border-subtle); border-radius: 50%; object-fit: cover; }
 .roster-role { width: 11px; height: 11px; opacity: .76; }
@@ -296,7 +299,9 @@ const compactName = (row: ParticipantRow) => displayName(row).split("#")[0]
 .empty { padding: var(--space-5); text-align: center; font-size: 12px; }
 
 @media (max-width: 1320px) {
-  .card-main { grid-template-columns: 138px 86px 78px 102px minmax(112px, .8fr) minmax(300px, 1.4fr); }
+  .card-main { grid-template-columns: 136px minmax(225px, .9fr) 112px minmax(380px, 1.5fr); }
+  .rosters { grid-template-columns: repeat(2, minmax(175px, 220px)); gap: 12px; }
+  .roster-player { grid-template-columns: 17px 11px minmax(110px, 1fr); }
 }
 
 @media (max-width: 850px) {
@@ -304,15 +309,16 @@ const compactName = (row: ParticipantRow) => displayName(row).split("#")[0]
   .headline { flex-wrap: wrap; }
   .details-link { font-size: 0; }
   .details-link svg { font-size: 11px; }
-  .card-main { grid-template-columns: 1.3fr repeat(3, minmax(72px, .7fr)); }
+  .card-main { grid-template-columns: 138px minmax(230px, 1fr) 118px; }
   .build { grid-column: 1 / -1; display: flex; justify-content: flex-start; }
   .rosters { display: none; }
-  .champion-block { grid-row: span 2; }
+  .champion-block { grid-row: auto; }
 }
 
 @media (max-width: 580px) {
   .card-main { grid-template-columns: 1fr 1fr; }
   .champion-block { grid-column: 1 / -1; grid-row: auto; }
-  .contribution { display: none; }
+  .performance { grid-column: 1 / -1; }
+  .build { grid-column: 1 / -1; }
 }
 </style>

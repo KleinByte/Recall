@@ -27,7 +27,7 @@ describe("Recall desktop window shell", () => {
     const sidebar = read("src/components/AppSidebar.vue")
     const titlebar = read("src/components/WindowTitleBar.vue")
 
-    expect(mark).toContain('src="/recall-icon.png"')
+    expect(mark).toContain(":src=\"publicAssetUrl('recall-icon.png')\"")
     expect(sidebar).toContain('<RecallMark class="brand-logo" />')
     expect(sidebar).toContain('class="brand-mark">ECALL</span>')
     expect(titlebar).toContain('<RecallMark class="titlebar-mark" />')

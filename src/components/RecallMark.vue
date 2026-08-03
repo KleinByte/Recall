@@ -1,6 +1,10 @@
+<script setup lang="ts">
+import { publicAssetUrl } from "../helpers/assets"
+</script>
+
 <template>
   <img
-    src="/recall-icon.png"
+    :src="publicAssetUrl('recall-icon.png')"
     role="presentation"
     aria-hidden="true"
     draggable="false"
