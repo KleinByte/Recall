@@ -29,7 +29,7 @@ defineProps<{
 
 .label {
   font-family: var(--font-heading);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 1.3px;
   text-transform: uppercase;
   color: var(--text-secondary);

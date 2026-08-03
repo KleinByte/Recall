@@ -243,7 +243,7 @@ h3 {
   flex-wrap: wrap;
   gap: var(--space-1) var(--space-3);
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .evidence {
@@ -253,7 +253,7 @@ h3 {
 details {
   margin-top: var(--space-3);
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 summary {

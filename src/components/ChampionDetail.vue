@@ -388,7 +388,7 @@ const gradeBars = computed(() => {
 }
 
 .kpi-label {
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 1.2px;
   text-transform: uppercase;
 }

@@ -322,19 +322,19 @@ const shortDate = (timestamp: number) => new Date(timestamp).toLocaleDateString(
 
 .grade-mark :deep(.grade) { margin: 10px 0; }
 .grade-kicker, .grade-wordmark, .eyebrow, .chapter { text-transform: uppercase; letter-spacing: 0.16em; }
-.grade-kicker { color: var(--cyan); font-size: 10px; }
+.grade-kicker { color: var(--cyan); font-size: 12px; }
 .grade-wordmark { color: var(--gold); font-family: var(--font-display); font-size: 12px; }
 .ungraded { color: var(--text-muted); font-family: var(--font-display); font-size: 34px; }
 
 .identity-copy { position: relative; z-index: 1; }
-.eyebrow, .chapter { margin: 0 0 var(--space-2); color: var(--cyan); font-size: 10px; }
+.eyebrow, .chapter { margin: 0 0 var(--space-2); color: var(--cyan); font-size: 12px; }
 .identity-copy h2, .story-head h2 { margin: 0; color: var(--gold-bright); font-family: var(--font-display); font-weight: 500; }
 .identity-copy h2 { max-width: 700px; font-size: clamp(21px, 2.6vw, 34px); line-height: 1.08; }
 .identity-copy > p:last-child { max-width: 720px; margin: var(--space-3) 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.65; }
 
 .identity-stats { position: relative; z-index: 1; display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin: 0; }
 .identity-stats div { padding: 0 0 var(--space-2); border-bottom: 1px solid var(--border-subtle); }
-.identity-stats dt { color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+.identity-stats dt { color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
 .identity-stats dd { margin: 4px 0 0; color: var(--text-primary); font-family: var(--font-numeric); font-size: 14px; }
 
 .story-section { min-width: 0; padding-top: var(--space-4); border-top: 1px solid var(--border-subtle); }
@@ -342,10 +342,10 @@ const shortDate = (timestamp: number) => new Date(timestamp).toLocaleDateString(
 .story-head { display: flex; justify-content: space-between; align-items: flex-end; gap: var(--space-5); margin-bottom: var(--space-4); }
 .story-head h2 { font-size: clamp(19px, 2vw, 26px); }
 .story-head > div > p:last-child { max-width: 760px; margin: var(--space-2) 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.55; }
-.sample { flex: 0 0 auto; color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+.sample { flex: 0 0 auto; color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
 .callout { flex: 0 0 auto; padding-left: var(--space-3); border-left: 2px solid var(--cyan); }
 .callout span, .callout strong { display: block; }
-.callout span { color: var(--text-muted); font-size: 10px; text-transform: uppercase; }
+.callout span { color: var(--text-muted); font-size: 12px; text-transform: uppercase; }
 .callout strong { margin-top: 3px; color: var(--text-primary); font-size: 12px; }
 
 .split-chart { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-5); margin-top: var(--space-5); }
@@ -366,7 +366,7 @@ th { position: sticky; top: 0; background: var(--surface-1); color: var(--text-m
 .component-grid div { display: grid; gap: 3px; }
 .component-grid span { color: var(--text-primary); font-size: 12px; }
 .component-grid strong { color: var(--cyan); font-family: var(--font-numeric); font-size: 16px; }
-.component-grid small { color: var(--text-muted); font-size: 10px; }
+.component-grid small { color: var(--text-muted); font-size: 12px; }
 
 .evidence-section { padding-bottom: var(--space-5); }
 .evidence-head {

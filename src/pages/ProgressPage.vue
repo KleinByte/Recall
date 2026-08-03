@@ -584,7 +584,7 @@ h1 {
 }
 
 .field-label {
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 1.4px;
   text-transform: uppercase;
 }
@@ -691,7 +691,7 @@ h1 {
 
 .record-group header span {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .records-head {
@@ -757,7 +757,7 @@ h1 {
 }
 
 .record-label {
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 1.4px;
   text-transform: uppercase;
 }

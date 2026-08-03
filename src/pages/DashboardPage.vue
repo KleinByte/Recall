@@ -593,7 +593,7 @@ h1 {
 }
 
 .form-summary span {
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .form-rate {
@@ -738,7 +738,7 @@ h1 {
 .champion-evidence {
   display: block;
   margin-top: 2px;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .champion-stats {
@@ -770,7 +770,7 @@ h1 {
 
 .champion-stats small {
   color: var(--text-muted);
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: .5px;
   text-transform: uppercase;
 }

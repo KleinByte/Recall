@@ -11,6 +11,17 @@ import {
 } from "../helpers/navigation"
 import { useApiEvents } from "../helpers/use-api-events"
 import RecallMark from "./RecallMark.vue"
+import RecordNotificationCenter from "./RecordNotificationCenter.vue"
+import type { RecordNotification } from "../types/notifications"
+
+defineProps<{
+  recordNotifications: RecordNotification[]
+}>()
+
+const emit = defineEmits<{
+  (event: "mark-records-read"): void
+  (event: "open-record", gameId: number): void
+}>()
 
 const isMaximized = ref(false)
 const events = useApiEvents()
@@ -66,38 +77,46 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleHistoryShortcu
       </nav>
     </div>
 
-    <div class="window-controls" @dblclick.stop>
-      <button
-        class="window-control"
-        type="button"
-        aria-label="Minimize Recall"
-        title="Minimize"
-        @click="api.minimizeWindow()"
-      >
-        <span class="minimize-icon" aria-hidden="true" />
-      </button>
-      <button
-        class="window-control"
-        type="button"
-        :aria-label="isMaximized ? 'Restore Recall' : 'Maximize Recall'"
-        :title="isMaximized ? 'Restore' : 'Maximize'"
-        @click="api.toggleMaximizeWindow()"
-      >
-        <span
-          class="maximize-icon"
-          :class="{ restore: isMaximized }"
-          aria-hidden="true"
-        />
-      </button>
-      <button
-        class="window-control close-control"
-        type="button"
-        aria-label="Close Recall to the notification area"
-        title="Close"
-        @click="api.closeWindow()"
-      >
-        <span class="close-icon" aria-hidden="true" />
-      </button>
+    <div class="titlebar-right">
+      <RecordNotificationCenter
+        :notifications="recordNotifications"
+        @mark-read="emit('mark-records-read')"
+        @open-record="emit('open-record', $event)"
+      />
+
+      <div class="window-controls" @dblclick.stop>
+        <button
+          class="window-control"
+          type="button"
+          aria-label="Minimize Recall"
+          title="Minimize"
+          @click="api.minimizeWindow()"
+        >
+          <span class="minimize-icon" aria-hidden="true" />
+        </button>
+        <button
+          class="window-control"
+          type="button"
+          :aria-label="isMaximized ? 'Restore Recall' : 'Maximize Recall'"
+          :title="isMaximized ? 'Restore' : 'Maximize'"
+          @click="api.toggleMaximizeWindow()"
+        >
+          <span
+            class="maximize-icon"
+            :class="{ restore: isMaximized }"
+            aria-hidden="true"
+          />
+        </button>
+        <button
+          class="window-control close-control"
+          type="button"
+          aria-label="Close Recall to the notification area"
+          title="Close"
+          @click="api.closeWindow()"
+        >
+          <span class="close-icon" aria-hidden="true" />
+        </button>
+      </div>
     </div>
   </header>
 </template>
@@ -185,6 +204,13 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleHistoryShortcu
   -webkit-app-region: no-drag;
   height: 100%;
   display: flex;
+}
+
+.titlebar-right {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .window-control {

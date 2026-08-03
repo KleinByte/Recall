@@ -122,7 +122,7 @@ const visibleRecords = computed(() => props.records.slice(0, 3))
   align-items: center;
   gap: 7px;
   color: var(--gold-bright);
-  font: 10px var(--font-heading);
+  font: 12px var(--font-heading);
   letter-spacing: .65px;
   text-transform: uppercase;
 }
@@ -138,7 +138,7 @@ const visibleRecords = computed(() => props.records.slice(0, 3))
   flex-wrap: wrap;
   margin-top: 4px;
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .record-list span:not(:last-child)::after {

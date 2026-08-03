@@ -142,7 +142,7 @@ const setSort = (key: SortKey) => {
 .champion-table th {
   text-align: right;
   font-family: var(--font-heading);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 1.2px;
   text-transform: uppercase;
   color: var(--text-secondary);

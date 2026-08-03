@@ -358,7 +358,7 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
 
 .refresh-message {
   margin: 0 0 var(--space-2);
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-secondary);
   text-align: center;
 }

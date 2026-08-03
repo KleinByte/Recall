@@ -174,7 +174,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", closeOnEscape))
   margin: 0 0 3px;
   color: var(--gold);
   font-family: var(--font-heading);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 1.8px;
   text-transform: uppercase;
 }
@@ -233,7 +233,7 @@ h2 {
 
 .release-tab small {
   color: var(--text-muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .release-tab:hover {
@@ -264,7 +264,7 @@ h2 {
 .version {
   color: var(--gold);
   font-family: var(--font-heading);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 1.2px;
   text-transform: uppercase;
 }
@@ -277,7 +277,7 @@ h3 {
 
 time {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -321,7 +321,7 @@ footer {
   padding: var(--space-3) var(--space-5);
   border-top: 1px solid var(--border-subtle);
   background: var(--surface-2);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 @media (max-width: 680px) {

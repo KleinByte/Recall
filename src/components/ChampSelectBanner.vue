@@ -171,7 +171,7 @@ const done = computed(() => statuses.value.filter((row) => row.completed))
 
 .mark {
   font-family: var(--font-heading);
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 1px;
   text-transform: uppercase;
   padding: 1px 5px;

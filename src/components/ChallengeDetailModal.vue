@@ -270,7 +270,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", closeOnEscape))
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   color: var(--gold);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.8px;
   text-transform: uppercase;
 }

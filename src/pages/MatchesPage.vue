@@ -429,7 +429,7 @@ h1 {
 }
 
 .field-label {
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 1.2px;
   text-transform: uppercase;
 }

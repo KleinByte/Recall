@@ -86,7 +86,7 @@ const option = computed<EChartsCoreOption>(() => ({
 </template>
 
 <style scoped>
-.champion-control { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2); margin: -4px 0 var(--space-2); color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+.champion-control { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2); margin: -4px 0 var(--space-2); color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
 .champion-control .league-select { width: min(100%, 230px); }
 .empty { margin: var(--space-5) 0; font-size: 12px; }
 @media (max-width: 560px) { .champion-control { align-items: stretch; flex-direction: column; } .champion-control .league-select { width: 100%; } }

@@ -368,7 +368,7 @@ const evidenceOf = (label: PerformanceLabel) =>
   background: rgba(200, 170, 109, 0.16);
   color: var(--gold-bright);
   font-family: var(--font-heading);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 1.4px;
 }
 

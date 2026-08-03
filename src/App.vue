@@ -26,6 +26,7 @@ import type { AramStats, Champion, Summoner } from "./types/lol"
 import type { MatchRow, PersonalRecord } from "./types/stats"
 import type { StoredSettings } from "./types/app"
 import type { LiveSession } from "./types/live"
+import type { RecordNotification } from "./types/notifications"
 import type { UpdateStatus } from "./types/update"
 
 const ChampionDetail = defineAsyncComponent(() => import("./components/ChampionDetail.vue"))
@@ -44,11 +45,14 @@ const allChampions = ref<Champion[] | null>(null)
 const stats = ref<AramStats | null>(null)
 const lastGame = ref<MatchRow | null>(null)
 const lastGameRecords = ref<PersonalRecord[]>([])
+const recordNotifications = ref<RecordNotification[]>([])
 const refreshing = ref(false)
 const refreshMessage = ref<string | null>(null)
 const showPatchNotes = ref(false)
 const updateStatus = ref<UpdateStatus>({ kind: "up-to-date" })
 const dismissedUpdateVersion = ref<string | null>(null)
+const startupAnimation = ref(true)
+const startupAnimationPhase = ref<"startup" | "arrival">("startup")
 const updateAnimation = ref<{
   phase: "channeling" | "arrival"
   version: string
@@ -99,20 +103,26 @@ function persistSettings() {
   )
 }
 
-async function showUnseenPatchNotes() {
-  const seenVersion = await api.getSetting<string>(
-    "last-seen-patch-notes-version",
-  )
-  if (!hasUnseenPatchNotes(seenVersion)) return
-
-  if (seenVersion) {
-    updateAnimation.value = { phase: "arrival", version: currentAppVersion }
-    await new Promise((resolve) => setTimeout(resolve, 2_700))
-    updateAnimation.value = null
+async function runStartupTransition() {
+  let seenVersion: string | undefined
+  try {
+    seenVersion = await api.getSetting<string>("last-seen-patch-notes-version")
+  } catch {
+    // Startup animation should still complete if settings are unavailable.
   }
 
+  const hasNewPatchNotes = hasUnseenPatchNotes(seenVersion)
+  startupAnimationPhase.value = seenVersion && hasNewPatchNotes
+    ? "arrival"
+    : "startup"
+
+  const duration = 2_700
+  await new Promise((resolve) => setTimeout(resolve, duration))
+  startupAnimation.value = false
+
+  if (!hasNewPatchNotes) return
   showPatchNotes.value = true
-  api.setSetting("last-seen-patch-notes-version", currentAppVersion)
+  void api.setSetting("last-seen-patch-notes-version", currentAppVersion)
 }
 
 async function installUpdateWithRecall() {
@@ -148,10 +158,22 @@ async function refreshAll() {
   }
 }
 
+function markRecordNotificationsRead() {
+  recordNotifications.value = recordNotifications.value.map((notification) => ({
+    ...notification,
+    read: true,
+  }))
+}
+
+function openRecordNotification(gameId: number) {
+  markRecordNotificationsRead()
+  reviewMatch(gameId)
+}
+
 onMounted(async () => {
   api.notifyReady()
   void loadDataDragonVersion()
-  void showUnseenPatchNotes()
+  void runStartupTransition()
 
   const storedStats = await api.getSetting<string>("aram-stats")
   if (storedStats) {
@@ -203,13 +225,36 @@ onMounted(async () => {
       lastGameRecords.value = payload.records
     }
   })
-  events.on("record:open", (gameId: number) => reviewMatch(gameId))
+  events.on("record:notification", (payload: {
+    gameId: number
+    records: PersonalRecord[]
+    createdAt: number
+  }) => {
+    if (!payload.records.length) return
+    const recordKeys = payload.records.map((record) => record.key).sort().join("|")
+    const id = `${payload.gameId}:${recordKeys}`
+    if (recordNotifications.value.some((entry) => entry.id === id)) return
+    recordNotifications.value = [
+      {
+        id,
+        gameId: payload.gameId,
+        records: payload.records,
+        createdAt: payload.createdAt,
+        read: false,
+      },
+      ...recordNotifications.value,
+    ].slice(0, 20)
+  })
 })
 </script>
 
 <template>
   <div class="app-window">
-    <WindowTitleBar />
+    <WindowTitleBar
+      :record-notifications="recordNotifications"
+      @mark-records-read="markRecordNotificationsRead"
+      @open-record="openRecordNotification"
+    />
 
     <div class="app">
       <AppSidebar
@@ -321,6 +366,12 @@ onMounted(async () => {
       <PatchNotesModal
         v-if="showPatchNotes"
         @close="showPatchNotes = false"
+      />
+
+      <UpdateRecallAnimation
+        v-if="startupAnimation"
+        :phase="startupAnimationPhase"
+        :version="currentAppVersion"
       />
 
       <UpdateRecallAnimation

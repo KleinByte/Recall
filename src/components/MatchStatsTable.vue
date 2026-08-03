@@ -175,7 +175,7 @@ thead th:first-child, tbody th[scope="row"] { position: sticky; left: 0; z-index
 thead th:first-child { z-index: 4; color: var(--text-primary); font: 13px var(--font-heading); }
 thead th:not(:first-child) { width: 86px; overflow: hidden; }
 thead th img { display: block; width: 28px; height: 28px; margin: 0 auto 3px; border: 1px solid var(--border-strong); border-radius: 50%; object-fit: cover; }
-thead th span { display: block; overflow: hidden; color: var(--text-muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+thead th span { display: block; overflow: hidden; color: var(--text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .group-row th { height: 33px; padding: 7px 10px; background: rgba(255,255,255,.025); color: var(--text-primary); font: 12px var(--font-heading); text-align: left; }
 tbody tr:not(.group-row):hover td, tbody tr:not(.group-row):hover th { background: color-mix(in srgb, var(--surface-3) 52%, #111824); }
 td.owner, thead th.owner { color: var(--gold-bright); background: color-mix(in srgb, var(--gold) 8%, #111824); }

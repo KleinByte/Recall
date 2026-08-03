@@ -230,7 +230,7 @@ const selectDimension = (key: string) => {
 .eyebrow {
   margin: 0 0 var(--space-1);
   color: var(--cyan);
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: .14em;
   text-transform: uppercase;
 }
@@ -269,7 +269,7 @@ const selectDimension = (key: string) => {
 
 .profile-meta span {
   color: var(--cyan);
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: .1em;
   text-transform: uppercase;
 }
@@ -284,7 +284,7 @@ const selectDimension = (key: string) => {
 .profile-meta small {
   max-width: 210px;
   color: var(--text-muted);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.4;
   text-align: right;
 }
@@ -321,10 +321,10 @@ const selectDimension = (key: string) => {
   background: linear-gradient(105deg, rgba(10, 203, 230, .08), rgba(8, 19, 35, .62) 45%);
 }
 .story-card.identity strong { color: var(--cyan); font-family: var(--font-display); font-size: 19px; }
-.story-label { color: var(--text-muted); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+.story-label { color: var(--text-muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
 .story-card strong { margin-top: var(--space-1); color: var(--text-primary); font-family: var(--font-heading); font-size: 13px; }
 .story-score { margin-top: var(--space-2); color: var(--gold-bright); font-size: 26px; }
-.story-card p { margin: var(--space-2) 0 0; color: var(--text-secondary); font-size: 10px; line-height: 1.5; }
+.story-card p { margin: var(--space-2) 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
 .comparison-note { grid-column: 1 / -1; margin: 0; }
 
 .dimension-grid {
@@ -365,21 +365,21 @@ const selectDimension = (key: string) => {
   border-radius: 50% 50% 42% 42%;
   color: var(--gold);
   font-family: var(--font-display);
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
 }
 
 .dimension-copy { display: grid; min-width: 0; }
 .dimension-copy strong { overflow: hidden; color: var(--text-primary); font-family: var(--font-heading); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.dimension-copy small { color: var(--text-muted); font-size: 9px; }
+.dimension-copy small { color: var(--text-muted); font-size: 11px; }
 .dimension-result { display: grid; justify-items: end; }
 .dimension-score { color: var(--gold-bright); font-size: 20px; line-height: 1; }
-.dimension-result small { margin-top: 3px; color: var(--text-muted); font-size: 8px; letter-spacing: .06em; text-transform: uppercase; }
+.dimension-result small { margin-top: 3px; color: var(--text-muted); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
 
 .dimension-delta {
   grid-column: 1 / -1;
   color: var(--text-muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .positive { color: var(--win) !important; }
@@ -412,12 +412,12 @@ const selectDimension = (key: string) => {
 .detail-toggle:hover .toggle-copy strong { color: var(--cyan); }
 .toggle-copy,
 .toggle-score { display: grid; }
-.toggle-copy small { color: var(--cyan); font-size: 8px; letter-spacing: .12em; text-transform: uppercase; }
+.toggle-copy small { color: var(--cyan); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
 .toggle-copy strong { margin-top: 2px; color: var(--gold-bright); font-family: var(--font-display); font-size: 17px; font-weight: 500; }
 .toggle-score { justify-items: end; }
 .toggle-score strong { color: var(--gold-bright); font-size: 20px; line-height: 1; }
-.toggle-score small { margin-top: 3px; color: var(--text-muted); font-size: 8px; }
-.toggle-action { display: flex; align-items: center; gap: var(--space-2); color: var(--text-secondary); font-size: 9px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.toggle-score small { margin-top: 3px; color: var(--text-muted); font-size: 10px; }
+.toggle-action { display: flex; align-items: center; gap: var(--space-2); color: var(--text-secondary); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
 .toggle-chevron { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--border-strong); border-radius: 50%; color: var(--gold-bright); background: var(--surface-2); transform: rotate(0); transition: transform 160ms ease, color 160ms ease, border-color 160ms ease; }
 .toggle-chevron svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .toggle-chevron.open { border-color: rgba(10, 203, 230, .55); color: var(--cyan); transform: rotate(180deg); }
@@ -445,7 +445,7 @@ const selectDimension = (key: string) => {
   border-bottom: 1px solid var(--border-subtle);
   background: rgba(10, 203, 230, .035);
   color: var(--text-muted);
-  font-size: 8px;
+  font-size: 10px;
   letter-spacing: .1em;
   text-transform: uppercase;
 }
@@ -462,8 +462,8 @@ const selectDimension = (key: string) => {
 .measurement-row:hover { background: rgba(10, 203, 230, .025); }
 .measurement-copy { display: grid; min-width: 0; }
 .measurement-copy strong { color: var(--text-primary); font-family: var(--font-heading); font-size: 12px; }
-.measurement-copy p { margin: 3px 0; color: var(--text-secondary); font-size: 10px; line-height: 1.4; }
-.measurement-copy small { color: var(--text-muted); font-size: 9px; }
+.measurement-copy p { margin: 3px 0; color: var(--text-secondary); font-size: 12px; line-height: 1.4; }
+.measurement-copy small { color: var(--text-muted); font-size: 11px; }
 
 .measurement-score {
   display: grid;
@@ -474,7 +474,7 @@ const selectDimension = (key: string) => {
 }
 
 .measurement-score > strong { color: var(--gold-bright); font-size: 13px; text-align: right; }
-.measurement-score > small { grid-column: 1 / -1; color: var(--text-muted); font-size: 8px; text-align: right; text-transform: uppercase; }
+.measurement-score > small { grid-column: 1 / -1; color: var(--text-muted); font-size: 10px; text-align: right; text-transform: uppercase; }
 
 .segment-meter {
   display: grid;
@@ -499,7 +499,7 @@ const selectDimension = (key: string) => {
 
 .measurement-influence { display: grid; justify-items: end; }
 .measurement-influence strong { color: var(--cyan); font-size: 14px; }
-.measurement-influence small { color: var(--text-muted); font-size: 8px; text-align: right; }
+.measurement-influence small { color: var(--text-muted); font-size: 10px; text-align: right; }
 .method-note { margin: var(--space-3) 0 0; }
 
 @media (max-width: 1100px) {

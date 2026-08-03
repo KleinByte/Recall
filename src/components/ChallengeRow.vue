@@ -209,7 +209,7 @@ const completedCount = computed(() => {
 }
 
 .tag {
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.8px;
   text-transform: uppercase;
   border: 1px solid var(--border-subtle);
@@ -258,7 +258,7 @@ const completedCount = computed(() => {
 }
 
 .percentile {
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .detail {

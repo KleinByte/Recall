@@ -298,7 +298,7 @@ const rviIdentity = computed(() => props.overview.performance
   justify-content: space-between;
   gap: var(--space-2);
   margin-top: 4px;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .context-grid {

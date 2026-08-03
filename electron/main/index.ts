@@ -5,7 +5,6 @@ import {
   ipcMain,
   Menu,
   nativeImage,
-  Notification,
   safeStorage,
   shell,
   Tray,
@@ -542,19 +541,11 @@ function broadcastHeldRecords(
   for (const record of newRecords) announced.add(record.key)
   announcedRecordKeys.set(match.gameId, announced)
 
-  if (Notification.isSupported()) {
-    const names = newRecords.slice(0, 3).map((record) => record.label).join(", ")
-    const extra = newRecords.length > 3 ? ` and ${newRecords.length - 3} more` : ""
-    const notification = new Notification({
-      title: newRecords.length === 1 ? "New Recall record" : `${newRecords.length} new Recall records`,
-      body: `${names}${extra}`,
-    })
-    notification.on("click", () => {
-      reveal(win)
-      broadcast(win, "record:open", match.gameId)
-    })
-    notification.show()
-  }
+  broadcast(win, "record:notification", {
+    gameId: match.gameId,
+    records: newRecords,
+    createdAt: Date.now(),
+  })
 }
 
 const announcedRecordKeys = new Map<number, Set<string>>()

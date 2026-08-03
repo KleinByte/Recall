@@ -246,9 +246,9 @@ const itemName = (itemId: number) => itemAsset(itemId).name
 }
 .headline { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .headline strong { color: var(--text-primary); font: 11px var(--font-heading); letter-spacing: .55px; text-transform: uppercase; }
-.outcome { font: 10px var(--font-heading); letter-spacing: .8px; text-transform: uppercase; }
+.outcome { font: 12px var(--font-heading); letter-spacing: .8px; text-transform: uppercase; }
 .dot { color: var(--text-muted); }
-.details-link { flex: 0 0 auto; display: flex; align-items: center; gap: 7px; color: var(--gold-bright); font-size: 10px; }
+.details-link { flex: 0 0 auto; display: flex; align-items: center; gap: 7px; color: var(--gold-bright); font-size: 12px; }
 
 .card-main {
   display: grid;
@@ -269,7 +269,7 @@ const itemName = (itemId: number) => itemAsset(itemId).name
 .stat-block { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; padding: 0 6px; border-left: 1px solid var(--border-subtle); }
 .stat-block:first-child { border-left: 0; }
 .stat-block strong { color: var(--text-primary); font-size: 12px; }
-.stat-block span { font-size: 10px; }
+.stat-block span { font-size: 12px; }
 .kda-line { font-size: 14px !important; }
 .kda-line span { color: var(--text-muted); font-size: 12px; }
 .accent { color: var(--win); font-weight: 700; }
@@ -295,7 +295,7 @@ const itemName = (itemId: number) => itemAsset(itemId).name
   display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px;
   border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--surface-0) 74%, transparent); color: var(--text-secondary);
-  font-size: 8px; line-height: 1; white-space: nowrap;
+  font-size: 10px; line-height: 1; white-space: nowrap;
 }
 .game-label { border-color: rgba(200, 170, 110, .3); color: var(--gold-bright); }
 .place-chip { color: var(--text-primary); }

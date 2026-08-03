@@ -177,7 +177,7 @@ const tone = computed(() =>
 
 .grip {
   margin-top: auto;
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 1px;
   text-transform: uppercase;
   color: var(--text-muted);

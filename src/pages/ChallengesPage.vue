@@ -522,7 +522,7 @@ h1 {
 }
 
 .field-label {
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 1.2px;
   text-transform: uppercase;
 }
@@ -562,7 +562,7 @@ h1 {
 }
 
 .grid-label {
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 1.2px;
   text-transform: uppercase;
   margin: var(--space-3) 0 var(--space-2);
@@ -605,7 +605,7 @@ h1 {
 }
 
 .champion-name {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;

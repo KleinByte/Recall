@@ -467,7 +467,7 @@ const kdaOf = (row: ParticipantRow) =>
 
 .side-totals .muted {
   font-family: var(--font-body);
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 1px;
 }
@@ -490,7 +490,7 @@ const kdaOf = (row: ParticipantRow) =>
   border-radius: 999px;
   background: var(--surface-2);
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .objective .numeric {
@@ -505,7 +505,7 @@ const kdaOf = (row: ParticipantRow) =>
 }
 
 .ban-label {
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 1px;
   margin-right: var(--space-1);
@@ -544,7 +544,7 @@ const kdaOf = (row: ParticipantRow) =>
   padding: 0 var(--space-2) var(--space-1);
   margin-bottom: var(--space-1);
   border-bottom: 1px solid var(--border-subtle);
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 1.1px;
   text-transform: uppercase;
 }
@@ -594,7 +594,7 @@ const kdaOf = (row: ParticipantRow) =>
   top: 12px;
   background: var(--surface-0);
   border-radius: 50%;
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1;
   padding: 2px 3px;
   color: var(--text-secondary);
@@ -606,7 +606,7 @@ const kdaOf = (row: ParticipantRow) =>
   border-radius: 999px;
   background: var(--surface-0);
   color: var(--text-secondary);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.4;
   text-align: center;
 }
@@ -626,7 +626,7 @@ const kdaOf = (row: ParticipantRow) =>
   background: rgba(200, 170, 109, 0.14);
   color: var(--gold-bright);
   font-family: var(--font-heading);
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 1px;
 }
 
@@ -778,7 +778,7 @@ const kdaOf = (row: ParticipantRow) =>
 .stat-group h4 {
   margin: 0 0 var(--space-2);
   font-family: var(--font-heading);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 1px;
   text-transform: uppercase;
   color: var(--gold);
@@ -799,7 +799,7 @@ const kdaOf = (row: ParticipantRow) =>
 
 .stat-grid dt {
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .stat-grid dd {
@@ -862,7 +862,7 @@ const kdaOf = (row: ParticipantRow) =>
 .setup-role small,
 .setup-spells small {
   color: var(--text-muted);
-  font-size: 8px;
+  font-size: 10px;
   text-transform: uppercase;
   letter-spacing: .6px;
 }
@@ -870,7 +870,7 @@ const kdaOf = (row: ParticipantRow) =>
 .setup-role strong,
 .setup-spells strong {
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .team-stats {
@@ -892,7 +892,7 @@ const kdaOf = (row: ParticipantRow) =>
 
 .stats-side {
   font-family: var(--font-heading);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 1.1px;
   text-transform: uppercase;
 }
@@ -903,7 +903,7 @@ const kdaOf = (row: ParticipantRow) =>
 .stats-title {
   margin: 0;
   font-family: var(--font-heading);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 1.2px;
   text-transform: uppercase;
   color: var(--gold);
@@ -938,7 +938,7 @@ const kdaOf = (row: ParticipantRow) =>
 
 .compare-label {
   text-align: center;
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 1.1px;
   text-transform: uppercase;
   color: var(--text-muted);

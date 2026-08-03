@@ -10,6 +10,35 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.27",
+    releasedAt: "2026-08-03",
+    title: "Records worth ringing in",
+    summary:
+      "Personal records now arrive inside Recall, compact text is easier to read throughout the app, and every launch begins with a polished return animation.",
+    sections: [
+      {
+        title: "A home for new records",
+        items: [
+          "New personal records now light up a notification bell in Recall's titlebar instead of appearing as a Windows notification.",
+          "The notification center keeps recent record moments together and opens the match review that earned each one.",
+        ],
+      },
+      {
+        title: "Comfortable reading",
+        items: [
+          "The smallest labels, captions, table values, and supporting copy are now two pixels larger across Recall without enlarging the primary interface.",
+        ],
+      },
+      {
+        title: "B-ing back",
+        items: [
+          "Recall now opens with the animated recall-complete choreography and transitions cleanly into the app.",
+          "Release publishing now creates one verified GitHub release containing the complete signed updater set.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.26",
     releasedAt: "2026-08-03",
     title: "A quieter Skill overview",

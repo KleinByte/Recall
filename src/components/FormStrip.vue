@@ -437,7 +437,7 @@ onBeforeUnmount(() => {
 }
 
 .pop-title small {
-  font-size: 10px;
+  font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -459,7 +459,7 @@ onBeforeUnmount(() => {
 }
 
 .pop-stats span {
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 1px;
   text-transform: uppercase;
 }
@@ -470,7 +470,7 @@ onBeforeUnmount(() => {
 }
 
 .pop-foot {
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.6px;
   text-transform: uppercase;
 }

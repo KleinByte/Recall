@@ -46,10 +46,10 @@ const asset = (augmentId: number) => props.assets.augments[augmentId]
 </template>
 
 <style scoped>
-.augment-advisor { display: grid; gap: 11px; }.augment-advisor > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.augment-advisor .eyebrow { margin: 0 0 3px; font: 10px var(--font-heading); letter-spacing: 1.25px; text-transform: uppercase; color: var(--gold); }.augment-advisor .section-title { margin: 0; }
-.history-chip { padding: 4px 8px; border: 1px solid var(--gold-dim); border-radius: 99px; color: var(--gold); font-size: 9px; letter-spacing: .8px; text-transform: uppercase; white-space: nowrap; }
-.advisor-grid { display: grid; grid-template-columns: repeat(4, minmax(220px, 1fr)); gap: 9px; }.empty-copy { margin: 0; padding: 18px; border: 1px dashed var(--border-subtle); border-radius: var(--radius-sm); text-align: center; font-size: 11px; }.policy-copy { margin: 0; color: var(--text-muted); font-size: 10px; }
-.compact .advisor-grid { grid-template-columns: 1fr; }.compact .policy-copy { font-size: 9px; }.compact .history-chip { display: none; }
+.augment-advisor { display: grid; gap: 11px; }.augment-advisor > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.augment-advisor .eyebrow { margin: 0 0 3px; font: 12px var(--font-heading); letter-spacing: 1.25px; text-transform: uppercase; color: var(--gold); }.augment-advisor .section-title { margin: 0; }
+.history-chip { padding: 4px 8px; border: 1px solid var(--gold-dim); border-radius: 99px; color: var(--gold); font-size: 11px; letter-spacing: .8px; text-transform: uppercase; white-space: nowrap; }
+.advisor-grid { display: grid; grid-template-columns: repeat(4, minmax(220px, 1fr)); gap: 9px; }.empty-copy { margin: 0; padding: 18px; border: 1px dashed var(--border-subtle); border-radius: var(--radius-sm); text-align: center; font-size: 11px; }.policy-copy { margin: 0; color: var(--text-muted); font-size: 12px; }
+.compact .advisor-grid { grid-template-columns: 1fr; }.compact .policy-copy { font-size: 11px; }.compact .history-chip { display: none; }
 @media (max-width: 1180px) { .advisor-grid { grid-template-columns: repeat(2, minmax(220px, 1fr)); } }
 @media (max-width: 620px) { .advisor-grid { grid-template-columns: 1fr; } }
 </style>

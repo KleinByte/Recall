@@ -358,7 +358,7 @@ const ariaLabel = computed(() =>
 .eyebrow {
   margin: 0 0 3px;
   color: var(--gold, #c8aa6d);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: .14em;
   text-transform: uppercase;
@@ -409,7 +409,7 @@ const ariaLabel = computed(() =>
   background: transparent;
   color: var(--text-muted, #a09b8c);
   font: inherit;
-  font-size: 10px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -430,7 +430,7 @@ const ariaLabel = computed(() =>
   background: transparent;
   color: var(--text-muted, #a09b8c);
   font: inherit;
-  font-size: 10px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -485,7 +485,7 @@ const ariaLabel = computed(() =>
   border-radius: 4px;
   background: rgba(2, 9, 16, .7);
   color: rgba(240, 230, 210, .76);
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: .04em;
   pointer-events: none;
 }
@@ -519,7 +519,7 @@ const ariaLabel = computed(() =>
   margin: auto 0 0;
   padding-top: var(--space-3);
   border-top: 1px solid rgba(200, 170, 109, .12);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -536,7 +536,7 @@ const ariaLabel = computed(() =>
 .aside-label {
   margin: 0 0 4px;
   color: var(--cyan, #0acbe6);
-  font-size: 8px;
+  font-size: 10px;
   letter-spacing: .12em;
   text-transform: uppercase;
 }
@@ -568,7 +568,7 @@ const ariaLabel = computed(() =>
   border: 1px solid rgba(200, 170, 109, .12);
   border-radius: 6px;
   background: rgba(3, 10, 20, .36);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .hotspot-rank {
@@ -580,7 +580,7 @@ const ariaLabel = computed(() =>
   border-radius: 50%;
   background: rgba(255, 126, 69, .16);
   color: #ff9b57;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -593,7 +593,7 @@ const ariaLabel = computed(() =>
 
 .hotspot-list li > .muted {
   grid-column: 2 / span 2;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 @media (max-width: 920px) {

@@ -1,10 +1,23 @@
 <script setup lang="ts">
+import { computed } from "vue"
 import RecallMark from "./RecallMark.vue"
 
 const props = defineProps<{
-  phase: "channeling" | "arrival"
+  phase: "startup" | "channeling" | "arrival"
   version?: string
 }>()
+
+const eyebrow = computed(() => {
+  if (props.phase === "channeling") return "Update channeling"
+  if (props.phase === "arrival") return "Recall complete"
+  return "B-ing back"
+})
+
+const headline = computed(() => {
+  if (props.phase === "channeling") return `Preparing Recall ${props.version || ""}`
+  if (props.phase === "arrival") return `Welcome to Recall ${props.version || ""}`
+  return "Welcome back to Recall"
+})
 </script>
 
 <template>
@@ -31,9 +44,8 @@ const props = defineProps<{
     </div>
 
     <div class="recall-copy">
-      <span>{{ props.phase === "channeling" ? "Update channeling" : "Recall complete" }}</span>
-      <strong v-if="props.phase === 'channeling'">Preparing Recall {{ props.version || "" }}</strong>
-      <strong v-else>Welcome to Recall {{ props.version || "" }}</strong>
+      <span>{{ eyebrow }}</span>
+      <strong>{{ headline }}</strong>
     </div>
   </section>
 </template>
@@ -58,6 +70,10 @@ const props = defineProps<{
   animation: channel-overlay 2.6s ease both;
 }
 
+.phase-startup {
+  animation: arrival-overlay 2.7s ease both;
+}
+
 .phase-arrival {
   animation: arrival-overlay 2.7s ease both;
 }
@@ -79,6 +95,10 @@ const props = defineProps<{
 
 .phase-channeling .update-recall-mark {
   animation: logo-channel 2.6s cubic-bezier(.35, .02, .22, 1) both;
+}
+
+.phase-startup .update-recall-mark {
+  animation: logo-arrive 2.7s cubic-bezier(.18, .7, .2, 1) both;
 }
 
 .phase-arrival .update-recall-mark {
@@ -111,6 +131,10 @@ const props = defineProps<{
 
 .phase-channeling .beam {
   animation: beam-channel 2.6s ease-in both;
+}
+
+.phase-startup .beam {
+  animation: beam-arrive 2.7s ease-out both;
 }
 
 .phase-arrival .beam {
@@ -147,6 +171,10 @@ const props = defineProps<{
   animation: platform-channel 1.15s ease-in-out infinite alternate;
 }
 
+.phase-startup .recall-platform {
+  animation: platform-arrive 2.7s ease-out both;
+}
+
 .phase-arrival .recall-platform {
   animation: platform-arrive 2.7s ease-out both;
 }
@@ -169,6 +197,10 @@ const props = defineProps<{
   animation: particle-rise 1.35s calc(var(--particle) * -90ms) linear infinite;
 }
 
+.phase-startup .particle {
+  animation: particle-burst 1s calc(1.28s + var(--particle) * 18ms) ease-out both;
+}
+
 .phase-arrival .particle {
   animation: particle-burst 1s calc(1.28s + var(--particle) * 18ms) ease-out both;
 }
@@ -183,6 +215,7 @@ const props = defineProps<{
   box-shadow: 0 0 28px rgba(10, 203, 230, 0.75);
 }
 
+.phase-startup .completion-burst,
 .phase-arrival .completion-burst {
   animation: completion-burst 1s 1.45s ease-out both;
 }
@@ -200,7 +233,7 @@ const props = defineProps<{
 
 .recall-copy span {
   color: var(--cyan);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 2.4px;
   text-transform: uppercase;

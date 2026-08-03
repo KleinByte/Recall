@@ -357,7 +357,7 @@ h1 {
 
 .field { display: grid; gap: var(--space-1); min-width: 0; }
 .champion-field { min-width: 0; }
-.field-label { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+.field-label { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
 .field .league-select { width: 100%; }
 .field .league-select:disabled { cursor: not-allowed; opacity: .55; }
 .clear { min-height: 34px; }

@@ -11,9 +11,15 @@ describe("personal record surfaces", () => {
     expect(banner).toContain("new personal")
     expect(banner).toContain("formatRecordValue(record)")
     expect(banner).toContain("record-callout")
-    expect(main).toContain("new Notification")
-    expect(main).toContain('broadcast(win, "record:open"')
-    expect(app).toContain('events.on("record:open"')
+    expect(main).not.toContain("new Notification")
+    expect(main).toContain('broadcast(win, "record:notification"')
+    expect(app).toContain('events.on("record:notification"')
+    expect(app).toContain("recordNotifications")
+    expect(app).toContain("openRecordNotification")
+    const center = read("../src/components/RecordNotificationCenter.vue")
+    expect(center).toContain("faBell")
+    expect(center).toContain("unread-count")
+    expect(center).toContain("Open match review")
   })
 
   it("marks every record currently held by the reviewed game", () => {

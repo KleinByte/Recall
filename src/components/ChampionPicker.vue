@@ -269,7 +269,7 @@ onBeforeUnmount(() => document.removeEventListener("pointerdown", handleOutsideC
   background: var(--surface-2);
   color: var(--text-secondary);
   font-family: var(--font-heading);
-  font-size: 9px;
+  font-size: 11px;
   text-transform: uppercase;
 }
 

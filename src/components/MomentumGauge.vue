@@ -334,7 +334,7 @@ const option = computed<EChartsCoreOption>(() => ({
 .readout span {
   margin-top: 3px;
   color: var(--gold);
-  font: 10px var(--font-heading);
+  font: 12px var(--font-heading);
   letter-spacing: .9px;
   text-transform: uppercase;
 }
@@ -342,7 +342,7 @@ const option = computed<EChartsCoreOption>(() => ({
 .readout small {
   margin-top: 4px;
   color: var(--text-muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .fire-ring {

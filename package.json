@@ -1,6 +1,6 @@
 {
   "name": "recall",
-  "version": "2.0.26",
+  "version": "2.0.27",
   "main": "dist-electron/main/index.js",
   "description": "League of Legends challenge and ARAM stat tracker that remembers what the client forgets.",
   "private": true,
@@ -20,7 +20,7 @@
     "dev": "vite",
     "typecheck": "vue-tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
     "release": "pnpm typecheck && vite build && electron-builder --publish always",
-    "release:signed": "pnpm typecheck && vite build && electron-builder --config electron-builder.azure.cjs --publish always",
+    "release:signed": "pnpm typecheck && vite build && electron-builder --config electron-builder.azure.cjs --publish never",
     "build": "pnpm typecheck && vite build && electron-builder",
     "preview": "vite preview",
     "sync:classic-items": "node scripts/sync-classic-items.mjs",
