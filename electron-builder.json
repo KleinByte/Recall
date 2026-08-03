@@ -5,6 +5,7 @@
   "directories": {
     "output": "release/${version}"
   },
+  "afterPack": "scripts/verify-packaged-runtime.cjs",
   "icon": "public/favicon.ico",
   "files": [
     "dist",
