@@ -54,7 +54,7 @@ function startOfToday(): number {
 const profile = ref<ProfileSummary | null>(null)
 const summary = ref<StatsSummary | null>(null)
 const session = ref<StatsSummary | null>(null)
-const form = ref<boolean[]>([])
+const form = ref<MatchRow[]>([])
 const challenges = ref<ChallengeRow[]>([])
 const recent = ref<MatchRow[]>([])
 const momentumMatches = ref<MatchRow[]>([])
@@ -94,7 +94,7 @@ async function loadStats() {
   ] = await Promise.all([
       api.getSummary({}),
       api.getSummary({ sinceMs: since }),
-      api.getForm({}, 20),
+      api.getMatches({}, 20),
       api.getMatches({}, 6),
       api.getMatches({}, 10),
       api.getRankedChampions({}),
@@ -185,7 +185,7 @@ const momentum = computed(() => performanceMomentum(
   momentumMatches.value,
   momentumClock.value,
 ))
-const recentFormWins = computed(() => form.value.filter(Boolean).length)
+const recentFormWins = computed(() => form.value.filter((game) => game.win === 1).length)
 const recentFormRate = computed(() => form.value.length
   ? recentFormWins.value / form.value.length
   : 0)
@@ -324,11 +324,11 @@ const championName = (id: number) => championNameById(props.champions, id)
           <div class="form-summary">
             <div>
               <strong>{{ recentFormWins }}W · {{ form.length - recentFormWins }}L</strong>
-              <span class="muted">Newest result first</span>
+              <span class="muted">Oldest to newest · hover for detail</span>
             </div>
             <strong class="form-rate">{{ formatPercent(recentFormRate) }}</strong>
           </div>
-          <FormStrip :results="form" />
+          <FormStrip :matches="form" :champions="champions" />
         </Panel>
 
         <Panel title="The Dial" :meta="momentum.label" class="momentum-panel">
@@ -597,17 +597,8 @@ h1 {
 }
 
 .form-rate {
-  color: var(--cyan);
+  color: var(--win);
   font-size: 23px;
-}
-
-.form-panel :deep(.form-strip) {
-  gap: 6px;
-}
-
-.form-panel :deep(.pill) {
-  width: 25px;
-  height: 25px;
 }
 
 .dashboard-column {

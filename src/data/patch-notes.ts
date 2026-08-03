@@ -10,6 +10,39 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.17",
+    releasedAt: "2026-08-03",
+    title: "Form you can read, champions you can rank",
+    summary:
+      "Recent form becomes an explorable grade trend instead of a row of letters, and the Champions page is rebuilt around headline numbers, filters, and a table that shows its shape at a glance.",
+    sections: [
+      {
+        title: "Recent form tells the story",
+        items: [
+          "A thin grade trend line now runs above the win-loss strip, drawn against a fixed range so a steady run reads as steady instead of being stretched into false drama.",
+          "Hovering any result opens a detail card with the champion, queue, grade, KDA, damage, CS and gold per minute, and game length.",
+          "Clicking a result jumps straight to that game's review, and every square is reachable by keyboard.",
+        ],
+      },
+      {
+        title: "A Champions page with hierarchy",
+        items: [
+          "Headline tiles summarize the whole collection: champions played, pool win rate, average grade, and challenges outstanding.",
+          "Filter chips split the roster into played, untouched, and challenge-bearing champions, each showing its own count alongside search.",
+          "Rows gained position numbers, larger portraits, mastery level chips, win-rate bars, and confidence pips, while unplayed champions recede so your real pool reads first.",
+        ],
+      },
+      {
+        title: "Polish",
+        items: [
+          "Champion rows open with Enter or Space, sortable columns advertise themselves before you hover, and the table keeps its header in view inside a contained card.",
+          "Riot grade, challenge names, mastery, and position columns fall away in that order as the window narrows rather than crushing together.",
+          "The recent-form win rate uses the intended cyan accent again after referencing a colour that was never defined.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.16",
     releasedAt: "2026-08-02",
     title: "One review, and Tempo that feels the fight",
