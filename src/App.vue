@@ -23,7 +23,7 @@ import {
 } from "./helpers/navigation"
 import { parseMerakiFile } from "./helpers/utils"
 import type { AramStats, Champion, Summoner } from "./types/lol"
-import type { MatchRow } from "./types/stats"
+import type { MatchRow, PersonalRecord } from "./types/stats"
 import type { StoredSettings } from "./types/app"
 import type { LiveSession } from "./types/live"
 import type { UpdateStatus } from "./types/update"
@@ -43,6 +43,7 @@ const summoner = ref<Summoner | null>(null)
 const allChampions = ref<Champion[] | null>(null)
 const stats = ref<AramStats | null>(null)
 const lastGame = ref<MatchRow | null>(null)
+const lastGameRecords = ref<PersonalRecord[]>([])
 const refreshing = ref(false)
 const refreshMessage = ref<string | null>(null)
 const showPatchNotes = ref(false)
@@ -195,7 +196,14 @@ onMounted(async () => {
   // Shown wherever the user happens to be, and never steals focus.
   events.on("match:recorded", (match: MatchRow) => {
     lastGame.value = match
+    lastGameRecords.value = []
   })
+  events.on("match:records", (payload: { gameId: number; records: PersonalRecord[] }) => {
+    if (lastGame.value?.gameId === payload.gameId) {
+      lastGameRecords.value = payload.records
+    }
+  })
+  events.on("record:open", (gameId: number) => reviewMatch(gameId))
 })
 </script>
 
@@ -222,8 +230,9 @@ onMounted(async () => {
         <PostGameBanner
           v-if="lastGame"
           :match="lastGame"
+          :records="lastGameRecords"
           :champions="allChampions"
-          @dismiss="lastGame = null"
+          @dismiss="lastGame = null; lastGameRecords = []"
           @review="reviewMatch"
         />
 

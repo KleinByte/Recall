@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
-import { faMedal } from "@fortawesome/free-solid-svg-icons"
+import { faMedal, faTrophy } from "@fortawesome/free-solid-svg-icons"
 import GradeBadge from "./GradeBadge.vue"
 import StatTile from "./ui/StatTile.vue"
 import { labelIcon } from "../helpers/label-icons"
@@ -14,6 +14,7 @@ import {
   formatDecimal,
   formatDuration,
   formatRelativeDate,
+  formatRecordValue,
   modeLabel,
 } from "../helpers/format"
 import type { Champion } from "../types/lol"
@@ -101,6 +102,20 @@ const evidence = (label: MatchReview["labels"][number]) =>
       />
     </div>
 
+    <div v-if="review.records.length" class="record-holders" aria-label="Personal records held by this game">
+      <div class="record-heading">
+        <FontAwesomeIcon :icon="faTrophy" aria-hidden="true" />
+        <span><strong>Current personal records</strong><small>This game still holds {{ review.records.length }} {{ review.records.length === 1 ? "record" : "records" }} in its mode.</small></span>
+      </div>
+      <div class="record-chips">
+        <span v-for="record in review.records" :key="record.key" :title="`${record.category} record`">
+          <small>This game holds</small>
+          <strong>{{ record.label }}</strong>
+          <b>{{ formatRecordValue(record) }}</b>
+        </span>
+      </div>
+    </div>
+
     <div v-if="review.labels.length" class="hero-labels" aria-label="Game labels">
       <article
         v-for="label in review.labels"
@@ -124,6 +139,9 @@ const evidence = (label: MatchReview["labels"][number]) =>
 .mvp-badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 9px; border: 1px solid var(--gold); border-radius: 6px; background: rgba(200,170,109,.13); color: var(--gold-bright); font: 10px var(--font-heading); }
 .bookmark { padding: 7px 10px; white-space: nowrap; }
 .hero-kpis { display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 1px; padding: 0 12px; background: color-mix(in srgb, var(--surface-0) 55%, transparent); }
+.record-holders { display: grid; grid-template-columns: minmax(190px, .7fr) minmax(0, 2.3fr); gap: 12px; padding: 10px 13px; border-top: 1px solid rgba(200,170,109,.22); border-bottom: 1px solid rgba(200,170,109,.14); background: radial-gradient(circle at 8% 50%, rgba(10,200,220,.1), transparent 34%), rgba(200,170,109,.055); }
+.record-heading { display: flex; align-items: center; gap: 9px; color: var(--gold-bright); }.record-heading > svg { color: var(--cyan); filter: drop-shadow(0 0 7px rgba(10,200,220,.55)); }.record-heading > span { display: flex; flex-direction: column; }.record-heading strong { font: 10px var(--font-heading); letter-spacing: .55px; text-transform: uppercase; }.record-heading small { margin-top: 2px; color: var(--text-muted); font-size: 9px; line-height: 1.25; }
+.record-chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }.record-chips > span { display: grid; grid-template-columns: 1fr auto; min-width: 166px; padding: 6px 8px; border: 1px solid color-mix(in srgb, var(--gold) 38%, transparent); border-radius: 5px; background: rgba(1,10,19,.5); }.record-chips small { grid-column: 1 / -1; color: var(--text-muted); font-size: 7px; letter-spacing: .4px; text-transform: uppercase; }.record-chips strong { overflow: hidden; color: var(--text-secondary); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }.record-chips b { margin-left: 8px; color: var(--gold-bright); font: 10px var(--font-heading); white-space: nowrap; }
 .hero-labels { display: flex; gap: 6px; min-height: 42px; padding: 7px 13px 9px; overflow-x: auto; }.hero-labels article { display: inline-flex; align-items: center; gap: 7px; min-width: 145px; max-width: 245px; padding: 6px 8px; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--surface-1); color: var(--gold-bright); }.hero-labels article.negative { color: var(--loss); }.hero-labels article.mixed { color: var(--text-secondary); }.hero-labels article > span { display: flex; flex-direction: column; min-width: 0; }.hero-labels strong { color: currentColor; font-size: 9px; text-transform: uppercase; letter-spacing: .45px; }.hero-labels small { overflow: hidden; margin-top: 2px; color: var(--text-muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
-@media (max-width: 880px) { .hero-main { align-items: flex-start; flex-wrap: wrap; }.hero-kpis { grid-template-columns: repeat(3, 1fr); }.bookmark { margin-left: auto; } }
+@media (max-width: 880px) { .hero-main { align-items: flex-start; flex-wrap: wrap; }.hero-kpis { grid-template-columns: repeat(3, 1fr); }.bookmark { margin-left: auto; }.record-holders { grid-template-columns: 1fr; } }
 </style>

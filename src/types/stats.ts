@@ -441,11 +441,21 @@ export interface ChampionStatus {
 export interface PersonalRecord {
   key: string
   label: string
+  category:
+    | "Performance"
+    | "Combat"
+    | "Economy"
+    | "Objectives"
+    | "Vision"
+    | "Timeline"
+    | "Special modes"
+  format: "compact" | "decimal" | "percent" | "duration" | "per-minute"
   value: number
   gameId: number
   championId: number
   playedAt: number
   mode: TrackedMode
+  source: "match" | "scoreboard" | "timeline"
 }
 
 export interface RankedPoint {

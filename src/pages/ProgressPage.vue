@@ -9,6 +9,7 @@ import {
   championNameById,
   formatCompact,
   formatDecimal,
+  formatRecordValue,
   formatRelativeDate,
   modeLabel,
 } from "../helpers/format"
@@ -230,10 +231,19 @@ const canSave = computed(
 
 const championName = (id: number) => championNameById(props.champions, id)
 
-const formatRecord = (record: PersonalRecord) =>
-  record.key === "kda"
-    ? formatDecimal(record.value, 2)
-    : formatCompact(record.value)
+const RECORD_CATEGORY_ORDER: PersonalRecord["category"][] = [
+  "Performance",
+  "Combat",
+  "Economy",
+  "Objectives",
+  "Vision",
+  "Timeline",
+  "Special modes",
+]
+const recordGroups = computed(() => RECORD_CATEGORY_ORDER.flatMap((category) => {
+  const entries = records.value.filter((record) => record.category === category)
+  return entries.length ? [{ category, entries }] : []
+}))
 </script>
 
 <template>
@@ -423,22 +433,30 @@ const formatRecord = (record: PersonalRecord) =>
         </div>
       </div>
 
-      <div v-if="records.length" class="records">
-        <div v-for="record in records" :key="record.key" class="record">
-          <div class="muted record-label">{{ record.label }}</div>
-          <div class="numeric record-value">{{ formatRecord(record) }}</div>
-          <div class="record-game">
-            <img
-              :src="championIconUrl(record.championId)"
-              :alt="championName(record.championId)"
-              class="portrait"
-            />
-            <span class="muted record-meta">
-              {{ modeLabel(record.mode) }} ·
-              {{ formatRelativeDate(record.playedAt) }}
-            </span>
+      <div v-if="records.length" class="record-groups">
+        <section v-for="group in recordGroups" :key="group.category" class="record-group">
+          <header>
+            <h3>{{ group.category }}</h3>
+            <span>{{ group.entries.length }} {{ group.entries.length === 1 ? "record" : "records" }}</span>
+          </header>
+          <div class="records">
+            <div v-for="record in group.entries" :key="record.key" class="record">
+              <div class="muted record-label">{{ record.label }}</div>
+              <div class="numeric record-value">{{ formatRecordValue(record) }}</div>
+              <div class="record-game">
+                <img
+                  :src="championIconUrl(record.championId)"
+                  :alt="championName(record.championId)"
+                  class="portrait"
+                />
+                <span class="muted record-meta">
+                  {{ modeLabel(record.mode) }} ·
+                  {{ formatRelativeDate(record.playedAt) }}
+                </span>
+              </div>
+            </div>
           </div>
-        </div>
+        </section>
       </div>
       <p v-else-if="recordsLoading" class="muted records-empty">
         Loading {{ selectedRecordScope.label }} records…
@@ -646,6 +664,34 @@ h1 {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   grid-auto-rows: 1fr;
   gap: var(--space-4);
+}
+
+.record-groups {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.record-group > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.record-group h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font: 13px var(--font-heading);
+  letter-spacing: .65px;
+  text-transform: uppercase;
+}
+
+.record-group header span {
+  color: var(--text-muted);
+  font-size: 10px;
 }
 
 .records-head {

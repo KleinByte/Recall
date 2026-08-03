@@ -8,6 +8,13 @@ import type {
 import type { StyleAverages } from "../matches/style.js"
 import { LABEL_EVALUATOR_VERSION } from "../matches/labels.js"
 import {
+  evaluateRecords,
+  type PersonalRecord,
+  type RecordContext,
+  type RecordParticipant,
+} from "../matches/records.js"
+import type { CompactTimeline } from "../riot/timeline-mapper.js"
+import {
   LEAGUE_CLASSIC_QUEUE_IDS,
   PERSONAL_RECORD_RIFT_QUEUE_IDS,
 } from "../matches/eligibility.js"
@@ -67,38 +74,7 @@ export interface MatchWindow {
   offset?: number
 }
 
-export interface PersonalRecord {
-  key: string
-  label: string
-  value: number
-  gameId: number
-  championId: number
-  playedAt: number
-  mode: TrackedMode
-}
-
-/** The single best game for each of these is worth remembering. */
-const RECORDS: { key: string; label: string; expression: string }[] = [
-  { key: "kills", label: "Most kills", expression: "kills" },
-  { key: "assists", label: "Most assists", expression: "assists" },
-  { key: "damage", label: "Most damage", expression: "damage_to_champions" },
-  { key: "gold", label: "Most gold", expression: "gold_earned" },
-  {
-    key: "spree",
-    label: "Longest killing spree",
-    expression: "largest_killing_spree",
-  },
-  {
-    key: "cs",
-    label: "Most creep score",
-    expression: "total_minions_killed + neutral_minions",
-  },
-  {
-    key: "kda",
-    label: "Best KDA",
-    expression: "(kills + assists) * 1.0 / MAX(1, deaths)",
-  },
-]
+export type { PersonalRecord } from "../matches/records.js"
 
 export interface GradeCount {
   grade: string
@@ -795,29 +771,140 @@ export class MatchesRepository {
   /**
    * The best single game for each record the Progress page shows.
    *
-   * Each record is resolved in one query so the game behind it can be named,
-   * rather than reporting a number with no story attached.
+   * Records are evaluated from the stored match, complete scoreboard, and any
+   * available timeline. A missing rich source simply omits the records that
+   * cannot be proved rather than inventing a value from partial data.
    */
   getRecords(filter: StatsFilter): PersonalRecord[] {
-    const { clause, params } = buildFilter(filter)
-    const eligibleModes = `(
-      mode IN ('aram', 'mayhem', 'league_classic')
-      OR queue_id IN (${PERSONAL_RECORD_RIFT_QUEUE_IDS.join(", ")})
-    )`
+    const matches = this.getRecentMatches(filter, 1_000_000).filter((match) =>
+      match.mode === "aram" || match.mode === "mayhem" ||
+      match.mode === "league_classic" ||
+      PERSONAL_RECORD_RIFT_QUEUE_IDS.includes(match.queueId as never),
+    )
+    if (!matches.length) return []
 
-    return RECORDS.flatMap(({ key, label, expression }) => {
-      const row = this.db
-        .prepare(
-          `SELECT game_id AS gameId, champion_id AS championId,
-                  played_at AS playedAt, mode, ${expression} AS value
-           FROM matches ${clause} AND ${eligibleModes}
-           ORDER BY value DESC, game_id DESC
-           LIMIT 1`,
-        )
-        .get(...params) as PersonalRecord | undefined
+    const gameIds = new Set(matches.map((match) => match.gameId))
+    const participants = this.recordParticipants(filter.puuid, gameIds)
+    const byGame = new Map<number, RecordParticipant[]>()
+    for (const participant of participants) {
+      const rows = byGame.get(participant.gameId) ?? []
+      rows.push(participant.row)
+      byGame.set(participant.gameId, rows)
+    }
+    const timelines = this.recordTimelines(filter.puuid, gameIds)
+    const augmentDetails = this.recordAugmentDetails(filter.puuid, gameIds)
 
-      return row ? [{ ...row, key, label }] : []
+    const contexts: RecordContext[] = matches.map((match) => {
+      const gameParticipants = byGame.get(match.gameId) ?? []
+      return {
+        match,
+        player: gameParticipants.find((participant) => participant.isPlayer === 1),
+        participants: gameParticipants,
+        timeline: timelines.get(match.gameId),
+        augmentCount: augmentDetails.get(match.gameId)?.count ?? 0,
+        firstAugmentAtMs: augmentDetails.get(match.gameId)?.firstAtMs,
+      }
     })
+    return evaluateRecords(contexts)
+  }
+
+  private recordParticipants(puuid: string, gameIds: ReadonlySet<number>) {
+    const rows = this.db.prepare(
+      `SELECT game_id AS gameId, participant_id AS participantId,
+              team_id AS teamId, is_player AS isPlayer, kills, deaths,
+              assists, gold_earned AS goldEarned,
+              damage_to_champions AS damageToChampions,
+              damage_objectives AS damageObjectives, role, lane,
+              assigned_position AS assignedPosition,
+              longest_time_living AS longestTimeLiving,
+              total_heal_on_teammates AS totalHealOnTeammates,
+              extended_metrics_json AS extendedMetricsJson
+       FROM match_participants
+       WHERE puuid = ?`,
+    ).all(puuid) as Array<{
+      gameId: number
+      participantId: number
+      teamId: number
+      isPlayer: number
+      kills: number
+      deaths: number
+      assists: number
+      goldEarned: number
+      damageToChampions: number
+      damageObjectives: number
+      role?: string
+      lane?: string
+      assignedPosition?: string
+      longestTimeLiving: number
+      totalHealOnTeammates: number
+      extendedMetricsJson: string
+    }>
+
+    return rows.flatMap((entry) => {
+      if (!gameIds.has(entry.gameId)) return []
+      const extendedMetrics = parseMetrics(entry.extendedMetricsJson)
+      return [{
+        gameId: entry.gameId,
+        row: {
+          participantId: entry.participantId,
+          teamId: entry.teamId,
+          isPlayer: entry.isPlayer,
+          kills: entry.kills,
+          deaths: entry.deaths,
+          assists: entry.assists,
+          goldEarned: entry.goldEarned,
+          damageToChampions: entry.damageToChampions,
+          damageObjectives: entry.damageObjectives,
+          role: entry.role ?? undefined,
+          lane: entry.lane ?? undefined,
+          assignedPosition: entry.assignedPosition ?? undefined,
+          longestTimeLiving: entry.longestTimeLiving,
+          totalHealOnTeammates: entry.totalHealOnTeammates ||
+            metricNumber(extendedMetrics, "totalHealsOnTeammates"),
+          totalDamageShieldedOnTeammates: metricNumber(
+            extendedMetrics,
+            "totalDamageShieldedOnTeammates",
+          ),
+          objectivesStolen: metricNumber(extendedMetrics, "objectivesStolen"),
+          turretPlatesTaken: metricNumber(extendedMetrics, "challenge.turretPlatesTaken"),
+          extendedMetrics,
+        },
+      }]
+    })
+  }
+
+  private recordTimelines(puuid: string, gameIds: ReadonlySet<number>) {
+    const rows = this.db.prepare(
+      `SELECT game_id AS gameId, data_json AS dataJson
+       FROM match_timeline_cache
+       WHERE puuid = ? AND status = 'ready' AND data_json IS NOT NULL`,
+    ).all(puuid) as Array<{ gameId: number; dataJson: string }>
+    const result = new Map<number, CompactTimeline>()
+    for (const row of rows) {
+      if (!gameIds.has(row.gameId)) continue
+      try {
+        result.set(row.gameId, JSON.parse(row.dataJson) as CompactTimeline)
+      } catch {
+        // A corrupt cache entry should not hide match-backed records.
+      }
+    }
+    return result
+  }
+
+  private recordAugmentDetails(puuid: string, gameIds: ReadonlySet<number>) {
+    const rows = this.db.prepare(
+      `SELECT a.game_id AS gameId, COUNT(*) AS count,
+              MIN(a.selected_at_ms) AS firstAtMs
+       FROM participant_augments a
+       JOIN match_participants p
+         ON p.game_id = a.game_id AND p.puuid = a.puuid
+        AND p.participant_id = a.participant_id
+       WHERE a.puuid = ? AND p.is_player = 1
+       GROUP BY a.game_id`,
+    ).all(puuid) as Array<{ gameId: number; count: number; firstAtMs?: number }>
+    return new Map(rows.flatMap((row) => gameIds.has(row.gameId)
+      ? [[row.gameId, { count: row.count, firstAtMs: row.firstAtMs ?? undefined }] as const]
+      : []))
   }
 
   /** How long one recorded game ran, for scoring that game on its own. */
@@ -1069,6 +1156,25 @@ function computeKda(kills: number, deaths: number, assists: number): number {
   if (kills + deaths + assists === 0) return 0
   if (deaths === 0) return kills + assists
   return (kills + assists) / deaths
+}
+
+function parseMetrics(value: string): Record<string, number | boolean | string> {
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, number | boolean | string>
+      : {}
+  } catch {
+    return {}
+  }
+}
+
+function metricNumber(
+  metrics: Record<string, number | boolean | string>,
+  key: string,
+) {
+  const value = metrics[key]
+  return typeof value === "number" && Number.isFinite(value) ? value : 0
 }
 
 /** Positive for a winning streak, negative for a losing one. */

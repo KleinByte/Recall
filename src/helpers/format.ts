@@ -1,4 +1,5 @@
 import type { Champion } from "../types/lol"
+import type { PersonalRecord } from "../types/stats"
 import championCatalog from "../data/champions.json"
 import { publicAssetUrl } from "./assets"
 import { RECALL_GRADES, recallGradeFromScore } from "../shared/recall-grade"
@@ -36,6 +37,14 @@ export function formatDuration(seconds: number): string {
   const minutes = Math.floor(rounded / 60)
   const rest = rounded % 60
   return `${minutes}:${rest.toString().padStart(2, "0")}`
+}
+
+export function formatRecordValue(record: Pick<PersonalRecord, "format" | "value">) {
+  if (record.format === "duration") return formatDuration(record.value)
+  if (record.format === "percent") return `${record.value.toFixed(1)}%`
+  if (record.format === "decimal") return formatDecimal(record.value, 2)
+  if (record.format === "per-minute") return `${formatDecimal(record.value, 1)}/min`
+  return formatCompact(record.value)
 }
 
 export function formatRelativeDate(timestampMs: number): string {

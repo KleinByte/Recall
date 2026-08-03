@@ -5,6 +5,7 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  Notification,
   safeStorage,
   shell,
   Tray,
@@ -48,6 +49,7 @@ import {
 } from "./matches/insights.js"
 import { buildSkillReport } from "./matches/skill-report.js"
 import { buildPerformanceProfile } from "./matches/performance-profile.js"
+import { recordScopeForMatch } from "./matches/records.js"
 import { championsNeededFor } from "./challenges/champion-needs.js"
 import { championStatusFor, overlayContentFor } from "./challenges/pinned.js"
 import { Overlay, type OverlayPosition } from "./overlay.js"
@@ -59,6 +61,7 @@ import { syncUntilRecorded } from "./post-game-sync.js"
 import { buildStyleProfile } from "./matches/style.js"
 import type {
   ChampionMasterySnapshot,
+  MatchRow,
   ModeFamily,
   ParticipantRow,
   TrackedMode,
@@ -514,12 +517,47 @@ function getTimelineService(win: BrowserWindow) {
         ])
         getRepository().replacePerformanceLabels(gameId, puuid, labels)
         broadcast(win, "stats:updated", { inserted: 0, labelsUpdated: 1 })
+        broadcastHeldRecords(win, match, puuid)
+        broadcast(win, "review:updated", gameId)
       },
       getLiveGameCaptures(),
     )
   }
   return timelineService
 }
+
+function broadcastHeldRecords(
+  win: BrowserWindow,
+  match: MatchRow,
+  puuid: string,
+) {
+  const records = getRepository()
+    .getRecords({ puuid, ...recordScopeForMatch(match) })
+    .filter((record) => record.gameId === match.gameId)
+  broadcast(win, "match:records", { gameId: match.gameId, records })
+
+  const announced = announcedRecordKeys.get(match.gameId) ?? new Set<string>()
+  const newRecords = records.filter((record) => !announced.has(record.key))
+  if (!newRecords.length) return
+  for (const record of newRecords) announced.add(record.key)
+  announcedRecordKeys.set(match.gameId, announced)
+
+  if (Notification.isSupported()) {
+    const names = newRecords.slice(0, 3).map((record) => record.label).join(", ")
+    const extra = newRecords.length > 3 ? ` and ${newRecords.length - 3} more` : ""
+    const notification = new Notification({
+      title: newRecords.length === 1 ? "New Recall record" : `${newRecords.length} new Recall records`,
+      body: `${names}${extra}`,
+    })
+    notification.on("click", () => {
+      reveal(win)
+      broadcast(win, "record:open", match.gameId)
+    })
+    notification.show()
+  }
+}
+
+const announcedRecordKeys = new Map<number, Set<string>>()
 
 function getReviewService(win: BrowserWindow) {
   if (!reviewService) {
@@ -1074,6 +1112,7 @@ async function afterSync(
     for (const match of recent) getReviewRepository().attachMatchingExperiments(match)
     if (latest) {
       broadcast(win, "match:recorded", latest)
+      broadcastHeldRecords(win, latest, session.summoner.puuid)
       broadcast(win, "review:updated", latest.gameId)
     }
     createDailyBackupIfNeeded(win)

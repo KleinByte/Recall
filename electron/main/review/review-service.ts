@@ -4,6 +4,7 @@ import type { ParticipantsRepository } from "../database/participants-repo.js"
 import type { ReviewRepository } from "../database/review-repo.js"
 import { gradeLobby, GRADE_ALGORITHM_VERSION } from "../matches/grade.js"
 import { resolveChampionClass } from "../matches/class-expectations.js"
+import { recordScopeForMatch } from "../matches/records.js"
 import type { MatchRow } from "../matches/types.js"
 import type { LcuTimelineService } from "../lcu-timeline-service.js"
 import { confidenceForGames, type GradeBreakdown } from "./types.js"
@@ -67,6 +68,9 @@ export class ReviewService {
     const baseline = this.baseline(match, puuid)
     return {
       match,
+      records: this.matches
+        .getRecords({ puuid, ...recordScopeForMatch(match) })
+        .filter((record) => record.gameId === match.gameId),
       scoreboard: detail.participants,
       teams: detail.teams,
       labels: this.matches.getPerformanceLabels(gameId, puuid),

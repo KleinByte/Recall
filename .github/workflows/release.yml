@@ -12,15 +12,55 @@ jobs:
   release:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
         with:
           version: 9
-      - uses: actions/setup-node@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm release
+      - name: Verify Azure signing configuration
+        shell: pwsh
         env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ vars.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME || secrets.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME }}
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ vars.AZURE_TRUSTED_SIGNING_ENDPOINT || secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ vars.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME || secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ vars.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME || secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+        run: |
+          $requiredVariables = @(
+            "AZURE_TENANT_ID",
+            "AZURE_CLIENT_ID",
+            "AZURE_CLIENT_SECRET",
+            "AZURE_TRUSTED_SIGNING_PUBLISHER_NAME",
+            "AZURE_TRUSTED_SIGNING_ENDPOINT",
+            "AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME",
+            "AZURE_TRUSTED_SIGNING_ACCOUNT_NAME"
+          )
+          $missingVariables = @(
+            $requiredVariables | Where-Object {
+              [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_))
+            }
+          )
+          if ($missingVariables.Count -gt 0) {
+            throw "Missing GitHub Actions secrets or variables: $($missingVariables -join ', ')"
+          }
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build, sign, and publish release
+        run: pnpm release:signed
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ vars.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME || secrets.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME }}
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ vars.AZURE_TRUSTED_SIGNING_ENDPOINT || secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ vars.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME || secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ vars.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME || secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

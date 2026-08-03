@@ -1,5 +1,6 @@
 import type {
   MatchRow,
+  PersonalRecord,
   ParticipantRow,
   PerformanceLabel,
   TeamRow,
@@ -148,6 +149,7 @@ export interface AnnotationTag {
 
 export interface MatchReview {
   match: MatchRow
+  records: PersonalRecord[]
   scoreboard: ParticipantRow[]
   teams: TeamRow[]
   labels: PerformanceLabel[]

@@ -39,15 +39,25 @@ describe("getRecords", () => {
 
     const keys = matches.getRecords({ puuid: PUUID }).map((r) => r.key)
 
-    expect(keys).toEqual([
+    expect(keys).toEqual(expect.arrayContaining([
       "kills",
       "assists",
       "damage",
+      "damage_taken",
+      "damage_mitigated",
+      "healing",
+      "crowd_control",
       "gold",
       "spree",
       "cs",
       "kda",
-    ])
+      "damage_per_minute",
+      "gold_per_minute",
+      "cs_per_minute",
+      "fastest_win",
+      "longest_game",
+    ]))
+    expect(keys).not.toContain("lobby_place")
   })
 
   it("reports nothing when no games are recorded", () => {
