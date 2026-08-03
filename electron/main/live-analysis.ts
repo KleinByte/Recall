@@ -45,6 +45,7 @@ interface LiveAnalysisState {
   killDifference: number
   objectiveDifference: number
   alliedDeaths: number
+  enemyDeaths: number
   localDeaths: number
   tempo: number
   lastEventId: number
@@ -54,6 +55,7 @@ interface LiveAnalysisState {
 
 interface LiveSignals {
   resources: LiveResourceAnalysis
+  aram: boolean
   allyKills: number
   enemyKills: number
   allyObjectives: number
@@ -193,6 +195,11 @@ function surgeCount(tier?: TempoSurgeTier) {
   return tier === "master" ? 5 : tier === "diamond" ? 4 : tier === "emerald" ? 3 : tier === "gold" ? 2 : 0
 }
 
+/** Bigger multikills earn a longer stay at maximum tempo. */
+function surgeDuration(tier: TempoSurgeTier) {
+  return tier === "master" ? 15 : tier === "diamond" ? 12 : tier === "emerald" ? 10 : 8
+}
+
 function objectiveName(eventName: string) {
   if (eventName === "BaronKill") return "baron"
   if (eventName === "DragonKill") return "dragon"
@@ -256,7 +263,7 @@ function tempoEventSwing(snapshot: LiveGameSnapshot, afterEventId: number): Temp
         factors.unshift(`Allied ${name.toLocaleLowerCase()} seized maximum tempo`)
       } else {
         impact -= 42 + (count - 2) * 5
-        addCeiling(0)
+        addCeiling(12)
         factors.unshift(`Enemy ${name.toLocaleLowerCase()} broke team tempo`)
       }
     }
@@ -354,6 +361,7 @@ function signals(snapshot: LiveGameSnapshot): LiveSignals | undefined {
       quality: estimateQuality(snapshot),
       source: "estimated",
     },
+    aram,
     allyKills: sum(snapshot.allies.map((player) => player.scores.kills)),
     enemyKills: sum(snapshot.enemies.map((player) => player.scores.kills)),
     allyObjectives: objectives.ally,
@@ -427,7 +435,9 @@ function tempoStateScore(snapshot: LiveGameSnapshot, current: LiveSignals) {
   const aliveDifference = current.enemyDead - current.allyDead
   const averageGold = (current.resources.allyGold + current.resources.enemyGold) / 2
   const goldScale = Math.max(1_500, averageGold * .075)
-  const expectedLocalDeaths = Math.max(1, snapshot.gameTime / (5 * 60))
+  // ARAM deaths come roughly twice as fast; judge against that pace.
+  const deathPaceSecs = (current.aram ? 2.5 : 5) * 60
+  const expectedLocalDeaths = Math.max(1, snapshot.gameTime / deathPaceSecs)
   const excessLocalDeaths = Math.max(0, current.localDeaths - expectedLocalDeaths)
 
   return clamp(
@@ -489,41 +499,60 @@ export class LiveTempoTracker {
       const killSwing = killDifference - this.previous.killDifference
       const objectiveSwing = objectiveDifference - this.previous.objectiveDifference
       const alliedDeaths = current.allyDeaths - this.previous.alliedDeaths
+      const enemyDeaths = current.enemyDeaths - this.previous.enemyDeaths
+      // An even trade is tempo-neutral: killSwing already captures who won the
+      // exchange, so only deaths the enemy did not pay for count against flow.
+      const uncompensatedDeaths = Math.max(0, alliedDeaths - Math.max(0, enemyDeaths))
       const personalDeaths = current.localDeaths - this.previous.localDeaths
       const throwPenalty = this.previous.goldDifference >= 1_500 && leadDelta <= -500
         ? this.previous.goldDifference >= 3_000 ? 18 : 12
         : 0
       const cleanWindow = stateScore >= 50 && alliedDeaths === 0 && leadDelta >= 0 ? 2 : 0
+      // ARAM trades constantly by design; deaths there say less about tempo.
+      const deathWeight = current.aram ? 2 : 3
+      const personalDeathWeight = current.aram ? 4 : 6
       const flowScore = clamp(
         50 +
           clamp(leadRate / 220, -8, 8) +
           clamp(killSwing * 5, -15, 15) +
           clamp(objectiveSwing * 5, -10, 10) +
           eventSwing.impact -
-          Math.max(0, alliedDeaths) * 3 -
-          Math.max(0, personalDeaths) * 7 +
+          uncompensatedDeaths * deathWeight -
+          Math.max(0, personalDeaths) * personalDeathWeight +
           cleanWindow,
         0,
         100,
       )
       const instantaneous = clamp(stateScore * .45 + flowScore * .55 - throwPenalty, 0, 100)
-      const alpha = clamp(elapsed / 10, .24, .55)
+      // Rising tempo is recognized quickly. Falling tempo bleeds off slowly so
+      // one bad exchange reads as a dip, not a collapse — unless a throw or a
+      // heavy counter-swing marks a genuine crisis worth dropping fast for.
+      const crisis = throwPenalty > 0 || eventSwing.impact <= -20
+      const alpha = instantaneous >= this.previous.tempo
+        ? clamp(elapsed / 8, .3, .6)
+        : crisis
+          ? clamp(elapsed / 10, .35, .6)
+          : clamp(elapsed / 20, .12, .3)
       tempo = Math.round(this.previous.tempo + (instantaneous - this.previous.tempo) * alpha)
       if (eventSwing.floor !== undefined) tempo = Math.max(tempo, Math.round(eventSwing.floor))
       if (eventSwing.ceiling !== undefined) tempo = Math.min(tempo, Math.round(eventSwing.ceiling))
 
       if (eventSwing.surgeTier) {
         activeSurgeTier = eventSwing.surgeTier
-        surgeUntil = snapshot.gameTime + 6
+        surgeUntil = snapshot.gameTime + surgeDuration(eventSwing.surgeTier)
         tempo = 100
       } else if (
-        eventSwing.impact >= 0 &&
+        eventSwing.impact > -25 &&
         this.previous.surgeTier &&
-        (this.previous.surgeUntil ?? 0) >= snapshot.gameTime
+        (this.previous.surgeUntil ?? 0) > snapshot.gameTime
       ) {
+        // Only a real counter-swing interrupts the celebration window.
         activeSurgeTier = this.previous.surgeTier
         surgeUntil = this.previous.surgeUntil
         tempo = 100
+      } else if (this.previous.surgeTier && this.previous.tempo >= 90) {
+        // Glide out of a surge instead of cliff-dropping off the redline.
+        tempo = Math.max(tempo, Math.round(this.previous.tempo - elapsed * 2.5))
       }
       direction = tempo >= this.previous.tempo + 2
         ? "up"
@@ -564,6 +593,7 @@ export class LiveTempoTracker {
       killDifference,
       objectiveDifference,
       alliedDeaths: current.allyDeaths,
+      enemyDeaths: current.enemyDeaths,
       localDeaths: current.localDeaths,
       tempo,
       lastEventId: currentLastEventId,

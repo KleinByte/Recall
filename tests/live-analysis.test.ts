@@ -186,6 +186,60 @@ describe("live resource and tempo analysis", () => {
     expect(decayed?.tempo.surgeTier).toBeUndefined()
   })
 
+  it("holds a quadra kill at 100 longer, then glides down instead of cliff-dropping", () => {
+    const tracker = new LiveTempoTracker()
+    tracker.update(snapshot(600))
+    const quadra = snapshot(604, {
+      scores: { kills: 5, deaths: 1, assists: 2, creepScore: 70, wardScore: 4 },
+    })
+    quadra.events = [{
+      id: 1,
+      name: "Multikill",
+      time: 603,
+      killerName: "Owner#NA1",
+      assisters: [],
+      multiKill: 4,
+    }]
+
+    expect(tracker.update(quadra)?.tempo.score).toBe(100)
+    // A quadra owns the dial for twelve seconds, not six.
+    expect(tracker.update({ ...quadra, gameTime: 610 })?.tempo.score).toBe(100)
+    expect(tracker.update({ ...quadra, gameTime: 615 })?.tempo).toMatchObject({
+      score: 100,
+      surgeTier: "diamond",
+    })
+    const gliding = tracker.update({ ...quadra, gameTime: 622 })
+    expect(gliding?.tempo.score).toBeLessThan(100)
+    expect(gliding?.tempo.score).toBeGreaterThanOrEqual(80)
+  })
+
+  it("keeps even ARAM bloodbath trades near the midpoint instead of sinking", () => {
+    const brawl = (gameTime: number, kills: number) => {
+      const value = snapshot(gameTime)
+      value.gameMode = "ARAM"
+      value.mapNumber = 12
+      // Both teams trade evenly; nobody is actually losing tempo.
+      value.allies.forEach((entry, index) => {
+        entry.scores = { ...entry.scores, kills, deaths: kills, assists: kills * 2 }
+        if (index === 0) entry.scores.deaths = 1
+      })
+      value.enemies.forEach((entry) => {
+        entry.scores = { ...entry.scores, kills, deaths: kills, assists: kills * 2 }
+      })
+      return value
+    }
+
+    const tracker = new LiveTempoTracker()
+    tracker.update(brawl(300, 3))
+    let tempo = 50
+    for (const [step, kills] of [[310, 5], [320, 7], [330, 9], [340, 11]] as const) {
+      tempo = tracker.update(brawl(step, kills))!.tempo.score
+    }
+
+    expect(tempo).toBeGreaterThanOrEqual(40)
+    expect(tempo).toBeLessThanOrEqual(60)
+  })
+
   it("lets an objective secure swing Tempo upward through a modest resource deficit", () => {
     const tracker = new LiveTempoTracker()
     const behind = snapshot(600)

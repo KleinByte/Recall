@@ -86,9 +86,20 @@ function labelFor(score: number, streak: number): PerformanceMomentum["label"] {
 }
 
 /**
+ * How much a loss should hurt, judged by how the game was actually played.
+ * gradeScore is standard deviations from the lobby mean, so an S-grade loss
+ * (~+1.2) barely moves the dial while a D-grade loss (~-1.5) craters it.
+ */
+function lossSeverity(gradeScore: number | undefined | null): number {
+  if (typeof gradeScore !== "number" || !Number.isFinite(gradeScore)) return 1
+  return clamp(1 - gradeScore * .55, .3, 1.8)
+}
+
+/**
  * A short-horizon meter: grades carry most of the signal, while weighted
- * results and the live streak add context. Three straight wins paired with
- * S+ performance reaches the 100-point redline by design.
+ * results and the live streak add context. An active three-win session
+ * streak always pins the dial at the 100-point redline, and a loss costs
+ * what the performance deserved: little after an S game, a lot after a D.
  */
 export function performanceMomentum(source: MatchRow[], now = Date.now()): PerformanceMomentum {
   const recentMatches = source.slice(0, 10)
@@ -118,7 +129,7 @@ export function performanceMomentum(source: MatchRow[], now = Date.now()): Perfo
   let gradeWeight = 0
   for (const [index, match] of matches.entries()) {
     const weight = .55 ** index
-    resultTotal += (match.win === 1 ? 1 : -1) * weight
+    resultTotal += (match.win === 1 ? 1 : -lossSeverity(match.gradeScore)) * weight
     resultWeight += weight
     if (typeof match.gradeScore === "number" && Number.isFinite(match.gradeScore)) {
       gradeTotal += clamp(match.gradeScore / 1.2, -1, 1) * weight
@@ -141,9 +152,10 @@ export function performanceMomentum(source: MatchRow[], now = Date.now()): Perfo
     0,
     100,
   ))
-  // A perfect meter is reserved for an active three-win session streak. This
-  // prevents yesterday's great form from reopening in Overdrive on startup.
-  const score = streak >= 3 ? calculatedScore : Math.min(99, calculatedScore)
+  // An active three-win session streak is Overdrive, full stop: the run is
+  // the story, not the grades along the way. Outside a hot streak the meter
+  // tops out at 99 so yesterday's form cannot reopen in Overdrive on startup.
+  const score = streak >= 3 ? 100 : Math.min(99, calculatedScore)
   const overdriveTier = score >= 100 ? tierFor(streak) : undefined
   const graded = matches.filter((match) =>
     typeof match.gradeScore === "number" && Number.isFinite(match.gradeScore))

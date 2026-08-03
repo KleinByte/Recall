@@ -37,6 +37,41 @@ describe("performance momentum", () => {
     })
   })
 
+  it("pins the dial at 100 for any active three-win streak, even with rough grades", () => {
+    const result = performanceMomentum([
+      match(true, -.5, 3),
+      match(true, -.8, 2),
+      match(true, -.3, 1),
+    ])
+
+    expect(result).toMatchObject({
+      score: 100,
+      streak: 3,
+      overdriveTier: "gold",
+    })
+  })
+
+  it("drops only slightly for an S-grade loss but craters for a D-grade loss", () => {
+    const base = performanceMomentum([
+      match(true, .5, 2),
+      match(true, .5, 1),
+    ])
+    const sLoss = performanceMomentum([
+      match(false, 1.2, 3),
+      match(true, .5, 2),
+      match(true, .5, 1),
+    ])
+    const dLoss = performanceMomentum([
+      match(false, -1.5, 3),
+      match(true, .5, 2),
+      match(true, .5, 1),
+    ])
+
+    expect(base.score - sLoss.score).toBeLessThan(25)
+    expect(base.score - dLoss.score).toBeGreaterThan(45)
+    expect(sLoss.score).toBeGreaterThan(dLoss.score + 25)
+  })
+
   it("hits the maximum after four wins with two S and two A grades", () => {
     const result = performanceMomentum([
       match(true, .4, 4),

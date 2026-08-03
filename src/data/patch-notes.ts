@@ -10,6 +10,38 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.24",
+    releasedAt: "2026-08-04",
+    title: "Grades that mean something, dials that feel right",
+    summary:
+      "The grade model is rebuilt around rank-and-magnitude comparisons with class-aware expectations and regrades your history automatically, while the momentum dial and live Tempo gauge learn to celebrate streaks properly and stop panicking over even trades.",
+    sections: [
+      {
+        title: "Grade algorithm v2",
+        items: [
+          "Grades now blend where you ranked in the lobby with how far ahead or behind you were, so a close second no longer scores like a distant one.",
+          "Damage and objective expectations bend to your champion's class — supports are no longer punished for a tank's damage share, and frontliners get credit for soaking damage.",
+          "Older matches are regraded automatically in the background whenever the algorithm improves, so your whole history stays comparable.",
+        ],
+      },
+      {
+        title: "A momentum dial with conviction",
+        items: [
+          "Any active three-win streak now pins the dial at 100 and lights the overdrive animations — a streak is a streak.",
+          "Losses are weighed by how you played: an S-grade loss barely nudges the dial, while a D-grade loss drops it hard.",
+        ],
+      },
+      {
+        title: "Live Tempo finds its nerve",
+        items: [
+          "Even trades no longer sink the gauge — only uncompensated deaths count against you, and ARAM's faster death pace is baked into expectations.",
+          "Multikill celebrations hold the redline longer the bigger the kill, then glide down instead of cliff-dropping.",
+          "Tempo rises quickly but bleeds off slowly, reserving fast drops for genuine throws and heavy counter-swings.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.18",
     releasedAt: "2026-08-03",
     title: "A clearer identity, fairer comparisons",
