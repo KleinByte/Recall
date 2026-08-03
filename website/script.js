@@ -15,9 +15,9 @@ const tourContent = {
     index: "02 / Match history",
     copy: "Filter a permanent local archive by mode, result, champion, grade, date, notes, bookmarks, or the practice experiment you were running.",
   },
-  challenges: {
-    index: "03 / Challenges",
-    copy: "Pin the goals that matter, sort by distance to the next tier, and know whether the champion in your draft moves one of them forward.",
+  review: {
+    index: "03 / Match review",
+    copy: "Open one complete review for the game summary, performance context, scoreboard, full stats, interactive timeline, and win probability.",
   },
 }
 
