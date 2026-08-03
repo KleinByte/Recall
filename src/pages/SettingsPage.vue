@@ -20,6 +20,7 @@ const emit = defineEmits<{
   (event: "refetch"): void
   (event: "refetch-aram-stats"): void
   (event: "view-patch-notes"): void
+  (event: "install-update"): void
 }>()
 
 const meta = ref<StatsMeta | null>(null)
@@ -161,7 +162,20 @@ function reimportRiotDetails() {
 
 function runUpdateAction(command: "retry" | "install") {
   if (command === "retry") void api.retryUpdate()
-  else if (command === "install") void api.installUpdate()
+  else if (command === "install") emit("install-update")
+}
+
+async function checkForApplicationUpdates() {
+  updateStatus.value = { kind: "checking" }
+  try {
+    await api.checkForUpdates()
+    updateStatus.value = await api.getUpdateStatus()
+  } catch {
+    updateStatus.value = {
+      kind: "error",
+      message: "Could not check for updates. Recall is still ready to use.",
+    }
+  }
 }
 
 async function resync() {
@@ -268,6 +282,14 @@ const formatDate = (value?: number) =>
       <p class="muted note">{{ update.message }}</p>
       <div class="actions update-actions">
         <button
+          class="league-button action"
+          type="button"
+          :disabled="updateStatus.kind === 'checking'"
+          @click="checkForApplicationUpdates"
+        >
+          {{ updateStatus.kind === "checking" ? "Checking…" : "Check for updates" }}
+        </button>
+        <button
           v-if="update.action"
           class="league-button action"
           @click="runUpdateAction(update.action!.command)"
@@ -296,6 +318,24 @@ const formatDate = (value?: number) =>
         Paste the Web API key beginning with <code>RGAPI-</code>. An RSO client
         secret or access token cannot be used for Match-V5.
       </p>
+      <div class="portal-callout">
+        <div>
+          <strong>Need a Riot API key?</strong>
+          <span>
+            Sign in to Riot's Developer Portal to generate a development key.
+            Development keys expire every 24 hours, so you may need to regenerate
+            and replace it here. Recall only stores the key on this computer.
+          </span>
+        </div>
+        <a
+          class="league-button portal-link"
+          href="https://developer.riotgames.com/"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Open Riot Developer Portal <span aria-hidden="true">↗</span>
+        </a>
+      </div>
       <p v-if="!riotKeyProtected" class="muted note danger-note">
         Secure local storage is unavailable, so Recall will not save an API key on this computer.
       </p>
@@ -584,6 +624,52 @@ h1 {
   margin-top: var(--space-3);
 }
 
+.portal-callout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  gap: var(--space-3);
+  border: 1px solid rgba(10, 203, 230, .22);
+  border-radius: var(--radius-md);
+  background:
+    radial-gradient(circle at 8% 0, rgba(10, 203, 230, .09), transparent 48%),
+    var(--surface-1);
+}
+
+.portal-callout > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.portal-callout strong {
+  color: var(--gold-bright);
+  font: 500 14px var(--font-heading);
+  letter-spacing: .35px;
+}
+
+.portal-callout span {
+  max-width: 690px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.portal-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  color: var(--cyan);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.portal-link span { color: inherit; font-size: 12px; }
+
 .key-row {
   display: flex;
   gap: var(--space-2);
@@ -607,6 +693,8 @@ h1 {
 
 @media (max-width: 620px) {
   .key-row { align-items: stretch; flex-direction: column; }
+  .portal-callout { grid-template-columns: 1fr; }
+  .portal-link { width: 100%; }
 }
 
 .action {

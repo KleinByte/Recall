@@ -4,6 +4,7 @@ import type { ParticipantsRepository } from "./database/participants-repo.js"
 import type { LiveGameCaptureRepository } from "./database/live-game-capture-repo.js"
 import type { LcuClient } from "./lcu-client.js"
 import { gradeLobby, type GradeInput } from "./matches/grade.js"
+import { resolveChampionClass } from "./matches/class-expectations.js"
 import {
   evaluateMatchLabels,
   prioritizePerformanceLabels,
@@ -265,6 +266,8 @@ export class MatchSync {
         minutes,
       visionScore: number(participant.stats?.visionScore),
       damageObjectives: number(participant.stats?.damageDealtToObjectives),
+      damageMitigated: number(participant.stats?.damageSelfMitigated),
+      championClass: resolveChampionClass(participant.championId),
       role: resolvePosition(
         participant.timeline?.lane,
         participant.timeline?.role,

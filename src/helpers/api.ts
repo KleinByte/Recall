@@ -506,6 +506,10 @@ export const api = {
     return invoke("app:update-status")
   },
 
+  checkForUpdates(): Promise<void> {
+    return invoke("app:update-check")
+  },
+
   retryUpdate(): Promise<void> {
     return invoke("app:update-retry")
   },

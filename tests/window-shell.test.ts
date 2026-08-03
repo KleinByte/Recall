@@ -19,7 +19,8 @@ describe("Recall desktop window shell", () => {
     expect(api).toContain('send("window:close")')
     expect(titlebar).toContain("-webkit-app-region: drag")
     expect(titlebar).toContain("-webkit-app-region: no-drag")
-    expect(titlebar).toContain("v{{ currentAppVersion }}")
+    expect(titlebar).toContain('<RecallMark animated class="titlebar-mark" />')
+    expect(titlebar).not.toContain("titlebar-wordmark")
   })
 
   it("keeps the letter mark in the sidebar and uses the full Recall logo elsewhere", () => {
@@ -30,9 +31,10 @@ describe("Recall desktop window shell", () => {
     expect(mark).toContain('props.variant === "letter" ? "recall-r.png" : "recall-icon.png"')
     expect(mark).toContain("recall-mark-wave")
     expect(sidebar).toContain('<RecallMark variant="letter" class="brand-logo" />')
+    expect(sidebar).toContain('<RecallMark animated class="brand-logo brand-logo-collapsed" />')
     expect(sidebar).toContain('class="brand-mark">ECALL</span>')
     expect(titlebar).toContain('<RecallMark animated class="titlebar-mark" />')
-    expect(titlebar).toContain('class="titlebar-wordmark">RECALL</span>')
+    expect(titlebar).not.toContain("titlebar-wordmark")
   })
 
   it("ships a transparent 512px Recall logo, letter mark, and multi-resolution favicon", () => {

@@ -4,6 +4,7 @@ import AppSidebar from "./components/AppSidebar.vue"
 import ChampSelectBanner from "./components/ChampSelectBanner.vue"
 import PatchNotesModal from "./components/PatchNotesModal.vue"
 import PostGameBanner from "./components/PostGameBanner.vue"
+import UpdateRecallAnimation from "./components/UpdateRecallAnimation.vue"
 import UpdateReadyBanner from "./components/UpdateReadyBanner.vue"
 import WindowTitleBar from "./components/WindowTitleBar.vue"
 import DashboardPage from "./pages/DashboardPage.vue"
@@ -47,6 +48,10 @@ const refreshMessage = ref<string | null>(null)
 const showPatchNotes = ref(false)
 const updateStatus = ref<UpdateStatus>({ kind: "up-to-date" })
 const dismissedUpdateVersion = ref<string | null>(null)
+const updateAnimation = ref<{
+  phase: "channeling" | "arrival"
+  version: string
+} | null>(null)
 let hasFocusedLiveGame = false
 const events = useApiEvents()
 
@@ -99,8 +104,29 @@ async function showUnseenPatchNotes() {
   )
   if (!hasUnseenPatchNotes(seenVersion)) return
 
+  if (seenVersion) {
+    updateAnimation.value = { phase: "arrival", version: currentAppVersion }
+    await new Promise((resolve) => setTimeout(resolve, 2_700))
+    updateAnimation.value = null
+  }
+
   showPatchNotes.value = true
   api.setSetting("last-seen-patch-notes-version", currentAppVersion)
+}
+
+async function installUpdateWithRecall() {
+  if (updateAnimation.value) return
+  const version = updateStatus.value.kind === "downloaded"
+    ? updateStatus.value.version
+    : ""
+  updateAnimation.value = { phase: "channeling", version }
+  await new Promise((resolve) => setTimeout(resolve, 2_500))
+  try {
+    const installing = await api.installUpdate()
+    if (!installing) updateAnimation.value = null
+  } catch {
+    updateAnimation.value = null
+  }
 }
 
 async function refreshAll() {
@@ -205,6 +231,7 @@ onMounted(async () => {
           v-if="updateStatus.kind === 'downloaded' && dismissedUpdateVersion !== updateStatus.version"
           :status="updateStatus"
           @dismiss="dismissedUpdateVersion = updateStatus.version"
+          @install="installUpdateWithRecall"
         />
 
         <DashboardPage
@@ -272,6 +299,7 @@ onMounted(async () => {
           @refetch="loadChampions"
           @refetch-aram-stats="fetchAramStats"
           @view-patch-notes="showPatchNotes = true"
+          @install-update="installUpdateWithRecall"
         />
       </main>
 
@@ -284,6 +312,12 @@ onMounted(async () => {
       <PatchNotesModal
         v-if="showPatchNotes"
         @close="showPatchNotes = false"
+      />
+
+      <UpdateRecallAnimation
+        v-if="updateAnimation"
+        :phase="updateAnimation.phase"
+        :version="updateAnimation.version"
       />
     </div>
   </div>

@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { ref } from "vue"
-import { api } from "../helpers/api"
 import type { UpdateStatus } from "../types/update"
 
 defineProps<{
@@ -9,18 +7,8 @@ defineProps<{
 
 const emit = defineEmits<{
   (event: "dismiss"): void
+  (event: "install"): void
 }>()
-
-const installing = ref(false)
-
-async function installUpdate() {
-  installing.value = true
-  try {
-    await api.installUpdate()
-  } finally {
-    installing.value = false
-  }
-}
 </script>
 
 <template>
@@ -29,8 +17,8 @@ async function installUpdate() {
       <strong>Recall {{ status.version }} is ready to install.</strong>
       <span>The update will restart Recall and finish in the background.</span>
     </div>
-    <button class="league-button" :disabled="installing" @click="installUpdate">
-      {{ installing ? "Restarting…" : "Restart to update" }}
+    <button class="league-button" @click="emit('install')">
+      Restart to update
     </button>
     <button class="dismiss" title="Later" aria-label="Later" @click="emit('dismiss')">×</button>
   </section>

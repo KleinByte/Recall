@@ -465,6 +465,33 @@ export class MatchesRepository {
   }
 
   /**
+   * Graded matches whose stored breakdown came from an older algorithm.
+   *
+   * Only lobbies stored in full can be regraded offline, so the query skips
+   * matches without ten saved participants rather than reselecting them on
+   * every pass.
+   */
+  getOutdatedGradeMatches(
+    version: number,
+    limit: number,
+  ): { gameId: number; puuid: string }[] {
+    return this.db
+      .prepare(
+        `SELECT m.game_id AS gameId, m.puuid FROM matches m
+         WHERE m.is_matched = 1 AND m.grade IS NOT NULL
+           AND m.mode_family IN ('sr', 'aram', 'classic')
+           AND (SELECT COUNT(*) FROM match_participants p
+                WHERE p.game_id = m.game_id AND p.puuid = m.puuid) >= 10
+           AND COALESCE((SELECT MAX(b.algorithm_version)
+                FROM match_grade_breakdowns b
+                WHERE b.game_id = m.game_id AND b.puuid = m.puuid), 0) < ?
+         ORDER BY m.played_at DESC
+         LIMIT ?`,
+      )
+      .all(version, limit) as { gameId: number; puuid: string }[]
+  }
+
+  /**
    * How often each grade was earned.
    *
    * Takes the same query as the match list so a page can describe exactly the

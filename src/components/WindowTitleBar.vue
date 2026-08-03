@@ -2,7 +2,6 @@
 import { onBeforeUnmount, onMounted, ref } from "vue"
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
 import { faArrowLeft, faArrowRight } from "@fortawesome/free-solid-svg-icons"
-import { currentAppVersion } from "../data/patch-notes"
 import { api } from "../helpers/api"
 import {
   canGoBack,
@@ -43,9 +42,6 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleHistoryShortcu
     <div class="titlebar-left">
       <div class="titlebar-brand" aria-label="Recall">
         <RecallMark animated class="titlebar-mark" />
-        <span class="titlebar-wordmark">RECALL</span>
-        <span class="titlebar-divider" aria-hidden="true" />
-        <span class="titlebar-version">v{{ currentAppVersion }}</span>
       </div>
 
       <nav class="history-controls" aria-label="Page history" @dblclick.stop>
@@ -179,33 +175,10 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleHistoryShortcu
 .titlebar-mark {
   width: 34px;
   height: 34px;
-  margin: 0 3px 0 -4px;
+  margin-left: -4px;
   filter:
     drop-shadow(0 0 4px rgba(240, 211, 116, 0.18))
     drop-shadow(0 0 6px rgba(10, 203, 230, 0.14));
-}
-
-.titlebar-wordmark {
-  font-family: var(--font-display);
-  font-size: 14px;
-  line-height: 1;
-  letter-spacing: 1.45px;
-  color: var(--gold-bright);
-}
-
-.titlebar-divider {
-  width: 1px;
-  height: 13px;
-  margin: 0 9px 0 10px;
-  background: var(--border-strong);
-}
-
-.titlebar-version {
-  font-family: var(--font-body);
-  font-size: 10px;
-  line-height: 1;
-  letter-spacing: 0.65px;
-  color: var(--text-muted);
 }
 
 .window-controls {

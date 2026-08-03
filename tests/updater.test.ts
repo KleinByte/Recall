@@ -148,6 +148,21 @@ describe("createUpdaterService", () => {
     expect(updater.checkForUpdates).toHaveBeenCalledTimes(2)
   })
 
+  it("allows a manual check from any current state", async () => {
+    const updater = client()
+    const service = createUpdaterService({
+      updater,
+      isPackaged: true,
+      publish: vi.fn(),
+    })
+    await service.start()
+    updater.emit("update-not-available")
+
+    await service.check()
+
+    expect(updater.checkForUpdates).toHaveBeenCalledTimes(2)
+  })
+
   it("sets status to checking immediately and exposes it via status()", async () => {
     const updater = client()
     const publish = vi.fn()
@@ -216,10 +231,11 @@ describe("createUpdaterService", () => {
 })
 
 describe("registerUpdaterIpc", () => {
-  it("registers typed state, retry, and install handlers", async () => {
+  it("registers typed state, check, retry, and install handlers", async () => {
     const handle = vi.fn()
     const service = {
       status: vi.fn().mockReturnValue({ kind: "up-to-date" as const }),
+      check: vi.fn().mockResolvedValue(undefined),
       retry: vi.fn().mockResolvedValue(undefined),
       install: vi.fn().mockResolvedValue(false),
     }
@@ -230,6 +246,8 @@ describe("registerUpdaterIpc", () => {
     await expect(handlers.get("app:update-status")!()).resolves.toEqual({
       kind: "up-to-date",
     })
+    await handlers.get("app:update-check")!()
+    expect(service.check).toHaveBeenCalledOnce()
     await handlers.get("app:update-retry")!()
     expect(service.retry).toHaveBeenCalledOnce()
     await expect(handlers.get("app:update-install")!()).resolves.toBe(false)

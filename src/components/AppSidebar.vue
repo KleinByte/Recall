@@ -51,10 +51,25 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
   <nav class="sidebar" :class="{ collapsed }">
     <div class="brand">
       <div class="brand-row">
-        <div class="brand-title" aria-label="Recall">
-          <RecallMark variant="letter" class="brand-logo" />
-          <span v-if="!collapsed" class="brand-mark">ECALL</span>
-        </div>
+        <Transition name="brand-recall" mode="out-in">
+          <div
+            v-if="collapsed"
+            key="collapsed-logo"
+            class="brand-title brand-title-collapsed"
+            aria-label="Recall"
+          >
+            <RecallMark animated class="brand-logo brand-logo-collapsed" />
+          </div>
+          <div
+            v-else
+            key="expanded-wordmark"
+            class="brand-title brand-title-expanded"
+            aria-label="Recall"
+          >
+            <RecallMark variant="letter" class="brand-logo" />
+            <span class="brand-mark">ECALL</span>
+          </div>
+        </Transition>
         <button
           class="collapse-toggle"
           type="button"
@@ -66,7 +81,9 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
           <FontAwesomeIcon :icon="collapsed ? faAnglesRight : faAnglesLeft" fixed-width />
         </button>
       </div>
-      <span v-if="!collapsed" class="brand-name">League companion</span>
+      <Transition name="brand-subtitle">
+        <span v-if="!collapsed" class="brand-name">League companion</span>
+      </Transition>
     </div>
 
     <ul class="nav">
@@ -158,6 +175,10 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
   min-width: 0;
 }
 
+.brand-title-collapsed {
+  justify-content: center;
+}
+
 .brand-logo {
   width: 36px;
   height: 36px;
@@ -166,6 +187,16 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
   filter:
     drop-shadow(0 0 5px rgba(240, 211, 116, 0.18))
     drop-shadow(0 0 7px rgba(10, 203, 230, 0.1));
+}
+
+.brand-logo-collapsed {
+  width: 44px;
+  height: 44px;
+  flex-basis: 44px;
+  margin: -4px 0;
+  filter:
+    drop-shadow(0 0 8px rgba(240, 211, 116, 0.2))
+    drop-shadow(0 0 12px rgba(10, 203, 230, 0.22));
 }
 
 .brand-mark {
@@ -212,6 +243,25 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
   flex-direction: column;
   gap: var(--space-2);
 }
+
+.brand-title-collapsed.brand-recall-enter-active {
+  animation: recall-brand-arrive .54s cubic-bezier(.2, .78, .2, 1) both;
+}
+
+.brand-title-collapsed.brand-recall-leave-active {
+  animation: recall-brand-depart .48s cubic-bezier(.55, .04, .8, .35) both;
+}
+
+.brand-title-expanded.brand-recall-enter-active {
+  animation: wordmark-return .42s cubic-bezier(.2, .72, .2, 1) both;
+}
+
+.brand-title-expanded.brand-recall-leave-active {
+  animation: wordmark-fold .22s ease-in both;
+}
+
+.brand-subtitle-enter-active { animation: subtitle-return .35s .18s ease both; }
+.brand-subtitle-leave-active { animation: subtitle-leave .15s ease both; }
 
 .nav {
   list-style: none;
@@ -315,6 +365,49 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+@keyframes recall-brand-arrive {
+  0% { opacity: 0; transform: translateY(26px) scale(.62); filter: blur(3px) brightness(1.8); }
+  45% { opacity: 1; transform: translateY(-3px) scale(1.08); filter: blur(0) brightness(1.4); }
+  100% { opacity: 1; transform: translateY(0) scale(1); filter: brightness(1); }
+}
+
+@keyframes recall-brand-depart {
+  0% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0) brightness(1); }
+  42% { opacity: 1; transform: translateY(-5px) scale(1.08); filter: blur(0) brightness(1.7); }
+  100% { opacity: 0; transform: translateY(-42px) scale(.38); filter: blur(4px) brightness(2.2); }
+}
+
+@keyframes wordmark-return {
+  0% { opacity: 0; transform: translateX(-18px) scaleX(.72); filter: blur(3px); }
+  58% { opacity: 1; transform: translateX(2px) scaleX(1.03); filter: blur(0); }
+  100% { opacity: 1; transform: none; }
+}
+
+@keyframes wordmark-fold {
+  to { opacity: 0; transform: translateX(-12px) scaleX(.78); filter: blur(2px); }
+}
+
+@keyframes subtitle-return {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes subtitle-leave {
+  to { opacity: 0; transform: translateY(-4px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-title-collapsed.brand-recall-enter-active,
+  .brand-title-collapsed.brand-recall-leave-active,
+  .brand-title-expanded.brand-recall-enter-active,
+  .brand-title-expanded.brand-recall-leave-active,
+  .brand-subtitle-enter-active,
+  .brand-subtitle-leave-active {
+    animation-duration: 1ms;
+    animation-delay: 0ms;
+  }
 }
 
 .status {

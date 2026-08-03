@@ -534,6 +534,29 @@ function getReviewService(win: BrowserWindow) {
   return reviewService
 }
 
+/** Refreshes grades stored by an older algorithm across the whole history. */
+async function regradeOutdatedGrades(win: BrowserWindow) {
+  const service = getReviewService(win)
+  let total = 0
+  for (;;) {
+    let regraded = 0
+    try {
+      regraded = service.regradeOutdated()
+    } catch (error) {
+      console.warn(`Could not refresh outdated grades: ${(error as Error).message}`)
+      break
+    }
+    total += regraded
+    if (regraded === 0) break
+    // Yield between batches so grading thousands of games cannot starve IPC.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  if (total > 0) {
+    console.log(`Regraded ${total} matches with the current grade algorithm`)
+    broadcast(win, "stats:updated", { inserted: 0, regraded: total })
+  }
+}
+
 async function createWindow(startHidden = false) {
   const win = new BrowserWindow({
     title: `Recall v${app.getVersion()}`,
@@ -2293,6 +2316,10 @@ async function main() {
 
   registerIpc(win, updater)
   void updater.start()
+
+  // A grading algorithm update rolls out to the entire stored history in the
+  // background, one batch at a time so startup stays responsive.
+  void regradeOutdatedGrades(win)
 
   // A second launch reveals the running copy rather than starting another.
   app.on("second-instance", () => reveal(win))

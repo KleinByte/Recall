@@ -143,48 +143,52 @@ onBeforeUnmount(() => {
     <div v-if="ordered.length === 0" class="empty muted">No games recorded</div>
 
     <template v-else>
-      <svg
-        class="trend"
-        :viewBox="`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`"
-        preserveAspectRatio="none"
-        role="img"
-        aria-label="Performance grade across the recent form window"
-      >
-        <defs>
-          <linearGradient :id="gradientId" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="var(--gold)" stop-opacity="0.26" />
-            <stop offset="100%" stop-color="var(--gold)" stop-opacity="0" />
-          </linearGradient>
-        </defs>
+      <div class="trend-shell">
+        <svg
+          class="trend"
+          :viewBox="`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`"
+          preserveAspectRatio="none"
+          role="img"
+          aria-label="Performance grade across the recent form window"
+        >
+          <defs>
+            <linearGradient :id="gradientId" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="var(--gold)" stop-opacity="0.26" />
+              <stop offset="100%" stop-color="var(--gold)" stop-opacity="0" />
+            </linearGradient>
+          </defs>
 
-        <line
-          class="midline"
-          x1="0"
-          :y1="midline"
-          :x2="VIEW_WIDTH"
-          :y2="midline"
-          vector-effect="non-scaling-stroke"
-        />
+          <line
+            class="midline"
+            x1="0"
+            :y1="midline"
+            :x2="VIEW_WIDTH"
+            :y2="midline"
+            vector-effect="non-scaling-stroke"
+          />
 
-        <polygon v-if="areaPath" :points="areaPath" :fill="`url(#${gradientId})`" />
+          <polygon v-if="areaPath" :points="areaPath" :fill="`url(#${gradientId})`" />
 
-        <polyline
-          v-if="graded.length > 1"
-          class="line"
-          :points="linePath"
-          vector-effect="non-scaling-stroke"
-        />
+          <polyline
+            v-if="graded.length > 1"
+            class="line"
+            :points="linePath"
+            vector-effect="non-scaling-stroke"
+          />
+        </svg>
 
-        <circle
+        <span
           v-for="point in graded"
           :key="point.index"
-          class="node"
+          class="trend-node"
           :class="{ active: activeIndex === point.index }"
-          :cx="point.x"
-          :cy="point.y"
-          :r="activeIndex === point.index ? 3 : 1.4"
+          :style="{
+            left: `${point.x}%`,
+            top: `${(point.y / VIEW_HEIGHT) * 100}%`,
+          }"
+          aria-hidden="true"
         />
-      </svg>
+      </div>
 
       <div class="pills" :style="{ '--count': String(ordered.length) }">
         <span v-for="point in points" :key="point.match.gameId" class="slot">
@@ -278,10 +282,15 @@ onBeforeUnmount(() => {
   gap: var(--space-2);
 }
 
+.trend-shell {
+  position: relative;
+  height: 46px;
+}
+
 .trend {
   display: block;
   width: 100%;
-  height: 46px;
+  height: 100%;
   overflow: visible;
 }
 
@@ -299,13 +308,30 @@ onBeforeUnmount(() => {
   stroke-linejoin: round;
 }
 
-.node {
-  fill: var(--gold-mid);
-  transition: fill 0.12s ease;
+.trend-node {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  pointer-events: none;
+  background: var(--gold-mid);
+  border: 1px solid rgba(4, 9, 16, .82);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(200, 170, 109, .16);
+  transform: translate(-50%, -50%);
+  transition:
+    width .12s ease,
+    height .12s ease,
+    background .12s ease,
+    box-shadow .12s ease;
 }
 
-.node.active {
-  fill: var(--gold-bright);
+.trend-node.active {
+  width: 9px;
+  height: 9px;
+  background: var(--gold-bright);
+  box-shadow:
+    0 0 0 2px rgba(200, 170, 109, .18),
+    0 0 10px rgba(240, 211, 116, .48);
 }
 
 /* No gap between cells, so each pill centres exactly under its trend point. */

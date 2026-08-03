@@ -54,8 +54,19 @@ describe("gradeMatch", () => {
         (sum, component) => sum + component.contribution,
         0,
       ),
-    ).toBeCloseTo(.45)
+    ).toBeCloseTo(.5)
     expect(result.percentile).toBe(.5)
+  })
+
+  it("weights every mode's components to a full composite", () => {
+    for (const family of ["aram", "sr"] as const) {
+      const result = gradeMatch(evenLobby().map((entry) => ({
+        ...entry, csPerMin: 5, visionScore: 20, damageObjectives: 5000,
+      })), 1, family)!
+      expect(
+        result.breakdown.components.reduce((sum, component) => sum + component.weight, 0),
+      ).toBeCloseTo(1)
+    }
   })
   it("gives an average grade when everyone performed identically", () => {
     const lobby = evenLobby()
@@ -149,6 +160,52 @@ describe("gradeMatch", () => {
 
     expect(Number.isFinite(result.score)).toBe(true)
     expect(GRADES).toContain(result.grade)
+  })
+
+  it("scores a bigger damage lead higher than a narrow one at the same rank", () => {
+    const narrow = evenLobby()
+    narrow[0] = player({ participantId: 1, damageToChampions: 21000 })
+    const wide = evenLobby()
+    wide[0] = player({ participantId: 1, damageToChampions: 60000 })
+
+    expect(gradeAram(wide, 1).percentile).toBeGreaterThanOrEqual(
+      gradeAram(narrow, 1).percentile,
+    )
+    expect(
+      gradeAram(wide, 1).breakdown.components.find((c) => c.key === "combat")!.percentile,
+    ).toBeGreaterThan(
+      gradeAram(narrow, 1).breakdown.components.find((c) => c.key === "combat")!.percentile,
+    )
+  })
+
+  it("judges damage share against the champion class's own ceiling", () => {
+    const withClasses = (): GradeInput[] => evenLobby().map((entry, index) => ({
+      ...entry,
+      championClass: index % 5 === 0 ? "tank" as const : "marksman" as const,
+    }))
+
+    // Identical raw output: the tank cleared its lower damage expectation
+    // while the marksmen only met theirs, so the tank's combat ranks higher.
+    const lobby = withClasses()
+    const tank = gradeAram(lobby, 1)
+    const marksman = gradeAram(lobby, 2)
+    expect(
+      tank.breakdown.components.find((c) => c.key === "combat")!.percentile,
+    ).toBeGreaterThan(
+      marksman.breakdown.components.find((c) => c.key === "combat")!.percentile,
+    )
+  })
+
+  it("counts mitigated damage per life as frontlining", () => {
+    const lobby = evenLobby()
+    lobby[0] = player({ participantId: 1, damageMitigated: 30000 })
+    lobby[1] = player({ participantId: 2, damageTaken: 30000, deaths: 12 })
+
+    const durable = gradeAram(lobby, 1).breakdown.components
+      .find((c) => c.key === "frontlining")!
+    const feeder = gradeAram(lobby, 2).breakdown.components
+      .find((c) => c.key === "frontlining")!
+    expect(durable.percentile).toBeGreaterThan(feeder.percentile)
   })
 
   it("returns undefined when the player is not in the lobby", () => {
@@ -269,7 +326,17 @@ describe("gradeMatch — Summoner's Rift", () => {
       role: undefined,
     }))
 
-    expect(gradeMatch(lobby, 1, "sr")).toBeDefined()
+    const result = gradeMatch(lobby, 1, "sr")
+    expect(result).toBeDefined()
+    // The breakdown must not claim a role comparison it could not make.
+    const farming = result!.breakdown.components.find((c) => c.key === "farming")
+    expect(farming!.scope).toBe("lobby")
+  })
+
+  it("reports the role scope when role peers exist", () => {
+    const result = gradeMatch(evenRiftLobby(), 1, "sr")!
+    const farming = result.breakdown.components.find((c) => c.key === "farming")
+    expect(farming!.scope).toBe("role")
   })
 
   it("handles a role held by only one player", () => {

@@ -30,6 +30,7 @@ export interface UpdaterService {
   start(): Promise<void>
   stop(): void
   status(): UpdateStatus
+  check(): Promise<void>
   retry(): Promise<void>
   install(): Promise<boolean>
 }
@@ -98,6 +99,11 @@ export function createUpdaterService({
   async function checkForUpdates() {
     if (checkInProgress) return
 
+    if (!isPackaged) {
+      set({ kind: "up-to-date" })
+      return
+    }
+
     checkInProgress = true
     set({ kind: "checking" })
     try {
@@ -130,6 +136,10 @@ export function createUpdaterService({
       return current
     },
 
+    async check() {
+      await checkForUpdates()
+    },
+
     async retry() {
       if (current.kind !== "error") return
       await checkForUpdates()
@@ -159,6 +169,7 @@ export function registerUpdaterIpc(
   service: UpdaterService,
 ) {
   ipcMain.handle("app:update-status", () => Promise.resolve(service.status()))
+  ipcMain.handle("app:update-check", () => service.check())
   ipcMain.handle("app:update-retry", () => service.retry())
   ipcMain.handle("app:update-install", () => service.install())
 }

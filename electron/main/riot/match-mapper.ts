@@ -1,4 +1,5 @@
 import type { GradeInput } from "../matches/grade.js"
+import { resolveChampionClass } from "../matches/class-expectations.js"
 import { resolvePosition } from "../matches/position.js"
 import { mapMatchRow } from "../matches/map-match.js"
 import type { QueueInfo } from "../matches/queues.js"
@@ -448,6 +449,8 @@ export function mapRiotMatch(
       (participant.totalMinionsKilled + participant.neutralMinions) / minutes,
     visionScore: participant.visionScore,
     damageObjectives: participant.damageObjectives,
+    damageMitigated: participant.damageSelfMitigated,
+    championClass: resolveChampionClass(participant.championId),
     role: resolvePosition(
       participant.lane,
       participant.role,

@@ -3,6 +3,7 @@ import type { MatchesRepository } from "../database/matches-repo.js"
 import type { ParticipantsRepository } from "../database/participants-repo.js"
 import type { ReviewRepository } from "../database/review-repo.js"
 import { gradeLobby, GRADE_ALGORITHM_VERSION } from "../matches/grade.js"
+import { resolveChampionClass } from "../matches/class-expectations.js"
 import type { MatchRow } from "../matches/types.js"
 import type { LcuTimelineService } from "../lcu-timeline-service.js"
 import { confidenceForGames, type GradeBreakdown } from "./types.js"
@@ -47,27 +48,12 @@ export class ReviewService {
     let grade = owner
       ? this.reviews.getGradeBreakdown(gameId, puuid, owner.participantId)
       : undefined
-    if (!grade && owner && detail.participants.length >= 10) {
-      const duration = Math.max(1, match.durationSecs / 60)
-      const results = gradeLobby(detail.participants.map((participant) => ({
-        participantId: participant.participantId,
-        teamId: participant.teamId,
-        kills: participant.kills,
-        deaths: participant.deaths,
-        assists: participant.assists,
-        damageToChampions: participant.damageToChampions,
-        damageTaken: participant.damageTaken,
-        goldEarned: participant.goldEarned,
-        csPerMin: (participant.totalMinionsKilled + participant.neutralMinions) / duration,
-        visionScore: participant.visionScore,
-        damageObjectives: participant.damageObjectives,
-        role: participant.role,
-      })), match.modeFamily)
-      this.participants.setGrades(gameId, puuid, results)
-      const ownerGrade = results.get(owner.participantId)
-      if (ownerGrade) {
-        this.matches.setGrade(gameId, puuid, ownerGrade.grade, ownerGrade.score)
-      }
+    // Grades from an older recipe are recomputed from the stored lobby, so
+    // reviewing a match always shows the current algorithm.
+    const outdated = grade !== undefined &&
+      grade.algorithmVersion < GRADE_ALGORITHM_VERSION
+    if ((!grade || outdated) && owner && detail.participants.length >= 10) {
+      this.regrade(match, puuid)
       grade = this.reviews.getGradeBreakdown(gameId, puuid, owner.participantId)
     }
     if (!grade && match.grade) {
@@ -90,6 +76,56 @@ export class ReviewService {
       annotation: this.reviews.getAnnotation(gameId, puuid),
       timeline: this.timelines.get(gameId, puuid),
     }
+  }
+
+  /**
+   * Recomputes a batch of grades stored by an older algorithm version, so a
+   * recipe change rolls out to the whole history instead of only newly synced
+   * games. Returns how many matches were regraded; callers keep invoking it
+   * until a pass regrades nothing.
+   */
+  regradeOutdated(limit = 200): number {
+    const candidates = this.matches.getOutdatedGradeMatches(
+      GRADE_ALGORITHM_VERSION,
+      limit,
+    )
+    let regraded = 0
+    for (const candidate of candidates) {
+      const match = this.matches.getMatch(candidate.gameId, candidate.puuid)
+      if (match && this.regrade(match, candidate.puuid)) regraded += 1
+    }
+    return regraded
+  }
+
+  /** Regrades one match from its stored lobby with the current algorithm. */
+  private regrade(match: MatchRow, puuid: string): boolean {
+    const detail = this.participants.getMatchDetail(match.gameId, puuid)
+    if (detail.participants.length < 10) return false
+    const duration = Math.max(1, match.durationSecs / 60)
+    const results = gradeLobby(detail.participants.map((participant) => ({
+      participantId: participant.participantId,
+      teamId: participant.teamId,
+      kills: participant.kills,
+      deaths: participant.deaths,
+      assists: participant.assists,
+      damageToChampions: participant.damageToChampions,
+      damageTaken: participant.damageTaken,
+      goldEarned: participant.goldEarned,
+      csPerMin: (participant.totalMinionsKilled + participant.neutralMinions) / duration,
+      visionScore: participant.visionScore,
+      damageObjectives: participant.damageObjectives,
+      damageMitigated: participant.damageSelfMitigated,
+      championClass: resolveChampionClass(participant.championId),
+      role: participant.role,
+    })), match.modeFamily)
+    if (results.size === 0) return false
+    this.participants.setGrades(match.gameId, puuid, results)
+    const owner = detail.participants.find((participant) => participant.isPlayer === 1)
+    const ownerGrade = owner ? results.get(owner.participantId) : undefined
+    if (ownerGrade) {
+      this.matches.setGrade(match.gameId, puuid, ownerGrade.grade, ownerGrade.score)
+    }
+    return true
   }
 
   sessions(puuid: string, page: number, pageSize = 20) {

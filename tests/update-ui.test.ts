@@ -50,12 +50,14 @@ describe("update API", () => {
     vi.stubGlobal("window", { ipcRenderer: { invoke, on } })
 
     await api.getUpdateStatus()
+    await api.checkForUpdates()
     await api.retryUpdate()
     await api.installUpdate()
     api.onUpdateStatus(vi.fn())
 
     expect(invoke.mock.calls.map(([channel]) => channel)).toEqual([
       "app:update-status",
+      "app:update-check",
       "app:update-retry",
       "app:update-install",
     ])
@@ -71,6 +73,8 @@ describe("update-ready notification", () => {
   it("shows a dismissible app-wide restart banner when an update is downloaded", () => {
     const app = readFileSync("src/App.vue", "utf8")
     const banner = readFileSync("src/components/UpdateReadyBanner.vue", "utf8")
+    const animation = readFileSync("src/components/UpdateRecallAnimation.vue", "utf8")
+    const settings = readFileSync("src/pages/SettingsPage.vue", "utf8")
 
     expect(app).toContain("useApiEvents")
     expect(app).toContain("events.onUpdateStatus")
@@ -78,7 +82,15 @@ describe("update-ready notification", () => {
     expect(app).toContain(':status="updateStatus"')
     expect(banner).toContain("status.kind === 'downloaded'")
     expect(banner).toContain("Restart to update")
-    expect(banner).toContain("api.installUpdate")
+    expect(banner).toContain("emit('install')")
     expect(banner).toContain("emit('dismiss')")
+    expect(app).toContain("installUpdateWithRecall")
+    expect(app).toContain("UpdateRecallAnimation")
+    expect(animation).toContain('phase: "channeling" | "arrival"')
+    expect(animation).toContain("completion-burst")
+    expect(settings).toContain("Check for updates")
+    expect(settings).toContain("api.checkForUpdates()")
+    expect(settings).toContain("https://developer.riotgames.com/")
+    expect(settings).toContain("Development keys expire every 24 hours")
   })
 })

@@ -161,6 +161,7 @@ describe("desktop page layout", () => {
   it("pairs recent form with a responsive Dial gauge", () => {
     const dashboard = read("src/pages/DashboardPage.vue")
     const gauge = read("src/components/MomentumGauge.vue")
+    const form = read("src/components/FormStrip.vue")
 
     expect(dashboard).toContain('class="form-momentum-grid"')
     expect(dashboard).toContain("<MomentumGauge")
@@ -191,6 +192,9 @@ describe("desktop page layout", () => {
     expect(gauge).toContain("fire-ring")
     expect(gauge).toContain("prefers-reduced-motion")
     expect(dashboard).toContain("scheduleMomentumExpiry")
+    expect(form).toContain('class="trend-node"')
+    expect(form).toContain("translate(-50%, -50%)")
+    expect(form).not.toContain("<circle")
   })
 
   it("fills champion form cards with performance and evidence", () => {

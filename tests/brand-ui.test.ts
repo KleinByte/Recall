@@ -9,6 +9,9 @@ describe("Recall branding", () => {
 
     expect(sidebar).toContain('import RecallMark from "./RecallMark.vue"')
     expect(sidebar).toContain('<RecallMark variant="letter" class="brand-logo" />')
+    expect(sidebar).toContain('<RecallMark animated class="brand-logo brand-logo-collapsed" />')
+    expect(sidebar).toContain('name="brand-recall"')
+    expect(sidebar).toContain("recall-brand-depart")
     expect(sidebar).toContain('aria-label="Recall"')
     expect(sidebar).toContain("ECALL")
     expect(sidebar).toContain('class="brand-row"')
