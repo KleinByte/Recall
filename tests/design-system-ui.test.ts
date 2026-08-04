@@ -74,6 +74,7 @@ describe("Recall shared UI system", () => {
       "StatTile",
       "Surface",
       "Tabs",
+      "TelemetryBoard",
       "TelemetryGrid",
     ]
 
@@ -193,6 +194,11 @@ describe("Recall shared UI system", () => {
     expect(mark).toContain('variant?: "logo" | "letter"')
     expect(mark).toContain("prefers-reduced-motion")
     expect(sidebar).toContain('<Transition name="brand-recall"')
+    expect(sidebar).toContain('import { publicAssetUrl } from "../helpers/assets"')
+    expect(sidebar).toContain('publicAssetUrl(`game-data/ui/sidebar/${name}.svg`)')
+    expect(sidebar).toContain('publicAssetUrl("game-data/ui/map11.png")')
+    expect(sidebar).not.toContain('art: "/game-data/ui/sidebar')
+    expect(sidebar).not.toContain('url("/game-data/ui/map11.png")')
 
     const titleBar = read("src/components/WindowTitleBar.vue")
     expect(titleBar).toContain("-webkit-app-region: drag")

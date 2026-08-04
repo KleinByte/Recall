@@ -10,6 +10,30 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.30",
+    releasedAt: "2026-08-04",
+    title: "Connected telemetry, cleaner proof",
+    summary:
+      "Recall now carries the Dashboard's connected telemetry language into Match Review and Skill, keeps dense record views steady, and restores packaged navigation artwork.",
+    sections: [
+      {
+        title: "A consistent performance language",
+        items: [
+          "Dashboard and Skill now share the same connected telemetry board instead of presenting isolated stacks of horizontal metrics.",
+          "Match Review presents KDA, damage, gold, creep score, and lobby placement in the same compact command-deck language.",
+          "Review labels, achievements, and personal-record callouts are denser so the evidence stays readable without taking over the page.",
+        ],
+      },
+      {
+        title: "Stable records and navigation",
+        items: [
+          "Progress record categories keep a stable ledger height and scroll internally, so switching between Performance, Combat, and Economy no longer shifts the page.",
+          "Packaged sidebar artwork now resolves through production-safe asset URLs instead of falling back to missing-image placeholders.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.29",
     releasedAt: "2026-08-04",
     title: "A sharper command deck",

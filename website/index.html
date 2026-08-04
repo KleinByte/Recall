@@ -51,7 +51,8 @@
           <a href="#skill">Skill</a>
           <a href="#privacy">Privacy</a>
           <a href="#faq">FAQ</a>
-          <a class="nav-download" href="https://github.com/KleinByte/Recall/releases/latest">Download</a>
+          <a href="https://ko-fi.com/kleinbyte" target="_blank" rel="noreferrer">Buy me a coffee</a>
+          <a class="nav-download" href="https://github.com/KleinByte/Recall/releases/latest/download/Recall-Windows-Setup.exe">Download</a>
         </nav>
       </div>
     </header>
@@ -70,7 +71,7 @@
           </p>
 
           <div class="hero-actions">
-            <a class="button button-primary" href="https://github.com/KleinByte/Recall/releases/latest">
+            <a class="button button-primary" href="https://github.com/KleinByte/Recall/releases/latest/download/Recall-Windows-Setup.exe">
               <span class="windows-mark" aria-hidden="true">⊞</span>
               Download for Windows
             </a>
@@ -126,9 +127,6 @@
                 <li>Complete lobby comparison</li>
               </ul>
             </div>
-            <figure class="real-ui-frame feature-shot feature-shot-review">
-              <img src="assets/recall-review.jpg" alt="The current Recall Match Review showing the game summary, review tabs, RVI profile, and scoreboard" loading="lazy" decoding="async" />
-            </figure>
           </article>
 
           <article class="feature-card feature-card-tempo">
@@ -138,18 +136,12 @@
               Tempo reads teamfights, multikills, sprees, objectives, and resources so momentum is visible while the
               game is still yours to change.
             </p>
-            <figure class="real-ui-frame feature-shot feature-shot-tempo">
-              <img src="assets/recall-tempo.jpg" alt="Recall's current live Tempo gauge showing falling control after a lost teamfight, deaths, and an objective concession" loading="lazy" decoding="async" />
-            </figure>
           </article>
 
           <article class="feature-card feature-card-challenges">
             <span class="card-index">03 / Progress</span>
             <h3>Turn “almost” into done.</h3>
             <p>Pin the challenges you’re chasing, see the champions you still need, and get the answer in champion select.</p>
-            <figure class="real-ui-frame feature-shot feature-shot-challenges">
-              <img src="assets/recall-challenges.jpg" alt="The current Recall Challenges page with filters, pinned goals, progress, and percentile placements" loading="lazy" decoding="async" />
-            </figure>
           </article>
 
           <article class="feature-card feature-card-wide feature-card-history">
@@ -161,9 +153,6 @@
                 filters, notes, bookmarks, and session context ready whenever you come back.
               </p>
             </div>
-            <figure class="real-ui-frame feature-shot feature-shot-history">
-              <img src="assets/recall-matches.jpg" alt="The current Recall match archive with mode filters, summary statistics, and compact match rows" loading="lazy" decoding="async" />
-            </figure>
           </article>
         </div>
       </section>
@@ -178,40 +167,39 @@
             <p>Explore a few of the places where your matches become a useful picture of how you play.</p>
           </div>
 
-          <div class="product-tour">
-            <div class="tour-tabs" role="tablist" aria-label="Recall product areas">
-              <button id="tab-dashboard" type="button" role="tab" aria-selected="true" aria-controls="panel-dashboard" data-tour="dashboard">
-                <span>01</span><b>Dashboard</b><small>Your form at a glance</small>
-              </button>
-              <button id="tab-matches" type="button" role="tab" aria-selected="false" aria-controls="panel-matches" data-tour="matches" tabindex="-1">
-                <span>02</span><b>Match history</b><small>Every game, still yours</small>
-              </button>
-              <button id="tab-review" type="button" role="tab" aria-selected="false" aria-controls="panel-review" data-tour="review" tabindex="-1">
-                <span>03</span><b>Match review</b><small>One game, fully explained</small>
-              </button>
-              <button id="tab-skill" type="button" role="tab" aria-selected="false" aria-controls="panel-skill" data-tour="skill" tabindex="-1">
-                <span>04</span><b>Skill</b><small>Evidence across your history</small>
-              </button>
+          <div class="gallery-toolbar">
+            <p>Fictional Master-tier Ranked Solo demo data · drag, scroll, or use the arrows</p>
+            <div class="gallery-buttons" aria-label="Gallery controls">
+              <button type="button" data-gallery-previous aria-label="Previous screenshot">←</button>
+              <button type="button" data-gallery-next aria-label="Next screenshot">→</button>
             </div>
+          </div>
 
-            <div class="tour-stage">
-              <div id="panel-dashboard" class="tour-panel is-active" role="tabpanel" aria-labelledby="tab-dashboard" data-panel="dashboard">
-                <img src="assets/recall-dashboard.jpg" alt="Recall dashboard with recent form, The Dial, and the Recall Vector Index" />
-              </div>
-              <div id="panel-matches" class="tour-panel" role="tabpanel" aria-labelledby="tab-matches" data-panel="matches" hidden>
-                <img src="assets/recall-matches.jpg" alt="Recall match history with filters, summary statistics, and compact game rows" />
-              </div>
-              <div id="panel-review" class="tour-panel" role="tabpanel" aria-labelledby="tab-review" data-panel="review" hidden>
-                <img src="assets/recall-review.jpg" alt="Recall match review with game summary, RVI profile, scoreboard, stats, timeline, and win probability tabs" />
-              </div>
-              <div id="panel-skill" class="tour-panel" role="tabpanel" aria-labelledby="tab-skill" data-panel="skill" hidden>
-                <img src="assets/recall-skill-insights.jpg" alt="Recall Skill Insights showing performance fingerprint and Grade Journey" />
-              </div>
-              <div class="tour-caption" aria-live="polite">
-                <span data-caption-index>01 / Dashboard</span>
-                <p data-caption-copy>See the session before the individual games: streak, recent form, The Dial, rank, records, and your mode-specific RVI.</p>
-              </div>
-            </div>
+          <div class="product-gallery" data-gallery tabindex="0" aria-label="Recall screenshot gallery">
+            <figure class="gallery-card">
+              <img src="assets/recall-dashboard.jpg" alt="Recall Dashboard for a fictional Master-tier Ranked Solo player" loading="lazy" decoding="async" />
+              <figcaption><span>01 / Command deck</span><h3>A Master climb, recent form, and RVI in one view.</h3></figcaption>
+            </figure>
+            <figure class="gallery-card">
+              <img src="assets/recall-review.jpg" alt="Ranked Solo match review using a fictional player and lobby" loading="lazy" decoding="async" />
+              <figcaption><span>02 / Ranked review</span><h3>Grade, lobby placement, records, and complete match context.</h3></figcaption>
+            </figure>
+            <figure class="gallery-card">
+              <img src="assets/recall-review-timeline.jpg" alt="Ranked Solo gold timeline and Summoner's Rift death map" loading="lazy" decoding="async" />
+              <figcaption><span>03 / Match evidence</span><h3>Gold swings, game events, and an interactive death map.</h3></figcaption>
+            </figure>
+            <figure class="gallery-card">
+              <img src="assets/recall-skill-overview.jpg" alt="Ranked Solo skill telemetry, rank history, and RVI profile" loading="lazy" decoding="async" />
+              <figcaption><span>04 / Ranked Solo skill</span><h3>Scope telemetry and rank evidence to the queue that matters.</h3></figcaption>
+            </figure>
+            <figure class="gallery-card">
+              <img src="assets/recall-skill-insights.jpg" alt="Recall Grade Journey and Grade DNA charts" loading="lazy" decoding="async" />
+              <figcaption><span>05 / Grade signals</span><h3>Follow Grade Journey and read the shape of your best games.</h3></figcaption>
+            </figure>
+            <figure class="gallery-card">
+              <img src="assets/recall-skill-analyze.jpg" alt="Recall performance form, session endurance, and match signature graphs" loading="lazy" decoding="async" />
+              <figcaption><span>06 / Analysis lab</span><h3>Find repeatable form, session, and matchup patterns.</h3></figcaption>
+            </figure>
           </div>
         </div>
       </section>
@@ -333,8 +321,9 @@
         <h2>Make your history useful.</h2>
         <p>Download Recall for Windows and keep the context the League client leaves behind.</p>
         <div class="hero-actions">
-          <a class="button button-primary" href="https://github.com/KleinByte/Recall/releases/latest"><span class="windows-mark" aria-hidden="true">⊞</span> Download latest release</a>
+          <a class="button button-primary" href="https://github.com/KleinByte/Recall/releases/latest/download/Recall-Windows-Setup.exe"><span class="windows-mark" aria-hidden="true">⊞</span> Download latest release</a>
           <a class="button button-secondary" href="https://github.com/KleinByte/Recall">View source on GitHub</a>
+          <a class="button button-secondary" href="https://ko-fi.com/kleinbyte" target="_blank" rel="noreferrer">☕ Buy me a coffee</a>
         </div>
       </section>
     </main>
@@ -351,8 +340,9 @@
           <p>Remember the game. Understand the player.</p>
         </div>
         <div class="footer-links">
-          <a href="https://github.com/KleinByte/Recall/releases/latest">Download</a>
+          <a href="https://github.com/KleinByte/Recall/releases/latest/download/Recall-Windows-Setup.exe">Download</a>
           <a href="https://github.com/KleinByte/Recall">GitHub</a>
+          <a href="https://ko-fi.com/kleinbyte" target="_blank" rel="noreferrer">Buy me a coffee</a>
           <a href="#privacy">Privacy</a>
           <a href="#faq">FAQ</a>
         </div>

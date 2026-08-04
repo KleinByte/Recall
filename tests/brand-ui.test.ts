@@ -37,19 +37,20 @@ describe("Recall branding", () => {
     const sidebar = read("src/components/AppSidebar.vue")
 
     expect(sidebar).toContain("const navSections: NavigationSection[]")
-    for (const icon of [
-      "dashboard.svg",
-      "live.svg",
-      "review.svg",
-      "matches.svg",
-      "skill.svg",
-      "progress.svg",
-      "champions.svg",
-      "challenges.svg",
-      "settings.svg",
+    for (const destination of [
+      "dashboard",
+      "live",
+      "review",
+      "matches",
+      "skill",
+      "progress",
+      "champions",
+      "challenges",
+      "settings",
     ]) {
-      expect(sidebar).toContain(`/game-data/ui/sidebar/${icon}`)
+      expect(sidebar).toContain(`sidebarIconUrl("${destination}")`)
     }
+    expect(sidebar).toContain('publicAssetUrl(`game-data/ui/sidebar/${name}.svg`)')
     expect(sidebar).not.toContain("/game-data/rune-styles/")
     expect(sidebar).not.toContain("/game-data/spells/")
     expect(sidebar).toContain('class="nav-emblem"')

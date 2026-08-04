@@ -44,7 +44,7 @@ describe("Skill Overview", () => {
     const overview = read("src/components/skill/SkillOverview.vue")
 
     expect(overview).toContain("Avg grade")
-    expect(overview).toContain("TelemetryGrid")
+    expect(overview).toContain("TelemetryBoard")
     expect(overview).toContain("graded")
     expect(overview).toContain("rviIdentity")
     expect(overview).not.toMatch(/strengths|weaknesses|you play best|to work on/i)

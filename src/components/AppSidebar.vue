@@ -5,6 +5,7 @@ import {
   faAnglesRight,
   faRotate,
 } from "@fortawesome/free-solid-svg-icons"
+import { publicAssetUrl } from "../helpers/assets"
 import type { Summoner } from "../types/lol"
 import type { PageId } from "../helpers/navigation"
 import RecallMark from "./RecallMark.vue"
@@ -39,41 +40,48 @@ interface NavigationSection {
   items: NavigationItem[]
 }
 
+const sidebarIconUrl = (name: PageId) =>
+  publicAssetUrl(`game-data/ui/sidebar/${name}.svg`)
+
+const sidebarStyle = {
+  "--sidebar-map-image": `url("${publicAssetUrl("game-data/ui/map11.png")}")`,
+}
+
 const navSections: NavigationSection[] = [
   {
     label: "Command",
     items: [
-      { id: "dashboard", label: "Dashboard", hint: "Performance view", art: "/game-data/ui/sidebar/dashboard.svg", artType: "glyph" },
-      { id: "live", label: "Live Game", hint: "Current match", art: "/game-data/ui/sidebar/live.svg", artType: "glyph" },
+      { id: "dashboard", label: "Dashboard", hint: "Performance view", art: sidebarIconUrl("dashboard"), artType: "glyph" },
+      { id: "live", label: "Live Game", hint: "Current match", art: sidebarIconUrl("live"), artType: "glyph" },
     ],
   },
   {
     label: "Archive",
     items: [
-      { id: "review", label: "Review", hint: "Post-game lab", art: "/game-data/ui/sidebar/review.svg", artType: "glyph" },
-      { id: "matches", label: "Matches", hint: "Match history", art: "/game-data/ui/sidebar/matches.svg", artType: "glyph" },
+      { id: "review", label: "Review", hint: "Post-game lab", art: sidebarIconUrl("review"), artType: "glyph" },
+      { id: "matches", label: "Matches", hint: "Match history", art: sidebarIconUrl("matches"), artType: "glyph" },
     ],
   },
   {
     label: "Growth",
     items: [
-      { id: "skill", label: "Skill", hint: "Patterns & form", art: "/game-data/ui/sidebar/skill.svg", artType: "glyph" },
-      { id: "progress", label: "Progress", hint: "Rank & records", art: "/game-data/ui/sidebar/progress.svg", artType: "glyph" },
-      { id: "champions", label: "Champions", hint: "Pool mastery", art: "/game-data/ui/sidebar/champions.svg", artType: "glyph" },
-      { id: "challenges", label: "Challenges", hint: "Collection goals", art: "/game-data/ui/sidebar/challenges.svg", artType: "glyph" },
+      { id: "skill", label: "Skill", hint: "Patterns & form", art: sidebarIconUrl("skill"), artType: "glyph" },
+      { id: "progress", label: "Progress", hint: "Rank & records", art: sidebarIconUrl("progress"), artType: "glyph" },
+      { id: "champions", label: "Champions", hint: "Pool mastery", art: sidebarIconUrl("champions"), artType: "glyph" },
+      { id: "challenges", label: "Challenges", hint: "Collection goals", art: sidebarIconUrl("challenges"), artType: "glyph" },
     ],
   },
   {
     label: "System",
     items: [
-      { id: "settings", label: "Settings", hint: "App & data", art: "/game-data/ui/sidebar/settings.svg", artType: "glyph" },
+      { id: "settings", label: "Settings", hint: "App & data", art: sidebarIconUrl("settings"), artType: "glyph" },
     ],
   },
 ]
 </script>
 
 <template>
-  <nav class="sidebar" :class="{ collapsed }">
+  <nav class="sidebar" :class="{ collapsed }" :style="sidebarStyle">
     <div class="brand">
       <div class="brand-row">
         <Transition name="brand-recall" mode="out-in">
@@ -198,7 +206,7 @@ const navSections: NavigationSection[] = [
   z-index: -1;
   inset: auto -70px 22px -92px;
   height: 330px;
-  background: url("/game-data/ui/map11.png") center / cover no-repeat;
+  background: var(--sidebar-map-image) center / cover no-repeat;
   opacity: .055;
   filter: saturate(.65) contrast(1.12);
   transform: rotate(-8deg);

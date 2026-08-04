@@ -28,13 +28,15 @@ describe("desktop page layout", () => {
 
   it("uses connected telemetry banks instead of oversized metric cards", () => {
     const dashboard = read("src/pages/DashboardPage.vue")
+    const telemetry = read("src/components/ui/TelemetryBoard.vue")
 
-    expect(dashboard).toContain('class="telemetry-board"')
-    expect(dashboard).toContain('class="telemetry-bank"')
-    expect(dashboard).toContain('class="telemetry-readings session-readings"')
-    expect(dashboard).toContain('class="telemetry-readings archive-readings"')
+    expect(dashboard).toContain("<TelemetryBoard")
+    expect(dashboard).toContain("{ label: 'Session', readings: sessionTelemetry }")
+    expect(dashboard).toContain("{ label: 'Archive', readings: archiveTelemetry }")
     expect(dashboard).not.toContain("<StatTile")
-    expect(dashboard).toMatch(/\.telemetry-board \{[\s\S]*grid-template-columns: minmax\(0, 3fr\) minmax\(0, 4fr\)/)
+    expect(telemetry).toContain('class="telemetry-board"')
+    expect(telemetry).toContain('class="telemetry-bank"')
+    expect(telemetry).toContain("flex: var(--bank-weight) 1 0")
     expect(dashboard).toMatch(/\.categories \{[\s\S]*grid-auto-rows: 1fr/)
     expect(dashboard).toMatch(/\.near-list \{[\s\S]*grid-auto-rows: 1fr/)
   })
@@ -63,8 +65,9 @@ describe("desktop page layout", () => {
     const skill = read("src/components/skill/SkillOverview.vue")
     const progress = read("src/pages/ProgressPage.vue")
 
-    expect(skill).toContain("<TelemetryGrid")
-    expect(skill).toContain('label="Scope telemetry"')
+    expect(skill).toContain("<TelemetryBoard")
+    expect(skill).toContain('{ label: "Results", readings: resultTelemetry.value }')
+    expect(skill).toContain('{ label: "Pace", readings: paceTelemetry.value }')
     expect(skill).toMatch(/\.metric-grid \{[\s\S]*grid-auto-rows: 1fr/)
     expect(skill).toMatch(/\.overview-grid \{[\s\S]*align-items: stretch/)
     expect(skill).toContain("PerformanceProfile")
@@ -74,6 +77,19 @@ describe("desktop page layout", () => {
     expect(progress).toContain('class="record-browser"')
     expect(progress).toContain('class="record-categories"')
     expect(progress).toContain('class="record-ledger"')
+    expect(progress).toMatch(/\.record-ledger \{[\s\S]*block-size: 365px/)
+    expect(progress).toMatch(/\.record-rows \{[\s\S]*overflow-y: auto;[\s\S]*scrollbar-gutter: stable/)
+  })
+
+  it("uses connected telemetry and compact evidence on match review", () => {
+    const hero = read("src/components/MatchReviewHero.vue")
+
+    expect(hero).toContain("<TelemetryGrid")
+    expect(hero).toContain('label="Match telemetry"')
+    expect(hero).toContain(':columns="5"')
+    expect(hero).not.toContain("<StatTile")
+    expect(hero).toMatch(/\.hero-labels article \{[\s\S]*min-height: 27px/)
+    expect(hero).toMatch(/\.record-chips > span \{[\s\S]*min-height: 30px/)
   })
 
   it("uses distinct champion-select and in-game live layouts", () => {

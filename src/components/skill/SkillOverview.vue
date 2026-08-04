@@ -6,7 +6,7 @@ import PerformanceProfile from "./PerformanceProfile.vue"
 import OutcomeTrendChart from "./OutcomeTrendChart.vue"
 import MiniBar from "../ui/MiniBar.vue"
 import Panel from "../ui/Panel.vue"
-import TelemetryGrid from "../ui/TelemetryGrid.vue"
+import TelemetryBoard from "../ui/TelemetryBoard.vue"
 import { itemAsset } from "../../helpers/items"
 import { classifyRviIdentity } from "../../helpers/rvi-identity"
 import {
@@ -40,7 +40,7 @@ type TelemetryReading = {
   tone?: "neutral" | "win" | "loss"
 }
 
-const telemetryReadings = computed<TelemetryReading[]>(() => [
+const resultTelemetry = computed<TelemetryReading[]>(() => [
   {
     label: "Games",
     value: summary.value.games.toString(),
@@ -57,14 +57,22 @@ const telemetryReadings = computed<TelemetryReading[]>(() => [
     hint: `${summary.value.gradedGames} graded`,
   },
   { label: "KDA", value: formatDecimal(summary.value.kda, 2) },
-  ...(detail.value ? [
-    { label: "Damage / min", value: formatCompact(detail.value.damagePerMin) },
-    { label: "Gold / min", value: formatCompact(detail.value.goldPerMin) },
-    { label: "CS / min", value: formatDecimal(detail.value.csPerMin, 1) },
-    ...(props.family === "sr" || props.family === "classic"
-      ? [{ label: "Vision / min", value: formatDecimal(detail.value.visionPerMin, 2) }]
-      : []),
-  ] : []),
+])
+
+const paceTelemetry = computed<TelemetryReading[]>(() => detail.value ? [
+  { label: "Damage / min", value: formatCompact(detail.value.damagePerMin) },
+  { label: "Gold / min", value: formatCompact(detail.value.goldPerMin) },
+  { label: "CS / min", value: formatDecimal(detail.value.csPerMin, 1) },
+  ...(props.family === "sr" || props.family === "classic"
+    ? [{ label: "Vision / min", value: formatDecimal(detail.value.visionPerMin, 2) }]
+    : []),
+] : [])
+
+const telemetryBanks = computed(() => [
+  { label: "Results", readings: resultTelemetry.value },
+  ...(paceTelemetry.value.length
+    ? [{ label: "Pace", readings: paceTelemetry.value }]
+    : []),
 ])
 
 const gradeBars = computed(() => {
@@ -96,7 +104,10 @@ const rviIdentity = computed(() => props.overview.performance
 
 <template>
   <div class="overview">
-    <TelemetryGrid label="Scope telemetry" :readings="telemetryReadings" />
+    <TelemetryBoard
+      label="Scope telemetry"
+      :banks="telemetryBanks"
+    />
 
     <RankedHistoryPanel
       v-if="SHOW_RANKED_HISTORY && ranked.length"

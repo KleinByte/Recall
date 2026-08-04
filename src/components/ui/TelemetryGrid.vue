@@ -1,19 +1,22 @@
 <script setup lang="ts">
-defineProps<{
+withDefaults(defineProps<{
   label?: string
+  columns?: 2 | 3 | 4 | 5
   readings: Array<{
     label: string
     value: string
     hint?: string
     tone?: "neutral" | "win" | "loss"
   }>
-}>()
+}>(), {
+  columns: 4,
+})
 </script>
 
 <template>
   <section class="telemetry-grid" :aria-label="label ?? 'Performance telemetry'">
     <div v-if="label" class="bank-label">{{ label }}</div>
-    <dl class="readings">
+    <dl class="readings" :style="{ '--telemetry-columns': columns }">
       <div v-for="reading in readings" :key="reading.label" class="reading">
         <dt>{{ reading.label }}</dt>
         <dd class="numeric" :class="reading.tone ?? 'neutral'">{{ reading.value }}</dd>
@@ -45,7 +48,7 @@ defineProps<{
 
 .readings {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--telemetry-columns), minmax(0, 1fr));
   margin: 0;
   background: var(--ui-surface-inset);
 }

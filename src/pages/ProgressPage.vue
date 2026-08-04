@@ -649,11 +649,12 @@ const activeRecordGroup = computed(() =>
   display: grid;
   grid-template-columns: minmax(150px, 190px) minmax(0, 1fr);
   gap: var(--ui-space-4);
-  align-items: start;
+  align-items: stretch;
 }
 
 .record-categories {
   display: grid;
+  align-content: start;
   gap: 3px;
   padding: 4px;
   border: 1px solid var(--ui-divider);
@@ -682,7 +683,10 @@ const activeRecordGroup = computed(() =>
 .record-categories strong { color: var(--ui-text-muted); font-size: 10px; }
 
 .record-ledger {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  block-size: 365px;
   overflow: hidden;
   border: 1px solid var(--ui-divider);
   border-radius: var(--ui-radius-sm);
@@ -703,7 +707,14 @@ const activeRecordGroup = computed(() =>
 .record-kicker { color: var(--ui-text-muted); font-size: 8px; letter-spacing: 1.2px; text-transform: uppercase; }
 .record-ledger h3 { margin: 1px 0 0; color: var(--ui-text-heading); font: 13px var(--ui-font-heading); letter-spacing: .65px; text-transform: uppercase; }
 .record-ledger > header > span { color: var(--ui-text-muted); font-size: 11px; }
-.record-rows { display: grid; }
+.record-rows {
+  display: grid;
+  align-content: start;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
 
 .record-row {
   display: grid;

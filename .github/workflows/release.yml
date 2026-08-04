@@ -73,7 +73,7 @@ jobs:
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
           $releaseDirectory = "release/$version"
-          $installer = "$releaseDirectory/Recall-Windows-$version-Setup.exe"
+          $installer = "$releaseDirectory/Recall-Windows-Setup.exe"
           $manifest = "$releaseDirectory/latest.yml"
           $blockmap = "$installer.blockmap"
           $requiredFiles = @($installer, $manifest, $blockmap)

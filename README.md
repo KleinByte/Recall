@@ -12,7 +12,9 @@ clean up a bad habit, or figure out which picks have been working lately, I
 want the answer in one place and I want the underlying games to still be there
 next month.
 
-[Download the latest Windows release](https://github.com/KleinByte/Recall/releases/latest)
+[Download Recall for Windows](https://github.com/KleinByte/Recall/releases/latest/download/Recall-Windows-Setup.exe)
+
+[☕ Buy me a coffee](https://ko-fi.com/kleinbyte)
 
 ![Recall dashboard with recent form, League Classic games, and Recall Vector Index](docs/screenshots/recall-dashboard.jpg)
 
@@ -144,7 +146,7 @@ the available data and explains why a detailed grade cannot be produced.
 Recall currently supports Windows.
 
 1. Download the installer from the
-   [latest release](https://github.com/KleinByte/Recall/releases/latest).
+   [latest Windows installer](https://github.com/KleinByte/Recall/releases/latest/download/Recall-Windows-Setup.exe).
 2. Run the installer.
 3. Start League and open Recall. The first sync begins automatically.
 

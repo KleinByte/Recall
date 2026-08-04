@@ -9,6 +9,7 @@ import PerformanceRadar from "../components/skill/PerformanceRadar.vue"
 import EmptyState from "../components/ui/EmptyState.vue"
 import MiniBar from "../components/ui/MiniBar.vue"
 import Panel from "../components/ui/Panel.vue"
+import TelemetryBoard from "../components/ui/TelemetryBoard.vue"
 import { api } from "../helpers/api"
 import { useApiEvents } from "../helpers/use-api-events"
 import { useCoalescedTask } from "../helpers/use-coalesced-task"
@@ -342,28 +343,13 @@ const championName = (id: number) => championNameById(props.champions, id)
           </div>
           <span class="muted">Live session and all recorded games</span>
         </header>
-        <div class="telemetry-board">
-          <section class="telemetry-bank" aria-label="Current session readings">
-            <span class="telemetry-bank-label">Session</span>
-            <dl class="telemetry-readings session-readings">
-              <div v-for="reading in sessionTelemetry" :key="reading.label" class="telemetry-reading">
-                <dt>{{ reading.label }}</dt>
-                <dd class="numeric telemetry-value" :class="reading.tone">{{ reading.value }}</dd>
-                <span v-if="reading.hint" class="telemetry-hint">{{ reading.hint }}</span>
-              </div>
-            </dl>
-          </section>
-          <section class="telemetry-bank" aria-label="Recorded performance readings">
-            <span class="telemetry-bank-label">Archive</span>
-            <dl class="telemetry-readings archive-readings">
-              <div v-for="reading in archiveTelemetry" :key="reading.label" class="telemetry-reading">
-                <dt>{{ reading.label }}</dt>
-                <dd class="numeric telemetry-value" :class="reading.tone">{{ reading.value }}</dd>
-                <span v-if="reading.hint" class="telemetry-hint">{{ reading.hint }}</span>
-              </div>
-            </dl>
-          </section>
-        </div>
+        <TelemetryBoard
+          label="Current and recorded performance readings"
+          :banks="[
+            { label: 'Session', readings: sessionTelemetry },
+            { label: 'Archive', readings: archiveTelemetry },
+          ]"
+        />
       </section>
 
       <section v-if="form.length" class="form-momentum-grid">
@@ -681,91 +667,6 @@ h1 {
 }
 
 .deck-heading > span { font-size: 11px; text-align: right; }
-
-.telemetry-board {
-  display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 4fr);
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid var(--ui-border);
-  border-radius: var(--ui-radius-sm);
-  background: var(--ui-surface-inset);
-  box-shadow: var(--ui-shadow-inset);
-}
-
-.telemetry-bank {
-  position: relative;
-  min-width: 0;
-  padding-top: 22px;
-}
-
-.telemetry-bank + .telemetry-bank {
-  border-left: 1px solid var(--ui-divider);
-}
-
-.telemetry-bank-label {
-  position: absolute;
-  inset: 0 0 auto;
-  padding: 5px 10px 4px;
-  border-bottom: 1px solid var(--ui-divider);
-  color: var(--ui-text-muted);
-  font: 9px var(--font-heading);
-  letter-spacing: 1.7px;
-  text-transform: uppercase;
-}
-
-.telemetry-readings {
-  display: grid;
-  min-height: 62px;
-  margin: 0;
-}
-
-.session-readings { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.archive-readings { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-
-.telemetry-reading {
-  display: grid;
-  align-content: center;
-  min-width: 0;
-  padding: 8px 11px 9px;
-}
-
-.telemetry-reading + .telemetry-reading {
-  border-left: 1px solid var(--ui-divider);
-}
-
-.telemetry-reading dt {
-  overflow: hidden;
-  color: var(--ui-text-muted);
-  font: 9px var(--font-heading);
-  letter-spacing: 1.15px;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.telemetry-value {
-  margin: 1px 0 0;
-  overflow: hidden;
-  color: var(--ui-text);
-  font-size: 19px;
-  line-height: 1.05;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.telemetry-value.win { color: var(--win); }
-.telemetry-value.loss { color: var(--loss); }
-
-.telemetry-hint {
-  overflow: hidden;
-  margin-top: 2px;
-  color: var(--ui-text-muted);
-  font-size: 9px;
-  line-height: 1.1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 .dashboard-grid {
   display: grid;
@@ -1303,14 +1204,6 @@ h1 {
   }
 }
 
-@media (max-width: 900px) {
-  .telemetry-board { grid-template-columns: minmax(0, 1fr); }
-  .telemetry-bank + .telemetry-bank {
-    border-top: 1px solid var(--ui-divider);
-    border-left: 0;
-  }
-}
-
 @media (max-width: 760px) {
   .form-momentum-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -1337,10 +1230,6 @@ h1 {
 }
 
 @media (max-width: 500px) {
-  .archive-readings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .archive-readings .telemetry-reading:nth-child(odd) { border-left: 0; }
-  .archive-readings .telemetry-reading:nth-child(n + 3) { border-top: 1px solid var(--ui-divider); }
-
   .near { grid-template-columns: 34px minmax(0, 1fr); }
   .near > .small { grid-column: 2; }
 }
