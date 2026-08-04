@@ -25,8 +25,9 @@ describe("personal record surfaces", () => {
   it("marks every record currently held by the reviewed game", () => {
     const hero = read("../src/components/MatchReviewHero.vue")
     expect(hero).toContain("Current personal records")
-    expect(hero).toContain("This game holds")
+    expect(hero).toContain("Personal best")
     expect(hero).toContain("review.records")
+    expect(hero).toContain("flex: 0 0 210px")
   })
 
   it("organizes the expanded Progress catalog into readable groups", () => {

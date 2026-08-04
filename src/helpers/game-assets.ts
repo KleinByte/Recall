@@ -18,6 +18,8 @@ export interface GameAssetCatalog {
   abilities: Record<number, GameAsset[]>
 }
 
+export type AugmentRarity = "Silver" | "Gold" | "Prismatic"
+
 interface DDragonItem {
   name?: string
   description?: string
@@ -56,6 +58,19 @@ let catalogPromise: Promise<GameAssetCatalog> | undefined
 export function normalizeAugmentId(value: unknown): number | undefined {
   const id = Number(value)
   return Number.isSafeInteger(id) && id > 0 ? id : undefined
+}
+
+/** Riot prefixes Cherry/Mayhem rarity enum values with `k` in game data. */
+export function normalizeAugmentRarity(value: unknown): AugmentRarity | undefined {
+  if (typeof value === "number") {
+    return ({ 1: "Silver", 2: "Gold", 3: "Prismatic" } as const)[value]
+  }
+  if (typeof value !== "string") return undefined
+  const normalized = value.trim().replace(/^k/i, "").toLowerCase()
+  if (normalized === "silver" || normalized === "1") return "Silver"
+  if (normalized === "gold" || normalized === "2") return "Gold"
+  if (normalized === "prismatic" || normalized === "3") return "Prismatic"
+  return undefined
 }
 
 function communityIcon(path?: string) {
@@ -171,7 +186,7 @@ export function loadGameAssets(): Promise<GameAssetCatalog> {
           name: augment.nameTRA ?? augment.name ?? `Augment ${augmentId}`,
           description: augment.descriptionTRA ?? augment.description,
           icon: communityIcon(augment.augmentSmallIconPath ?? augment.iconPath),
-          rarity: augment.rarity,
+          rarity: normalizeAugmentRarity(augment.rarity),
         }
       }
     } catch {

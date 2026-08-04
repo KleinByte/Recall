@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   normalizeAugmentId,
+  normalizeAugmentRarity,
   timelineObjectiveIconUrl,
 } from "../src/helpers/game-assets"
 
@@ -11,6 +12,15 @@ describe("game asset normalization", () => {
     expect(normalizeAugmentId("undefined")).toBeUndefined()
     expect(normalizeAugmentId(Number.NaN)).toBeUndefined()
     expect(normalizeAugmentId(0)).toBeUndefined()
+  })
+
+  it("normalizes Riot's prefixed augment rarity values", () => {
+    expect(normalizeAugmentRarity("kSilver")).toBe("Silver")
+    expect(normalizeAugmentRarity("kGold")).toBe("Gold")
+    expect(normalizeAugmentRarity("kPrismatic")).toBe("Prismatic")
+    expect(normalizeAugmentRarity("gold")).toBe("Gold")
+    expect(normalizeAugmentRarity(3)).toBe("Prismatic")
+    expect(normalizeAugmentRarity("unknown")).toBeUndefined()
   })
 
   it("maps timeline objectives to League client match-history icons", () => {
