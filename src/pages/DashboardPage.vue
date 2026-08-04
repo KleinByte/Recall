@@ -332,6 +332,7 @@ const championName = (id: number) => championNameById(props.champions, id)
         </Panel>
 
         <Panel title="The Dial" :meta="momentum.label" class="momentum-panel">
+          <span v-for="corner in ['tl', 'tr', 'bl', 'br']" :key="corner" class="corner-brace" :class="corner" aria-hidden="true" />
           <MomentumGauge
             :score="momentum.score"
             :label="momentum.label"
@@ -566,9 +567,119 @@ h1 {
   overflow: hidden;
 }
 
+/* Hextech reliquary plate: chamfered gold frame over an engraved hex lattice. */
+.momentum-panel {
+  --chamfer: 16px;
+  position: relative;
+  isolation: isolate;
+  padding: 12px 16px 15px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, .42);
+  clip-path: polygon(
+    var(--chamfer) 0, calc(100% - var(--chamfer)) 0, 100% var(--chamfer),
+    100% calc(100% - var(--chamfer)), calc(100% - var(--chamfer)) 100%,
+    var(--chamfer) 100%, 0 calc(100% - var(--chamfer)), 0 var(--chamfer)
+  );
+}
+
+.momentum-panel::before {
+  content: "";
+  position: absolute;
+  z-index: -2;
+  inset: 0;
+  background: linear-gradient(155deg, #8a6a2f, #e8d29a 26%, #6d5426 52%, #c8aa6d 78%, #7a5c28);
+}
+
+.momentum-panel::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 1.4px;
+  clip-path: polygon(
+    15px 0, calc(100% - 15px) 0, 100% 15px,
+    100% calc(100% - 15px), calc(100% - 15px) 100%,
+    15px 100%, 0 calc(100% - 15px), 0 15px
+  );
+  background:
+    radial-gradient(ellipse 72% 62% at 50% 66%, rgba(9, 151, 178, .12), transparent 62%),
+    repeating-linear-gradient(60deg, rgba(200, 170, 109, .03) 0 1px, transparent 1px 13px),
+    repeating-linear-gradient(-60deg, rgba(200, 170, 109, .03) 0 1px, transparent 1px 13px),
+    linear-gradient(168deg, #101a2c, #0a111d 55%, #070d16);
+}
+
+.momentum-panel .corner-brace {
+  position: absolute;
+  z-index: 5;
+  width: 24px;
+  height: 24px;
+  background: linear-gradient(135deg, transparent 11.5px, rgba(216, 188, 125, .8) 12px, rgba(216, 188, 125, .8) 13.2px, transparent 13.8px);
+  pointer-events: none;
+}
+
+.momentum-panel .corner-brace.tl { top: 4px; left: 4px; }
+.momentum-panel .corner-brace.tr { top: 4px; right: 4px; transform: scaleX(-1); }
+.momentum-panel .corner-brace.bl { bottom: 4px; left: 4px; transform: scaleY(-1); }
+.momentum-panel .corner-brace.br { bottom: 4px; right: 4px; transform: scale(-1); }
+
 .momentum-panel :deep(.head) {
   position: relative;
   z-index: 6;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+/* The gauge shows its own label; the plaque only carries the title. */
+.momentum-panel :deep(.head .meta) {
+  display: none;
+}
+
+.momentum-panel :deep(.section-title) {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  color: #ead9a8;
+  font-size: 12px;
+  letter-spacing: 2.4px;
+  text-transform: uppercase;
+}
+
+.momentum-panel :deep(.section-title)::before,
+.momentum-panel :deep(.section-title)::after {
+  content: "";
+  flex: none;
+  width: 36px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(200, 170, 109, .75));
+}
+
+.momentum-panel :deep(.section-title)::after {
+  background: linear-gradient(270deg, transparent, rgba(200, 170, 109, .75));
+}
+
+/* Engraved divider under the plaque, anchored by a nexus-crystal stud. */
+.momentum-panel :deep(.head)::after {
+  content: "";
+  position: absolute;
+  right: 10%;
+  bottom: -6px;
+  left: 10%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(200, 170, 109, .5) 22%, rgba(200, 170, 109, .5) 78%, transparent);
+}
+
+.momentum-panel :deep(.head)::before {
+  content: "";
+  position: absolute;
+  bottom: -10.5px;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  border: 1px solid #d8bc7d;
+  background: radial-gradient(circle at 32% 28%, #dff8ff 0 14%, #35d4f0 36%, #0a86b4 64%, #063a52);
+  box-shadow: 0 0 8px rgba(10, 200, 230, .6);
+  transform: translateX(-50%) rotate(45deg);
 }
 
 .form-summary {
