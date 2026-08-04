@@ -1,0 +1,389 @@
+import { readFileSync } from "node:fs"
+import { describe, expect, it } from "vitest"
+
+const read = (path: string) => readFileSync(path, "utf8")
+
+describe("desktop page layout", () => {
+  it("organizes the dashboard into responsive instrument and analysis decks", () => {
+    const dashboard = read("src/pages/DashboardPage.vue")
+
+    expect(dashboard).toContain('class="page-head dashboard-hero"')
+    expect(dashboard).toContain('class="status-deck"')
+    expect(dashboard).toContain('class="dashboard-grid"')
+    expect(dashboard).toContain('class="challenge-deck"')
+    expect(dashboard).not.toContain('class="dashboard-column')
+    expect(dashboard).toMatch(
+      /class="dashboard-grid"[\s\S]*RankedHistoryPanel[\s\S]*title="Recall Vector Index"[\s\S]*title="Recent games"[\s\S]*title="Champions in form"/,
+    )
+    expect(dashboard).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))")
+    expect(dashboard).toContain("grid-template-columns: minmax(300px, 360px) minmax(0, 1fr)")
+    expect(dashboard).toContain('height="270px"')
+    expect(dashboard).toContain("getRviProfile")
+    expect(dashboard).toContain("PerformanceRadar")
+    expect(dashboard).not.toContain("StyleRadar")
+    expect(dashboard).toMatch(/\.rank-panel,[\s\S]*\.rvi-panel \{[\s\S]*height: 360px/)
+    expect(dashboard).toContain("var(--instrument-surface)")
+    expect(dashboard).toContain("var(--instrument-border-soft)")
+  })
+
+  it("uses connected telemetry banks instead of oversized metric cards", () => {
+    const dashboard = read("src/pages/DashboardPage.vue")
+    const telemetry = read("src/components/ui/TelemetryBoard.vue")
+
+    expect(dashboard).toContain("<TelemetryBoard")
+    expect(dashboard).toContain("{ label: 'Session', readings: sessionTelemetry }")
+    expect(dashboard).toContain("{ label: 'Archive', readings: archiveTelemetry }")
+    expect(dashboard).not.toContain("<StatTile")
+    expect(telemetry).toContain('class="telemetry-board"')
+    expect(telemetry).toContain('class="telemetry-bank"')
+    expect(telemetry).toContain("flex: var(--bank-weight) 1 0")
+    expect(dashboard).toMatch(/\.categories \{[\s\S]*grid-auto-rows: 1fr/)
+    expect(dashboard).toMatch(/\.near-list \{[\s\S]*grid-auto-rows: 1fr/)
+  })
+
+  it("publishes The Dial as a reusable instrument design language", () => {
+    const baseTokens = read("src/design/tokens.css")
+    const dialTokens = read("src/design/dial-tokens.css")
+    const spec = read("docs/dial-ui-design-token-spec.md")
+    const dashboard = read("src/pages/DashboardPage.vue")
+    const dial = read("src/components/MomentumGauge.vue")
+
+    expect(baseTokens).toContain('@import "./dial-tokens.css"')
+    expect(dialTokens).toContain("--instrument-surface:")
+    expect(dialTokens).toContain("--instrument-frame:")
+    expect(dialTokens).toContain("--instrument-energy:")
+    expect(dialTokens).toContain("--dial-score-100: #e7bd55")
+    expect(dialTokens).toContain("--dial-tier-master-bright: #e0a4ff")
+    expect(dashboard).toContain("background: var(--instrument-frame)")
+    expect(dial).toContain("var(--instrument-motion-ambient)")
+    expect(spec).toContain("## Design principles")
+    expect(spec).toContain("## Component recipes")
+    expect(spec).toContain("## Accessibility guardrails")
+  })
+
+  it("aligns variable-height analysis and progress cards", () => {
+    const skill = read("src/components/skill/SkillOverview.vue")
+    const progress = read("src/pages/ProgressPage.vue")
+
+    expect(skill).toContain("<TelemetryBoard")
+    expect(skill).toContain('{ label: "Results", readings: resultTelemetry.value }')
+    expect(skill).toContain('{ label: "Pace", readings: paceTelemetry.value }')
+    expect(skill).toMatch(/\.metric-grid \{[\s\S]*grid-auto-rows: 1fr/)
+    expect(skill).toMatch(/\.overview-grid \{[\s\S]*align-items: stretch/)
+    expect(skill).toContain("PerformanceProfile")
+    expect(skill).toContain('class="context-grid"')
+    expect(skill).toContain('class="contribution-layout"')
+    expect(skill).toMatch(/\.context-grid \{[\s\S]*grid-template-columns: repeat\(2/)
+    expect(progress).toContain('class="record-browser"')
+    expect(progress).toContain('class="record-categories"')
+    expect(progress).toContain('class="record-ledger"')
+    expect(progress).toMatch(/\.record-ledger \{[\s\S]*block-size: 365px/)
+    expect(progress).toMatch(/\.record-rows \{[\s\S]*overflow-y: auto;[\s\S]*scrollbar-gutter: stable/)
+  })
+
+  it("uses connected telemetry and compact evidence on match review", () => {
+    const hero = read("src/components/MatchReviewHero.vue")
+
+    expect(hero).toContain("<TelemetryGrid")
+    expect(hero).toContain('label="Match telemetry"')
+    expect(hero).toContain(':columns="5"')
+    expect(hero).not.toContain("<StatTile")
+    expect(hero).toMatch(/\.hero-labels article \{[\s\S]*min-height: 27px/)
+    expect(hero).toMatch(/\.record-chips > span \{[\s\S]*min-height: 30px/)
+  })
+
+  it("uses distinct champion-select and in-game live layouts", () => {
+    const live = read("src/pages/LiveGamePage.vue")
+    const tempo = read("src/components/TempoGauge.vue")
+    const dial = read("src/components/MomentumGauge.vue")
+
+    expect(live).toContain("live.phase === 'ChampSelect'")
+    expect(live).toContain('class="choice-table"')
+    expect(live).toContain("composition-card")
+    expect(live).toContain("live-scoreboard")
+    expect(live).toContain("live.game.activePlayer")
+    expect(live).toContain('class="live-intelligence"')
+    expect(live).toContain("Estimated team gold")
+    expect(live).toContain("Win confidence")
+    expect(live).toContain("<TempoGauge")
+    expect(live).toContain("<AugmentRecommendations")
+    expect(tempo).toContain('import MomentumGauge from "./MomentumGauge.vue"')
+    expect(tempo).toContain("<MomentumGauge")
+    expect(tempo).toContain('title="Tempo"')
+    expect(tempo).toContain(':detail="detail"')
+    expect(tempo).toContain(':overdrive-tier="surgeTier"')
+    expect(live).toContain(':surge-tier="analysis.tempo.surgeTier"')
+    expect(dial).toContain('role="meter"')
+    expect(dial).toContain('class="hex-cell"')
+    expect(dial).toContain("prefers-reduced-motion")
+  })
+
+  it("aligns readable event tracks beneath the timeline graph", () => {
+    const review = read("src/pages/ReviewPage.vue")
+
+    expect(review).toContain('class="gold-chart-wrap"')
+    expect(review).toContain('class="timeline-event-tracks"')
+    expect(review).toContain('class="event-track-marker"')
+    expect(review).toContain('label: "Deaths"')
+    expect(review).toContain('label: "Levels"')
+    expect(review).toContain('label: "Items"')
+    expect(review).toContain("timelineMarkerIcon")
+    expect(review).toContain("timelineMarkerTitle")
+    expect(review).toContain("sampleTimelineEvents(events, track.maximum)")
+    expect(review).toContain("timelineObjectiveIconUrl")
+    expect(review).toContain("abilityAsset(event)")
+    expect(review).toContain("killActor(event)")
+    expect(review).toContain("timelineKillIconUrl")
+    expect(review).toContain('class="kill-matchup"')
+    expect(review).toContain('class="blue-series"')
+    expect(review).toContain('class="red-series"')
+    expect(review).toContain("timelineGoldDifferencePoints")
+    expect(review).toContain("finalTimelineFrame.blueGold")
+  })
+
+  it("sets the consolidated review scoreboard out as dense stacked teams", () => {
+    const review = read("src/pages/ReviewPage.vue")
+    const scoreboard = read("src/components/ReviewScoreboard.vue")
+
+    expect(review).toContain("<ReviewScoreboard")
+    expect(scoreboard).toContain('v-for="teamId in [100, 200]"')
+    expect(scoreboard).toContain('class="player-row"')
+    expect(scoreboard).toContain('class="player-identity"')
+    expect(scoreboard).toContain('class="build-cell"')
+    expect(scoreboard).toContain('class="damage-cell"')
+    expect(scoreboard).toContain("lobbyStandings")
+    expect(scoreboard).toContain("teamKillParticipation")
+    expect(scoreboard).toContain("positionIconUrl")
+    expect(scoreboard).toContain("team-bans")
+    expect(scoreboard).toContain("aramPoroIconUrl")
+  })
+
+  it("keeps match browsing and review statistics dense at common desktop widths", () => {
+    const matches = read("src/pages/MatchesPage.vue")
+    const stats = read("src/components/MatchStatsTable.vue")
+
+    expect(matches).toContain("width: min(100%, 1480px)")
+    expect(matches).toContain("margin-inline: auto")
+    expect(stats).toContain("min-width: 1060px")
+    expect(stats).toContain("width: 86px")
+    expect(stats).toContain("padding: 6px 4px")
+  })
+
+  it("shows a dense at-a-glance match card with builds and both teams", () => {
+    const matches = read("src/components/MatchList.vue")
+
+    expect(matches).toContain('class="card-main"')
+    expect(matches).toContain('class="build"')
+    expect(matches).toContain('class="rosters"')
+    expect(matches).toContain('class="team-roster"')
+    expect(matches).toContain('class="performance"')
+    expect(matches).toContain("minmax(120px, 1fr)")
+    expect(matches).toContain("repeat(2, minmax(0, 1fr))")
+    expect(matches).toContain("font-size: 12px; line-height: 1.15")
+    expect(matches).toContain("killParticipation(match)")
+    expect(matches).toContain("player(match)?.items")
+    expect(matches).toContain("match.participants")
+    expect(matches).toContain("positionIconUrl")
+    expect(matches).toContain("match.lobbyPlace")
+    expect(matches).toContain("roster-player.roleless")
+    expect(matches).toContain(":title=\"itemName(item)\"")
+    expect(matches).toContain("itemAsset(itemId).name")
+  })
+
+  it("uses League role art and shows interactive rune pages throughout reviews", () => {
+    const roles = read("src/helpers/roles.ts")
+    const review = read("src/pages/ReviewPage.vue")
+    const scoreboard = read("src/components/ReviewScoreboard.vue")
+    const runePage = read("src/components/RunePage.vue")
+
+    expect(roles).toContain("rcp-fe-lol-champ-select")
+    expect(roles).toContain("position-${position ? INFO[position].asset")
+    expect(review).toContain("<ReviewScoreboard")
+    expect(scoreboard).toContain('<RunePage :participant="row"')
+    expect(scoreboard).toContain('align="left" compact')
+    expect(runePage).toContain('<Teleport to="body">')
+    expect(runePage).toContain("position: fixed")
+    expect(runePage).toContain("opensAbove")
+    expect(review).toContain('class="grade-orbit"')
+    expect(review).toContain('class="baseline-axis"')
+    expect(scoreboard).toContain("positionIconUrl(role(row))")
+  })
+
+  it("pairs recent form with a responsive Dial gauge", () => {
+    const dashboard = read("src/pages/DashboardPage.vue")
+    const gauge = read("src/components/MomentumGauge.vue")
+    const form = read("src/components/FormStrip.vue")
+
+    expect(dashboard).toContain('class="form-momentum-grid"')
+    expect(dashboard).toContain("<MomentumGauge")
+    expect(dashboard).toContain('title="The Dial"')
+    expect(dashboard).toMatch(
+      /performanceMomentum\(\s*momentumMatches\.value,\s*momentumClock\.value/,
+    )
+    expect(gauge).toContain('role="meter"')
+    expect(gauge).not.toContain("BaseEChart")
+    expect(gauge).toContain('class="gauge-svg"')
+    expect(gauge).toContain('class="hex-cell"')
+    expect(gauge).toContain("frontier")
+    expect(gauge).toContain('const scoreSpectrum = gradientStops')
+    expect(gauge).toContain('[0, "#4a0717"]')
+    expect(gauge).toContain('[1, "#e7bd55"]')
+    expect(gauge).toContain('class="core-gem"')
+    expect(gauge).toContain('class="gem-shine"')
+    expect(gauge).toContain('class="end-cap"')
+    expect(gauge).not.toContain("keystone")
+    expect(gauge).not.toContain("filigree")
+    expect(gauge).not.toContain("needle")
+    expect(gauge).not.toContain("rank-crest")
+    expect(gauge).toContain("const TIER_EFFECTS")
+    expect(gauge).toMatch(/master:\s*\{[\s\S]*?level:\s*4/)
+    expect(gauge).toMatch(/diamond:\s*\{[\s\S]*?level:\s*3/)
+    expect(gauge).toMatch(/emerald:\s*\{[\s\S]*?level:\s*2/)
+    expect(gauge).toContain('"--shake-amp"')
+    expect(gauge).toContain('"--shake-period"')
+    expect(gauge).toContain("tier-driven instrument vibration")
+    expect(gauge).toContain("cell-surge")
+    expect(gauge).toContain("hex-shock")
+    expect(gauge).toContain("comet-orbit")
+    expect(gauge).toContain("hex-halo")
+    expect(gauge).toContain('transform-origin: 0 0')
+    expect(gauge).toContain('top: 96px')
+    expect(gauge).toContain('class="core-label"')
+    expect(gauge).toContain("prefers-reduced-motion")
+    expect(dashboard).toContain("scheduleMomentumExpiry")
+    expect(form).toContain('class="trend-node"')
+    expect(form).toContain("translate(-50%, -50%)")
+    expect(form).not.toContain("<circle")
+  })
+
+  it("stages progressive, tier-driven stress and a Master-only rupture", () => {
+    const gauge = read("src/components/MomentumGauge.vue")
+
+    expect(gauge).toMatch(/(?:tier\w*effect\w*profile|effect\w*profile)/i)
+    for (const tier of ["gold", "emerald", "diamond", "master"]) {
+      expect(gauge).toMatch(new RegExp(`${tier}:\\s*\\{`))
+    }
+    expect(gauge).toContain("`tier-${displayTier.value}`")
+
+    expect(gauge).toContain('class="gem-cracks"')
+    expect(gauge).toContain('class="gem-crack"')
+    expect(gauge).toMatch(/crack(?:s|Count|Level|Intensity)/i)
+    expect(gauge).toContain('class="core-sparks"')
+    expect(gauge).toContain('class="core-spark"')
+    expect(gauge).toMatch(/spark(?:s|Count|Rate|Intensity)/i)
+    expect(gauge).toContain('"--spark-return-delay"')
+    expect(gauge).toContain('"--discharge-animation-duration"')
+
+    expect(gauge).toContain('class="master-rupture"')
+    expect(gauge).toMatch(
+      /(?:displayTier|tier)\.value\s*===\s*["']master["']|\bisMaster\b|\.tier-master\s+\.master-rupture/,
+    )
+    expect(gauge).toMatch(/discharg/i)
+    expect(gauge).toMatch(/reassembl/i)
+    expect(gauge).toMatch(/implod|implosion/i)
+    expect(gauge).toContain('phase.value = next === "master" ? "rupturing" : "igniting"')
+    expect(gauge).toContain("const spectrum = overdriveActive.value")
+    expect(gauge).not.toContain("orbit-retract var(--discharge-duration) ease-in reverse")
+
+    const reducedMotionAt = gauge.indexOf("@media (prefers-reduced-motion: reduce)")
+    expect(reducedMotionAt).toBeGreaterThan(-1)
+    const reducedMotion = gauge.slice(reducedMotionAt)
+    for (const effect of ["gem-crack", "core-spark", "master-rupture"]) {
+      expect(reducedMotion).toContain(effect)
+    }
+    expect(reducedMotion).toMatch(/animation:\s*none/)
+    expect(reducedMotion).toMatch(/transition:\s*none/)
+  })
+
+  it("fills champion form cards with performance and evidence", () => {
+    const dashboard = read("src/pages/DashboardPage.vue")
+
+    expect(dashboard).toContain("confidenceLabel(row.gradedGames)")
+    expect(dashboard).toContain("formatDecimal(row.kda, 2)")
+    expect(dashboard).toContain("formatPercent(row.winRate)")
+    expect(dashboard).toContain("Open a champion for its full breakdown")
+  })
+
+  it("shows ranked history from the first reading and plots it on a time axis", () => {
+    const dashboard = read("src/pages/DashboardPage.vue")
+    const panel = read("src/components/RankedHistoryPanel.vue")
+    const rankGraph = read("src/components/RankGraph.vue")
+
+    expect(dashboard).toContain("RankedHistoryPanel")
+    expect(panel).toContain('title="Rank over time"')
+    expect(panel).toContain('<RankGraph :points="points" :height="compact ? \'150px\' : \'220px\'" />')
+    expect(panel).toContain("currentRankedSeason")
+    expect(panel).toContain('v-model="selectedQueue"')
+    expect(panel).toContain('class="select-well"')
+    expect(panel).toContain('class="instrument-select"')
+    expect(panel).toContain('class="control-label">Queue')
+    expect(panel).not.toContain("compact-select")
+    expect(rankGraph).toContain('type: "time"')
+    expect(rankGraph).toContain('step: "end"')
+    expect(rankGraph).toContain("timestamps.length === 1")
+  })
+
+  it("includes League Classic in the dashboard feed while retaining queue tags", () => {
+    const dashboard = read("src/pages/DashboardPage.vue")
+    const matches = read("src/components/MatchList.vue")
+
+    expect(dashboard).toContain("api.getMatches({}, 6)")
+    expect(dashboard).toContain('modeFamily: "classic"')
+    expect(dashboard).not.toContain("2450")
+    expect(matches).toContain("match.queueName ?? modeLabel(match.mode)")
+  })
+
+  it("scopes personal records with a compact mode selector", () => {
+    const progress = read("src/pages/ProgressPage.vue")
+
+    expect(progress).toContain('<UiField label="Mode"')
+    expect(progress).toContain('<select v-model="recordScopeModel"')
+    expect(progress).toContain('v-model="recordScopeModel"')
+    expect(progress).toContain('label: "Solo/Duo Ranked"')
+    expect(progress).toContain('label: "ARAM"')
+    expect(progress).toContain('label: "Mayhem"')
+    expect(progress).toContain('label: "League Classic"')
+    expect(progress).toContain('label: "All Rift"')
+    expect(progress).not.toContain("excludeLeagueClassic: true")
+  })
+
+  it("visually separates the evidence introduction from its accordions", () => {
+    const insights = read("src/components/skill/SkillInsights.vue")
+
+    expect(insights).toContain('class="story-head evidence-head"')
+    expect(insights).toMatch(/\.evidence-head \{[\s\S]*border-left: 2px solid var\(--cyan\)/)
+  })
+
+  it("sorts champions from their table headers instead of separate buttons", () => {
+    const champions = read("src/pages/ChampionsPage.vue")
+
+    expect(champions).not.toContain('class="sort-row"')
+    expect(champions).toContain('@click="setSort(\'rank\')"')
+    expect(champions).toContain('@click="setSort(\'games\')"')
+    expect(champions).toContain('@click="setSort(\'needs\')"')
+    expect(champions).toContain(":aria-sort=\"ariaSort('winRate')\"")
+  })
+
+  it("offers challenge filters for both game mode and map", () => {
+    const challenges = read("src/pages/ChallengesPage.vue")
+
+    expect(challenges).toContain('v-model="gameMode"')
+    expect(challenges).toContain('v-model="challengeMap"')
+    expect(challenges).toContain("challengeMatchesGameMode")
+    expect(challenges).toContain("challengeMatchesMap")
+  })
+
+  it("uses visual performance charts in insights and names the top champion pool", () => {
+    const overview = read("src/components/skill/SkillOverview.vue")
+    const insights = read("src/components/skill/SkillInsights.vue")
+
+    expect(overview).toContain("overview.pool.top")
+    expect(overview).toContain("championNameById")
+    expect(overview).toContain("championIconUrl")
+    expect(insights).toContain("OutcomeTrendChart")
+    expect(insights).toContain(':rows="report.overview.outcomes.hours"')
+    expect(insights).toContain(':rows="report.overview.outcomes.weekdays"')
+    expect(insights).toContain(':rows="report.overview.outcomes.duration"')
+    expect(insights).toContain("ChampionPoolTreemap")
+  })
+})

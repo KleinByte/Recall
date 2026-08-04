@@ -1,0 +1,201 @@
+@import "./dial-tokens.css";
+
+:root {
+  /*
+   * Recall semantic UI system
+   *
+   * Product and UI components consume --ui-* roles. The --dial-* palette is
+   * the private material foundation. Legacy aliases at the end keep existing
+   * feature visuals stable while they migrate.
+   */
+
+  /* Canvas and material hierarchy */
+  --ui-canvas: var(--dial-ink-950);
+  --ui-shell: #07111f;
+  --ui-sidebar: #091525;
+  --ui-surface-panel: linear-gradient(
+    150deg,
+    rgba(255, 255, 255, 0.014),
+    transparent 44%
+  ), var(--instrument-surface);
+  --ui-surface-panel-quiet: linear-gradient(155deg, #0c1828, #091321 72%);
+  --ui-surface-raised: linear-gradient(145deg, #122139, #0b1627 68%);
+  --ui-surface-inset: linear-gradient(180deg, rgba(0, 0, 0, 0.24), transparent),
+    #070f1b;
+  --ui-surface-hover: #172942;
+  --ui-surface-hover-subtle: rgba(255, 255, 255, 0.018);
+  --ui-surface-selected: linear-gradient(90deg, rgba(200, 170, 109, 0.11), rgba(15, 32, 52, 0.92));
+  --ui-surface-overlay: rgba(5, 11, 20, 0.96);
+  --ui-data-row-background: rgba(7, 15, 27, 0.66);
+  --ui-match-row-background: linear-gradient(
+    105deg,
+    color-mix(in srgb, var(--ui-team-blue) 8%, var(--ui-shell)),
+    color-mix(in srgb, var(--ui-team-blue) 4%, var(--ui-sidebar)) 72%,
+    var(--ui-shell)
+  );
+  --ui-match-row-header-background: color-mix(in srgb, var(--ui-team-blue) 7%, var(--ui-surface-inset));
+  --ui-match-row-hover-background: color-mix(in srgb, var(--ui-team-blue) 11%, transparent);
+
+  /* Content */
+  --ui-text: var(--dial-metal-200);
+  --ui-text-heading: var(--dial-metal-100);
+  --ui-text-subtle: #aaa493;
+  --ui-text-muted: #718198;
+  --ui-text-faint: #566479;
+  --ui-text-on-accent: var(--dial-ink-950);
+  --ui-text-on-status: #ffffff;
+
+  /* Structure and emphasis */
+  --ui-accent: var(--dial-metal-500);
+  --ui-accent-strong: var(--dial-metal-200);
+  --ui-accent-dim: var(--dial-metal-800);
+  --ui-border: rgba(200, 170, 109, 0.26);
+  --ui-border-emphasis: rgba(216, 188, 125, 0.58);
+  --ui-divider: rgba(200, 170, 109, 0.18);
+  --ui-focus-ring: var(--instrument-energy);
+
+  /* Semantic state */
+  --ui-live: var(--instrument-energy);
+  --ui-live-dim: var(--dial-energy-800);
+  --ui-positive: #2ec4a6;
+  --ui-positive-dim: #124d46;
+  --ui-negative: #e45868;
+  --ui-negative-text: #f28a96;
+  --ui-negative-dim: #5c2029;
+  --ui-warning: #dfb85a;
+  --ui-warning-dim: #5a4722;
+  --ui-team-blue: #35b9dd;
+  --ui-team-red: #e45868;
+
+  /* Typography */
+  --ui-font-display: "BeaufortforLOL Bold", "BeaufortforLOL", serif;
+  --ui-font-heading: "BeaufortforLOL Medium", "BeaufortforLOL", serif;
+  --ui-font-body: "Spiegel", system-ui, sans-serif;
+  --ui-font-numeric: var(--ui-font-display);
+  --ui-label-size: 10px;
+  --ui-body-size: 13px;
+  --ui-title-size: 15px;
+
+  /* Spacing */
+  --ui-space-1: 4px;
+  --ui-space-2: 8px;
+  --ui-space-3: 12px;
+  --ui-space-4: 16px;
+  --ui-space-5: 24px;
+  --ui-space-6: 32px;
+  --ui-space-7: 40px;
+
+  /* Shape, depth, and control geometry */
+  --ui-radius-xs: 3px;
+  --ui-radius-sm: 6px;
+  --ui-radius-md: 10px;
+  --ui-radius-lg: 14px;
+  --ui-radius-pill: 999px;
+  --ui-shadow-panel: 0 12px 30px rgba(0, 0, 0, 0.22);
+  --ui-shadow-raised: 0 20px 52px rgba(0, 0, 0, 0.46);
+  --ui-shadow-inset: inset 0 1px 6px rgba(0, 0, 0, 0.5);
+  --ui-shadow-focus: 0 0 0 2px rgba(53, 212, 240, 0.22);
+  --ui-control-height: 36px;
+  --ui-control-height-compact: 30px;
+  --ui-control-background: linear-gradient(180deg, #14243a, #0d192b);
+  --ui-control-background-hover: linear-gradient(180deg, #1a2d48, #102038);
+  --ui-control-border: var(--ui-border);
+  --ui-control-border-hover: var(--ui-border-emphasis);
+  --ui-control-text: var(--ui-text-heading);
+  --ui-control-sheen: rgba(255, 255, 255, 0.02);
+  --ui-page-ambient-energy: rgba(53, 212, 240, 0.035);
+  --ui-page-ambient-metal: rgba(200, 170, 109, 0.05);
+
+  /* Layout and layering */
+  --ui-page-max: 1440px;
+  --ui-sidebar-width: 208px;
+  --ui-z-shell: 10;
+  --ui-z-popover: 100;
+  --ui-z-drawer: 300;
+  --ui-z-modal: 500;
+  --ui-z-notification: 700;
+  --ui-z-transition: 1000;
+
+  /* Compatibility aliases. New UI components do not use these names. */
+  --surface-0: var(--ui-canvas);
+  --surface-1: #0d192b;
+  --surface-2: #14243a;
+  --surface-3: var(--ui-surface-hover);
+  --gold-bright: var(--ui-text-heading);
+  --gold: var(--ui-accent);
+  --gold-mid: #a1854c;
+  --gold-dim: var(--ui-accent-dim);
+  --gold-faint: #5c4a2a;
+  --text-primary: var(--ui-text);
+  --text-secondary: var(--ui-text-subtle);
+  --text-muted: var(--ui-text-muted);
+  --text-faint: var(--ui-text-faint);
+  --win: var(--ui-live);
+  --win-dim: var(--ui-live-dim);
+  --loss: var(--ui-negative);
+  --loss-dim: var(--ui-negative-dim);
+  --accent: var(--ui-live);
+  --cyan: var(--ui-live);
+  --border-subtle: var(--ui-border);
+  --border-strong: var(--ui-border-emphasis);
+  --space-1: var(--ui-space-1);
+  --space-2: var(--ui-space-2);
+  --space-3: var(--ui-space-3);
+  --space-4: var(--ui-space-4);
+  --space-5: var(--ui-space-5);
+  --space-6: var(--ui-space-6);
+  --radius-sm: var(--ui-radius-sm);
+  --radius-md: var(--ui-radius-md);
+  --radius-lg: var(--ui-radius-lg);
+  --shadow-card: var(--ui-shadow-panel);
+  --font-display: var(--ui-font-display);
+  --font-heading: var(--ui-font-heading);
+  --font-body: var(--ui-font-body);
+  --font-numeric: var(--ui-font-numeric);
+  --sidebar-width: var(--ui-sidebar-width);
+}
+
+/* Compatibility primitives share the same component tokens as the library. */
+.card {
+  min-width: 0;
+  padding: var(--ui-space-4);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-surface-panel);
+  box-shadow: var(--ui-shadow-panel);
+}
+
+.section-title {
+  margin: 0 0 var(--ui-space-3);
+  color: var(--ui-text-heading);
+  font: 500 13px var(--ui-font-heading);
+  letter-spacing: 1.45px;
+  text-transform: uppercase;
+}
+
+.muted { color: var(--ui-text-subtle); }
+
+.numeric {
+  font-family: var(--ui-font-numeric);
+  font-variant-numeric: tabular-nums;
+}
+
+.win-text { color: var(--ui-live); }
+.loss-text { color: var(--ui-negative); }
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ui-accent-dim) transparent;
+}
+
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-accent-dim);
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--ui-accent);
+  background-clip: content-box;
+}

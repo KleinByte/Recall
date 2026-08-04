@@ -1,0 +1,43 @@
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "appId": "com.kleinbyte.recall",
+  "productName": "Recall",
+  "directories": {
+    "output": "release/${version}"
+  },
+  "afterPack": "scripts/verify-packaged-runtime.cjs",
+  "icon": "public/favicon.ico",
+  "files": [
+    "dist",
+    "dist-electron"
+  ],
+  "asarUnpack": [
+    "**/node_modules/better-sqlite3/**"
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      }
+    ],
+    "artifactName": "${productName}-Windows-Setup.${ext}"
+  },
+  "nsis": {
+    "guid": "f055652a-03fc-5862-8fe3-2be04dffe9f6",
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "deleteAppDataOnUninstall": false
+  },
+  "publish": [
+    {
+      "provider": "github",
+      "owner": "KleinByte",
+      "repo": "Recall",
+      "releaseType": "release"
+    }
+  ]
+}
