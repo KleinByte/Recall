@@ -99,6 +99,12 @@ describe("Skill Insights", () => {
     expect(insights).toContain("ChampionPoolTreemap")
   })
 
+  it("orders Grade Journey history chronologically", () => {
+    const insights = read("src/components/skill/SkillInsights.vue")
+
+    expect(insights).toContain(".sort((left, right) => left.playedAt - right.playedAt)")
+  })
+
   it("shows evidence, sample size, intervals, and timezone context", () => {
     const insights = read("src/components/skill/SkillInsights.vue")
     const finding = read("src/components/skill/InsightFinding.vue")

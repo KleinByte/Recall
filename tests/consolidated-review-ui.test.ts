@@ -65,6 +65,23 @@ describe("consolidated match review UI", () => {
     expect(fs.statSync("public/game-data/ui/map453.png").size).toBeGreaterThan(100_000)
   })
 
+  it("plays positioned timeline frames on a synchronized review map", () => {
+    const review = read("src/pages/ReviewPage.vue")
+    const playback = read("src/components/MatchPlaybackMap.vue")
+
+    expect(review).toContain("<MatchPlaybackMap")
+    expect(review).toContain('type TimelineView = "chronology" | "playback"')
+    expect(review).toContain('label: "Playback"')
+    expect(review).toContain("v-if=\"timelineView === 'playback'\"")
+    expect(review).toContain(':frames="review.timeline.summary.frames"')
+    expect(review).toContain('v-model:timestamp="timelineCursorTimestamp"')
+    expect(playback).toContain("playbackPositionsAt")
+    expect(playback).toContain("requestAnimationFrame")
+    expect(playback).toContain("periodic observations")
+    expect(playback).toContain('type="range"')
+    expect(playback).toContain("prefers-reduced-motion")
+  })
+
   it("returns teams and labels as part of the unified review payload", () => {
     const service = read("electron/main/review/review-service.ts")
     const types = read("src/types/review.ts")

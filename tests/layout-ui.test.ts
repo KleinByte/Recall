@@ -235,12 +235,13 @@ describe("desktop page layout", () => {
     expect(gauge).not.toContain("filigree")
     expect(gauge).not.toContain("needle")
     expect(gauge).not.toContain("rank-crest")
-    expect(gauge).toContain('case "master"')
-    expect(gauge).toContain('case "diamond"')
-    expect(gauge).toContain('case "emerald"')
-    expect(gauge).toContain("shake-soft")
-    expect(gauge).toContain("shake-medium")
-    expect(gauge).toContain("shake-hard")
+    expect(gauge).toContain("const TIER_EFFECTS")
+    expect(gauge).toMatch(/master:\s*\{[\s\S]*?level:\s*4/)
+    expect(gauge).toMatch(/diamond:\s*\{[\s\S]*?level:\s*3/)
+    expect(gauge).toMatch(/emerald:\s*\{[\s\S]*?level:\s*2/)
+    expect(gauge).toContain('"--shake-amp"')
+    expect(gauge).toContain('"--shake-period"')
+    expect(gauge).toContain("tier-driven instrument vibration")
     expect(gauge).toContain("cell-surge")
     expect(gauge).toContain("hex-shock")
     expect(gauge).toContain("comet-orbit")
@@ -253,6 +254,45 @@ describe("desktop page layout", () => {
     expect(form).toContain('class="trend-node"')
     expect(form).toContain("translate(-50%, -50%)")
     expect(form).not.toContain("<circle")
+  })
+
+  it("stages progressive, tier-driven stress and a Master-only rupture", () => {
+    const gauge = read("src/components/MomentumGauge.vue")
+
+    expect(gauge).toMatch(/(?:tier\w*effect\w*profile|effect\w*profile)/i)
+    for (const tier of ["gold", "emerald", "diamond", "master"]) {
+      expect(gauge).toMatch(new RegExp(`${tier}:\\s*\\{`))
+    }
+    expect(gauge).toContain("`tier-${displayTier.value}`")
+
+    expect(gauge).toContain('class="gem-cracks"')
+    expect(gauge).toContain('class="gem-crack"')
+    expect(gauge).toMatch(/crack(?:s|Count|Level|Intensity)/i)
+    expect(gauge).toContain('class="core-sparks"')
+    expect(gauge).toContain('class="core-spark"')
+    expect(gauge).toMatch(/spark(?:s|Count|Rate|Intensity)/i)
+    expect(gauge).toContain('"--spark-return-delay"')
+    expect(gauge).toContain('"--discharge-animation-duration"')
+
+    expect(gauge).toContain('class="master-rupture"')
+    expect(gauge).toMatch(
+      /(?:displayTier|tier)\.value\s*===\s*["']master["']|\bisMaster\b|\.tier-master\s+\.master-rupture/,
+    )
+    expect(gauge).toMatch(/discharg/i)
+    expect(gauge).toMatch(/reassembl/i)
+    expect(gauge).toMatch(/implod|implosion/i)
+    expect(gauge).toContain('phase.value = next === "master" ? "rupturing" : "igniting"')
+    expect(gauge).toContain("const spectrum = overdriveActive.value")
+    expect(gauge).not.toContain("orbit-retract var(--discharge-duration) ease-in reverse")
+
+    const reducedMotionAt = gauge.indexOf("@media (prefers-reduced-motion: reduce)")
+    expect(reducedMotionAt).toBeGreaterThan(-1)
+    const reducedMotion = gauge.slice(reducedMotionAt)
+    for (const effect of ["gem-crack", "core-spark", "master-rupture"]) {
+      expect(reducedMotion).toContain(effect)
+    }
+    expect(reducedMotion).toMatch(/animation:\s*none/)
+    expect(reducedMotion).toMatch(/transition:\s*none/)
   })
 
   it("fills champion form cards with performance and evidence", () => {

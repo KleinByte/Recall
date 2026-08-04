@@ -205,7 +205,9 @@ Motion follows an energy model:
 2. **Ignite** — a threshold crossing gets one 550–950ms entrance response.
 3. **Sustain** — only a high-value live/overdrive state may use slow ambient
    motion.
-4. **Cool** — persistent effects visibly settle when the state ends.
+4. **Discharge** — a lower tier removes only the excess energy that the higher
+   tier added.
+5. **Cool** — persistent effects visibly settle when overdrive ends.
 
 Use `--instrument-motion-fast` for controls,
 `--instrument-motion-state` for value changes,
@@ -213,6 +215,63 @@ Use `--instrument-motion-fast` for controls,
 `--instrument-motion-ambient` for rare sheen passes. Every animation requires
 a `prefers-reduced-motion` static state. Avoid layout movement, continuous card
 floating, and simultaneous ambient effects across a page.
+
+### Bidirectional overdrive choreography
+
+Overdrive is a reversible state system, not a sequence of one-way celebration
+animations. Every enter or sustain effect must define its authored reverse:
+
+| Enter or sustain effect | Reverse or discharge effect |
+| --- | --- |
+| Vibration strengthens | Amplitude and frequency decay smoothly to the arriving tier |
+| Sparks emit outward | Emission stops first; remaining sparks fade or converge into the core |
+| Gem bloom expands | Bloom contracts into the gem without a second flash |
+| Cracks branch outward | Branches reseal from their tips toward the core |
+| Halo or rune energy radiates | Energy contracts and is absorbed by the core |
+| Gem fragments separate | Fragments reassemble and lock into the arriving gem shape |
+
+A reverse is designed for the meaning of discharge; it is not necessarily the
+forward keyframes played backward. Promotion adds the delta between tiers.
+Demotion removes the departing tier's delta and settles into the complete,
+stable pose of the arriving tier. If a transition is interrupted, the next
+transition begins from the currently rendered pose and cancels stale completion
+callbacks. Initial render restores the correct sustained pose without replaying
+an entrance burst.
+
+The departing tier sets the maximum cooldown budget:
+
+| Departing tier | Cooldown budget | Expected release |
+| --- | --- | --- |
+| Gold | 450–650ms | Glow settles and sparse sparks finish |
+| Emerald | 600–800ms | Vibration decays and the first fracture reseals |
+| Diamond | 750–1,000ms | Dense sparks converge, the halo contracts, and deeper fractures reseal |
+| Master | 950–1,300ms | Rune energy implodes and separated gem pieces reassemble |
+
+Master discharge must read as controlled containment, not another explosion.
+Rune traces and loose energy contract toward the center, gem pieces return along
+clear inward paths, and the core locks into the arriving tier's fracture stage.
+A Master-to-Diamond transition therefore remains visibly Diamond; only a full
+exit from overdrive returns the gem to its sealed baseline.
+
+State semantics never wait for visual cooldown. The score, tier label, detail
+copy, meter value, accessible name, and any non-color state cue update in the
+same frame as the underlying state. Retiring particles and fragments are
+decorative, `aria-hidden`, non-interactive, and may finish briefly in the
+departing tier's palette without presenting stale text or status.
+
+### Motion containment and cost
+
+Effects must have an explicit visual envelope at every supported panel size.
+Reserve space for the largest shockwave and fragment path, or clip them to an
+intentional aperture; do not depend on SVG `overflow: visible` to escape an
+ancestor's `overflow` or `clip-path`. Keep the score and essential labels above
+the effect plane and stationary even when the decorative core vibrates.
+
+Prefer transforms and opacity for continuous motion. Treat animated blur,
+`filter`, masks, blend modes, and large multi-layer shadows as a limited burst
+budget rather than a default particle treatment. Group shared glow where
+possible, cap sustained particle counts by tier, stop emitters before their
+cooldown completes, and do not retain `will-change` after a transition settles.
 
 ## Responsive behavior
 
@@ -235,7 +294,14 @@ floating, and simultaneous ambient effects across a page.
 - Focus indicators remain visible against both ink and energized surfaces.
 - Meter, progress, and chart components expose numeric values and labels to
   assistive technology.
-- Reduced-motion mode removes shake, orbit, shimmer, and staggered delay.
+- Reduced-motion mode is a static state, not a shorter version of the same
+  choreography. It removes shake, orbit, shimmer, traveling particles,
+  fragment movement, implosion, shockwaves, and staggered delay, including
+  script-driven tweens.
+- With reduced motion, state and semantics update immediately. Render the
+  arriving tier's stable color, fracture, core, and non-color cue with no
+  transient pose from the departing tier. Master may remain visibly open or
+  fractured when active, but it does not burst open or reassemble in motion.
 
 ## Adoption sequence
 

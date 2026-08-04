@@ -22,7 +22,8 @@ const props = defineProps<{
 }>()
 
 const summary = computed(() => props.report.overview.summary)
-const history = computed(() => props.report.visuals.history)
+const history = computed(() => [...props.report.visuals.history]
+  .sort((left, right) => left.playedAt - right.playedAt))
 const gradedHistory = computed(() => history.value.filter((game) => game.gradeScore !== undefined))
 const averageGrade = computed(() => gradeFromScore(summary.value.avgGradeScore))
 const gradedCoverage = computed(() => summary.value.games ? summary.value.gradedGames / summary.value.games : 0)

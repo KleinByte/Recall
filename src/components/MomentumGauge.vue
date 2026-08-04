@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 
 /**
  * Hextech Resonance Core — a charge-cell gauge.
@@ -19,6 +19,24 @@ const props = defineProps<{
 
 type Tier = "gold" | "emerald" | "diamond" | "master"
 type GradientKey = readonly [position: number, color: string]
+type Phase = "idle" | "igniting" | "promoting" | "rupturing" | "burning" | "discharging"
+
+interface TierEffectProfile {
+  level: number
+  crackLevel: number
+  sparkCount: number
+  color: string
+  bright: string
+  shadow: string
+  speed: string
+  shakeAmp: string
+  shakePeriod: string
+  sparkDuration: string
+  sparkDistance: string
+  glowRadius: string
+  cooldownMs: number
+  gradient: ReturnType<typeof gradientStops>
+}
 
 function rgb(hex: string) {
   const value = Number.parseInt(hex.slice(1), 16)
@@ -101,67 +119,154 @@ function hexPath(radius: number) {
 const uid = `core-${Math.floor(Math.random() * 0xffffff).toString(16)}`
 
 const value = computed(() => Math.max(0, Math.min(100, props.score)))
-const derivedTier = computed(() => {
+const derivedTier = computed<Tier | undefined>(() => {
   if (value.value < 100 || props.streak < 3) return undefined
   if (props.streak >= 6) return "master"
   if (props.streak === 5) return "diamond"
   if (props.streak === 4) return "emerald"
   return "gold"
 })
-const tier = computed(() => props.overdriveTier ?? derivedTier.value)
-const overdrive = computed(() => value.value >= 100 && tier.value !== undefined)
+const requestedTier = computed<Tier | undefined>(() => props.overdriveTier ?? derivedTier.value)
+const tier = computed<Tier | undefined>(() => value.value >= 100 ? requestedTier.value : undefined)
+const overdrive = computed(() => tier.value !== undefined)
 const maxed = computed(() => value.value >= 100)
 
-/* ---------- overdrive choreography: idle → igniting → burning → cooling ---------- */
-const phase = ref<"idle" | "igniting" | "burning" | "cooling">("idle")
+const TIER_EFFECTS = {
+  gold: {
+    level: 1, crackLevel: 1, sparkCount: 3,
+    color: "#d3a238", bright: "#ffe08a", shadow: "rgba(255, 181, 47, .95)", speed: "1.05s",
+    shakeAmp: ".24px", shakePeriod: "1.9s", sparkDuration: "2.8s", sparkDistance: "25px",
+    glowRadius: "7px", cooldownMs: 650,
+    gradient: gradientStops([[0, "#a06a1a"], [.35, "#ffe08a"], [.65, "#c1892a"], [1, "#f5c557"]]),
+  },
+  emerald: {
+    level: 2, crackLevel: 2, sparkCount: 5,
+    color: "#0fa76f", bright: "#67ecb5", shadow: "rgba(31, 196, 132, .94)", speed: ".8s",
+    shakeAmp: ".48px", shakePeriod: "1.42s", sparkDuration: "2.35s", sparkDistance: "34px",
+    glowRadius: "9px", cooldownMs: 800,
+    gradient: gradientStops([[0, "#0b7a51"], [.35, "#67ecb5"], [.65, "#10935f"], [1, "#45d99d"]]),
+  },
+  diamond: {
+    level: 3, crackLevel: 3, sparkCount: 8,
+    color: "#1ea9d6", bright: "#8ceaff", shadow: "rgba(38, 190, 235, .96)", speed: ".66s",
+    shakeAmp: ".78px", shakePeriod: "1.02s", sparkDuration: "1.9s", sparkDistance: "43px",
+    glowRadius: "12px", cooldownMs: 1000,
+    gradient: gradientStops([[0, "#0d78a1"], [.35, "#8ceaff"], [.65, "#1b98c4"], [1, "#68d8f5"]]),
+  },
+  master: {
+    level: 4, crackLevel: 4, sparkCount: 12,
+    color: "#9254d6", bright: "#e0a4ff", shadow: "rgba(158, 79, 232, .96)", speed: ".52s",
+    shakeAmp: "1.12px", shakePeriod: ".72s", sparkDuration: "1.45s", sparkDistance: "54px",
+    glowRadius: "15px", cooldownMs: 1300,
+    gradient: gradientStops([[0, "#6d2fa8"], [.35, "#bc76ef"], [.65, "#8b46c9"], [1, "#e0a4ff"]]),
+  },
+} satisfies Record<Tier, TierEffectProfile>
+
+/* ---------- overdrive choreography: charge → promote/rupture → sustain → discharge ---------- */
+const prefersReducedMotion = ref(
+  typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+)
+let motionQuery: MediaQueryList | undefined
+const syncMotionPreference = (event: MediaQueryListEvent) => {
+  prefersReducedMotion.value = event.matches
+}
+
+const phase = ref<Phase>("idle")
 let phaseTimer: ReturnType<typeof setTimeout> | undefined
-watch(overdrive, (on, was) => {
+const lastTier = ref<Tier>("gold")
+const departingTier = ref<Tier>("gold")
+let phaseInitialized = false
+
+function schedulePhase(next: Phase, delay: number) {
   clearTimeout(phaseTimer)
-  if (on) {
-    if (was === undefined) {
-      phase.value = "burning"
+  phaseTimer = setTimeout(() => { phase.value = next }, delay)
+}
+
+watch(tier, (next, previous) => {
+  clearTimeout(phaseTimer)
+
+  if (!phaseInitialized) {
+    phaseInitialized = true
+    if (next) lastTier.value = next
+    phase.value = next ? "burning" : "idle"
+    return
+  }
+
+  if (prefersReducedMotion.value) {
+    if (next) lastTier.value = next
+    phase.value = next ? "burning" : "idle"
+    return
+  }
+
+  if (next && previous) {
+    const promoted = TIER_EFFECTS[next].level > TIER_EFFECTS[previous].level
+    if (promoted) {
+      lastTier.value = next
+      phase.value = next === "master" ? "rupturing" : "promoting"
+      schedulePhase("burning", next === "master" ? 1050 : 950)
       return
     }
-    phase.value = "igniting"
-    phaseTimer = setTimeout(() => { phase.value = "burning" }, 950)
-  } else if (was) {
-    phase.value = "cooling"
-    phaseTimer = setTimeout(() => { phase.value = "idle" }, 1000)
+
+    if (TIER_EFFECTS[next].level < TIER_EFFECTS[previous].level) {
+      departingTier.value = previous
+      phase.value = "discharging"
+      lastTier.value = next
+      schedulePhase("burning", TIER_EFFECTS[previous].cooldownMs)
+      return
+    }
+
+    lastTier.value = next
+    phase.value = "burning"
+    return
+  }
+
+  if (next) {
+    lastTier.value = next
+    phase.value = next === "master" ? "rupturing" : "igniting"
+    schedulePhase("burning", next === "master" ? 1050 : 950)
+    return
+  }
+
+  if (previous) {
+    departingTier.value = previous
+    lastTier.value = previous
+    phase.value = "discharging"
+    schedulePhase("idle", TIER_EFFECTS[previous].cooldownMs)
+  } else {
+    phase.value = "idle"
   }
 }, { immediate: true })
 
-const overdriveActive = computed(() => phase.value === "igniting" || phase.value === "burning")
+watch(prefersReducedMotion, reduced => {
+  if (!reduced) return
+  clearTimeout(phaseTimer)
+  cancelAnimationFrame(scoreRaf)
+  displayScore.value = Math.round(props.score)
+  if (tier.value) lastTier.value = tier.value
+  phase.value = tier.value ? "burning" : "idle"
+})
 
-// Cooling keeps the last tier so the wind-down plays in its own colors.
-const lastTier = ref<Tier>("gold")
-watch(tier, next => { if (next) lastTier.value = next }, { immediate: true })
-const displayTier = computed(() => tier.value ?? lastTier.value)
+const overdriveActive = computed(() =>
+  phase.value === "igniting" || phase.value === "promoting" ||
+  phase.value === "rupturing" || phase.value === "burning",
+)
+const displayTier = computed(() =>
+  phase.value === "discharging" ? departingTier.value : tier.value ?? lastTier.value,
+)
+const tierEffectProfile = computed(() => TIER_EFFECTS[displayTier.value])
 
-const tierPalette = computed(() => {
-  switch (displayTier.value) {
-    case "master": return {
-      color: "#9254d6", bright: "#e0a4ff", shadow: "rgba(158, 79, 232, .96)", speed: ".52s",
-      gradient: gradientStops([[0, "#6d2fa8"], [.35, "#bc76ef"], [.65, "#8b46c9"], [1, "#e0a4ff"]]),
-    }
-    case "diamond": return {
-      color: "#1ea9d6", bright: "#8ceaff", shadow: "rgba(38, 190, 235, .96)", speed: ".66s",
-      gradient: gradientStops([[0, "#0d78a1"], [.35, "#8ceaff"], [.65, "#1b98c4"], [1, "#68d8f5"]]),
-    }
-    case "emerald": return {
-      color: "#0fa76f", bright: "#67ecb5", shadow: "rgba(31, 196, 132, .94)", speed: ".8s",
-      gradient: gradientStops([[0, "#0b7a51"], [.35, "#67ecb5"], [.65, "#10935f"], [1, "#45d99d"]]),
-    }
-    default: return {
-      color: "#d3a238", bright: "#ffe08a", shadow: "rgba(255, 181, 47, .95)", speed: "1.05s",
-      gradient: gradientStops([[0, "#a06a1a"], [.35, "#ffe08a"], [.65, "#c1892a"], [1, "#f5c557"]]),
-    }
-  }
+onMounted(() => {
+  motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)")
+  prefersReducedMotion.value = motionQuery.matches
+  motionQuery.addEventListener("change", syncMotionPreference)
 })
 
 /* ---------- charge cells ---------- */
 const CELL_COUNT = 20
 const cells = computed(() => {
-  const spectrum = overdriveActive.value ? tierPalette.value.gradient : scoreSpectrum
+  // Switching back to the score spectrum at discharge start lets the inline
+  // fills drain out of the departing tier color during the cooldown itself.
+  const spectrum = overdriveActive.value ? tierEffectProfile.value.gradient : scoreSpectrum
   const litCount = Math.max(1, Math.round(value.value / 5))
   return Array.from({ length: CELL_COUNT }, (_, index) => {
     const from = 210 - index * 12 - 1.7
@@ -178,6 +283,19 @@ const cells = computed(() => {
   })
 })
 
+const sparks = computed(() => {
+  const profile = tierEffectProfile.value
+  return Array.from({ length: 12 }, (_, index) => ({
+    active: index < profile.sparkCount,
+    style: {
+      "--spark-angle": `${-165 + index * 30 + (index % 2 ? 7 : 0)}deg`,
+      "--spark-delay": `${(index * -.19).toFixed(2)}s`,
+      "--spark-return-delay": `${Math.round(index * profile.cooldownMs * .012)}ms`,
+      "--spark-scale": `${.72 + (index % 4) * .12}`,
+    },
+  }))
+})
+
 const tickLabels = [0, 50, 100].map(tick => {
   const [x, y] = polar(angleAt(tick), 46).split(" ").map(Number)
   return { tick, x, y: y + 3 }
@@ -190,6 +308,10 @@ let scoreRaf = 0
 watch(() => props.score, next => {
   popKey.value = next
   cancelAnimationFrame(scoreRaf)
+  if (prefersReducedMotion.value) {
+    displayScore.value = Math.round(next)
+    return
+  }
   const from = displayScore.value
   const startedAt = performance.now()
   const step = (now: number) => {
@@ -204,6 +326,7 @@ watch(() => props.score, next => {
 onBeforeUnmount(() => {
   clearTimeout(phaseTimer)
   cancelAnimationFrame(scoreRaf)
+  motionQuery?.removeEventListener("change", syncMotionPreference)
 })
 
 const scoreColor = computed(() => {
@@ -214,29 +337,41 @@ const scoreColor = computed(() => {
   return "#a33049"
 })
 const gaugeStyle = computed(() => ({
-  "--score-color": overdriveActive.value ? tierPalette.value.bright : scoreColor.value,
-  "--tier-color": tierPalette.value.color,
-  "--tier-bright": tierPalette.value.bright,
-  "--tier-shadow": tierPalette.value.shadow,
-  "--surge-speed": tierPalette.value.speed,
+  "--score-color": overdrive.value ? tierEffectProfile.value.bright : scoreColor.value,
+  "--tier-color": tierEffectProfile.value.color,
+  "--tier-bright": tierEffectProfile.value.bright,
+  "--tier-shadow": tierEffectProfile.value.shadow,
+  "--surge-speed": tierEffectProfile.value.speed,
+  "--effect-level": tierEffectProfile.value.level,
+  "--shake-amp": tierEffectProfile.value.shakeAmp,
+  "--shake-period": tierEffectProfile.value.shakePeriod,
+  "--spark-duration": tierEffectProfile.value.sparkDuration,
+  "--spark-distance": tierEffectProfile.value.sparkDistance,
+  "--gem-glow-radius": tierEffectProfile.value.glowRadius,
+  "--discharge-duration": `${tierEffectProfile.value.cooldownMs}ms`,
+  "--discharge-animation-duration": `${Math.max(360, tierEffectProfile.value.cooldownMs - 180)}ms`,
 }))
 const gaugeClass = computed(() => [
   `phase-${phase.value}`,
+  `tier-${displayTier.value}`,
+  `crack-level-${tierEffectProfile.value.crackLevel}`,
   {
     overdrive: overdriveActive.value,
-    cooling: phase.value === "cooling",
+    discharging: phase.value === "discharging",
     maxed: maxed.value,
   },
-  phase.value === "burning" && props.streak >= 6
-    ? "shake-hard"
-    : phase.value === "burning" && props.streak === 5
-      ? "shake-medium"
-      : phase.value === "burning" && props.streak === 4
-        ? "shake-soft"
-        : "",
 ])
 
 const ariaLabel = computed(() => `${props.title ?? "The Dial"} ${props.score} out of 100, ${props.label}`)
+const tierAccessibleName: Record<Tier, string> = {
+  gold: "Gold",
+  emerald: "Emerald",
+  diamond: "Blue",
+  master: "Purple",
+}
+const ariaValueText = computed(() => tier.value
+  ? `${Math.round(value.value)} out of 100, ${props.label}, ${tierAccessibleName[tier.value]} Overdrive`
+  : `${Math.round(value.value)} out of 100, ${props.label}, not in Overdrive`)
 const streakText = computed(() =>
   props.detail ?? (props.streak > 0
     ? `${props.streak} win streak`
@@ -254,6 +389,7 @@ const streakText = computed(() =>
     role="meter"
     :aria-label="ariaLabel"
     :aria-valuenow="value"
+    :aria-valuetext="ariaValueText"
     aria-valuemin="0"
     aria-valuemax="100"
   >
@@ -284,7 +420,15 @@ const streakText = computed(() =>
           <circle class="comet-head" cx="0" cy="-92" r="3.2" />
         </g>
       </svg>
-      <span v-for="n in 7" :key="`ember-${n}`" class="ember" />
+    </div>
+    <div class="core-sparks" aria-hidden="true">
+      <span
+        v-for="(spark, index) in sparks"
+        :key="`core-spark-${index}`"
+        class="core-spark"
+        :class="{ active: spark.active }"
+        :style="spark.style"
+      />
     </div>
     <svg class="gauge-svg" viewBox="0 0 320 170" aria-hidden="true">
       <defs>
@@ -298,6 +442,11 @@ const streakText = computed(() =>
           <stop offset=".5" stop-color="rgba(235,250,255,.5)" />
           <stop offset="1" stop-color="rgba(255,255,255,0)" />
         </linearGradient>
+        <radialGradient :id="`energy-${uid}`">
+          <stop offset="0" stop-color="#ffffff" />
+          <stop class="energy-stop" offset=".35" />
+          <stop class="energy-stop-tail" offset="1" />
+        </radialGradient>
         <clipPath :id="`gem-clip-${uid}`">
           <path d="M160 79L186 94V122L160 137L134 122V94Z" />
         </clipPath>
@@ -338,7 +487,12 @@ const streakText = computed(() =>
         <path class="cap-rivet" :d="hexPath(1.7)" transform="translate(2.2 0)" />
       </g>
       <g class="core-gem">
+        <path class="gem-energy-core" d="M160 86L178 97V119L160 130L142 119V97Z" :fill="`url(#energy-${uid})`" />
         <path class="gem-body" d="M160 79L186 94V122L160 137L134 122V94Z" :fill="`url(#glass-${uid})`" />
+        <g class="gem-shards">
+          <path class="gem-shard gem-shard-left" d="M160 79L160 137L134 122V94Z" :fill="`url(#glass-${uid})`" />
+          <path class="gem-shard gem-shard-right" d="M160 79L186 94V122L160 137Z" :fill="`url(#glass-${uid})`" />
+        </g>
         <g :clip-path="`url(#gem-clip-${uid})`">
           <rect class="gem-shine" x="144" y="73" width="16" height="70" :fill="`url(#shine-${uid})`" />
         </g>
@@ -346,11 +500,30 @@ const streakText = computed(() =>
           class="gem-facets"
           d="M160 92.05L174.3 100.3V115.7L160 123.95L145.7 115.7V100.3ZM160 79V92.05M186 94L174.3 100.3M186 122L174.3 115.7M160 137V123.95M134 122L145.7 115.7M134 94L145.7 100.3"
         />
+        <g class="gem-cracks" aria-hidden="true" :clip-path="`url(#gem-clip-${uid})`">
+          <path class="gem-crack" pathLength="1" d="M160 80L157 94L162 103L158 112L160 136" />
+          <path class="gem-crack" pathLength="1" d="M161 103L171 97L179 98M158 112L148 119L138 118" />
+          <path class="gem-crack" pathLength="1" d="M157 94L148 91L141 84M171 97L175 87L183 82M148 119L145 130" />
+          <path class="gem-crack" pathLength="1" d="M160 91L168 84M162 103L180 111L188 110M158 112L151 103L137 101M160 122L169 132" />
+        </g>
+      </g>
+      <g v-if="displayTier === 'master'" class="master-rupture" aria-hidden="true">
+        <path class="rupture-ring" :d="hexPath(31)" transform="translate(160 108)" />
+        <path
+          v-for="n in 6"
+          :key="`rupture-rune-${n}`"
+          class="rupture-rune"
+          d="M-2 5L0 -5L2 5M-1 1H1"
+          :style="{ '--rune-index': n - 1 }"
+          :transform="`translate(160 108) rotate(${(n - 1) * 60}) translate(0 -29)`"
+        />
+        <path class="rupture-rays" d="M160 73V85M160 131V143M125 108H139M181 108H195M136 84L146 94M174 122L184 132M184 84L174 94M146 122L136 132" />
       </g>
     </svg>
-    <template v-if="phase === 'igniting'">
-      <span class="ignite-flash" aria-hidden="true" />
-      <svg class="hex-shock" viewBox="-150 -150 300 300" aria-hidden="true">
+    <template v-if="phase === 'igniting' || phase === 'promoting' || phase === 'rupturing' || phase === 'discharging'">
+      <span v-if="phase !== 'discharging'" class="ignite-flash" aria-hidden="true" />
+      <span v-else class="containment-flash" aria-hidden="true" />
+      <svg class="hex-shock" :class="{ imploding: phase === 'discharging' }" viewBox="-150 -150 300 300" aria-hidden="true">
         <path class="shock-hex" :d="hexPath(42)" />
         <path class="shock-hex shock-hex-late" :d="hexPath(42)" />
       </svg>
@@ -417,10 +590,20 @@ const streakText = computed(() =>
   animation: cell-charge .85s steps(3, jump-none) infinite alternate;
 }
 
-/* Full charge: a resonance wave rolls cell to cell through the ring. */
-.maxed .hex-cell.lit {
+/* Full Overdrive charge: a resonance wave rolls cell to cell through the ring. */
+.overdrive.maxed .hex-cell.lit {
   animation: cell-surge 2.4s ease-in-out infinite;
   animation-delay: calc(var(--i) * -.12s);
+}
+
+.phase-discharging .hex-cell {
+  transition-duration: var(--discharge-animation-duration);
+  transition-delay: calc(var(--i) * 9ms);
+}
+
+.phase-discharging .hex-cell.lit {
+  animation: cell-discharge var(--discharge-animation-duration) ease-in forwards;
+  animation-delay: calc(var(--i) * 9ms);
 }
 
 .tick-label {
@@ -461,6 +644,10 @@ const streakText = computed(() =>
   filter: drop-shadow(0 0 3.5px var(--tier-shadow));
 }
 
+.phase-discharging .cap-vein {
+  animation: cap-vein-discharge var(--discharge-duration) ease-in both;
+}
+
 /* ---------- hextech crystal core ---------- */
 .core-gem {
   transform-box: fill-box;
@@ -471,15 +658,78 @@ const streakText = computed(() =>
   stroke: var(--dial-metal-500);
   stroke-width: 1.3;
   stroke-linejoin: bevel;
-  transition: stroke .6s ease, filter .6s ease;
+  transition: stroke .6s ease, filter .6s ease, opacity .45s ease;
   filter: drop-shadow(0 0 5px rgba(200, 155, 60, .3));
 }
+
+.gem-energy-core {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: opacity .45s ease;
+}
+
+.energy-stop { stop-color: var(--tier-bright); }
+.energy-stop-tail { stop-color: var(--tier-color); stop-opacity: 0; }
+
+.gem-shard {
+  opacity: 0;
+  stroke: var(--tier-bright);
+  stroke-width: .8;
+  stroke-linejoin: bevel;
+  transform-box: fill-box;
+  transition: opacity .25s ease, transform .5s cubic-bezier(.2, 1.2, .4, 1);
+}
+
+.gem-shard-left { transform-origin: right center; }
+.gem-shard-right { transform-origin: left center; }
 
 .gem-facets {
   fill: none;
   stroke: rgba(200, 170, 109, .3);
   stroke-width: .6;
 }
+
+.gem-crack {
+  fill: none;
+  stroke: var(--tier-bright);
+  stroke-width: 1.05;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  opacity: 0;
+  filter: drop-shadow(0 0 2px var(--tier-shadow));
+  transition: stroke-dashoffset .58s ease-out, opacity .35s ease;
+}
+
+.overdrive.crack-level-1 .gem-crack:nth-child(1),
+.overdrive.crack-level-2 .gem-crack:nth-child(-n + 2),
+.overdrive.crack-level-3 .gem-crack:nth-child(-n + 3),
+.overdrive.crack-level-4 .gem-crack:nth-child(-n + 4) {
+  stroke-dashoffset: 0;
+  opacity: .9;
+}
+
+.overdrive .gem-crack:nth-child(2) { transition-delay: .1s; }
+.overdrive .gem-crack:nth-child(3) { transition-delay: .18s; }
+.overdrive .gem-crack:nth-child(4) { transition-delay: .26s; }
+
+.phase-discharging .gem-crack {
+  opacity: 0;
+}
+
+.phase-discharging.crack-level-1 .gem-crack:nth-child(1),
+.phase-discharging.crack-level-2 .gem-crack:nth-child(-n + 2),
+.phase-discharging.crack-level-3 .gem-crack:nth-child(-n + 3),
+.phase-discharging.crack-level-4 .gem-crack:nth-child(-n + 4) {
+  opacity: .9;
+  animation: crack-reseal var(--discharge-animation-duration) ease-in forwards;
+}
+
+.phase-discharging .gem-crack:nth-child(2) { animation-delay: 60ms; }
+.phase-discharging .gem-crack:nth-child(3) { animation-delay: 110ms; }
+.phase-discharging .gem-crack:nth-child(4) { animation-delay: 160ms; }
 
 .gem-stop-a { stop-color: var(--dial-navy-500); transition: stop-color var(--instrument-motion-material) ease; }
 .gem-stop-b { stop-color: var(--dial-navy-650); transition: stop-color var(--instrument-motion-material) ease; }
@@ -492,15 +742,47 @@ const streakText = computed(() =>
 
 .overdrive .gem-body {
   stroke: var(--tier-bright);
-  filter: drop-shadow(0 0 7px var(--tier-shadow));
+  filter: drop-shadow(0 0 var(--gem-glow-radius) var(--tier-shadow));
   animation: gem-resonate calc(var(--surge-speed) * 1.3) ease-in-out infinite alternate;
 }
 
 .overdrive .gem-stop-a { stop-color: color-mix(in srgb, var(--tier-color) 55%, #0a1c2c); }
 .overdrive .gem-stop-b { stop-color: color-mix(in srgb, var(--tier-color) 25%, #0a1c2c); }
 
-.phase-igniting .core-gem {
+.phase-igniting .core-gem,
+.phase-promoting .core-gem {
   animation: gem-kick .55s cubic-bezier(.3, 1.6, .4, 1);
+}
+
+.tier-master.overdrive .gem-body { opacity: .18; }
+.tier-master.overdrive .gem-energy-core { opacity: .95; }
+.tier-master.overdrive .gem-shard { opacity: 1; }
+.tier-master.phase-burning .gem-shard-left { transform: translateX(-3px) rotate(-1.8deg); }
+.tier-master.phase-burning .gem-shard-right { transform: translateX(3px) rotate(1.8deg); }
+
+.tier-master.phase-rupturing .gem-body { opacity: .12; }
+.tier-master.phase-rupturing .gem-energy-core {
+  opacity: 1;
+  animation: energy-core-rupture 1.05s ease-out both;
+}
+.tier-master.phase-rupturing .gem-shard { opacity: 1; }
+.tier-master.phase-rupturing .gem-shard-left { animation: gem-rupture-left 1.05s cubic-bezier(.2, .8, .3, 1) both; }
+.tier-master.phase-rupturing .gem-shard-right { animation: gem-rupture-right 1.05s cubic-bezier(.2, .8, .3, 1) both; }
+
+.tier-master.phase-discharging .gem-body {
+  opacity: .18;
+  animation: gem-body-restore var(--discharge-duration) ease-in both;
+}
+.tier-master.phase-discharging .gem-energy-core {
+  opacity: 1;
+  animation: energy-core-contain var(--discharge-duration) ease-in both;
+}
+.tier-master.phase-discharging .gem-shard { opacity: 1; }
+.tier-master.phase-discharging .gem-shard-left { animation: gem-reassemble-left var(--discharge-duration) ease-in-out both; }
+.tier-master.phase-discharging .gem-shard-right { animation: gem-reassemble-right var(--discharge-duration) ease-in-out both; }
+
+.phase-discharging:not(.tier-master) .gem-body {
+  animation: gem-glow-contract var(--discharge-duration) ease-in both;
 }
 
 /* ---------- readout ---------- */
@@ -558,13 +840,13 @@ const streakText = computed(() =>
   pointer-events: none;
 }
 
-/* ---------- overdrive halo: hex glyph orbit, comet, embers ---------- */
+/* ---------- overdrive halo: hex glyph orbit and comet ---------- */
 .hex-halo {
   display: none;
 }
 
 .overdrive .hex-halo,
-.cooling .hex-halo {
+.phase-discharging .hex-halo {
   position: absolute;
   z-index: 0;
   inset: 0;
@@ -573,12 +855,14 @@ const streakText = computed(() =>
   pointer-events: none;
 }
 
-.phase-igniting .hex-halo {
+.phase-igniting .hex-halo,
+.phase-promoting .hex-halo,
+.phase-rupturing .hex-halo {
   animation: halo-ignite .95s cubic-bezier(.2, 1.3, .4, 1);
 }
 
-.cooling .hex-halo {
-  animation: halo-cool 1s ease-in forwards;
+.phase-discharging .hex-halo {
+  animation: halo-discharge var(--discharge-duration) ease-in forwards;
 }
 
 .halo-svg {
@@ -640,25 +924,54 @@ const streakText = computed(() =>
   filter: drop-shadow(0 0 5px var(--tier-shadow)) drop-shadow(0 0 10px var(--tier-shadow));
 }
 
-.ember {
-  position: absolute;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, #fff, var(--tier-bright) 45%, transparent 72%);
-  box-shadow: 0 0 6px var(--tier-shadow);
-  opacity: 0;
-  animation: ember-float var(--ember-dur, 2.6s) ease-in infinite;
-  animation-delay: var(--ember-delay, 0s);
+.phase-discharging .halo-band-orbit {
+  animation: orbit-retract var(--discharge-duration) ease-in both;
 }
 
-.ember:nth-of-type(1) { left: 10%; top: 60%; --ember-delay: 0s; --ember-dur: 2.4s; --ember-sway: 5px; }
-.ember:nth-of-type(2) { left: 20%; top: 34%; --ember-delay: .6s; --ember-dur: 2.8s; --ember-sway: -4px; }
-.ember:nth-of-type(3) { left: 33%; top: 16%; --ember-delay: 1.1s; --ember-dur: 2.2s; --ember-sway: 6px; }
-.ember:nth-of-type(4) { left: 50%; top: 9%; --ember-delay: 1.5s; --ember-dur: 3s; --ember-sway: -5px; }
-.ember:nth-of-type(5) { left: 66%; top: 16%; --ember-delay: 2s; --ember-dur: 2.5s; --ember-sway: 4px; }
-.ember:nth-of-type(6) { left: 80%; top: 34%; --ember-delay: 2.4s; --ember-dur: 2.9s; --ember-sway: -6px; }
-.ember:nth-of-type(7) { left: 89%; top: 60%; --ember-delay: 2.8s; --ember-dur: 2.3s; --ember-sway: 5px; }
+.phase-discharging .halo-hexes {
+  animation: orbit-retract var(--discharge-duration) ease-in both;
+}
+
+.phase-discharging .comet-orbit {
+  animation: comet-absorb var(--discharge-duration) ease-in both;
+}
+
+/* ---------- gem-origin spark emitter ---------- */
+.core-sparks {
+  position: absolute;
+  z-index: 2;
+  top: 108px;
+  left: 50%;
+  display: none;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.overdrive .core-sparks,
+.phase-discharging .core-sparks {
+  display: block;
+}
+
+.core-spark {
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #fff, var(--tier-bright) 45%, transparent 72%);
+  box-shadow: 0 0 5px var(--tier-shadow);
+  opacity: 0;
+}
+
+.overdrive .core-spark.active {
+  animation: spark-emit var(--spark-duration) var(--spark-delay) ease-out infinite;
+}
+
+.phase-discharging .core-spark.active {
+  animation: spark-converge var(--discharge-animation-duration) var(--spark-return-delay) ease-in both;
+}
 
 /* ---------- ignition burst ---------- */
 .ignite-flash {
@@ -669,6 +982,16 @@ const streakText = computed(() =>
   mix-blend-mode: screen;
   pointer-events: none;
   animation: ignite-flash .55s ease-out forwards;
+}
+
+.containment-flash {
+  position: absolute;
+  z-index: 5;
+  inset: 0;
+  background: radial-gradient(ellipse 42% 52% at 50% 63.5%, transparent 18%, var(--tier-color) 32%, transparent 64%);
+  mix-blend-mode: screen;
+  pointer-events: none;
+  animation: containment-flash var(--discharge-duration) ease-in forwards;
 }
 
 .hex-shock {
@@ -700,10 +1023,57 @@ const streakText = computed(() =>
   animation-delay: .18s;
 }
 
-/* ---------- streak shakes ---------- */
-.shake-soft { --shake-amp: .5px; animation: core-shake 1.3s linear infinite; }
-.shake-medium { --shake-amp: 1px; animation: core-shake .85s linear infinite; }
-.shake-hard { --shake-amp: 1.8px; animation: core-shake .5s linear infinite; }
+/* ---------- tier-driven instrument vibration ---------- */
+.phase-burning.overdrive .gauge-svg,
+.phase-promoting.overdrive .gauge-svg,
+.phase-rupturing.overdrive .gauge-svg {
+  animation: core-shake var(--shake-period) linear infinite;
+}
+
+.phase-discharging .gauge-svg {
+  animation: shake-damp var(--discharge-duration) ease-out both;
+}
+
+.hex-shock.imploding .shock-hex {
+  animation: shock-implode var(--discharge-animation-duration) ease-in forwards;
+}
+
+.hex-shock.imploding .shock-hex-late {
+  animation-delay: 70ms;
+}
+
+/* ---------- Master rupture runes ---------- */
+.master-rupture {
+  pointer-events: none;
+  opacity: 0;
+  transform-box: view-box;
+  transform-origin: 160px 108px;
+}
+
+.tier-master .master-rupture {
+  color: var(--tier-bright);
+}
+
+.rupture-ring,
+.rupture-rune,
+.rupture-rays {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.rupture-ring { stroke-width: 1.2; }
+.rupture-rune { stroke-width: 1; }
+.rupture-rays { stroke-width: 1.35; }
+
+.phase-rupturing.tier-master .master-rupture {
+  animation: master-rupture 1.05s cubic-bezier(.15, .7, .2, 1) both;
+}
+
+.phase-discharging.tier-master .master-rupture {
+  animation: rune-implode var(--discharge-duration) ease-in both;
+}
 
 @keyframes core-shake {
   0%, 58%, 100% { transform: translate(0, 0); }
@@ -711,6 +1081,14 @@ const streakText = computed(() =>
   74% { transform: translate(calc(var(--shake-amp) * -1.1), calc(var(--shake-amp) * .6)); }
   82% { transform: translate(calc(var(--shake-amp) * .7), calc(var(--shake-amp) * .4)); }
   90% { transform: translate(calc(var(--shake-amp) * -.4), calc(var(--shake-amp) * -.25)); }
+}
+
+@keyframes shake-damp {
+  0% { transform: translate(var(--shake-amp), calc(var(--shake-amp) * -.55)); }
+  18% { transform: translate(calc(var(--shake-amp) * -.72), calc(var(--shake-amp) * .45)); }
+  38% { transform: translate(calc(var(--shake-amp) * .42), calc(var(--shake-amp) * -.25)); }
+  62% { transform: translate(calc(var(--shake-amp) * -.18), calc(var(--shake-amp) * .1)); }
+  100% { transform: translate(0, 0); }
 }
 
 @keyframes cell-charge {
@@ -721,6 +1099,18 @@ const streakText = computed(() =>
 @keyframes cell-surge {
   0%, 100% { filter: drop-shadow(0 0 2px var(--cell-glow)) brightness(1); }
   50% { filter: drop-shadow(0 0 6px var(--cell-glow)) brightness(1.6); }
+}
+
+@keyframes cell-discharge {
+  0% { opacity: 1; filter: drop-shadow(0 0 5px var(--cell-glow)) brightness(1.45); }
+  60% { opacity: .72; filter: drop-shadow(0 0 2px var(--cell-glow)) brightness(1.05); }
+  100% { opacity: .45; filter: none; }
+}
+
+@keyframes cap-vein-discharge {
+  0% { stroke: var(--tier-bright); filter: drop-shadow(0 0 3.5px var(--tier-shadow)); }
+  70% { stroke: var(--tier-color); filter: drop-shadow(0 0 1px var(--tier-shadow)); }
+  100% { stroke: var(--dial-energy-700); filter: none; }
 }
 
 @keyframes score-pop {
@@ -744,14 +1134,93 @@ const streakText = computed(() =>
   to { filter: drop-shadow(0 0 11px var(--tier-shadow)); }
 }
 
+@keyframes gem-glow-contract {
+  0% { filter: drop-shadow(0 0 var(--gem-glow-radius) var(--tier-shadow)); }
+  70% { filter: drop-shadow(0 0 3px var(--tier-shadow)); }
+  100% { filter: drop-shadow(0 0 5px rgba(200, 155, 60, .3)); }
+}
+
+@keyframes crack-reseal {
+  0% { opacity: .95; stroke-dashoffset: 0; }
+  65% { opacity: .7; }
+  100% { opacity: 0; stroke-dashoffset: -1; }
+}
+
+@keyframes gem-rupture-left {
+  0% { transform: translateX(0) rotate(0); }
+  38% { transform: translateX(-5px) rotate(-3deg); }
+  66%, 100% { transform: translateX(-3px) rotate(-1.8deg); }
+}
+
+@keyframes gem-rupture-right {
+  0% { transform: translateX(0) rotate(0); }
+  38% { transform: translateX(5px) rotate(3deg); }
+  66%, 100% { transform: translateX(3px) rotate(1.8deg); }
+}
+
+@keyframes gem-reassemble-left {
+  0% { transform: translateX(-3px) rotate(-1.8deg); }
+  72% { transform: translateX(.5px) rotate(.3deg); }
+  100% { transform: translateX(0) rotate(0); }
+}
+
+@keyframes gem-reassemble-right {
+  0% { transform: translateX(3px) rotate(1.8deg); }
+  72% { transform: translateX(-.5px) rotate(-.3deg); }
+  100% { transform: translateX(0) rotate(0); }
+}
+
+@keyframes energy-core-rupture {
+  0% { opacity: .45; transform: scale(.76); filter: brightness(1); }
+  32% { opacity: 1; transform: scale(1.2); filter: brightness(2.1); }
+  100% { opacity: .95; transform: scale(1); filter: brightness(1.2); }
+}
+
+@keyframes energy-core-contain {
+  0% { opacity: 1; transform: scale(1.08); filter: brightness(1.65); }
+  72% { opacity: .38; transform: scale(.82); filter: brightness(1); }
+  100% { opacity: 0; transform: scale(.68); filter: brightness(.8); }
+}
+
+@keyframes gem-body-restore {
+  0%, 62% { opacity: .18; }
+  100% { opacity: 1; }
+}
+
 @keyframes ignite-flash {
   0% { opacity: .9; }
   100% { opacity: 0; }
 }
 
+@keyframes containment-flash {
+  0% { opacity: .08; transform: scale(1.22); }
+  45% { opacity: .42; }
+  100% { opacity: 0; transform: scale(.42); }
+}
+
 @keyframes shock-expand {
   0% { opacity: .95; transform: scale(.3) rotate(var(--shock-angle, 0deg)); }
   100% { opacity: 0; transform: scale(3.4) rotate(calc(var(--shock-angle, 0deg) + 24deg)); }
+}
+
+@keyframes shock-implode {
+  0% { opacity: 0; transform: scale(3.1) rotate(calc(var(--shock-angle, 0deg) + 20deg)); }
+  24% { opacity: .68; }
+  100% { opacity: 0; transform: scale(.26) rotate(var(--shock-angle, 0deg)); }
+}
+
+@keyframes master-rupture {
+  0% { opacity: 0; transform: scale(.45) rotate(-12deg); filter: brightness(2); }
+  22% { opacity: 1; }
+  72% { opacity: .62; }
+  100% { opacity: 0; transform: scale(1.62) rotate(18deg); filter: brightness(1); }
+}
+
+@keyframes rune-implode {
+  0% { opacity: 0; transform: scale(1.55) rotate(18deg); }
+  24% { opacity: .72; }
+  76% { opacity: .5; }
+  100% { opacity: 0; transform: scale(.18) rotate(-8deg); }
 }
 
 @keyframes halo-ignite {
@@ -760,34 +1229,64 @@ const streakText = computed(() =>
   100% { opacity: 1; transform: scale(1); filter: blur(0) brightness(1); }
 }
 
-@keyframes halo-cool {
+@keyframes halo-discharge {
   0% { opacity: 1; transform: scale(1); filter: none; }
-  100% { opacity: 0; transform: scale(.93); filter: blur(3px) saturate(.35); }
+  64% { opacity: .62; transform: scale(.9); }
+  100% { opacity: 0; transform: scale(.55); filter: blur(2px) saturate(.35); }
 }
 
 @keyframes orbit-spin {
   to { transform: rotate(360deg); }
 }
 
-@keyframes ember-float {
-  0% { opacity: 0; transform: translate3d(0, 6px, 0) scale(.6); }
-  12% { opacity: .95; }
-  55% { opacity: .7; transform: translate3d(var(--ember-sway, 4px), -14px, 0) scale(.85); }
-  100% { opacity: 0; transform: translate3d(calc(var(--ember-sway, 4px) * -.6), -30px, 0) scale(.4); }
+@keyframes orbit-retract {
+  0% { opacity: 1; transform: rotate(0) scale(1); }
+  100% { opacity: 0; transform: rotate(110deg) scale(.35); }
+}
+
+@keyframes comet-absorb {
+  0% { opacity: 1; transform: rotate(0) scale(1); }
+  60% { opacity: .75; }
+  100% { opacity: 0; transform: rotate(220deg) scale(.12); }
+}
+
+@keyframes spark-emit {
+  0% {
+    opacity: 0;
+    transform: rotate(var(--spark-angle)) translateX(5px) scale(.25);
+  }
+  18% { opacity: .96; }
+  72% { opacity: .62; }
+  100% {
+    opacity: 0;
+    transform: rotate(var(--spark-angle)) translateX(var(--spark-distance)) scale(var(--spark-scale));
+  }
+}
+
+@keyframes spark-converge {
+  0% {
+    opacity: 0;
+    transform: rotate(var(--spark-angle)) translateX(var(--spark-distance)) scale(var(--spark-scale));
+  }
+  24% { opacity: .82; }
+  78% { opacity: .5; }
+  100% {
+    opacity: 0;
+    transform: rotate(var(--spark-angle)) translateX(3px) scale(.18);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .momentum-gauge,
-  .momentum-gauge .hex-cell,
-  .momentum-gauge .gem-shine,
-  .momentum-gauge .core-gem,
-  .momentum-gauge .gem-body,
-  .momentum-gauge .hex-halo,
-  .momentum-gauge .hex-halo *,
-  .momentum-gauge .ignite-flash,
-  .momentum-gauge .shock-hex,
-  .momentum-gauge .core-readout strong,
-  .momentum-gauge .ember { animation: none; }
-  .hex-cell { transition-delay: 0s; }
+  .momentum-gauge * {
+    animation: none !important;
+    transition: none !important;
+  }
+  .momentum-gauge .gem-crack { transition: none !important; }
+  .core-sparks,
+  .master-rupture,
+  .ignite-flash,
+  .containment-flash,
+  .hex-shock { display: none; }
 }
 </style>

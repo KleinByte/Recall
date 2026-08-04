@@ -10,6 +10,37 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.31",
+    releasedAt: "2026-08-04",
+    title: "Match playback, evolving form",
+    summary:
+      "Recall now replays match events on the map, gives The Dial a clearer progression through sustained form, and presents personal records and performance evidence with stronger chronological context.",
+    sections: [
+      {
+        title: "Review the match as it unfolded",
+        items: [
+          "Timeline playback now moves through kills, deaths, levels, items, objectives, and map positions instead of leaving the match as a static event list.",
+          "Summoner's Rift and ARAM reviews keep champion activity aligned with the selected moment while retaining the complete gold and event evidence.",
+          "Review layouts remain readable at narrower window sizes while Grade and Context stay attached to the match telemetry above them.",
+        ],
+      },
+      {
+        title: "The Dial responds to the run",
+        items: [
+          "The Dial now changes its color, material, title, and effects as strong play develops into Overdrive and an extended Flow State.",
+          "Momentum presentation uses the shared Recall token system while preserving the gauge's special reactive identity.",
+        ],
+      },
+      {
+        title: "Records and history you can trust",
+        items: [
+          "Personal records remain tied to their champion, mode, date, result, and source review so a new best always keeps its context.",
+          "Grade Journey now orders matches chronologically even when imported or synthetic input arrives out of sequence.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.30",
     releasedAt: "2026-08-04",
     title: "Connected telemetry, cleaner proof",

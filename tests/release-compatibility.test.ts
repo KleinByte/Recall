@@ -23,7 +23,11 @@ describe("Windows update compatibility", () => {
       "https://github.com/KleinByte/Recall/releases/latest/download/Recall-Windows-Setup.exe",
     )
     expect(website).toContain("https://ko-fi.com/kleinbyte")
-    expect(website).toContain('class="product-gallery"')
-    expect(website).toContain("Fictional Master-tier Ranked Solo demo data")
+    expect(website).toContain('class="showcase-stage"')
+    expect(website).toContain("Master · 392 LP")
+    expect(website).toContain("recall-dial-master.jpg")
+    expect(website).toContain("recall-social-card.png")
+    expect(website).toContain("recall-personal-records.png")
+    expect(website).toContain("recall-review-context.png")
   })
 })

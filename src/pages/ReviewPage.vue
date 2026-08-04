@@ -33,6 +33,7 @@ import MatchReviewHero from "../components/MatchReviewHero.vue"
 import MatchStatsTable from "../components/MatchStatsTable.vue"
 import ReviewScoreboard from "../components/ReviewScoreboard.vue"
 import MatchDeathMap from "../components/MatchDeathMap.vue"
+import MatchPlaybackMap from "../components/MatchPlaybackMap.vue"
 import WinProbabilityChart from "../components/WinProbabilityChart.vue"
 import PerformanceRadar from "../components/skill/PerformanceRadar.vue"
 import PageHeader from "../components/ui/PageHeader.vue"
@@ -70,9 +71,11 @@ const events = useApiEvents()
 type Tab = "review" | "sessions" | "bookmarks" | "experiments"
 type MatchTab = "overview" | "stats" | "timeline" | "probability"
 type InsightTab = "rvi" | "performance"
+type TimelineView = "chronology" | "playback"
 const tab = ref<Tab>("review")
 const matchTab = ref<MatchTab>("overview")
 const insightTab = ref<InsightTab>("rvi")
+const timelineView = ref<TimelineView>("chronology")
 const review = ref<MatchReview>()
 const gameRvi = ref<PerformanceProfile>()
 const careerRvi = ref<PerformanceProfile>()
@@ -89,7 +92,7 @@ const experimentChampionIds = ref<number[]>([])
 const experimentModes = ref<TrackedMode[]>([])
 const timelineFilter = ref<"all" | "you" | "kills" | "objectives" | "items" | "levels" | "vision">("all")
 const timelineFilters = ["all", "you", "kills", "objectives", "items", "levels", "vision"] as const
-const timelineCursorTimestamp = ref<number>()
+const timelineCursorTimestamp = ref(0)
 const assets = ref<GameAssetCatalog>({ version: "latest", items: {}, augments: {}, abilities: {} })
 const augmentSummary = ref<Record<number, OwnerAugmentSummary>>({})
 const augmentSummaryLoading = ref(false)
@@ -116,6 +119,10 @@ const insightTabs = [
   { value: "performance", label: "Grade & context" },
 ]
 const matchTabOptions = matchTabs.map((item) => ({ value: item.id, label: item.label }))
+const timelineViewOptions = [
+  { value: "chronology", label: "Chronology" },
+  { value: "playback", label: "Playback" },
+]
 
 const rviDimensions = computed<PerformanceDimensionScore[]>(() =>
   (gameRvi.value?.dimensions ?? []).map((dimension) => ({
@@ -447,6 +454,8 @@ async function load(gameId?: number) {
   busy.value = true
   error.value = ""
   timelineFilter.value = "all"
+  timelineCursorTimestamp.value = 0
+  timelineView.value = "chronology"
   matchTab.value = "overview"
   insightTab.value = "rvi"
   augmentSummary.value = {}
@@ -963,14 +972,24 @@ onBeforeUnmount(() => {
       </div>
 
       <section v-if="matchTab === 'timeline'" class="card match-tab-panel" role="tabpanel">
-        <div class="section-heading">
-          <div>
-            <span class="eyebrow">Match chronology</span>
-            <h2 class="section-title">Timeline</h2>
-          </div>
-          <span class="muted">Interactive gold advantage, death positions, and match events</span>
-        </div>
         <div v-if="review.timeline.status === 'ready' && review.timeline.summary">
+          <Tabs
+            v-model="timelineView"
+            :options="timelineViewOptions"
+            label="Timeline views"
+            variant="compact"
+            class="timeline-view-tabs"
+          />
+          <MatchPlaybackMap
+            v-if="timelineView === 'playback'"
+            class="timeline-playback"
+            :match="review.match"
+            :participants="review.scoreboard"
+            :frames="review.timeline.summary.frames"
+            :events="review.timeline.summary.events"
+            v-model:timestamp="timelineCursorTimestamp"
+          />
+          <div v-else class="timeline-chronology" role="tabpanel">
           <div class="timeline-visuals">
             <div class="gold-chart-column">
               <header class="timeline-card-heading">
@@ -978,8 +997,7 @@ onBeforeUnmount(() => {
                 <span class="muted">Blue + / Red −</span>
               </header>
               <div class="gold-chart-wrap" tabindex="0" aria-label="Interactive team gold advantage chart. Use left and right arrow keys to inspect each minute."
-                @pointermove="setTimelineCursor" @pointerleave="timelineCursorTimestamp = undefined"
-                @focus="timelineCursorTimestamp ??= timelineDomain.maximumTimestamp"
+                @pointermove="setTimelineCursor"
                 @keydown.left.prevent="moveTimelineCursor(-1)" @keydown.right.prevent="moveTimelineCursor(1)">
                 <svg class="gold-chart" viewBox="0 0 100 100" preserveAspectRatio="none"
                   aria-label="Blue versus Red team gold advantage across the match">
@@ -1123,6 +1141,7 @@ onBeforeUnmount(() => {
             <span v-for="point in review.timeline.summary.turningPoints" :key="point.timestamp">
               {{ Math.round(point.timestamp / 60000) }} min · {{ Math.abs(point.swing).toLocaleString() }} gold swing
             </span>
+          </div>
           </div>
         </div>
         <div v-else class="timeline-empty">
@@ -1273,7 +1292,7 @@ h2 { margin: 0; }
 .grade-orbit::before { content: ""; grid-area: 1 / 1; width: 76px; height: 76px; border-radius: 50%; background: radial-gradient(circle at 50% 24%, var(--surface-2), var(--surface-0)); box-shadow: inset 0 0 0 1px var(--border-subtle); }
 .grade-orbit > div { z-index: 1; grid-area: 1 / 1; display: flex; flex-direction: column; align-items: center; }
 .grade-orbit strong { color: var(--gold-bright); font: 25px var(--font-display); line-height: 1; }
-.grade-orbit span { margin-top: 4px; color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .7px; }
+.grade-orbit span { margin-top: 4px; color: var(--text-muted); font-size: 9px; line-height: 1; text-transform: uppercase; letter-spacing: .45px; white-space: nowrap; }
 .component { display: grid; grid-template-columns: minmax(76px, .8fr) 1.3fr 36px; align-items: center; gap: 8px; }
 .component-copy { display: flex; flex-direction: column; min-width: 0; }
 .component-copy strong { color: var(--text-secondary); font-size: 12px; }
@@ -1309,6 +1328,9 @@ h2 { margin: 0; }
 textarea { width: 100%; box-sizing: border-box; min-height: 110px; resize: vertical; background: var(--surface-0); color: var(--text-primary); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: var(--space-3); font: 12px var(--font-body); }
 .tag-list, .inline, .experiment-outcome, .session-games { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-2); }.tag { border: 1px solid var(--border-subtle); background: var(--surface-2); color: var(--text-secondary); border-radius: 99px; padding: 4px 9px; }.tag.selected { color: var(--gold-bright); border-color: var(--gold); }
 .inline input { flex: 1; }.experiment-outcome { justify-content: space-between; align-items: center; }.outcome-note { flex-basis: 100%; }
+.timeline-view-tabs { margin-bottom: var(--ui-space-4); }
+.timeline-playback { max-width: 900px; margin-inline: auto; }
+.timeline-chronology { min-width: 0; }
 .timeline-visuals { display: grid; grid-template-columns: minmax(0, 1fr) minmax(310px, 380px); align-items: start; gap: clamp(18px, 2.5vw, 34px); }
 .timeline-card-heading { display: flex; align-items: end; justify-content: space-between; gap: 10px; min-height: 34px; margin-bottom: 8px; }.timeline-card-heading h3 { margin: 1px 0 0; color: var(--gold-bright); font: 16px var(--font-heading); }.timeline-card-heading > span { font-size: 11px; }
 .gold-chart-wrap { position: relative; height: 318px; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: linear-gradient(180deg, color-mix(in srgb, var(--surface-2) 82%, #0b2742) 0%, var(--surface-0) 50%, color-mix(in srgb, var(--surface-2) 84%, #35131c) 100%); }

@@ -15,14 +15,14 @@
       content="Keep every match. Understand every performance. Improve with a League companion built around your own history."
     />
     <meta property="og:url" content="https://kleinbyte.github.io/Recall/" />
-    <meta property="og:image" content="https://kleinbyte.github.io/Recall/assets/recall-dashboard.jpg" />
+    <meta property="og:image" content="https://kleinbyte.github.io/Recall/assets/recall-social-card.png" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Recall — The League companion that remembers" />
     <meta
       name="twitter:description"
       content="Permanent match history, live Tempo, complete reviews, and challenge tracking—kept privately on your PC."
     />
-    <meta name="twitter:image" content="https://kleinbyte.github.io/Recall/assets/recall-dashboard.jpg" />
+    <meta name="twitter:image" content="https://kleinbyte.github.io/Recall/assets/recall-social-card.png" />
     <link rel="icon" href="assets/recall-icon.png" />
     <link rel="stylesheet" href="styles.css" />
     <title>Recall — League Companion</title>
@@ -155,6 +155,26 @@
             </div>
           </article>
         </div>
+
+        <article class="records-feature">
+          <div class="records-copy">
+            <span class="card-index">05 / Personal records</span>
+            <h3>Know when a match becomes a personal best.</h3>
+            <p>
+              Recall keeps a curated record book for every supported mode. Browse combat, economy, objectives,
+              vision, timeline, and special-mode records, then open the exact review where each best happened.
+            </p>
+            <ul class="records-points">
+              <li><strong>Mode-aware</strong><span>Ranked, Normal, ARAM, Mayhem, and Classic stay meaningful on their own.</span></li>
+              <li><strong>Useful records</strong><span>Track memorable highs such as kills, damage, healing, mitigation, leads, and objective work.</span></li>
+              <li><strong>Full context</strong><span>Every record links back to its champion, date, result, and complete match review.</span></li>
+            </ul>
+          </div>
+          <figure class="records-preview">
+            <img src="assets/recall-personal-records.png" alt="Recall Personal Records for Solo/Duo Ranked, organized into performance, combat, economy, objectives, vision, timeline, and special mode categories" loading="lazy" decoding="async" />
+            <figcaption><span>Personal Records</span><strong>Every best stays attached to the game that earned it.</strong></figcaption>
+          </figure>
+        </article>
       </section>
 
       <section id="tour" class="tour-section page-section">
@@ -167,39 +187,81 @@
             <p>Explore a few of the places where your matches become a useful picture of how you play.</p>
           </div>
 
-          <div class="gallery-toolbar">
-            <p>Fictional Master-tier Ranked Solo demo data · drag, scroll, or use the arrows</p>
-            <div class="gallery-buttons" aria-label="Gallery controls">
-              <button type="button" data-gallery-previous aria-label="Previous screenshot">←</button>
-              <button type="button" data-gallery-next aria-label="Next screenshot">→</button>
+          <div class="showcase-profile" aria-label="Screenshot profile disclosure">
+            <span>Fictional showcase</span><strong>Master · 392 LP</strong><i></i><span>Ranked Solo/Duo</span>
+          </div>
+
+          <div class="showcase-stage" data-showcase tabindex="0" aria-label="Recall product screenshot gallery">
+            <div class="showcase-viewport">
+              <figure class="showcase-slide is-active" data-showcase-slide>
+                <img src="assets/recall-dashboard.jpg" alt="Recall Dashboard for a fictional Master-tier Ranked Solo player, showing Master 392 LP and a purple Flow State Dial" decoding="async" />
+                <figcaption><span>01 / Command deck</span><h3>See the whole Master climb at a glance.</h3><p>Rank history, recent form, performance telemetry, and the current Dial state share one focused view.</p></figcaption>
+              </figure>
+              <figure class="showcase-slide showcase-slide-review" data-showcase-slide hidden>
+                <img src="assets/recall-review-context.png" alt="Ranked Solo Zac match review showing match telemetry, a personal record, labels, Grade and Context, and comparison with prior games" loading="lazy" decoding="async" />
+                <figcaption><span>02 / Ranked review</span><h3>Understand the result—not just the scoreline.</h3><p>Match telemetry, lobby-relative grading, personal records, labels, and prior-game context explain what made the performance different.</p></figcaption>
+              </figure>
+              <figure class="showcase-slide showcase-slide-timeline" data-showcase-slide hidden>
+                <img src="assets/recall-review-timeline.jpg" alt="Ranked Solo gold timeline and Summoner's Rift death map" loading="lazy" decoding="async" />
+                <figcaption><span>03 / Match evidence</span><h3>Replay every swing on the map and timeline.</h3><p>Follow gold, items, levels, deaths, and location evidence without losing the shape of the game.</p></figcaption>
+              </figure>
+              <figure class="showcase-slide" data-showcase-slide hidden>
+                <img src="assets/recall-skill-overview.jpg" alt="Ranked Solo skill telemetry, rank history, and RVI profile" loading="lazy" decoding="async" />
+                <figcaption><span>04 / Ranked Solo skill</span><h3>Scope the evidence to the queue that matters.</h3><p>Filter telemetry, rank movement, outcome splits, and RVI by mode, season, role, or champion.</p></figcaption>
+              </figure>
+              <figure class="showcase-slide" data-showcase-slide hidden>
+                <img src="assets/recall-skill-insights.jpg" alt="Recall Grade Journey and Grade DNA charts" loading="lazy" decoding="async" />
+                <figcaption><span>05 / Grade signals</span><h3>See what your best games have in common.</h3><p>Grade Journey and Grade DNA turn a match archive into patterns you can actually review.</p></figcaption>
+              </figure>
+            </div>
+
+            <button class="showcase-arrow showcase-arrow-previous" type="button" data-showcase-previous aria-label="Previous screenshot">←</button>
+            <button class="showcase-arrow showcase-arrow-next" type="button" data-showcase-next aria-label="Next screenshot">→</button>
+
+            <div class="showcase-controls">
+              <div class="showcase-position" aria-live="polite"><strong data-showcase-current>01</strong><span>/ 05</span></div>
+              <div class="showcase-progress" aria-hidden="true"><i data-showcase-progress></i></div>
+              <p>Use the arrows, thumbnails, or your keyboard to explore.</p>
             </div>
           </div>
 
-          <div class="product-gallery" data-gallery tabindex="0" aria-label="Recall screenshot gallery">
-            <figure class="gallery-card">
-              <img src="assets/recall-dashboard.jpg" alt="Recall Dashboard for a fictional Master-tier Ranked Solo player" loading="lazy" decoding="async" />
-              <figcaption><span>01 / Command deck</span><h3>A Master climb, recent form, and RVI in one view.</h3></figcaption>
-            </figure>
-            <figure class="gallery-card">
-              <img src="assets/recall-review.jpg" alt="Ranked Solo match review using a fictional player and lobby" loading="lazy" decoding="async" />
-              <figcaption><span>02 / Ranked review</span><h3>Grade, lobby placement, records, and complete match context.</h3></figcaption>
-            </figure>
-            <figure class="gallery-card">
-              <img src="assets/recall-review-timeline.jpg" alt="Ranked Solo gold timeline and Summoner's Rift death map" loading="lazy" decoding="async" />
-              <figcaption><span>03 / Match evidence</span><h3>Gold swings, game events, and an interactive death map.</h3></figcaption>
-            </figure>
-            <figure class="gallery-card">
-              <img src="assets/recall-skill-overview.jpg" alt="Ranked Solo skill telemetry, rank history, and RVI profile" loading="lazy" decoding="async" />
-              <figcaption><span>04 / Ranked Solo skill</span><h3>Scope telemetry and rank evidence to the queue that matters.</h3></figcaption>
-            </figure>
-            <figure class="gallery-card">
-              <img src="assets/recall-skill-insights.jpg" alt="Recall Grade Journey and Grade DNA charts" loading="lazy" decoding="async" />
-              <figcaption><span>05 / Grade signals</span><h3>Follow Grade Journey and read the shape of your best games.</h3></figcaption>
-            </figure>
-            <figure class="gallery-card">
-              <img src="assets/recall-skill-analyze.jpg" alt="Recall performance form, session endurance, and match signature graphs" loading="lazy" decoding="async" />
-              <figcaption><span>06 / Analysis lab</span><h3>Find repeatable form, session, and matchup patterns.</h3></figcaption>
-            </figure>
+          <div class="showcase-thumbnails" role="tablist" aria-label="Choose a Recall screenshot">
+            <button class="is-active" type="button" role="tab" aria-selected="true" data-showcase-thumb>
+              <img src="assets/recall-dashboard.jpg" alt="" /><span><b>01</b>Dashboard</span>
+            </button>
+            <button type="button" role="tab" aria-selected="false" tabindex="-1" data-showcase-thumb>
+              <img src="assets/recall-review-context.png" alt="" loading="lazy" /><span><b>02</b>Review</span>
+            </button>
+            <button type="button" role="tab" aria-selected="false" tabindex="-1" data-showcase-thumb>
+              <img src="assets/recall-review-timeline.jpg" alt="" loading="lazy" /><span><b>03</b>Timeline</span>
+            </button>
+            <button type="button" role="tab" aria-selected="false" tabindex="-1" data-showcase-thumb>
+              <img src="assets/recall-skill-overview.jpg" alt="" loading="lazy" /><span><b>04</b>Skill</span>
+            </button>
+            <button type="button" role="tab" aria-selected="false" tabindex="-1" data-showcase-thumb>
+              <img src="assets/recall-skill-insights.jpg" alt="" loading="lazy" /><span><b>05</b>Signals</span>
+            </button>
+          </div>
+
+          <div class="dial-story">
+            <div class="dial-story-heading">
+              <div><span class="section-kicker">The Dial responds</span><h3>Your form has a shape.</h3></div>
+              <p>Build a streak and The Dial does more than raise a number. Its color, material, motion, and title evolve with the run—from rising form to gold Overdrive and the fractured purple Master state.</p>
+            </div>
+            <div class="dial-steps" aria-label="The Dial progression across a winning streak">
+              <article>
+                <div class="dial-image"><img src="assets/recall-dial-building.jpg" alt="The Dial at 99, Surging, after two wins" loading="lazy" decoding="async" /></div>
+                <span>01 · Building form</span><h4>Surging</h4><p>2 win streak</p>
+              </article>
+              <article>
+                <div class="dial-image"><img src="assets/recall-dial-gold.jpg" alt="The Dial in gold Overdrive at 100 after three wins" loading="lazy" decoding="async" /></div>
+                <span>02 · Overdrive</span><h4>Dialed In</h4><p>3 win streak</p>
+              </article>
+              <article>
+                <div class="dial-image"><img src="assets/recall-dial-master.jpg" alt="The Dial in its fractured purple Master Flow State at 100 after six wins" loading="lazy" decoding="async" /></div>
+                <span>03 · Master state</span><h4>Flow State</h4><p>6 win streak</p>
+              </article>
+            </div>
           </div>
         </div>
       </section>

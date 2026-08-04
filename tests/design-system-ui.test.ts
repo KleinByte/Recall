@@ -159,10 +159,18 @@ describe("Recall shared UI system", () => {
   it("protects intentional game, instrument, and brand visuals", () => {
     const gauge = read("src/components/MomentumGauge.vue")
     expect(gauge).toContain('role="meter"')
+    expect(gauge).toMatch(/:aria-valuetext="[^"]+"/)
+    expect(gauge).toMatch(/const\s+\w*(?:aria|accessible)\w*\s*=\s*computed[\s\S]{0,500}Overdrive/i)
     expect(gauge).toContain('class="gauge-svg"')
     expect(gauge).toContain('class="hex-cell"')
     expect(gauge).toContain('class="core-gem"')
+    for (const decorativeEffect of ["gem-cracks", "core-sparks", "master-rupture"]) {
+      expect(gauge).toMatch(
+        new RegExp(`<[^>]+(?=[^>]*class="${decorativeEffect}")(?=[^>]*aria-hidden="true")[^>]*>`),
+      )
+    }
     expect(gauge).toContain("prefers-reduced-motion")
+    expect(gauge).toMatch(/matchMedia\(["']\(prefers-reduced-motion: reduce\)["']\)/)
 
     const tempo = read("src/components/TempoGauge.vue")
     expect(tempo).toContain('import MomentumGauge from "./MomentumGauge.vue"')
