@@ -4,45 +4,76 @@ import { describe, expect, it } from "vitest"
 const read = (path: string) => readFileSync(path, "utf8")
 
 describe("desktop page layout", () => {
-  it("stacks related dashboard panels independently in two columns", () => {
+  it("organizes the dashboard into responsive instrument and analysis decks", () => {
     const dashboard = read("src/pages/DashboardPage.vue")
 
-    expect(dashboard).toContain('class="dashboard-columns"')
+    expect(dashboard).toContain('class="page-head dashboard-hero"')
+    expect(dashboard).toContain('class="status-deck"')
+    expect(dashboard).toContain('class="dashboard-grid"')
+    expect(dashboard).toContain('class="challenge-deck"')
+    expect(dashboard).not.toContain('class="dashboard-column')
     expect(dashboard).toMatch(
-      /class="dashboard-column left-column"[\s\S]*RankedHistoryPanel[\s\S]*title="Recent games"/,
-    )
-    expect(dashboard).toMatch(
-      /class="dashboard-column right-column"[\s\S]*title="Recall Vector Index"[\s\S]*title="Champions in form"/,
+      /class="dashboard-grid"[\s\S]*RankedHistoryPanel[\s\S]*title="Recall Vector Index"[\s\S]*title="Recent games"[\s\S]*title="Champions in form"/,
     )
     expect(dashboard).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))")
-    expect(dashboard).toContain("grid-template-rows: auto minmax(0, 1fr)")
+    expect(dashboard).toContain("grid-template-columns: minmax(300px, 360px) minmax(0, 1fr)")
     expect(dashboard).toContain('height="270px"')
     expect(dashboard).toContain("getRviProfile")
     expect(dashboard).toContain("PerformanceRadar")
     expect(dashboard).not.toContain("StyleRadar")
-    expect(dashboard).toMatch(/\.rank-panel,[\s\S]*\.rvi-panel \{[\s\S]*height: 340px/)
+    expect(dashboard).toMatch(/\.rank-panel,[\s\S]*\.rvi-panel \{[\s\S]*height: 360px/)
+    expect(dashboard).toContain("var(--instrument-surface)")
+    expect(dashboard).toContain("var(--instrument-border-soft)")
   })
 
-  it("makes repeated dashboard cards align within their rows", () => {
+  it("uses connected telemetry banks instead of oversized metric cards", () => {
     const dashboard = read("src/pages/DashboardPage.vue")
 
-    expect(dashboard).toMatch(/\.kpis \{[\s\S]*grid-auto-rows: 1fr/)
+    expect(dashboard).toContain('class="telemetry-board"')
+    expect(dashboard).toContain('class="telemetry-bank"')
+    expect(dashboard).toContain('class="telemetry-readings session-readings"')
+    expect(dashboard).toContain('class="telemetry-readings archive-readings"')
+    expect(dashboard).not.toContain("<StatTile")
+    expect(dashboard).toMatch(/\.telemetry-board \{[\s\S]*grid-template-columns: minmax\(0, 3fr\) minmax\(0, 4fr\)/)
     expect(dashboard).toMatch(/\.categories \{[\s\S]*grid-auto-rows: 1fr/)
     expect(dashboard).toMatch(/\.near-list \{[\s\S]*grid-auto-rows: 1fr/)
+  })
+
+  it("publishes The Dial as a reusable instrument design language", () => {
+    const baseTokens = read("src/design/tokens.css")
+    const dialTokens = read("src/design/dial-tokens.css")
+    const spec = read("docs/dial-ui-design-token-spec.md")
+    const dashboard = read("src/pages/DashboardPage.vue")
+    const dial = read("src/components/MomentumGauge.vue")
+
+    expect(baseTokens).toContain('@import "./dial-tokens.css"')
+    expect(dialTokens).toContain("--instrument-surface:")
+    expect(dialTokens).toContain("--instrument-frame:")
+    expect(dialTokens).toContain("--instrument-energy:")
+    expect(dialTokens).toContain("--dial-score-100: #e7bd55")
+    expect(dialTokens).toContain("--dial-tier-master-bright: #e0a4ff")
+    expect(dashboard).toContain("background: var(--instrument-frame)")
+    expect(dial).toContain("var(--instrument-motion-ambient)")
+    expect(spec).toContain("## Design principles")
+    expect(spec).toContain("## Component recipes")
+    expect(spec).toContain("## Accessibility guardrails")
   })
 
   it("aligns variable-height analysis and progress cards", () => {
     const skill = read("src/components/skill/SkillOverview.vue")
     const progress = read("src/pages/ProgressPage.vue")
 
-    expect(skill).toMatch(/\.kpis \{[\s\S]*grid-auto-rows: 1fr/)
+    expect(skill).toContain("<TelemetryGrid")
+    expect(skill).toContain('label="Scope telemetry"')
     expect(skill).toMatch(/\.metric-grid \{[\s\S]*grid-auto-rows: 1fr/)
     expect(skill).toMatch(/\.overview-grid \{[\s\S]*align-items: stretch/)
     expect(skill).toContain("PerformanceProfile")
     expect(skill).toContain('class="context-grid"')
     expect(skill).toContain('class="contribution-layout"')
     expect(skill).toMatch(/\.context-grid \{[\s\S]*grid-template-columns: repeat\(2/)
-    expect(progress).toMatch(/\.records \{[\s\S]*grid-auto-rows: 1fr/)
+    expect(progress).toContain('class="record-browser"')
+    expect(progress).toContain('class="record-categories"')
+    expect(progress).toContain('class="record-ledger"')
   })
 
   it("uses distinct champion-select and in-game live layouts", () => {
@@ -71,14 +102,18 @@ describe("desktop page layout", () => {
     expect(dial).toContain("prefers-reduced-motion")
   })
 
-  it("places event icons directly on the timeline graph", () => {
+  it("aligns readable event tracks beneath the timeline graph", () => {
     const review = read("src/pages/ReviewPage.vue")
 
     expect(review).toContain('class="gold-chart-wrap"')
-    expect(review).toContain('class="chart-marker"')
+    expect(review).toContain('class="timeline-event-tracks"')
+    expect(review).toContain('class="event-track-marker"')
+    expect(review).toContain('label: "Deaths"')
+    expect(review).toContain('label: "Levels"')
+    expect(review).toContain('label: "Items"')
     expect(review).toContain("timelineMarkerIcon")
     expect(review).toContain("timelineMarkerTitle")
-    expect(review).toContain("sampleTimelineEvents(source, 90)")
+    expect(review).toContain("sampleTimelineEvents(events, track.maximum)")
     expect(review).toContain("timelineObjectiveIconUrl")
     expect(review).toContain("abilityAsset(event)")
     expect(review).toContain("killActor(event)")
@@ -86,7 +121,7 @@ describe("desktop page layout", () => {
     expect(review).toContain('class="kill-matchup"')
     expect(review).toContain('class="blue-series"')
     expect(review).toContain('class="red-series"')
-    expect(review).toContain("timelineTeamGoldPoints")
+    expect(review).toContain("timelineGoldDifferencePoints")
     expect(review).toContain("finalTimelineFrame.blueGold")
   })
 
@@ -127,7 +162,7 @@ describe("desktop page layout", () => {
     expect(matches).toContain('class="team-roster"')
     expect(matches).toContain('class="performance"')
     expect(matches).toContain("minmax(120px, 1fr)")
-    expect(matches).toContain("repeat(2, minmax(195px, 245px))")
+    expect(matches).toContain("repeat(2, minmax(0, 1fr))")
     expect(matches).toContain("font-size: 12px; line-height: 1.15")
     expect(matches).toContain("killParticipation(match)")
     expect(matches).toContain("player(match)?.items")
@@ -223,6 +258,10 @@ describe("desktop page layout", () => {
     expect(panel).toContain('<RankGraph :points="points" :height="compact ? \'150px\' : \'220px\'" />')
     expect(panel).toContain("currentRankedSeason")
     expect(panel).toContain('v-model="selectedQueue"')
+    expect(panel).toContain('class="select-well"')
+    expect(panel).toContain('class="instrument-select"')
+    expect(panel).toContain('class="control-label">Queue')
+    expect(panel).not.toContain("compact-select")
     expect(rankGraph).toContain('type: "time"')
     expect(rankGraph).toContain('step: "end"')
     expect(rankGraph).toContain("timestamps.length === 1")
@@ -238,10 +277,12 @@ describe("desktop page layout", () => {
     expect(matches).toContain("match.queueName ?? modeLabel(match.mode)")
   })
 
-  it("scopes personal records with mode tabs", () => {
+  it("scopes personal records with a compact mode selector", () => {
     const progress = read("src/pages/ProgressPage.vue")
 
-    expect(progress).toContain('role="tablist"')
+    expect(progress).toContain('<UiField label="Mode"')
+    expect(progress).toContain('<select v-model="recordScopeModel"')
+    expect(progress).toContain('v-model="recordScopeModel"')
     expect(progress).toContain('label: "Solo/Duo Ranked"')
     expect(progress).toContain('label: "ARAM"')
     expect(progress).toContain('label: "Mayhem"')

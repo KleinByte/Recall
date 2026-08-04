@@ -4,6 +4,7 @@ import { computed } from "vue"
 import BaseEChart from "../charts/BaseEChart.vue"
 import { registerInsightCharts } from "../../charts/register-insights"
 import { escapeTooltip } from "../../charts/formatters"
+import { CHART_COLOURS, CHART_STYLES } from "../../charts/recall-chart-theme"
 import type { SkillGradeComponentPoint, SkillHistoryPoint } from "../../types/stats"
 
 registerInsightCharts()
@@ -32,7 +33,7 @@ const signatures = computed(() => games.value.map((game) => {
     game,
     history,
     lineStyle: {
-      color: history?.win ? "#2ec4a6" : "#d85b74",
+      color: history?.win ? CHART_COLOURS.positive : CHART_COLOURS.negative,
       opacity: history?.win ? .46 : .32,
       width: history?.win ? 1.5 : 1,
     },
@@ -63,7 +64,7 @@ const option = computed<EChartsCoreOption>(() => ({
     max: 100,
     nameLocation: "end",
     axisLabel: { show: index === 0 || index === axes.value.length - 1 },
-    splitLine: { lineStyle: { color: "rgba(200, 170, 109, .1)" } },
+    splitLine: { lineStyle: { color: CHART_STYLES.gridSoft } },
   })),
   series: [{
     type: "parallel",

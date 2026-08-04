@@ -4,6 +4,7 @@ import { computed } from "vue"
 import BaseEChart from "../charts/BaseEChart.vue"
 import { registerInsightCharts } from "../../charts/register-insights"
 import { escapeTooltip } from "../../charts/formatters"
+import { CHART_COLOURS, CHART_SCORE_RAMP, CHART_STYLES } from "../../charts/recall-chart-theme"
 import type { SkillGradeComponentPoint } from "../../types/stats"
 
 registerInsightCharts()
@@ -60,23 +61,25 @@ const option = computed<EChartsCoreOption>(() => ({
     left: "center",
     bottom: 4,
     text: ["Leads peers", "Trails peers"],
-    inRange: { color: ["#5b2637", "#26334a", "#0f7182", "#c8aa6d"] },
+    inRange: {
+      color: [CHART_SCORE_RAMP[0], CHART_SCORE_RAMP[2], CHART_SCORE_RAMP[3], CHART_SCORE_RAMP[4]],
+    },
   },
   series: [{
     type: "heatmap",
     data: heatData.value,
     label: {
       show: games.value.length <= 14,
-      color: "#f0e6d2",
+      color: CHART_COLOURS.text,
       fontSize: 10,
       fontWeight: 700,
-      backgroundColor: "rgba(6, 14, 28, .74)",
+      backgroundColor: CHART_STYLES.labelBackdrop,
       borderRadius: 2,
       padding: [2, 3],
       textBorderWidth: 0,
       formatter: (raw: unknown) => `${(raw as { value: number[] }).value[2]}`,
     },
-    emphasis: { itemStyle: { shadowBlur: 10, shadowColor: "rgba(0,0,0,0.5)" } },
+    emphasis: { itemStyle: { shadowBlur: 10, shadowColor: CHART_STYLES.labelShadow } },
   }],
 }))
 </script>

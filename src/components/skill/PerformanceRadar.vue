@@ -2,7 +2,7 @@
 import { computed } from "vue"
 import type { EChartsCoreOption } from "echarts/core"
 import BaseEChart from "../charts/BaseEChart.vue"
-import { CHART_COLOURS } from "../../charts/recall-chart-theme"
+import { CHART_COLOURS, CHART_STYLES } from "../../charts/recall-chart-theme"
 import { escapeTooltip } from "../../charts/formatters"
 import type { PerformanceDimensionScore } from "../../types/stats"
 
@@ -24,18 +24,18 @@ const option = computed<EChartsCoreOption>(() => {
   }> = [{
     name: props.primaryLabel ?? "Recorded profile",
     value: props.dimensions.map((dimension) => dimension.score),
-    lineStyle: { color: CHART_COLOURS.gold, width: 2 },
-    itemStyle: { color: CHART_COLOURS.goldBright },
-    areaStyle: { color: "rgba(200, 170, 109, 0.20)" },
+    lineStyle: { color: CHART_COLOURS.accent, width: 2 },
+    itemStyle: { color: CHART_COLOURS.accentStrong },
+    areaStyle: { color: CHART_STYLES.accentAreaStrong },
   }]
 
   if (hasRecent) {
     series.push({
       name: props.secondaryLabel ?? "Recent form",
       value: props.dimensions.map((dimension) => dimension.recentScore ?? dimension.score),
-      lineStyle: { color: CHART_COLOURS.cyan, width: 1.5 },
-      itemStyle: { color: CHART_COLOURS.cyan },
-      areaStyle: { color: "rgba(10, 203, 230, 0.09)" },
+      lineStyle: { color: CHART_COLOURS.live, width: 1.5 },
+      itemStyle: { color: CHART_COLOURS.live },
+      areaStyle: { color: CHART_STYLES.liveArea },
     })
   }
 
@@ -56,7 +56,7 @@ const option = computed<EChartsCoreOption>(() => {
     legend: {
       show: hasRecent,
       bottom: 0,
-      textStyle: { color: CHART_COLOURS.textSecondary, fontSize: 10 },
+      textStyle: { color: CHART_COLOURS.textSubtle, fontSize: 10 },
     },
     radar: {
       center: ["50%", hasRecent ? "46%" : "50%"],
@@ -68,8 +68,8 @@ const option = computed<EChartsCoreOption>(() => {
         fontFamily: "BeaufortforLOL Medium, serif",
         fontSize: 11,
       },
-      axisLine: { lineStyle: { color: "rgba(200, 170, 109, 0.18)" } },
-      splitLine: { lineStyle: { color: "rgba(200, 170, 109, 0.18)" } },
+      axisLine: { lineStyle: { color: CHART_STYLES.grid } },
+      splitLine: { lineStyle: { color: CHART_STYLES.grid } },
       splitArea: { show: false },
     },
     series: [{ type: "radar", symbolSize: 4, data: series }],

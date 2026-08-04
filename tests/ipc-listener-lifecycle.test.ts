@@ -7,7 +7,6 @@ describe("renderer IPC listener lifecycle", () => {
   it("owns page and component subscriptions through the unmount helper", () => {
     const files = [
       "src/App.vue",
-      "src/Overlay.vue",
       "src/components/ChampSelectBanner.vue",
       "src/components/WindowTitleBar.vue",
       "src/pages/ChallengesPage.vue",

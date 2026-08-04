@@ -2,7 +2,7 @@
 import { computed } from "vue"
 import type { EChartsCoreOption } from "echarts/core"
 import BaseEChart from "./charts/BaseEChart.vue"
-import { CHART_COLOURS } from "../charts/recall-chart-theme"
+import { CHART_COLOURS, CHART_STYLES } from "../charts/recall-chart-theme"
 import { escapeTooltip } from "../charts/formatters"
 import type { StyleAxis } from "../types/stats"
 
@@ -26,9 +26,9 @@ const option = computed<EChartsCoreOption>(() => {
   }> = [{
     name: props.primaryLabel ?? "All games",
     value: props.axes.map(valueFor),
-    lineStyle: { color: CHART_COLOURS.gold, width: 2 },
-    itemStyle: { color: CHART_COLOURS.gold },
-    areaStyle: { color: "rgba(200, 170, 109, 0.22)" },
+    lineStyle: { color: CHART_COLOURS.accent, width: 2 },
+    itemStyle: { color: CHART_COLOURS.accent },
+    areaStyle: { color: CHART_STYLES.accentAreaStrong },
   }]
 
   if (props.recent) {
@@ -37,9 +37,9 @@ const option = computed<EChartsCoreOption>(() => {
       value: props.axes.map((axis) =>
         valueFor(props.recent?.find((entry) => entry.key === axis.key) ?? axis),
       ),
-      lineStyle: { color: CHART_COLOURS.cyan, width: 1.5 },
-      itemStyle: { color: CHART_COLOURS.cyan },
-      areaStyle: { color: "rgba(10, 203, 230, 0.10)" },
+      lineStyle: { color: CHART_COLOURS.live, width: 1.5 },
+      itemStyle: { color: CHART_COLOURS.live },
+      areaStyle: { color: CHART_STYLES.liveArea },
     })
   }
 
@@ -52,7 +52,7 @@ const option = computed<EChartsCoreOption>(() => {
         return [
           `<strong>${escapeTooltip(item.name ?? "Playstyle")}</strong>`,
           ...props.axes.map((axis, index) =>
-            `${escapeTooltip(axis.label)}: ${values[index] ?? 0}%<br><span style="color:${CHART_COLOURS.textSecondary}">${escapeTooltip(axis.description)}</span>`,
+            `${escapeTooltip(axis.label)}: ${values[index] ?? 0}%<br><span style="color:${CHART_COLOURS.textSubtle}">${escapeTooltip(axis.description)}</span>`,
           ),
         ].join("<br>")
       },
@@ -60,7 +60,7 @@ const option = computed<EChartsCoreOption>(() => {
     legend: {
       show: seriesData.length > 1,
       bottom: 4,
-      textStyle: { color: CHART_COLOURS.textSecondary },
+      textStyle: { color: CHART_COLOURS.textSubtle },
     },
     radar: {
       center: ["50%", seriesData.length > 1 ? "47%" : "50%"],
@@ -72,8 +72,8 @@ const option = computed<EChartsCoreOption>(() => {
         fontFamily: "BeaufortforLOL Medium, serif",
         fontSize: 13,
       },
-      axisLine: { lineStyle: { color: "rgba(200, 170, 109, 0.18)" } },
-      splitLine: { lineStyle: { color: "rgba(200, 170, 109, 0.18)" } },
+      axisLine: { lineStyle: { color: CHART_STYLES.grid } },
+      splitLine: { lineStyle: { color: CHART_STYLES.grid } },
       splitArea: { show: false },
     },
     series: [{

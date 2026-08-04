@@ -61,36 +61,3 @@ export function championStatusFor(
     completedCount: completed.length,
   }
 }
-
-export interface OverlayContent {
-  championId: number
-  needed: ChampionStatus[]
-  done: ChampionStatus[]
-}
-
-/**
- * What the champion select overlay should say, if anything.
- *
- * Returns `undefined` when there is nothing worth covering the client for:
- * no champion held, nothing pinned, or nothing pinned that can speak about
- * champions at all. A champion already done is still worth showing — in ARAM
- * that is the cue to reroll or trade it away.
- */
-export function overlayContentFor(
-  pinned: ChallengeRow[],
-  championId: number | null,
-): OverlayContent | undefined {
-  if (championId === null) return undefined
-
-  const statuses = pinned
-    .map((challenge) => championStatusFor(challenge, championId))
-    .filter((status): status is ChampionStatus => status !== undefined)
-
-  if (statuses.length === 0) return undefined
-
-  return {
-    championId,
-    needed: statuses.filter((status) => !status.completed),
-    done: statuses.filter((status) => status.completed),
-  }
-}

@@ -2,6 +2,7 @@
 import type { EChartsCoreOption } from "echarts/core"
 import { computed } from "vue"
 import BaseEChart from "../charts/BaseEChart.vue"
+import { CHART_COLOURS, CHART_STYLES } from "../../charts/recall-chart-theme"
 import { recallGradeFromScore } from "../../shared/recall-grade"
 import type { SkillHistoryPoint } from "../../types/stats"
 
@@ -35,7 +36,7 @@ const option = computed<EChartsCoreOption>(() => ({
   legend: { top: 0, data: ["Win rate", "Recall score"] },
   xAxis: { type: "category", data: buckets.value.map((bucket) => bucket.label), axisTick: { show: false } },
   yAxis: [
-    { type: "value", min: 0, max: 100, axisLabel: { formatter: "{value}%" }, splitLine: { lineStyle: { color: "rgba(200, 170, 109, .1)" } } },
+    { type: "value", min: 0, max: 100, axisLabel: { formatter: "{value}%" }, splitLine: { lineStyle: { color: CHART_STYLES.gridSoft } } },
     { type: "value", axisLabel: { formatter: (value: number) => recallGradeFromScore(value) ?? "–" }, splitLine: { show: false } },
   ],
   series: [
@@ -44,7 +45,7 @@ const option = computed<EChartsCoreOption>(() => ({
       type: "bar",
       data: buckets.value.map((bucket) => ({
         value: Math.round(bucket.wins / bucket.games * 100),
-        itemStyle: { color: "rgba(10, 203, 230, .42)", borderColor: "#0acbe6", borderWidth: 1, borderRadius: [3, 3, 0, 0] },
+        itemStyle: { color: CHART_STYLES.liveFill, borderColor: CHART_COLOURS.live, borderWidth: 1, borderRadius: [3, 3, 0, 0] },
       })),
       barMaxWidth: 30,
     },
@@ -58,8 +59,8 @@ const option = computed<EChartsCoreOption>(() => ({
         ? bucket.grades.reduce((sum, score) => sum + score, 0) / bucket.grades.length
         : null),
       symbolSize: 7,
-      lineStyle: { color: "#c8aa6d", width: 2 },
-      itemStyle: { color: "#c8aa6d" },
+      lineStyle: { color: CHART_COLOURS.accent, width: 2 },
+      itemStyle: { color: CHART_COLOURS.accent },
     },
   ],
 }))

@@ -1,9 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
 import RankGraph from "../components/RankGraph.vue"
+import {
+  Button as UiButton,
+  EmptyState,
+  Field as UiField,
+  PageHeader,
+  Panel,
+  Surface,
+  Tabs as UiTabs,
+} from "../components/ui"
 import { api } from "../helpers/api"
 import { useApiEvents } from "../helpers/use-api-events"
 import { useCoalescedTask } from "../helpers/use-coalesced-task"
+import { reviewMatch } from "../helpers/navigation"
 import {
   championIconUrl,
   championNameById,
@@ -93,6 +103,7 @@ const RECORD_SCOPES: readonly {
 const ranked = ref<RankedHistory[]>([])
 const records = ref<PersonalRecord[]>([])
 const recordScope = ref<RecordScopeId>("rankedSolo")
+const recordCategory = ref<PersonalRecord["category"] | null>(null)
 const recordsLoading = ref(false)
 const goals = ref<Goal[]>([])
 const challenges = ref<ChallengeRow[]>([])
@@ -102,6 +113,22 @@ const goalKind = ref<"challenge" | "rank">("rank")
 const targetTier = ref("GOLD")
 const challengeSearch = ref("")
 const chosenChallenge = ref<ChallengeRow | null>(null)
+const goalKindModel = computed<string>({
+  get: () => goalKind.value,
+  set: (value) => { goalKind.value = value as "challenge" | "rank" },
+})
+const goalKindOptions = [
+  { value: "rank", label: "A rank" },
+  { value: "challenge", label: "A challenge" },
+]
+const recordScopeModel = computed<string>({
+  get: () => recordScope.value,
+  set: (value) => { void selectRecordScope(value as RecordScopeId) },
+})
+const recordScopeOptions = RECORD_SCOPES.map((scope) => ({
+  value: scope.id,
+  label: scope.label,
+}))
 
 const selectedRecordScope = computed(() =>
   RECORD_SCOPES.find((scope) => scope.id === recordScope.value)!,
@@ -244,21 +271,21 @@ const recordGroups = computed(() => RECORD_CATEGORY_ORDER.flatMap((category) => 
   const entries = records.value.filter((record) => record.category === category)
   return entries.length ? [{ category, entries }] : []
 }))
+const activeRecordGroup = computed(() =>
+  recordGroups.value.find((group) => group.category === recordCategory.value) ??
+  recordGroups.value[0],
+)
 </script>
 
 <template>
   <div class="page">
-    <header class="page-head">
-      <div>
-        <h1>Progress</h1>
-        <p class="muted subtitle">
-          Where you are heading, and the best you have managed so far.
-        </p>
-      </div>
-    </header>
+    <PageHeader
+      title="Progress"
+      eyebrow="Long-term archive"
+      description="Where you are heading, and the best you have managed so far."
+    />
 
-    <section v-if="rankedQueues.length" class="card">
-      <h2 class="section-title">Ranked</h2>
+    <Panel v-if="rankedQueues.length" title="Ranked" class="ranked-panel">
       <div class="queues">
         <div v-for="queue in rankedQueues" :key="queue.queue" class="queue">
           <div class="queue-head">
@@ -284,64 +311,47 @@ const recordGroups = computed(() => RECORD_CATEGORY_ORDER.flatMap((category) => 
           </p>
         </div>
       </div>
-    </section>
+    </Panel>
 
-    <div v-else class="card notice">
-      <h2 class="section-title">No ranked history yet</h2>
-      <p class="muted">
-        Recall notes where you stand each time it syncs, so a climb draws itself
-        from here on. Nothing before today can be recovered — the client only
-        reports where you are now.
-      </p>
-    </div>
+    <EmptyState
+      v-else
+      title="No ranked history yet"
+      description="Recall notes where you stand each time it syncs, so a climb draws itself from here on. Nothing before today can be recovered — the client only reports where you are now."
+    />
 
-    <section class="card">
-      <div class="panel-head">
-        <h2 class="section-title flush">Goals</h2>
-        <button
-          v-if="!adding"
-          class="league-button small"
-          @click="adding = true"
-        >
+    <Panel title="Goals" class="goals-panel">
+      <template #actions>
+        <UiButton v-if="!adding" size="compact" @click="adding = true">
           Set a goal
-        </button>
-      </div>
+        </UiButton>
+      </template>
 
-      <div v-if="adding" class="goal-form">
-        <div class="kind-row">
-          <button
-            class="league-button chip"
-            :class="{ active: goalKind === 'rank' }"
-            @click="goalKind = 'rank'"
-          >
-            A rank
-          </button>
-          <button
-            class="league-button chip"
-            :class="{ active: goalKind === 'challenge' }"
-            @click="goalKind = 'challenge'"
-          >
-            A challenge
-          </button>
-        </div>
+      <Surface v-if="adding" as="div" variant="inset" padding="compact" class="goal-form">
+        <UiTabs
+          v-model="goalKindModel"
+          :options="goalKindOptions"
+          label="Goal type"
+          variant="compact"
+          class="kind-tabs"
+        />
 
-        <label v-if="goalKind === 'rank'" class="field">
-          <span class="muted field-label">Target</span>
+        <UiField v-if="goalKind === 'rank'" label="Target" compact class="goal-field">
           <select v-model="targetTier" class="league-select">
             <option v-for="tier in TIERS" :key="tier" :value="tier">
               {{ tier.charAt(0) + tier.slice(1).toLowerCase() }}
             </option>
           </select>
-        </label>
+        </UiField>
 
-        <div v-else class="field">
-          <span class="muted field-label">Challenge</span>
-          <input
-            v-model="challengeSearch"
-            class="league-input"
-            placeholder="Search your challenges"
-            @input="chosenChallenge = null"
-          />
+        <div v-else class="goal-field">
+          <UiField label="Challenge" compact>
+            <input
+              v-model="challengeSearch"
+              class="league-input"
+              placeholder="Search your challenges"
+              @input="chosenChallenge = null"
+            />
+          </UiField>
           <ul v-if="challengeMatches.length && !chosenChallenge" class="suggestions">
             <li v-for="challenge in challengeMatches" :key="challenge.challengeId">
               <button class="suggestion" @click="chooseChallenge(challenge)">
@@ -356,32 +366,37 @@ const recordGroups = computed(() => RECORD_CATEGORY_ORDER.flatMap((category) => 
         </div>
 
         <div class="form-actions">
-          <button
-            class="league-button"
+          <UiButton
+            variant="primary"
             :disabled="!canSave"
             @click="saveGoal"
           >
             Save
-          </button>
-          <button class="league-button ghost" @click="resetForm">Cancel</button>
+          </UiButton>
+          <UiButton variant="ghost" @click="resetForm">Cancel</UiButton>
         </div>
-      </div>
+      </Surface>
 
-      <p v-if="!outstanding.length && !achieved.length && !adding" class="muted">
-        Nothing set yet. A goal turns a number into something to aim at.
-      </p>
+      <EmptyState
+        v-if="!outstanding.length && !achieved.length && !adding"
+        compact
+        title="No goals set"
+        description="A goal turns a number into something to aim at."
+      />
 
       <ul v-if="outstanding.length" class="goal-list">
         <li v-for="goal in outstanding" :key="goal.id">
           <div class="goal-head">
             <span class="goal-label">{{ goal.label }}</span>
-            <button
-              class="link remove"
+            <UiButton
+              variant="ghost"
+              size="compact"
+              class="remove"
               title="Remove this goal"
               @click="removeGoal(goal.id)"
             >
               Remove
-            </button>
+            </UiButton>
           </div>
           <div class="track">
             <span class="fill" :style="{ width: `${goal.progress * 100}%` }" />
@@ -398,73 +413,93 @@ const recordGroups = computed(() => RECORD_CATEGORY_ORDER.flatMap((category) => 
         <li v-for="goal in achieved" :key="goal.id">
           <div class="goal-head">
             <span class="goal-label">✓ {{ goal.label }}</span>
-            <button class="link remove" @click="removeGoal(goal.id)">
+            <UiButton variant="ghost" size="compact" class="remove" @click="removeGoal(goal.id)">
               Remove
-            </button>
+            </UiButton>
           </div>
           <div class="muted goal-meta">
             Reached {{ formatRelativeDate(goal.achievedAt!) }}
           </div>
         </li>
       </ul>
-    </section>
+    </Panel>
 
-    <section class="card records-card">
-      <div class="records-head">
-        <div>
-          <h2 class="section-title">Personal records</h2>
-          <p class="muted records-note">
-            Special modes stay separate so their rules do not distort your best Rift games.
-          </p>
-        </div>
-        <div class="record-tabs" role="tablist" aria-label="Personal record mode">
+    <Panel title="Personal records" class="records-card">
+      <template #actions>
+        <UiField label="Mode" compact class="record-scope-field">
+          <select v-model="recordScopeModel" class="league-select">
+            <option v-for="option in recordScopeOptions" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </UiField>
+      </template>
+      <p class="muted records-note">
+        Curated personal bests for {{ selectedRecordScope.label }}. Choose a category, then open any result in Review.
+      </p>
+
+      <div v-if="records.length && activeRecordGroup" class="record-browser">
+        <nav class="record-categories" aria-label="Record categories">
           <button
-            v-for="scope in RECORD_SCOPES"
-            :key="scope.id"
+            v-for="group in recordGroups"
+            :key="group.category"
             type="button"
-            role="tab"
-            class="record-tab"
-            :class="{ active: recordScope === scope.id }"
-            :aria-selected="recordScope === scope.id"
-            @click="selectRecordScope(scope.id)"
+            :class="{ active: activeRecordGroup.category === group.category }"
+            :aria-pressed="activeRecordGroup.category === group.category"
+            @click="recordCategory = group.category"
           >
-            {{ scope.label }}
+            <span>{{ group.category }}</span>
+            <strong class="numeric">{{ group.entries.length }}</strong>
           </button>
-        </div>
-      </div>
+        </nav>
 
-      <div v-if="records.length" class="record-groups">
-        <section v-for="group in recordGroups" :key="group.category" class="record-group">
+        <section class="record-ledger">
           <header>
-            <h3>{{ group.category }}</h3>
-            <span>{{ group.entries.length }} {{ group.entries.length === 1 ? "record" : "records" }}</span>
-          </header>
-          <div class="records">
-            <div v-for="record in group.entries" :key="record.key" class="record">
-              <div class="muted record-label">{{ record.label }}</div>
-              <div class="numeric record-value">{{ formatRecordValue(record) }}</div>
-              <div class="record-game">
-                <img
-                  :src="championIconUrl(record.championId)"
-                  :alt="championName(record.championId)"
-                  class="portrait"
-                />
-                <span class="muted record-meta">
-                  {{ modeLabel(record.mode) }} ·
-                  {{ formatRelativeDate(record.playedAt) }}
-                </span>
-              </div>
+            <div>
+              <span class="record-kicker">Record category</span>
+              <h3>{{ activeRecordGroup.category }}</h3>
             </div>
+            <span>{{ activeRecordGroup.entries.length }} bests</span>
+          </header>
+          <div class="record-rows">
+            <button
+              v-for="record in activeRecordGroup.entries"
+              :key="record.key"
+              type="button"
+              class="record-row"
+              @click="reviewMatch(record.gameId)"
+            >
+              <img
+                :src="championIconUrl(record.championId)"
+                :alt="championName(record.championId)"
+                class="portrait"
+              />
+              <span class="record-copy">
+                <strong>{{ record.label }}</strong>
+                <small>
+                  {{ championName(record.championId) }} · {{ modeLabel(record.mode) }} ·
+                  {{ formatRelativeDate(record.playedAt) }}
+                </small>
+              </span>
+              <strong class="numeric record-value">{{ formatRecordValue(record) }}</strong>
+              <span class="record-open" aria-hidden="true">→</span>
+            </button>
           </div>
         </section>
       </div>
-      <p v-else-if="recordsLoading" class="muted records-empty">
-        Loading {{ selectedRecordScope.label }} records…
-      </p>
-      <p v-else class="muted records-empty">
-        No {{ selectedRecordScope.label }} games have been recorded yet.
-      </p>
-    </section>
+      <EmptyState
+        v-else-if="recordsLoading"
+        compact
+        title="Loading personal records"
+        :description="`Recall is collecting ${selectedRecordScope.label} bests.`"
+      />
+      <EmptyState
+        v-else
+        compact
+        title="No personal records yet"
+        :description="`No ${selectedRecordScope.label} games have been recorded yet.`"
+      />
+    </Panel>
   </div>
 </template>
 
@@ -472,40 +507,8 @@ const recordGroups = computed(() => RECORD_CATEGORY_ORDER.flatMap((category) => 
 .page {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
-}
-
-.page-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: var(--space-5);
-  flex-wrap: wrap;
-}
-
-h1 {
-  font-family: var(--font-display);
-  font-size: 22px;
-  letter-spacing: 1px;
-  margin: 0;
-  color: var(--gold-bright);
-}
-
-.subtitle {
-  margin: var(--space-1) 0 0;
-  font-size: 12px;
-}
-
-.panel-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: var(--space-4);
-  margin-bottom: var(--space-3);
-}
-
-.section-title.flush {
-  margin: 0;
+  gap: var(--ui-space-4);
+  container: recall-content / inline-size;
 }
 
 .queues {
@@ -530,7 +533,7 @@ h1 {
 .queue-rank {
   font-family: var(--font-display);
   font-size: 18px;
-  color: var(--gold);
+  color: var(--ui-accent-strong);
 }
 
 .queue-meta {
@@ -544,13 +547,9 @@ h1 {
   margin-top: 2px;
 }
 
-.change.up {
-  color: var(--win);
-}
+.change.up { color: var(--ui-positive); }
 
-.change.down {
-  color: var(--loss);
-}
+.change.down { color: var(--ui-negative); }
 
 .footnote {
   font-size: 11px;
@@ -560,34 +559,12 @@ h1 {
 .goal-form {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  padding-bottom: var(--space-4);
-  margin-bottom: var(--space-3);
-  border-bottom: 1px solid var(--border-subtle);
+  gap: var(--ui-space-3);
+  margin-bottom: var(--ui-space-3);
 }
 
-.kind-row {
-  display: flex;
-  gap: var(--space-1);
-}
-
-.chip {
-  padding: var(--space-2) var(--space-3);
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  position: relative;
-  max-width: 420px;
-}
-
-.field-label {
-  font-size: 12px;
-  letter-spacing: 1.4px;
-  text-transform: uppercase;
-}
+.kind-tabs { align-self: flex-start; }
+.goal-field { position: relative; max-width: 420px; }
 
 .suggestions {
   list-style: none;
@@ -659,143 +636,121 @@ h1 {
   margin-top: var(--space-1);
 }
 
-.records {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  grid-auto-rows: 1fr;
-  gap: var(--space-4);
-}
-
-.record-groups {
-  display: grid;
-  gap: var(--space-5);
-}
-
-.record-group > header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-bottom: var(--space-2);
-  padding-bottom: var(--space-2);
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.record-group h3 {
-  margin: 0;
-  color: var(--text-primary);
-  font: 13px var(--font-heading);
-  letter-spacing: .65px;
-  text-transform: uppercase;
-}
-
-.record-group header span {
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.records-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: var(--space-4);
-  margin-bottom: var(--space-4);
-}
-
 .records-note {
   max-width: 58ch;
-  margin: var(--space-1) 0 0;
+  margin: 0 0 var(--ui-space-4);
   font-size: 11px;
   line-height: 1.5;
 }
 
-.record-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--surface-0);
+.record-scope-field { width: min(220px, 100%); }
+
+.record-browser {
+  display: grid;
+  grid-template-columns: minmax(150px, 190px) minmax(0, 1fr);
+  gap: var(--ui-space-4);
+  align-items: start;
 }
 
-.record-tab {
-  padding: 6px 10px;
-  border: 0;
-  border-radius: 2px;
+.record-categories {
+  display: grid;
+  gap: 3px;
+  padding: 4px;
+  border: 1px solid var(--ui-divider);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-inset);
+}
+
+.record-categories button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-2);
+  min-height: 35px;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--ui-radius-sm);
   background: transparent;
-  color: var(--text-muted);
-  font: 11px var(--font-body);
+  color: var(--ui-text-subtle);
+  font: 11px var(--ui-font-heading);
+  text-align: left;
   cursor: pointer;
 }
 
-.record-tab:hover {
-  color: var(--text-primary);
-  background: var(--surface-2);
+.record-categories button:hover { background: var(--ui-surface-hover-subtle); color: var(--ui-text); }
+.record-categories button.active { border-color: var(--ui-border-emphasis); background: color-mix(in srgb, var(--ui-accent) 10%, var(--ui-surface-hover)); color: var(--ui-text-heading); }
+.record-categories strong { color: var(--ui-text-muted); font-size: 10px; }
+
+.record-ledger {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--ui-divider);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-inset);
+  box-shadow: var(--ui-shadow-inset);
 }
 
-.record-tab.active {
-  background: var(--surface-3);
-  color: var(--gold-bright);
-  box-shadow: inset 0 -2px var(--gold);
-}
-
-.records-empty {
-  margin: 0;
-  padding: var(--space-5);
-  border: 1px dashed var(--border-subtle);
-  text-align: center;
-  font-size: 12px;
-}
-
-.record {
-  background: var(--surface-2);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: var(--space-3);
-}
-
-.record-label {
-  font-size: 12px;
-  letter-spacing: 1.4px;
-  text-transform: uppercase;
-}
-
-.record-value {
-  font-size: 24px;
-  color: var(--gold-bright);
-  margin: var(--space-1) 0 var(--space-2);
-}
-
-.record-game {
+.record-ledger > header {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  justify-content: space-between;
+  gap: var(--ui-space-3);
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--ui-divider);
+  background: var(--ui-surface-hover-subtle);
 }
 
+.record-kicker { color: var(--ui-text-muted); font-size: 8px; letter-spacing: 1.2px; text-transform: uppercase; }
+.record-ledger h3 { margin: 1px 0 0; color: var(--ui-text-heading); font: 13px var(--ui-font-heading); letter-spacing: .65px; text-transform: uppercase; }
+.record-ledger > header > span { color: var(--ui-text-muted); font-size: 11px; }
+.record-rows { display: grid; }
+
+.record-row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto 16px;
+  align-items: center;
+  gap: var(--ui-space-3);
+  min-width: 0;
+  min-height: 52px;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--ui-divider);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.record-row:last-child { border-bottom: 0; }
+.record-row:hover { background: color-mix(in srgb, var(--ui-live) 5%, var(--ui-surface-hover-subtle)); }
+.record-copy { display: flex; flex-direction: column; min-width: 0; }
+.record-copy strong { overflow: hidden; color: var(--ui-text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.record-copy small { overflow: hidden; margin-top: 2px; color: var(--ui-text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.record-value { color: var(--ui-accent-strong); font: 18px var(--ui-font-numeric); white-space: nowrap; }
+.record-open { color: var(--ui-live); opacity: .65; }
+
 .portrait {
-  width: 22px;
-  height: 22px;
+  width: 30px;
+  height: 30px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-subtle);
 }
 
-.record-meta {
-  font-size: 11px;
+@container recall-content (max-width: 720px) {
+  .records-card :deep(.head) { align-items: flex-start; flex-direction: column; }
+  .record-scope-field { width: 100%; }
+  .record-browser { grid-template-columns: minmax(0, 1fr); }
+  .record-categories { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+  .queue-head { gap: var(--ui-space-3); }
 }
 
-.notice {
-  padding: var(--space-5);
-}
-
-@media (max-width: 820px) {
-  .records-head {
-    flex-direction: column;
-  }
-
-  .record-tabs {
-    justify-content: flex-start;
-  }
+@container recall-content (max-width: 480px) {
+  .queue-head { flex-direction: column; }
+  .queue-meta { text-align: left; }
+  .kind-tabs { width: 100%; }
+  .form-actions :deep(.ui-button) { flex: 1; }
+  .record-row { grid-template-columns: 30px minmax(0, 1fr) auto; }
+  .record-open { display: none; }
+  .record-value { font-size: 15px; }
 }
 </style>

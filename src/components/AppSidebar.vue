@@ -1,19 +1,9 @@
 <script setup lang="ts">
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
 import {
-  faChartSimple,
-  faDragon,
-  faGear,
-  faListUl,
-  faTowerBroadcast,
-  faBookOpen,
   faAnglesLeft,
   faAnglesRight,
-  faRadiation,
   faRotate,
-  faSeedling,
-  faTrophy,
-  type IconDefinition,
 } from "@fortawesome/free-solid-svg-icons"
 import type { Summoner } from "../types/lol"
 import type { PageId } from "../helpers/navigation"
@@ -34,16 +24,51 @@ const emit = defineEmits<{
   (event: "refresh"): void
 }>()
 
-const items: { id: PageId; label: string; icon: IconDefinition }[] = [
-  { id: "dashboard", label: "Dashboard", icon: faChartSimple },
-  { id: "live", label: "Live Game", icon: faTowerBroadcast },
-  { id: "review", label: "Review", icon: faBookOpen },
-  { id: "matches", label: "Matches", icon: faListUl },
-  { id: "skill", label: "Skill", icon: faRadiation },
-  { id: "progress", label: "Progress", icon: faSeedling },
-  { id: "champions", label: "Champions", icon: faDragon },
-  { id: "challenges", label: "Challenges", icon: faTrophy },
-  { id: "settings", label: "Settings", icon: faGear },
+type NavigationArt = "glyph"
+
+interface NavigationItem {
+  id: PageId
+  label: string
+  hint: string
+  art: string
+  artType: NavigationArt
+}
+
+interface NavigationSection {
+  label: string
+  items: NavigationItem[]
+}
+
+const navSections: NavigationSection[] = [
+  {
+    label: "Command",
+    items: [
+      { id: "dashboard", label: "Dashboard", hint: "Performance view", art: "/game-data/ui/sidebar/dashboard.svg", artType: "glyph" },
+      { id: "live", label: "Live Game", hint: "Current match", art: "/game-data/ui/sidebar/live.svg", artType: "glyph" },
+    ],
+  },
+  {
+    label: "Archive",
+    items: [
+      { id: "review", label: "Review", hint: "Post-game lab", art: "/game-data/ui/sidebar/review.svg", artType: "glyph" },
+      { id: "matches", label: "Matches", hint: "Match history", art: "/game-data/ui/sidebar/matches.svg", artType: "glyph" },
+    ],
+  },
+  {
+    label: "Growth",
+    items: [
+      { id: "skill", label: "Skill", hint: "Patterns & form", art: "/game-data/ui/sidebar/skill.svg", artType: "glyph" },
+      { id: "progress", label: "Progress", hint: "Rank & records", art: "/game-data/ui/sidebar/progress.svg", artType: "glyph" },
+      { id: "champions", label: "Champions", hint: "Pool mastery", art: "/game-data/ui/sidebar/champions.svg", artType: "glyph" },
+      { id: "challenges", label: "Challenges", hint: "Collection goals", art: "/game-data/ui/sidebar/challenges.svg", artType: "glyph" },
+    ],
+  },
+  {
+    label: "System",
+    items: [
+      { id: "settings", label: "Settings", hint: "App & data", art: "/game-data/ui/sidebar/settings.svg", artType: "glyph" },
+    ],
+  },
 ]
 </script>
 
@@ -87,16 +112,27 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
     </div>
 
     <ul class="nav">
-      <li v-for="item in items" :key="item.id">
-        <button
-          class="nav-item"
-          :class="{ active: page === item.id }"
-          :title="collapsed ? item.label : undefined"
-          @click="emit('update:page', item.id)"
-        >
-          <FontAwesomeIcon :icon="item.icon" class="nav-icon" fixed-width />
-          <span v-if="!collapsed">{{ item.label }}</span>
-        </button>
+      <li v-for="section in navSections" :key="section.label" class="nav-section">
+        <p v-if="!collapsed" class="nav-section-label">{{ section.label }}</p>
+        <ul class="nav-group">
+          <li v-for="item in section.items" :key="item.id">
+            <button
+              class="nav-item"
+              :class="{ active: page === item.id }"
+              :title="collapsed ? item.label : undefined"
+              :aria-current="page === item.id ? 'page' : undefined"
+              @click="emit('update:page', item.id)"
+            >
+              <span class="nav-emblem" :class="`art-${item.artType}`" aria-hidden="true">
+                <img class="nav-art" :src="item.art" alt="" />
+              </span>
+              <span v-if="!collapsed" class="nav-copy">
+                <strong>{{ item.label }}</strong>
+                <small>{{ item.hint }}</small>
+              </span>
+            </button>
+          </li>
+        </ul>
       </li>
     </ul>
 
@@ -131,40 +167,75 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
 
 <style scoped>
 .sidebar {
-  width: var(--sidebar-width);
-  flex: 0 0 var(--sidebar-width);
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  width: var(--ui-sidebar-width);
+  flex: 0 0 var(--ui-sidebar-width);
   height: 100%;
   display: flex;
   flex-direction: column;
   background:
-    linear-gradient(180deg, rgba(200, 170, 109, 0.035), transparent 24%),
-    var(--surface-1);
-  border-right: 1px solid var(--border-subtle);
-  padding: var(--space-5) var(--space-3) var(--space-3);
+    radial-gradient(circle at 20% 8%, color-mix(in srgb, var(--ui-live) 9%, transparent), transparent 24%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--ui-accent) 8%, transparent),
+      transparent 22%,
+      color-mix(in srgb, var(--ui-team-blue) 4%, transparent) 72%,
+      transparent
+    ),
+    var(--ui-sidebar);
+  border-right: 1px solid color-mix(in srgb, var(--ui-accent) 42%, var(--ui-divider));
+  padding: var(--ui-space-5) var(--ui-space-3) var(--ui-space-3);
   box-sizing: border-box;
+  box-shadow: 14px 0 36px rgba(0, 0, 0, .22);
   transition: width 0.18s ease, flex-basis 0.18s ease, padding 0.18s ease;
+}
+
+.sidebar::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: auto -70px 22px -92px;
+  height: 330px;
+  background: url("/game-data/ui/map11.png") center / cover no-repeat;
+  opacity: .055;
+  filter: saturate(.65) contrast(1.12);
+  transform: rotate(-8deg);
+  pointer-events: none;
+}
+
+.sidebar::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  inset: 0 -1px 0 auto;
+  width: 1px;
+  background: linear-gradient(transparent 5%, var(--ui-accent-dim) 23%, var(--ui-live-dim) 78%, transparent 96%);
+  opacity: .68;
+  pointer-events: none;
 }
 
 .sidebar.collapsed {
   width: 68px;
   flex-basis: 68px;
-  padding-inline: var(--space-2);
+  padding-inline: var(--ui-space-2);
 }
 
 .brand {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 0 var(--space-2) var(--space-5);
-  border-bottom: 1px solid var(--border-subtle);
-  margin-bottom: var(--space-3);
+  gap: var(--ui-space-1);
+  padding: 0 var(--ui-space-2) var(--ui-space-5);
+  border-bottom: 1px solid var(--ui-divider);
+  margin-bottom: var(--ui-space-3);
 }
 
 .brand-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-2);
+  gap: var(--ui-space-2);
   min-width: 0;
 }
 
@@ -185,8 +256,8 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
   flex: 0 0 36px;
   margin-right: -5px;
   filter:
-    drop-shadow(0 0 5px rgba(240, 211, 116, 0.18))
-    drop-shadow(0 0 7px rgba(10, 203, 230, 0.1));
+    drop-shadow(0 0 5px color-mix(in srgb, var(--ui-accent-strong) 18%, transparent))
+    drop-shadow(0 0 7px color-mix(in srgb, var(--ui-live) 10%, transparent));
 }
 
 .brand-logo-collapsed {
@@ -195,24 +266,24 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
   flex-basis: 44px;
   margin: -4px 0;
   filter:
-    drop-shadow(0 0 8px rgba(240, 211, 116, 0.2))
-    drop-shadow(0 0 12px rgba(10, 203, 230, 0.22));
+    drop-shadow(0 0 8px color-mix(in srgb, var(--ui-accent-strong) 20%, transparent))
+    drop-shadow(0 0 12px color-mix(in srgb, var(--ui-live) 22%, transparent));
 }
 
 .brand-mark {
-  font-family: var(--font-display);
+  font-family: var(--ui-font-display);
   font-size: 24px;
   letter-spacing: 2.1px;
-  color: var(--gold);
+  color: var(--ui-accent);
   line-height: 1;
 }
 
 .brand-name {
-  font-family: var(--font-heading);
+  font-family: var(--ui-font-heading);
   font-size: 11px;
   letter-spacing: 1.6px;
   text-transform: uppercase;
-  color: var(--text-secondary);
+  color: var(--ui-text-subtle);
 }
 
 .collapse-toggle {
@@ -222,16 +293,17 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
   display: grid;
   place-items: center;
   padding: 0;
-  background: var(--surface-2);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
+  background: var(--ui-control-background);
+  border: 1px solid var(--ui-control-border);
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-subtle);
   cursor: pointer;
 }
 
 .collapse-toggle:hover {
-  border-color: var(--gold);
-  color: var(--gold-bright);
+  border-color: var(--ui-control-border-hover);
+  background: var(--ui-control-background-hover);
+  color: var(--ui-text-heading);
 }
 
 .sidebar.collapsed .brand {
@@ -241,7 +313,7 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
 
 .sidebar.collapsed .brand-row {
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--ui-space-2);
 }
 
 .brand-title-collapsed.brand-recall-enter-active {
@@ -264,82 +336,228 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
 .brand-subtitle-leave-active { animation: subtitle-leave .15s ease both; }
 
 .nav {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+  min-height: 0;
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
-  flex: 1;
+  gap: 9px;
+  margin: 0 -3px;
+  padding: 0 3px 4px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  list-style: none;
+  scrollbar-width: none;
 }
 
-.nav li:last-child {
+.nav::-webkit-scrollbar { display: none; }
+
+.nav-section {
+  list-style: none;
+}
+
+.nav-section:last-child {
   margin-top: auto;
 }
 
-.nav-item {
-  width: 100%;
+.nav-section-label {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  font-family: var(--font-body);
-  font-size: 13px;
-  letter-spacing: 0.6px;
-  text-align: left;
+  gap: 8px;
+  margin: 0 8px 4px;
+  color: var(--ui-text-faint);
+  font: 9px var(--ui-font-heading);
+  letter-spacing: 1.7px;
+  text-transform: uppercase;
+}
+
+.nav-section-label::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: linear-gradient(90deg, var(--ui-divider), transparent);
+}
+
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nav-item {
+  position: relative;
+  width: 100%;
+  min-height: 41px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 7px;
+  overflow: hidden;
   background: transparent;
-  color: var(--text-secondary);
-  border: none;
+  color: var(--ui-text-subtle);
   border: 1px solid transparent;
-  border-left: 2px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-sm);
+  text-align: left;
   cursor: pointer;
-  transition:
-    background 0.12s ease,
-    color 0.12s ease;
+  transition: transform .16s ease, border-color .16s ease, background .16s ease, color .16s ease;
+}
+
+.nav-item::before {
+  content: "";
+  position: absolute;
+  inset: 7px auto 7px 0;
+  width: 2px;
+  border-radius: var(--ui-radius-pill);
+  background: linear-gradient(var(--ui-accent-strong), var(--ui-accent-dim));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--ui-accent) 55%, transparent);
+  opacity: 0;
+  transform: scaleY(.4);
+  transition: opacity .16s ease, transform .16s ease;
+}
+
+.sidebar:not(.collapsed) .nav-item:hover {
+  transform: translateX(2px);
+}
+
+.nav-item:hover {
+  border-color: color-mix(in srgb, var(--ui-border) 65%, transparent);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--ui-live) 5%, transparent), var(--ui-surface-hover-subtle));
+  color: var(--ui-text);
+}
+
+.nav-item.active {
+  border-color: color-mix(in srgb, var(--ui-accent) 48%, var(--ui-border));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--ui-accent) 13%, transparent), transparent 58%),
+    linear-gradient(115deg, color-mix(in srgb, var(--ui-team-blue) 12%, var(--ui-surface-hover)), var(--ui-surface-inset));
+  color: var(--ui-text-heading);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ui-accent-strong) 9%, transparent), 0 7px 18px rgba(0, 0, 0, .18);
+}
+
+.nav-item.active::before {
+  opacity: 1;
+  transform: scaleY(1);
+}
+
+.nav-emblem {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--ui-accent) 34%, var(--ui-border));
+  border-radius: 9px 3px 9px 3px;
+  background:
+    radial-gradient(circle at 42% 32%, color-mix(in srgb, var(--ui-team-blue) 13%, transparent), transparent 54%),
+    var(--ui-surface-inset);
+  box-shadow: inset 0 0 10px rgba(0, 0, 0, .42);
+  transition: border-color .16s ease, box-shadow .16s ease, filter .16s ease;
+}
+
+.nav-emblem::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border: 1px solid color-mix(in srgb, var(--ui-accent) 16%, transparent);
+  border-radius: 6px 2px 6px 2px;
+  pointer-events: none;
+}
+
+.nav-art {
+  width: 21px;
+  height: 21px;
+  object-fit: contain;
+  opacity: .72;
+  filter: saturate(.72) brightness(.86);
+  transition: opacity .16s ease, filter .16s ease, transform .16s ease;
+}
+
+.art-glyph .nav-art { width: 21px; height: 21px; }
+
+.nav-item:hover .nav-emblem,
+.nav-item.active .nav-emblem {
+  border-color: var(--ui-border-emphasis);
+  box-shadow: inset 0 0 10px rgba(0, 0, 0, .3), 0 0 11px color-mix(in srgb, var(--ui-live) 18%, transparent);
+}
+
+.nav-item:hover .nav-art,
+.nav-item.active .nav-art {
+  opacity: 1;
+  filter: saturate(1) brightness(1.08);
+}
+
+.nav-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.nav-copy strong {
+  overflow: hidden;
+  color: inherit;
+  font: 12px var(--ui-font-heading);
+  letter-spacing: .55px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-copy small {
+  overflow: hidden;
+  color: var(--ui-text-muted);
+  font: 9px var(--ui-font-body);
+  letter-spacing: .25px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-item.active .nav-copy small { color: var(--ui-text-subtle); }
+
+.sidebar.collapsed .nav {
+  gap: 5px;
+  margin-inline: 0;
+  padding-inline: 0;
+}
+
+.sidebar.collapsed .nav-section:not(:last-child) {
+  padding-bottom: 5px;
+  border-bottom: 1px solid color-mix(in srgb, var(--ui-divider) 72%, transparent);
 }
 
 .sidebar.collapsed .nav-item {
   justify-content: center;
-  padding-inline: 0;
+  min-height: 42px;
+  padding: 4px;
 }
 
-.nav-item:hover {
-  background: var(--surface-2);
-  color: var(--text-primary);
-}
-
-.nav-item.active {
-  background: linear-gradient(90deg, var(--surface-3), var(--surface-2));
-  border-color: var(--border-subtle);
-  border-left-color: var(--gold);
-  color: var(--gold-bright);
-}
-
-.nav-icon {
-  font-size: 13px;
-  opacity: 0.85;
-}
+.sidebar.collapsed .nav-item::before { inset-block: 9px; }
+.sidebar.collapsed .nav-emblem { width: 34px; height: 34px; flex-basis: 34px; }
 
 .refresh {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-2);
+  gap: var(--ui-space-2);
   width: 100%;
-  margin: var(--space-3) 0 var(--space-2);
-  padding: var(--space-2);
-  background: linear-gradient(145deg, var(--surface-3), var(--surface-2));
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  color: var(--gold-bright);
+  min-height: 34px;
+  margin: 9px 0 var(--ui-space-2);
+  padding: var(--ui-space-2);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ui-team-blue) 5%, transparent), transparent), var(--ui-control-background);
+  border: 1px solid var(--ui-control-border);
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-control-text);
   cursor: pointer;
-  font-family: var(--font-body);
+  font-family: var(--ui-font-body);
   font-size: 12px;
 }
 
 .refresh:hover:not(:disabled) {
-  border-color: var(--gold);
+  border-color: var(--ui-control-border-hover);
+  background: var(--ui-control-background-hover);
 }
 
 .sidebar.collapsed .refresh {
@@ -348,7 +566,7 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
 
 .refresh:disabled {
   cursor: not-allowed;
-  color: var(--text-muted);
+  color: var(--ui-text-faint);
   opacity: 0.7;
 }
 
@@ -357,9 +575,9 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
 }
 
 .refresh-message {
-  margin: 0 0 var(--space-2);
+  margin: 0 0 var(--ui-space-2);
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--ui-text-subtle);
   text-align: center;
 }
 
@@ -410,50 +628,93 @@ const items: { id: PageId; label: string; icon: IconDefinition }[] = [
   }
 }
 
+@media (max-height: 680px) {
+  .sidebar:not(.collapsed) .brand {
+    padding-bottom: var(--ui-space-3);
+    margin-bottom: var(--ui-space-2);
+  }
+
+  .sidebar:not(.collapsed) .nav { gap: 3px; }
+  .sidebar:not(.collapsed) .nav-section-label { display: none; }
+
+  .sidebar:not(.collapsed) .nav-section:not(:last-child) {
+    padding-bottom: 3px;
+    border-bottom: 1px solid color-mix(in srgb, var(--ui-divider) 62%, transparent);
+  }
+
+  .sidebar:not(.collapsed) .nav-item {
+    min-height: 34px;
+    padding-block: 2px;
+  }
+
+  .sidebar:not(.collapsed) .nav-emblem {
+    width: 28px;
+    height: 28px;
+    flex-basis: 28px;
+  }
+
+  .sidebar:not(.collapsed) .nav-art { width: 18px; height: 18px; }
+  .sidebar:not(.collapsed) .nav-copy small { display: none; }
+  .sidebar:not(.collapsed) .refresh { margin-top: 5px; }
+  .sidebar:not(.collapsed) .status { padding-block: 7px; }
+}
+
 .status {
-  border-top: 1px solid var(--border-subtle);
-  padding: var(--space-3) var(--space-2) var(--space-1);
+  margin-top: 2px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--ui-divider) 78%, transparent);
+  border-radius: var(--ui-radius-sm);
+  background: color-mix(in srgb, var(--ui-surface-inset) 76%, transparent);
+  box-shadow: var(--ui-shadow-inset);
 }
 
 .status-row {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--ui-space-2);
 }
 
 .sidebar.collapsed .status-row {
   justify-content: center;
 }
 
+.sidebar.collapsed .status {
+  margin-inline: 5px;
+  padding: 8px 0;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
 .dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--text-muted);
+  background: var(--ui-text-faint);
   flex: 0 0 auto;
 }
 
 .dot.online {
-  background: var(--win);
-  box-shadow: 0 0 6px var(--win);
+  background: var(--ui-live);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--ui-live) 72%, transparent);
 }
 
 .status-text {
   font-size: 11px;
-  color: var(--text-secondary);
+  color: var(--ui-text-subtle);
 }
 
 .summoner {
-  margin-top: var(--space-1);
+  margin-top: var(--ui-space-1);
   padding-left: 15px;
   font-size: 12px;
-  color: var(--text-primary);
+  color: var(--ui-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .tag {
-  color: var(--text-muted);
+  color: var(--ui-text-muted);
 }
 </style>

@@ -29,7 +29,6 @@ import {
   ChallengesRepository,
   type ChallengeFilter,
 } from "./database/challenges-repo.js"
-import type { ChallengeRow } from "./challenges/types.js"
 import { ProfileRepository } from "./database/profile-repo.js"
 import { ParticipantsRepository } from "./database/participants-repo.js"
 import { MasteryRepository } from "./database/mastery-repo.js"
@@ -50,8 +49,7 @@ import { buildSkillReport } from "./matches/skill-report.js"
 import { buildPerformanceProfile } from "./matches/performance-profile.js"
 import { recordScopeForMatch } from "./matches/records.js"
 import { championsNeededFor } from "./challenges/champion-needs.js"
-import { championStatusFor, overlayContentFor } from "./challenges/pinned.js"
-import { Overlay, type OverlayPosition } from "./overlay.js"
+import { championStatusFor } from "./challenges/pinned.js"
 import { LcuClient } from "./lcu-client.js"
 import { LcuDiscovery, type LcuCredentials } from "./lcu-discovery.js"
 import { LcuEvents as LcuEventStream } from "./lcu-events.js"
@@ -187,8 +185,6 @@ let session: Session | undefined
 let connectRetry: NodeJS.Timeout | undefined
 let lcuDiscovery: LcuDiscovery | undefined
 let tray: Tray | undefined
-let overlay: Overlay | undefined
-let overlayRevision = 0
 let liveRevision = 0
 let liveGameReading = false
 let liveSession: LiveSession = {
@@ -743,12 +739,10 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
   })
   events.on("pick", (championId: number | null) => {
     broadcast(win, "pick", championId)
-    void updateOverlay(championId)
   })
   events.on("champ-select", () => void refreshLiveSession(win, "ChampSelect"))
   events.on("game-start", (selections: unknown) => {
     broadcast(win, "game-start", selections)
-    hideOverlay()
     void refreshLiveSession(win, "InProgress")
   })
   events.on("phase", (phase: string) => {
@@ -801,7 +795,6 @@ function stopSession(win: BrowserWindow) {
   session.client.close()
   session.gameClient.close()
   session = undefined
-  hideOverlay()
   clearLiveSession(win)
 
   broadcast(win, "lcu:status", { connected: false, summoner: null })
@@ -1265,24 +1258,6 @@ function readPinned(): number[] {
   return Array.isArray(stored) ? (stored as number[]) : []
 }
 
-function getOverlay(): Overlay {
-  if (!overlay) {
-    overlay = new Overlay(
-      preload,
-      indexHtml,
-      VITE_DEV_SERVER_URL,
-      () => store.get("overlay-position") as OverlayPosition | undefined,
-      (position) => store.set("overlay-position", position),
-    )
-  }
-  return overlay
-}
-
-function hideOverlay() {
-  overlayRevision += 1
-  getOverlay().hide()
-}
-
 function storedChampionCatalog(): ChampionCatalogEntry[] {
   return mergeChampionCatalog(store.get(CHAMPION_CATALOG_STORE))
 }
@@ -1318,54 +1293,13 @@ async function loadChampionCatalog(): Promise<ChampionCatalogEntry[]> {
   }
 }
 
-/** Champion names for overlays and recommendations, online or offline. */
+/** Champion names for recommendations, online or offline. */
 async function championNameFor(championId: number): Promise<string | undefined> {
   const known = championNames?.get(championId)
   if (known) return known
 
   const catalog = await loadChampionCatalog()
   return catalog.find((champion) => champion.id === championId)?.name
-}
-
-/**
- * Puts the overlay over the client, or takes it away.
- *
- * It appears only while a champion is held and a pinned challenge has an
- * opinion about it, so it never covers the client without cause.
- */
-async function updateOverlay(championId: number | null) {
-  const revision = ++overlayRevision
-  const puuid = currentPuuid()
-  if (!puuid) {
-    if (revision === overlayRevision) getOverlay().hide()
-    return
-  }
-
-  const pinnedIds = readPinned()
-  if (pinnedIds.length === 0) {
-    if (revision === overlayRevision) getOverlay().hide()
-    return
-  }
-
-  const repo = getChallenges()
-  const pinned = pinnedIds
-    .map((id) => repo.getById(id, puuid))
-    .filter((challenge): challenge is ChallengeRow => challenge !== undefined)
-
-  const content = overlayContentFor(pinned, championId)
-
-  if (!content) {
-    if (revision === overlayRevision) getOverlay().hide()
-    return
-  }
-
-  const championName = await championNameFor(content.championId)
-  if (revision !== overlayRevision) return
-
-  getOverlay().show({
-    ...content,
-    championName,
-  })
 }
 
 function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
@@ -2252,7 +2186,6 @@ async function prepareShutdown(
   if (shutdownPrepared) return
 
   quitting = true
-  hideOverlay()
   riotBackfillRevision += 1
   riotBackfillAbort?.abort()
   riotBackfillAbort = undefined

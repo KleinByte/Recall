@@ -2,6 +2,7 @@
 import type { EChartsCoreOption } from "echarts/core"
 import { computed, ref, watch } from "vue"
 import BaseEChart from "../charts/BaseEChart.vue"
+import { CHART_COLOURS, CHART_STYLES } from "../../charts/recall-chart-theme"
 import { championNameById } from "../../helpers/format"
 import { recallGradeFromScore } from "../../shared/recall-grade"
 import type { Champion } from "../../types/lol"
@@ -41,7 +42,7 @@ const option = computed<EChartsCoreOption>(() => ({
   yAxis: {
     type: "value",
     axisLabel: { formatter: (value: number) => recallGradeFromScore(value) ?? "–" },
-    splitLine: { lineStyle: { color: "rgba(200, 170, 109, .1)" } },
+    splitLine: { lineStyle: { color: CHART_STYLES.gridSoft } },
   },
   series: [
     {
@@ -49,7 +50,7 @@ const option = computed<EChartsCoreOption>(() => ({
       type: "scatter",
       data: games.value.map((game, index) => ({
         value: [index + 1, game.gradeScore],
-        itemStyle: { color: game.win ? "rgba(46, 196, 166, .52)" : "rgba(216, 91, 116, .48)" },
+        itemStyle: { color: game.win ? CHART_STYLES.positiveFill : CHART_STYLES.negativeFill },
       })),
       symbolSize: 6,
     },
@@ -59,7 +60,7 @@ const option = computed<EChartsCoreOption>(() => ({
       data: moving.value,
       smooth: .3,
       showSymbol: false,
-      lineStyle: { color: "#c8aa6d", width: 2.5 },
+      lineStyle: { color: CHART_COLOURS.accent, width: 2.5 },
     },
   ],
 }))

@@ -2,7 +2,14 @@
 import { computed, onMounted, ref, watch } from "vue"
 import MatchList from "../components/MatchList.vue"
 import Pagination from "../components/Pagination.vue"
-import StatCard from "../components/StatCard.vue"
+import {
+  Button,
+  EmptyState,
+  Field,
+  PageHeader,
+  StatTile,
+  Surface,
+} from "../components/ui"
 import { api } from "../helpers/api"
 import { useApiEvents } from "../helpers/use-api-events"
 import { useCoalescedTask } from "../helpers/use-coalesced-task"
@@ -200,49 +207,50 @@ const averageGrade = computed(() => gradeFromScore(summary.value?.avgGradeScore)
 
 <template>
   <div class="page">
-    <header class="page-head">
-      <div>
-        <h1>Matches</h1>
-        <p class="muted subtitle">
-          Every game Recall has recorded, across all tracked modes.
-        </p>
-      </div>
-    </header>
+    <PageHeader
+      title="Matches"
+      eyebrow="Performance archive"
+      description="Every game Recall has recorded, across all tracked modes."
+    />
 
-    <div class="filters card">
+    <Surface
+      as="section"
+      variant="toolbar"
+      padding="compact"
+      class="filters"
+      aria-label="Match filters"
+    >
       <div class="mode-row">
-        <button
+        <Button
           v-for="mode in MODES"
           :key="mode.value"
-          class="league-button chip"
-          :class="{ active: selectedModes.includes(mode.value) }"
+          class="chip"
+          size="compact"
+          :active="selectedModes.includes(mode.value)"
           @click="toggleMode(mode.value)"
         >
           {{ mode.label }}
-        </button>
+        </Button>
       </div>
 
       <div class="control-row">
-        <label class="field">
-          <span class="muted field-label">Range</span>
+        <Field label="Range" compact>
           <select v-model="rangeDays" class="league-select">
             <option v-for="range in RANGES" :key="range.label" :value="range.days">
               {{ range.label }}
             </option>
           </select>
-        </label>
+        </Field>
 
-        <label class="field">
-          <span class="muted field-label">Result</span>
+        <Field label="Result" compact>
           <select v-model="result" class="league-select">
             <option :value="undefined">Any</option>
             <option value="win">Wins</option>
             <option value="loss">Losses</option>
           </select>
-        </label>
+        </Field>
 
-        <label class="field">
-          <span class="muted field-label">Champion</span>
+        <Field label="Champion" compact>
           <select v-model="championId" class="league-select">
             <option :value="undefined">Any champion</option>
             <option
@@ -253,10 +261,9 @@ const averageGrade = computed(() => gradeFromScore(summary.value?.avgGradeScore)
               {{ champion.name }}
             </option>
           </select>
-        </label>
+        </Field>
 
-        <label class="field">
-          <span class="muted field-label">Grade</span>
+        <Field label="Grade" compact>
           <select v-model="minGradeScore" class="league-select">
             <option
               v-for="option in GRADES"
@@ -266,24 +273,26 @@ const averageGrade = computed(() => gradeFromScore(summary.value?.avgGradeScore)
               {{ option.label }}
             </option>
           </select>
-        </label>
+        </Field>
 
-        <label class="field">
-          <span class="muted field-label">Sort</span>
+        <Field label="Sort" compact>
           <select v-model="sortBy" class="league-select">
             <option v-for="option in SORTS" :key="option.label" :value="option.value">
               {{ option.label }}
             </option>
           </select>
-        </label>
+        </Field>
 
-        <button
-          class="league-button dir"
+        <Button
+          class="dir"
+          size="compact"
+          icon-only
           :title="sortDir === 'desc' ? 'Descending' : 'Ascending'"
+          :aria-label="sortDir === 'desc' ? 'Sort descending' : 'Sort ascending'"
           @click="sortDir = sortDir === 'desc' ? 'asc' : 'desc'"
         >
           {{ sortDir === "desc" ? "↓" : "↑" }}
-        </button>
+        </Button>
 
         <label class="toggle">
           <input type="checkbox" v-model="excludeRemakes" />
@@ -300,63 +309,65 @@ const averageGrade = computed(() => gradeFromScore(summary.value?.avgGradeScore)
           <span>Has notes</span>
         </label>
 
-        <label v-if="tags.length" class="field">
-          <span class="muted field-label">Tag</span>
+        <Field v-if="tags.length" label="Tag" compact>
           <select v-model="tagId" class="league-select">
             <option :value="undefined">Any tag</option>
             <option v-for="tag in tags" :key="tag.id" :value="tag.id">{{ tag.name }}</option>
           </select>
-        </label>
+        </Field>
 
-        <label v-if="experiments.length" class="field">
-          <span class="muted field-label">Experiment</span>
+        <Field v-if="experiments.length" label="Experiment" compact>
           <select v-model="experimentId" class="league-select">
             <option :value="undefined">Any experiment</option>
             <option v-for="experiment in experiments" :key="experiment.id" :value="experiment.id">
               {{ experiment.name }}
             </option>
           </select>
-        </label>
+        </Field>
 
-        <button
+        <Button
           v-if="hasFilters"
-          class="league-button clear"
+          class="clear"
+          variant="ghost"
+          size="compact"
           @click="clearFilters"
         >
           Clear filters
-        </button>
+        </Button>
       </div>
-    </div>
+    </Surface>
 
-    <section v-if="summary && summary.games > 0" class="kpis">
-      <StatCard label="Games" :value="summary.games.toString()" />
-      <StatCard
+    <Surface
+      v-if="summary && summary.games > 0"
+      as="section"
+      variant="quiet"
+      padding="compact"
+      class="kpis"
+      aria-label="Filtered match summary"
+    >
+      <StatTile density="compact" label="Games" :value="summary.games.toString()" />
+      <StatTile
+        density="compact"
         label="Win rate"
         :value="formatPercent(summary.winRate)"
         :tone="summary.winRate >= 0.5 ? 'win' : 'loss'"
       />
-      <StatCard label="KDA" :value="formatDecimal(summary.kda, 2)" />
-      <StatCard label="Avg grade" :value="averageGrade ?? '–'" />
-    </section>
+      <StatTile density="compact" label="KDA" :value="formatDecimal(summary.kda, 2)" />
+      <StatTile density="compact" label="Avg grade" :value="averageGrade ?? '–'" />
+    </Surface>
 
-    <div v-if="total === 0 && !loading" class="card notice">
-      <template v-if="hasFilters">
-        <h2 class="section-title">No matches for these filters</h2>
-        <p class="muted">
-          Nothing recorded matches the current selection.
-          <button class="link" @click="clearFilters">Clear the filters</button>
-          to see everything.
-        </p>
+    <EmptyState
+      v-if="total === 0 && !loading"
+      class="notice"
+      :title="hasFilters ? 'No matches for these filters' : 'No matches recorded yet'"
+      :description="hasFilters
+        ? 'Nothing recorded matches the current selection.'
+        : 'Recall records games as you play and keeps them permanently. Add a Riot API key in Settings to import every older match Riot still exposes; without one, the League client fallback provides 20 games.'"
+    >
+      <template v-if="hasFilters" #actions>
+        <Button size="compact" @click="clearFilters">Clear filters</Button>
       </template>
-      <template v-else>
-        <h2 class="section-title">No matches recorded yet</h2>
-        <p class="muted">
-          Recall records games as you play and keeps them permanently. Add a
-          Riot API key in Settings to import every older match Riot still
-          exposes; without one, the League client fallback provides 20 games.
-        </p>
-      </template>
-    </div>
+    </EmptyState>
 
     <template v-else>
       <Pagination
@@ -380,63 +391,32 @@ const averageGrade = computed(() => gradeFromScore(summary.value?.avgGradeScore)
 .page {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--ui-space-5);
   width: min(100%, 1480px);
   margin-inline: auto;
-}
-
-h1 {
-  font-family: var(--font-display);
-  font-size: 22px;
-  letter-spacing: 1px;
-  margin: 0;
-  color: var(--gold-bright);
-}
-
-.subtitle {
-  margin: var(--space-1) 0 0;
-  font-size: 12px;
 }
 
 .filters {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
+  gap: var(--ui-space-3);
 }
 
 .mode-row {
   display: flex;
-  gap: var(--space-1);
+  gap: var(--ui-space-1);
   flex-wrap: wrap;
-}
-
-.chip {
-  padding: var(--space-2) var(--space-3);
 }
 
 .control-row {
   display: flex;
-  gap: var(--space-3);
+  gap: var(--ui-space-3);
   align-items: flex-end;
   flex-wrap: wrap;
 }
 
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.field-label {
-  font-size: 12px;
-  letter-spacing: 1.2px;
-  text-transform: uppercase;
-}
-
-.dir {
-  padding: var(--space-2) var(--space-3);
-}
+.control-row > :deep(.ui-field) { flex: 1 1 130px; }
+.dir { flex: 0 0 auto; }
 
 .toggle {
   display: flex;
@@ -452,7 +432,6 @@ h1 {
 }
 
 .clear {
-  padding: var(--space-2) var(--space-3);
   margin-left: auto;
 }
 
@@ -466,18 +445,17 @@ h1 {
   max-width: 62ch;
 }
 
-.notice p {
-  margin: 0;
-  font-size: 13px;
+@container recall-content (max-width: 760px) {
+  .page { gap: var(--ui-space-4); }
+  .control-row { align-items: stretch; }
+  .control-row > :deep(.ui-field) { flex-basis: calc(50% - var(--ui-space-2)); }
+  .dir { align-self: end; }
+  .toggle { flex: 1 1 130px; padding: var(--ui-space-2) 0 0; }
+  .clear { margin-left: 0; }
 }
 
-.link {
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--gold);
-  cursor: pointer;
-  font: inherit;
-  text-decoration: underline;
+@container recall-content (max-width: 430px) {
+  .mode-row > :deep(.ui-button) { flex: 1 1 calc(50% - var(--ui-space-1)); }
+  .control-row > :deep(.ui-field) { flex-basis: 100%; }
 }
 </style>

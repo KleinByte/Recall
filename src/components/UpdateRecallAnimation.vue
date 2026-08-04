@@ -16,7 +16,7 @@ const eyebrow = computed(() => {
 const headline = computed(() => {
   if (props.phase === "channeling") return `Preparing Recall ${props.version || ""}`
   if (props.phase === "arrival") return `Welcome to Recall ${props.version || ""}`
-  return "Welcome back to Recall"
+  return ""
 })
 </script>
 
@@ -45,7 +45,7 @@ const headline = computed(() => {
 
     <div class="recall-copy">
       <span>{{ eyebrow }}</span>
-      <strong>{{ headline }}</strong>
+      <strong v-if="headline">{{ headline }}</strong>
     </div>
   </section>
 </template>

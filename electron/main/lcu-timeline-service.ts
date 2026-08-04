@@ -1,5 +1,8 @@
 import type { Database } from "better-sqlite3"
-import type { LiveGameCaptureRepository } from "./database/live-game-capture-repo.js"
+import type {
+  LiveCaptureParticipant,
+  LiveGameCaptureRepository,
+} from "./database/live-game-capture-repo.js"
 import { LcuRequestError, type LcuClient } from "./lcu-client.js"
 import {
   mapTimeline,
@@ -43,13 +46,36 @@ export class LcuTimelineService {
   get(gameId: number, puuid: string) {
     const row = this.db.prepare(
       `SELECT status, mapper_version AS mapperVersion,
-              fetched_at AS fetchedAt, last_error AS error, data_json AS dataJson
+              riot_match_id AS riotMatchId, fetched_at AS fetchedAt,
+              last_error AS error, data_json AS dataJson, raw_json AS rawJson
        FROM match_timeline_cache WHERE game_id = ? AND puuid = ?`,
     ).get(gameId, puuid) as
-      | { status: string; mapperVersion: number; fetchedAt?: number; error?: string; dataJson?: string }
+      | {
+        status: string
+        mapperVersion: number
+        riotMatchId?: string
+        fetchedAt?: number
+        error?: string
+        dataJson?: string
+        rawJson?: string
+      }
       | undefined
-    if (!row || row.mapperVersion !== TIMELINE_MAPPER_VERSION) {
+    if (!row) {
       return { status: "not_requested" as const }
+    }
+    if (row.mapperVersion !== TIMELINE_MAPPER_VERSION) {
+      const summary = row.status === "ready" && row.rawJson
+        ? this.remapCached(gameId, puuid, row.rawJson)
+        : undefined
+      if (!summary) return { status: "not_requested" as const }
+      this.write(gameId, puuid, row.riotMatchId, "ready", {
+        fetchedAt: row.fetchedAt ?? Date.now(),
+        data: summary,
+      })
+      void Promise.resolve(this.onReady?.(gameId, puuid, summary)).catch((error) => {
+        console.warn(`Timeline labels could not be reevaluated: ${(error as Error).message}`)
+      })
+      return { status: "ready" as const, summary, fetchedAt: row.fetchedAt }
     }
     return {
       status: row.status,
@@ -176,6 +202,38 @@ export class LcuTimelineService {
         this.drainingAccounts.delete(puuid)
       }
     })()
+  }
+
+  /** Reprocesses durable raw LCU data when mapping logic gains richer fields. */
+  private remapCached(gameId: number, puuid: string, rawJson: string) {
+    try {
+      const dto = JSON.parse(rawJson) as LcuTimelineResponse
+      const frames = Array.isArray(dto) ? dto : dto.frames ?? dto.info?.frames
+      if (!frames?.length) return undefined
+      const participants = this.db.prepare(
+        `SELECT participant_id AS participantId, team_id AS teamId,
+                is_player AS isPlayer, summoner_name AS summonerName
+         FROM match_participants WHERE game_id = ? AND puuid = ?`,
+      ).all(gameId, puuid) as LiveCaptureParticipant[]
+      const owner = participants.find((participant) => participant.isPlayer === 1)
+      if (!owner) return undefined
+      const summary = mapTimeline(
+        frames,
+        owner.participantId,
+        new Map(participants.map((participant) => [
+          participant.participantId,
+          participant.teamId,
+        ])),
+      )
+      return this.liveCaptures?.enrichTimeline(
+        gameId,
+        puuid,
+        summary,
+        participants,
+      ) ?? summary
+    } catch {
+      return undefined
+    }
   }
 
   private write(

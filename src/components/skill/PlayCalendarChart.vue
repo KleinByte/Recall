@@ -4,6 +4,7 @@ import { computed } from "vue"
 import BaseEChart from "../charts/BaseEChart.vue"
 import { registerInsightCharts } from "../../charts/register-insights"
 import { escapeTooltip } from "../../charts/formatters"
+import { CHART_COLOURS, CHART_SCORE_RAMP, CHART_STYLES } from "../../charts/recall-chart-theme"
 import { recallGradeFromScore } from "../../shared/recall-grade"
 import type { SkillHistoryPoint } from "../../types/stats"
 
@@ -51,7 +52,9 @@ const option = computed<EChartsCoreOption>(() => ({
     left: "center",
     bottom: 0,
     text: ["Stronger grade", "Weaker grade"],
-    inRange: { color: ["#5b2637", "#26334a", "#087a8c", "#c8aa6d"] },
+    inRange: {
+      color: [CHART_SCORE_RAMP[0], CHART_SCORE_RAMP[2], CHART_SCORE_RAMP[3], CHART_SCORE_RAMP[4]],
+    },
   },
   calendar: {
     top: 28,
@@ -60,10 +63,10 @@ const option = computed<EChartsCoreOption>(() => ({
     bottom: 50,
     range: range.value,
     cellSize: ["auto", 18],
-    splitLine: { lineStyle: { color: "rgba(200, 170, 109, 0.24)" } },
-    itemStyle: { color: "rgba(15, 28, 51, 0.55)", borderColor: "rgba(200, 170, 109, 0.10)" },
+    splitLine: { lineStyle: { color: CHART_STYLES.gridStrong } },
+    itemStyle: { color: CHART_COLOURS.surfaceInset, opacity: .55, borderColor: CHART_STYLES.gridSoft },
     dayLabel: { firstDay: 1, nameMap: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] },
-    monthLabel: { color: "#a09b8c" },
+    monthLabel: { color: CHART_COLOURS.textSubtle },
     yearLabel: { show: false },
   },
   series: [{ type: "heatmap", coordinateSystem: "calendar", data: days.value }],

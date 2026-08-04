@@ -3,6 +3,7 @@ import type { EChartsCoreOption } from "echarts/core"
 import { computed } from "vue"
 import BaseEChart from "../charts/BaseEChart.vue"
 import { escapeTooltip } from "../../charts/formatters"
+import { CHART_COLOURS, CHART_STYLES } from "../../charts/recall-chart-theme"
 import { championNameById } from "../../helpers/format"
 import { recallGradeFromScore } from "../../shared/recall-grade"
 import type { SkillHistoryPoint } from "../../types/stats"
@@ -40,7 +41,7 @@ const option = computed<EChartsCoreOption>(() => ({
     type: "value",
     name: "Recall Grade",
     axisLabel: { formatter: (value: number) => recallGradeFromScore(value) ?? "D" },
-    splitLine: { lineStyle: { color: "rgba(200, 170, 109, 0.12)" } },
+    splitLine: { lineStyle: { color: CHART_STYLES.gridSoft } },
   },
   series: [
     {
@@ -49,7 +50,7 @@ const option = computed<EChartsCoreOption>(() => ({
       symbolSize: 8,
       data: graded.value.map((game) => ({
         value: [game.durationSecs / 60, game.gradeScore],
-        itemStyle: { color: game.win ? "#1cbf8a" : "#e84057", opacity: 0.65 },
+        itemStyle: { color: game.win ? CHART_COLOURS.positive : CHART_COLOURS.negative, opacity: 0.65 },
       })),
     },
     {
@@ -58,8 +59,8 @@ const option = computed<EChartsCoreOption>(() => ({
       smooth: 0.35,
       symbolSize: 5,
       data: trend.value,
-      lineStyle: { color: "#f0e6d2", width: 2.5 },
-      itemStyle: { color: "#c8aa6d" },
+      lineStyle: { color: CHART_COLOURS.text, width: 2.5 },
+      itemStyle: { color: CHART_COLOURS.accent },
     },
   ],
 }))

@@ -3,6 +3,7 @@ import type { EChartsCoreOption } from "echarts/core"
 import { computed } from "vue"
 import BaseEChart from "../charts/BaseEChart.vue"
 import { escapeTooltip } from "../../charts/formatters"
+import { CHART_COLOURS, CHART_STYLES } from "../../charts/recall-chart-theme"
 import { championNameById } from "../../helpers/format"
 import type { Champion } from "../../types/lol"
 import type { SkillChampionPoint } from "../../types/stats"
@@ -43,12 +44,12 @@ const option = computed<EChartsCoreOption>(() => ({
     name: "Recorded games",
     nameLocation: "middle",
     nameGap: 30,
-    splitLine: { lineStyle: { color: "rgba(200, 170, 109, .1)" } },
+    splitLine: { lineStyle: { color: CHART_STYLES.gridSoft } },
   },
   yAxis: {
     type: "value",
     name: "Recall score",
-    splitLine: { lineStyle: { color: "rgba(200, 170, 109, .1)" } },
+    splitLine: { lineStyle: { color: CHART_STYLES.gridSoft } },
   },
   series: [{
     type: "scatter",
@@ -62,12 +63,12 @@ const option = computed<EChartsCoreOption>(() => ({
       quadrant(champion.games, champion.avgGradeScore!),
     ]),
     symbolSize: (value: unknown) => Math.min(38, 10 + Math.sqrt(Number((value as unknown[])[0]) || 1) * 3),
-    itemStyle: { color: "rgba(10, 203, 230, .66)", borderColor: "#b9f5ff", borderWidth: 1 },
+    itemStyle: { color: CHART_COLOURS.live, opacity: .66, borderColor: CHART_COLOURS.text, borderWidth: 1 },
     emphasis: { scale: 1.18 },
     markLine: {
       silent: true,
       symbol: ["none", "none"],
-      lineStyle: { color: "rgba(200, 170, 109, .36)", type: "dashed" },
+      lineStyle: { color: CHART_STYLES.gridStrong, type: "dashed" },
       data: [{ xAxis: experienceCutoff.value }, { yAxis: performanceCutoff.value }],
     },
   }],

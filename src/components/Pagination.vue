@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import Button from "./ui/Button.vue"
+
 const props = defineProps<{
   page: number
   pageSize: number
@@ -18,50 +20,54 @@ const to = () => Math.min(props.total, props.page * props.pageSize)
 </script>
 
 <template>
-  <div class="pagination">
-    <div class="muted range numeric">
+  <nav class="pagination" aria-label="Pagination">
+    <div class="range">
       {{ from().toLocaleString() }}–{{ to().toLocaleString() }} of
       {{ total.toLocaleString() }}
     </div>
 
     <div class="controls">
-      <button
-        class="league-button step"
+      <Button
+        class="step"
+        size="compact"
         :disabled="page <= 1"
         @click="emit('update:page', 1)"
       >
         First
-      </button>
-      <button
-        class="league-button step"
+      </Button>
+      <Button
+        class="step"
+        size="compact"
         :disabled="page <= 1"
         @click="emit('update:page', page - 1)"
       >
         Prev
-      </button>
+      </Button>
 
-      <span class="numeric current">Page {{ page }} of {{ lastPage() }}</span>
+      <span class="current">Page {{ page }} of {{ lastPage() }}</span>
 
-      <button
-        class="league-button step"
+      <Button
+        class="step"
+        size="compact"
         :disabled="page >= lastPage()"
         @click="emit('update:page', page + 1)"
       >
         Next
-      </button>
-      <button
-        class="league-button step"
+      </Button>
+      <Button
+        class="step"
+        size="compact"
         :disabled="page >= lastPage()"
         @click="emit('update:page', lastPage())"
       >
         Last
-      </button>
+      </Button>
     </div>
 
     <label class="size">
-      <span class="muted">Per page</span>
+      <span>Per page</span>
       <select
-        class="league-select"
+        class="league-select page-size-select"
         :value="pageSize"
         @change="
           emit(
@@ -75,7 +81,7 @@ const to = () => Math.min(props.total, props.page * props.pageSize)
         </option>
       </select>
     </label>
-  </div>
+  </nav>
 </template>
 
 <style scoped>
@@ -83,40 +89,56 @@ const to = () => Math.min(props.total, props.page * props.pageSize)
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-4);
+  gap: var(--ui-space-4);
   flex-wrap: wrap;
-  padding: var(--space-3) 0;
+  padding: var(--ui-space-3) 0;
 }
 
 .range {
+  color: var(--ui-text-muted);
+  font-family: var(--ui-font-numeric);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .controls {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-}
-
-.step {
-  padding: var(--space-2) var(--space-3);
-}
-
-.step:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
 }
 
 .current {
   font-size: 12px;
-  color: var(--text-secondary);
-  padding: 0 var(--space-2);
+  color: var(--ui-text-subtle);
+  padding: 0 var(--ui-space-2);
+  font-family: var(--ui-font-numeric);
+  font-variant-numeric: tabular-nums;
 }
 
 .size {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--ui-space-2);
+  color: var(--ui-text-muted);
   font-size: 12px;
+}
+
+.page-size-select {
+  min-height: var(--ui-control-height-compact);
+  padding-block: 3px;
+  font-size: 11px;
+}
+
+@container recall-content (max-width: 620px) {
+  .pagination { justify-content: center; }
+  .range { width: 100%; text-align: center; }
+  .controls { order: 3; width: 100%; }
+}
+
+@container recall-content (max-width: 420px) {
+  .current { order: -1; flex-basis: 100%; text-align: center; }
+  .step { flex: 1 1 64px; }
 }
 </style>

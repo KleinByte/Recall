@@ -2,6 +2,14 @@
 import { computed, defineAsyncComponent, onMounted, ref } from "vue"
 import ChampionPicker from "../components/ChampionPicker.vue"
 import SkillOverview from "../components/skill/SkillOverview.vue"
+import {
+  Button as UiButton,
+  EmptyState,
+  Field as UiField,
+  PageHeader,
+  Surface,
+  Tabs as UiTabs,
+} from "../components/ui"
 import { api } from "../helpers/api"
 import { useApiEvents } from "../helpers/use-api-events"
 import { useCoalescedTask } from "../helpers/use-coalesced-task"
@@ -37,6 +45,15 @@ const season = ref<number | undefined>(undefined)
 const role = ref<string | undefined>(undefined)
 const championId = ref<number | undefined>(undefined)
 const tab = ref<SkillTab>("overview")
+const tabModel = computed<string>({
+  get: () => tab.value,
+  set: (value) => { tab.value = value as SkillTab },
+})
+const tabOptions = [
+  { value: "overview", label: "Overview" },
+  { value: "insights", label: "Insights" },
+  { value: "analyze", label: "Analyze" },
+]
 const counts = ref<Record<SkillScopeId, number>>(
   Object.fromEntries(SKILL_SCOPES.map((scope) => [scope.id, 0])) as Record<SkillScopeId, number>,
 )
@@ -179,18 +196,15 @@ onMounted(async () => {
 
 <template>
   <div class="page">
-    <header class="page-head">
-      <div>
-        <h1>Skill</h1>
-        <p class="muted subtitle">Measurements and evidence from your recorded games.</p>
-      </div>
+    <PageHeader
+      title="Skill"
+      eyebrow="Performance laboratory"
+      description="Measurements and evidence from your recorded games."
+    />
 
-    </header>
-
-    <section class="filters card" aria-label="Skill report filters">
+    <Surface as="section" variant="toolbar" padding="compact" class="filters" aria-label="Skill report filters">
       <div class="control-row">
-        <label class="field">
-          <span class="muted field-label">Game mode</span>
+        <UiField label="Game mode" compact>
           <select v-model="scopeId" class="league-select" @change="applyFilters">
             <optgroup label="Summoner's Rift">
               <option v-for="scope in riftScopes" :key="scope.id" :value="scope.id">
@@ -208,18 +222,16 @@ onMounted(async () => {
               </option>
             </optgroup>
           </select>
-        </label>
+        </UiField>
 
-        <label class="field">
-          <span class="muted field-label">Season</span>
+        <UiField label="Season" compact>
           <select v-model="season" class="league-select" @change="applyFilters">
             <option :value="undefined">All seasons</option>
             <option v-for="year in seasonOptions" :key="year" :value="year">{{ year }} season</option>
           </select>
-        </label>
+        </UiField>
 
-        <label class="field">
-          <span class="muted field-label">Role</span>
+        <UiField label="Role" compact>
           <select
             v-model="role"
             class="league-select"
@@ -231,10 +243,10 @@ onMounted(async () => {
               {{ option.label }}
             </option>
           </select>
-        </label>
+        </UiField>
 
-        <div class="field champion-field">
-          <span class="muted field-label">Champion</span>
+        <div class="champion-field">
+          <span class="field-caption">Champion</span>
           <ChampionPicker
             v-model="championId"
             :champions="championOptions"
@@ -242,75 +254,60 @@ onMounted(async () => {
           />
         </div>
 
-        <button v-if="hasDetailFilters" class="league-button clear" @click="clearDetailFilters">
+        <UiButton v-if="hasDetailFilters" class="clear" variant="ghost" @click="clearDetailFilters">
           Clear filters
-        </button>
+        </UiButton>
       </div>
       <p class="filter-note muted">
         Every chart and finding below uses this exact selection.
       </p>
+    </Surface>
+
+    <section class="skill-view" aria-label="Skill analysis">
+      <UiTabs v-model="tabModel" :options="tabOptions" label="Skill view" />
+      <Surface variant="quiet" padding="compact" class="skill-tab-surface">
+        <EmptyState
+          v-if="loading && !report"
+          compact
+          title="Loading Skill report"
+          description="Recall is assembling the measurements for this selection."
+        />
+
+        <EmptyState
+          v-else-if="failed"
+          compact
+          tone="warning"
+          title="Skill report unavailable"
+          description="The recorded matches are still intact. Try this scope again."
+        />
+
+        <EmptyState
+          v-else-if="!report?.overview.summary.games"
+          compact
+          title="Nothing recorded for this scope yet"
+          :description="`Play a game in ${selectedScope.label} with Recall running, or import Riot history from Settings.`"
+        />
+
+        <SkillOverview
+          v-else-if="report && tab === 'overview'"
+          :overview="report.overview"
+          :family="report.scope.family"
+          :champions="champions"
+          :ranked="ranked"
+        />
+        <SkillInsights
+          v-else-if="report && tab === 'insights'"
+          :report="report"
+          :timezone-label="timezoneLabel"
+          :champions="champions"
+        />
+        <SkillAnalyze
+          v-else-if="report && tab === 'analyze'"
+          :report="report"
+          :champions="champions"
+        />
+      </Surface>
     </section>
-
-    <nav class="tab-row" aria-label="Skill view">
-      <button
-        class="tab-button"
-        :class="{ active: tab === 'overview' }"
-        :aria-pressed="tab === 'overview'"
-        @click="tab = 'overview'"
-      >
-        Overview
-      </button>
-      <button
-        class="tab-button"
-        :class="{ active: tab === 'insights' }"
-        :aria-pressed="tab === 'insights'"
-        @click="tab = 'insights'"
-      >
-        Insights
-      </button>
-      <button
-        class="tab-button"
-        :class="{ active: tab === 'analyze' }"
-        :aria-pressed="tab === 'analyze'"
-        @click="tab = 'analyze'"
-      >
-        Analyze
-      </button>
-    </nav>
-
-    <div v-if="loading && !report" class="card notice muted">Loading Skill report…</div>
-
-    <div v-else-if="failed" class="card notice">
-      <h2 class="section-title">Skill report unavailable</h2>
-      <p class="muted">The recorded matches are still intact. Try this scope again.</p>
-    </div>
-
-    <div v-else-if="!report?.overview.summary.games" class="card notice">
-      <h2 class="section-title">Nothing recorded for this scope yet</h2>
-      <p class="muted">
-        Play a game in {{ selectedScope.label }} with Recall running, or import Riot
-        history from Settings.
-      </p>
-    </div>
-
-    <SkillOverview
-      v-else-if="report && tab === 'overview'"
-      :overview="report.overview"
-      :family="report.scope.family"
-      :champions="champions"
-      :ranked="ranked"
-    />
-    <SkillInsights
-      v-else-if="report && tab === 'insights'"
-      :report="report"
-      :timezone-label="timezoneLabel"
-      :champions="champions"
-    />
-    <SkillAnalyze
-      v-else-if="report && tab === 'analyze'"
-      :report="report"
-      :champions="champions"
-    />
   </div>
 </template>
 
@@ -318,31 +315,10 @@ onMounted(async () => {
 .page {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--ui-space-4);
+  container: recall-content / inline-size;
 }
 
-.page-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: var(--space-5);
-  flex-wrap: wrap;
-}
-
-h1 {
-  margin: 0;
-  color: var(--gold-bright);
-  font-family: var(--font-display);
-  font-size: 22px;
-  letter-spacing: 1px;
-}
-
-.subtitle {
-  margin: var(--space-1) 0 0;
-  font-size: 12px;
-}
-
-.filters { padding: var(--space-3) var(--space-4); }
 .control-row {
   display: grid;
   grid-template-columns:
@@ -352,54 +328,19 @@ h1 {
     minmax(210px, 1.25fr)
     auto;
   align-items: end;
-  gap: var(--space-3);
+  gap: var(--ui-space-3);
 }
 
-.field { display: grid; gap: var(--space-1); min-width: 0; }
-.champion-field { min-width: 0; }
-.field-label { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
-.field .league-select { width: 100%; }
-.field .league-select:disabled { cursor: not-allowed; opacity: .55; }
+.champion-field { display: grid; align-content: start; gap: 5px; min-width: 0; }
+.field-caption { color: var(--ui-text-muted); font: var(--ui-label-size) var(--ui-font-heading); letter-spacing: 1.2px; text-transform: uppercase; }
+.control-row :deep(.league-select:disabled) { cursor: not-allowed; opacity: .55; }
 .clear { min-height: 34px; }
-.filter-note { margin: var(--space-2) 0 0; font-size: 11px; }
+.filter-note { margin: var(--ui-space-2) 0 0; font-size: 11px; }
 
-.tab-row {
-  display: flex;
-  gap: var(--space-4);
-  border-bottom: 1px solid var(--border-subtle);
-}
+.skill-view { min-width: 0; }
+.skill-tab-surface { border-top: 0; border-radius: 0 0 var(--ui-radius-md) var(--ui-radius-md); box-shadow: none; }
 
-.tab-button {
-  min-width: 88px;
-  min-height: 34px;
-  padding: 0 var(--space-2);
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--text-secondary);
-  font-family: var(--font-heading);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.tab-button:hover,
-.tab-button.active {
-  color: var(--gold-bright);
-}
-
-.tab-button.active {
-  border-bottom-color: var(--gold);
-}
-
-.notice {
-  padding: var(--space-5);
-}
-
-.notice p {
-  margin-bottom: 0;
-}
-
-@media (max-width: 1050px) {
+@container recall-content (max-width: 920px) {
   .control-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -407,9 +348,8 @@ h1 {
   .clear { justify-self: start; }
 }
 
-@media (max-width: 560px) {
-  .page { gap: var(--space-3); }
-  .filters { padding: var(--space-3); }
+@container recall-content (max-width: 520px) {
+  .page { gap: var(--ui-space-3); }
   .control-row { grid-template-columns: minmax(0, 1fr); }
   .clear { width: 100%; }
   .filter-note { line-height: 1.45; }

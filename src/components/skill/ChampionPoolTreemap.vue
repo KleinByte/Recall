@@ -4,6 +4,7 @@ import { computed } from "vue"
 import BaseEChart from "../charts/BaseEChart.vue"
 import { registerInsightCharts } from "../../charts/register-insights"
 import { escapeTooltip } from "../../charts/formatters"
+import { CHART_COLOURS, CHART_SCORE_RAMP, CHART_STYLES } from "../../charts/recall-chart-theme"
 import { championNameById } from "../../helpers/format"
 import { recallGradeFromScore } from "../../shared/recall-grade"
 import type { SkillChampionPoint } from "../../types/stats"
@@ -14,11 +15,11 @@ registerInsightCharts()
 const props = defineProps<{ champions: SkillChampionPoint[]; catalog: Champion[] | null }>()
 
 function colorFor(score?: number) {
-  if (score === undefined) return "#3c4659"
-  if (score >= 0.65) return "#b78b3f"
-  if (score >= 0.15) return "#087a8c"
-  if (score >= -0.35) return "#31445f"
-  return "#6b2d41"
+  if (score === undefined) return CHART_COLOURS.neutral
+  if (score >= 0.65) return CHART_SCORE_RAMP[4]
+  if (score >= 0.15) return CHART_SCORE_RAMP[3]
+  if (score >= -0.35) return CHART_SCORE_RAMP[2]
+  return CHART_SCORE_RAMP[1]
 }
 
 const nodes = computed(() => props.champions
@@ -27,7 +28,7 @@ const nodes = computed(() => props.champions
   .map((champion) => ({
     name: championNameById(props.catalog, champion.championId),
     value: champion.games,
-    itemStyle: { color: colorFor(champion.avgGradeScore), borderColor: "#091426", borderWidth: 2 },
+    itemStyle: { color: colorFor(champion.avgGradeScore), borderColor: CHART_COLOURS.surfaceInset, borderWidth: 2 },
     recall: champion,
   })))
 
@@ -48,11 +49,11 @@ const option = computed<EChartsCoreOption>(() => ({
     breadcrumb: { show: false },
     label: {
       show: true,
-      color: "#f0e6d2",
+      color: CHART_COLOURS.text,
       fontWeight: 600,
       textBorderWidth: 0,
       textShadowBlur: 4,
-      textShadowColor: "rgba(0, 0, 0, .82)",
+      textShadowColor: CHART_STYLES.labelShadow,
       formatter: (raw: unknown) => {
         const item = raw as { name: string; data: { recall: SkillChampionPoint } }
         return `${item.name}\n${item.data.recall.games} games`

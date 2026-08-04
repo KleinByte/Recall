@@ -20,6 +20,7 @@ defineProps<{
 
 const emit = defineEmits<{
   (event: "mark-records-read"): void
+  (event: "clear-records"): void
   (event: "open-record", gameId: number): void
 }>()
 
@@ -81,6 +82,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleHistoryShortcu
       <RecordNotificationCenter
         :notifications="recordNotifications"
         @mark-read="emit('mark-records-read')"
+        @clear="emit('clear-records')"
         @open-record="emit('open-record', $event)"
       />
 
@@ -133,10 +135,14 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleHistoryShortcu
   justify-content: space-between;
   padding-left: 10px;
   background:
-    linear-gradient(90deg, rgba(200, 170, 109, 0.055), transparent 28%),
-    linear-gradient(180deg, #101b2e, #0b1527);
-  border-bottom: 1px solid rgba(200, 170, 109, 0.18);
-  box-shadow: 0 1px 10px rgba(0, 0, 0, 0.24);
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--ui-accent) 5.5%, transparent),
+      transparent 28%
+    ),
+    var(--ui-shell);
+  border-bottom: 1px solid var(--ui-divider);
+  box-shadow: 0 1px 10px color-mix(in srgb, var(--ui-canvas) 62%, transparent);
   user-select: none;
 }
 
@@ -168,22 +174,23 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleHistoryShortcu
   place-items: center;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: var(--ui-radius-sm);
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--ui-text-subtle);
   font-size: 11px;
   cursor: pointer;
 }
 
 .history-controls button:hover:not(:disabled) {
-  border-color: var(--border-strong);
-  background: rgba(200, 170, 109, 0.08);
-  color: var(--gold-bright);
+  border-color: var(--ui-border-emphasis);
+  background: var(--ui-surface-selected);
+  color: var(--ui-text-heading);
 }
 
 .history-controls button:focus-visible {
-  outline: 1px solid var(--cyan);
+  outline: 2px solid var(--ui-focus-ring);
   outline-offset: 1px;
+  box-shadow: var(--ui-shadow-focus);
 }
 
 .history-controls button:disabled {
@@ -196,8 +203,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleHistoryShortcu
   height: 34px;
   margin-left: -4px;
   filter:
-    drop-shadow(0 0 4px rgba(240, 211, 116, 0.18))
-    drop-shadow(0 0 6px rgba(10, 203, 230, 0.14));
+    drop-shadow(0 0 4px color-mix(in srgb, var(--ui-accent-strong) 18%, transparent))
+    drop-shadow(0 0 6px color-mix(in srgb, var(--ui-live) 14%, transparent));
 }
 
 .window-controls {
@@ -224,25 +231,26 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleHistoryShortcu
   border-left: 1px solid transparent;
   border-radius: 0;
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--ui-text-subtle);
   cursor: default;
   transition: background 0.1s ease, color 0.1s ease;
 }
 
 .window-control:hover {
-  background: rgba(200, 170, 109, 0.1);
-  color: var(--gold-bright);
+  background: var(--ui-surface-selected);
+  color: var(--ui-text-heading);
 }
 
 .window-control:focus-visible {
   z-index: 1;
-  outline: 1px solid var(--cyan);
+  outline: 2px solid var(--ui-focus-ring);
   outline-offset: -2px;
+  box-shadow: inset var(--ui-shadow-focus);
 }
 
 .close-control:hover {
-  background: #c42b3b;
-  color: #fff;
+  background: var(--ui-negative);
+  color: var(--ui-text-heading);
 }
 
 .minimize-icon {
@@ -266,7 +274,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleHistoryShortcu
   border: 1px solid currentColor;
   top: -2px;
   right: -2px;
-  background: #0d182a;
+  background: var(--ui-shell);
 }
 
 .maximize-icon.restore::after {
@@ -277,7 +285,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleHistoryShortcu
   left: -2px;
   bottom: -2px;
   border: 1px solid currentColor;
-  background: #0d182a;
+  background: var(--ui-shell);
 }
 
 .close-icon,

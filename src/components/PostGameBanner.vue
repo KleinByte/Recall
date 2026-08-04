@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import GradeBadge from "./GradeBadge.vue"
+import Button from "./ui/Button.vue"
+import Surface from "./ui/Surface.vue"
 import {
   championIconUrl,
   championNameById,
@@ -33,18 +35,24 @@ const visibleRecords = computed(() => props.records.slice(0, 3))
 </script>
 
 <template>
-  <div class="banner" :class="match.win ? 'win' : 'loss'">
+  <Surface
+    as="section"
+    variant="raised"
+    padding="compact"
+    class="banner"
+    :class="match.win ? 'win' : 'loss'"
+  >
     <img :src="championIconUrl(match.championId)" :alt="champion" class="portrait" />
 
     <div class="body">
       <div class="headline">
         <strong>{{ match.win ? "Victory" : "Defeat" }}</strong>
-        <span class="muted">
+        <span class="match-meta">
           {{ match.queueName ?? modeLabel(match.mode) }} ·
           {{ formatDuration(match.durationSecs) }}
         </span>
       </div>
-      <div class="muted detail">
+      <div class="match-detail">
         {{ champion }} · {{ kda }} · {{ match.totalMinionsKilled }} CS
       </div>
     </div>
@@ -65,41 +73,47 @@ const visibleRecords = computed(() => props.records.slice(0, 3))
     </div>
 
     <GradeBadge :grade="match.grade" size="lg" />
-    <button class="league-button review" @click="emit('review', match.gameId)">
+    <Button class="review" variant="primary" size="compact" @click="emit('review', match.gameId)">
       Review game
-    </button>
+    </Button>
 
-    <button class="close" title="Dismiss" @click="emit('dismiss')">×</button>
-  </div>
+    <Button
+      class="close"
+      variant="ghost"
+      size="compact"
+      icon-only
+      title="Dismiss"
+      aria-label="Dismiss post-game summary"
+      @click="emit('dismiss')"
+    >
+      ×
+    </Button>
+  </Surface>
 </template>
 
 <style scoped>
 .banner {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  margin-bottom: var(--space-4);
-  background: var(--surface-2);
-  border: 1px solid var(--border-subtle);
+  gap: var(--ui-space-3);
+  margin-bottom: var(--ui-space-4);
   border-left-width: 3px;
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-card);
 }
 
 .banner.win {
-  border-left-color: var(--win);
+  border-left-color: var(--ui-positive);
 }
 
 .banner.loss {
-  border-left-color: var(--loss);
+  border-left-color: var(--ui-negative);
 }
 
 .portrait {
   width: 40px;
   height: 40px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-sm);
+  object-fit: cover;
 }
 
 .body {
@@ -110,10 +124,14 @@ const visibleRecords = computed(() => props.records.slice(0, 3))
 .record-callout {
   min-width: min(370px, 34vw);
   padding: 7px 10px;
-  border: 1px solid color-mix(in srgb, var(--gold) 55%, transparent);
-  border-radius: var(--radius-sm);
-  background: linear-gradient(120deg, rgba(200, 170, 109, .14), rgba(10, 200, 220, .06));
-  box-shadow: 0 0 18px rgba(200, 170, 109, .08);
+  border: 1px solid color-mix(in srgb, var(--ui-accent) 55%, transparent);
+  border-radius: var(--ui-radius-sm);
+  background: linear-gradient(
+    120deg,
+    color-mix(in srgb, var(--ui-accent) 14%, transparent),
+    color-mix(in srgb, var(--ui-live) 6%, transparent)
+  );
+  box-shadow: 0 0 18px color-mix(in srgb, var(--ui-accent) 8%, transparent);
   animation: record-arrival 520ms ease-out both;
 }
 
@@ -121,15 +139,15 @@ const visibleRecords = computed(() => props.records.slice(0, 3))
   display: flex;
   align-items: center;
   gap: 7px;
-  color: var(--gold-bright);
-  font: 12px var(--font-heading);
+  color: var(--ui-text-heading);
+  font: 12px var(--ui-font-heading);
   letter-spacing: .65px;
   text-transform: uppercase;
 }
 
 .record-rune {
-  color: var(--cyan);
-  text-shadow: 0 0 10px rgba(10, 200, 220, .7);
+  color: var(--ui-live);
+  text-shadow: 0 0 10px color-mix(in srgb, var(--ui-live) 70%, transparent);
 }
 
 .record-list {
@@ -137,16 +155,16 @@ const visibleRecords = computed(() => props.records.slice(0, 3))
   gap: 4px 10px;
   flex-wrap: wrap;
   margin-top: 4px;
-  color: var(--text-secondary);
+  color: var(--ui-text-subtle);
   font-size: 12px;
 }
 
 .record-list span:not(:last-child)::after {
   content: " ·";
-  color: var(--text-muted);
+  color: var(--ui-text-muted);
 }
 
-.record-list .more { color: var(--gold-bright); }
+.record-list .more { color: var(--ui-text-heading); }
 
 @keyframes record-arrival {
   from { opacity: 0; transform: translateY(6px) scale(.98); filter: brightness(1.7); }
@@ -156,48 +174,46 @@ const visibleRecords = computed(() => props.records.slice(0, 3))
 .headline {
   display: flex;
   align-items: baseline;
-  gap: var(--space-2);
+  gap: var(--ui-space-2);
   font-size: 14px;
 }
 
 .headline strong {
-  font-family: var(--font-heading);
+  color: var(--ui-text-heading);
+  font-family: var(--ui-font-heading);
   font-weight: 500;
   letter-spacing: 0.6px;
-  color: var(--gold-bright);
 }
 
-.headline .muted,
-.detail {
+.match-meta,
+.match-detail {
+  color: var(--ui-text-subtle);
   font-size: 12px;
 }
 
-.detail {
+.match-detail {
   margin-top: 2px;
 }
 
 .close {
-  background: none;
-  border: none;
-  color: var(--text-secondary);
   font-size: 20px;
   line-height: 1;
-  cursor: pointer;
-  padding: 0 var(--space-1);
-}
-
-.close:hover {
-  color: var(--text-primary);
 }
 
 .review {
-  padding: var(--space-2) var(--space-3);
   white-space: nowrap;
 }
 
-@media (max-width: 1050px) {
+@container recall-content (max-width: 880px) {
   .banner { flex-wrap: wrap; }
   .record-callout { order: 3; width: 100%; min-width: 0; }
+}
+
+@container recall-content (max-width: 560px) {
+  .banner { align-items: flex-start; }
+  .body { flex-basis: calc(100% - 64px); }
+  .headline { align-items: flex-start; flex-direction: column; gap: 1px; }
+  .review { flex: 1 1 140px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

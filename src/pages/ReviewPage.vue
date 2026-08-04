@@ -22,9 +22,9 @@ import { publicAssetUrl } from "../helpers/assets"
 import {
   timelineChartDomain,
   timelineChartX,
+  timelineChartY,
+  timelineGoldDifferencePoints,
   timelineTeamGoldAt,
-  timelineTeamGoldPoints,
-  timelineTeamGoldY,
   sampleTimelineEvents,
 } from "../helpers/timeline-chart"
 import GradeBadge from "../components/GradeBadge.vue"
@@ -32,8 +32,13 @@ import AugmentInsightCard from "../components/AugmentInsightCard.vue"
 import MatchReviewHero from "../components/MatchReviewHero.vue"
 import MatchStatsTable from "../components/MatchStatsTable.vue"
 import ReviewScoreboard from "../components/ReviewScoreboard.vue"
+import MatchDeathMap from "../components/MatchDeathMap.vue"
 import WinProbabilityChart from "../components/WinProbabilityChart.vue"
 import PerformanceRadar from "../components/skill/PerformanceRadar.vue"
+import PageHeader from "../components/ui/PageHeader.vue"
+import Tabs from "../components/ui/Tabs.vue"
+import Button from "../components/ui/Button.vue"
+import EmptyState from "../components/ui/EmptyState.vue"
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
 import {
   faArrowTrendDown,
@@ -100,6 +105,17 @@ const matchTabs: { id: MatchTab; label: string }[] = [
   { id: "timeline", label: "Timeline" },
   { id: "probability", label: "Win Probability" },
 ]
+const pageTabs = [
+  { value: "review", label: "Current match" },
+  { value: "sessions", label: "Sessions" },
+  { value: "bookmarks", label: "Bookmarks" },
+  { value: "experiments", label: "Experiments" },
+]
+const insightTabs = [
+  { value: "rvi", label: "RVI profile" },
+  { value: "performance", label: "Grade & context" },
+]
+const matchTabOptions = matchTabs.map((item) => ({ value: item.id, label: item.label }))
 
 const rviDimensions = computed<PerformanceDimensionScore[]>(() =>
   (gameRvi.value?.dimensions ?? []).map((dimension) => ({
@@ -119,71 +135,26 @@ const timelineDomain = computed(() => {
   const summary = review.value?.timeline.summary
   return timelineChartDomain(summary?.frames ?? [], summary?.events ?? [])
 })
-const timelineBluePoints = computed(() => {
+const timelineDifferencePoints = computed(() => {
   const frames = review.value?.timeline.summary?.frames ?? []
   if (frames.length < 2) return ""
-  return timelineTeamGoldPoints(frames, timelineDomain.value, "blue")
-})
-const timelineRedPoints = computed(() => {
-  const frames = review.value?.timeline.summary?.frames ?? []
-  if (frames.length < 2) return ""
-  return timelineTeamGoldPoints(frames, timelineDomain.value, "red")
+  return timelineGoldDifferencePoints(frames, timelineDomain.value)
 })
 const finalTimelineFrame = computed(() => review.value?.timeline.summary?.frames.at(-1))
 const finalGoldDifference = computed(() =>
   (finalTimelineFrame.value?.blueGold ?? 0) - (finalTimelineFrame.value?.redGold ?? 0),
 )
 const timelineGoldTicks = computed(() => [
-  timelineDomain.value.maximumGold,
-  timelineDomain.value.maximumGold / 2,
+  timelineDomain.value.maximumDifference,
+  timelineDomain.value.maximumDifference / 2,
   0,
-].map((gold) => ({ gold, y: timelineTeamGoldY(gold, timelineDomain.value) })))
+  -timelineDomain.value.maximumDifference / 2,
+  -timelineDomain.value.maximumDifference,
+].map((gold) => ({ gold, y: timelineChartY(gold, timelineDomain.value) })))
 const compactGold = (gold: number) => `${(gold / 1_000).toFixed(gold >= 10_000 ? 0 : 1)}k`
-const timelineMarkers = computed(() => {
-  const summary = review.value?.timeline.summary
-  if (!summary?.frames.length) return []
-  const frames = summary.frames
-  const ownerId = owner.value?.participantId
-  const source = timelineFilter.value === "all"
-    ? summary.events.filter((event) =>
-      event.category === "kill" ||
-      event.category === "objective" ||
-      event.category === "game" ||
-      (
-        event.category === "level" &&
-        event.participantId === ownerId
-      ) ||
-      (
-        event.category === "item" &&
-        event.participantId === ownerId &&
-        [
-          "ITEM_PURCHASED",
-          "ITEM_TRANSFORM",
-          "ITEM_TRANSFORMED",
-          "ITEM_ACQUIRED",
-          "ITEM_OBSERVED",
-        ].includes(event.type)
-      ),
-    )
-    : filteredTimelineEvents.value
-  const laneByBucket = new Map<number, number>()
-
-  return sampleTimelineEvents(source, 90).map((event) => {
-    const x = timelineChartX(event.timestamp, timelineDomain.value)
-    const gold = timelineTeamGoldAt(event.timestamp, frames, event.teamId)
-    const lineY = timelineTeamGoldY(gold, timelineDomain.value)
-    const bucket = Math.round(x / 2)
-    const lane = laneByBucket.get(bucket) ?? 0
-    laneByBucket.set(bucket, lane + 1)
-    const direction = lane % 2 === 0 ? -1 : 1
-    const distance = Math.ceil((lane + 1) / 2) * 7
-    return {
-      event,
-      x,
-      y: Math.max(7, Math.min(93, lineY + direction * distance)),
-    }
-  })
-})
+const signedCompactGold = (gold: number) => gold === 0
+  ? "0"
+  : `${gold > 0 ? "+" : "−"}${compactGold(Math.abs(gold))}`
 const filteredTimelineEvents = computed(() => {
   const events = review.value?.timeline.summary?.events ?? []
   if (timelineFilter.value === "all") {
@@ -210,6 +181,53 @@ const filteredTimelineEvents = computed(() => {
   if (timelineFilter.value === "levels") return events.filter((event) => event.category === "level")
   return events.filter((event) => event.category === "vision")
 })
+
+const timelineTrackMeta = [
+  { id: "kill", label: "Deaths", maximum: 60 },
+  { id: "level", label: "Levels", maximum: 36 },
+  { id: "item", label: "Items", maximum: 42 },
+  { id: "objective", label: "Objectives", maximum: 30 },
+  { id: "vision", label: "Vision", maximum: 30 },
+  { id: "game", label: "Match", maximum: 10 },
+] as const
+
+const timelineTrackSource = computed(() => {
+  const summary = review.value?.timeline.summary
+  if (!summary) return []
+  if (timelineFilter.value !== "all") return filteredTimelineEvents.value
+  const ownerId = owner.value?.participantId
+  return summary.events.filter((event) =>
+    event.category === "kill" ||
+    event.category === "objective" ||
+    event.category === "game" ||
+    (event.category === "level" && event.participantId === ownerId) ||
+    (
+      event.category === "item" &&
+      event.participantId === ownerId &&
+      [
+        "ITEM_PURCHASED",
+        "ITEM_TRANSFORM",
+        "ITEM_TRANSFORMED",
+        "ITEM_ACQUIRED",
+        "ITEM_OBSERVED",
+      ].includes(event.type)
+    ),
+  )
+})
+
+const timelineEventTracks = computed(() => timelineTrackMeta.flatMap((track) => {
+  const events = timelineTrackSource.value.filter((event) => event.category === track.id)
+  if (events.length === 0) return []
+  const laneByBucket = new Map<number, number>()
+  const markers = sampleTimelineEvents(events, track.maximum).map((event) => {
+    const x = timelineChartX(event.timestamp, timelineDomain.value)
+    const bucket = Math.round(x / 3)
+    const lane = laneByBucket.get(bucket) ?? 0
+    laneByBucket.set(bucket, lane + 1)
+    return { event, x, top: [21, 10, 32][lane % 3] }
+  })
+  return [{ ...track, markers }]
+}))
 const timelineEventCounts = computed(() => {
   const counts = { kills: 0, objectives: 0, items: 0, levels: 0, vision: 0 }
   for (const event of review.value?.timeline.summary?.events ?? []) {
@@ -300,15 +318,10 @@ function abilityKey(skillSlot?: number) {
 
 function timelineMarkerIcon(event: TimelineEvent) {
   if (event.category === "kill") {
-    const actor = killActor(event)
-    const target = participant(event.targetId)
-    return championIconUrl(actor?.championId || target?.championId || 0)
+    return championIconUrl(killTarget(event)?.championId || 0)
   }
   if (event.category === "item") return itemIcon(event)
   if (event.type === "SKILL_LEVEL_UP") return abilityAsset(event)?.icon
-  if (event.type === "LEVEL_UP") {
-    return championIconUrl(participant(event.participantId)?.championId || 0)
-  }
   if (event.category === "objective") {
     return timelineObjectiveIconUrl(event.type, event.objective, event.teamId)
   }
@@ -317,18 +330,30 @@ function timelineMarkerIcon(event: TimelineEvent) {
 
 function timelineMarkerGlyph(event: TimelineEvent) {
   if (event.category === "objective") return "◆"
+  if (event.type === "LEVEL_UP") return `${event.approximate ? "≈" : ""}${event.level ?? "↑"}`
+  if (event.type === "SKILL_LEVEL_UP") return abilityKey(event.skillSlot).toUpperCase()
   if (event.category === "level") return "↑"
   if (event.category === "vision") return "◉"
   if (event.category === "game") return "■"
   return "•"
 }
 
+function timelineMarkerClasses(event: TimelineEvent) {
+  const victim = event.category === "kill" ? killTarget(event) : undefined
+  return [
+    event.category,
+    victim?.teamId === 100 ? "blue-team" : victim?.teamId === 200 ? "red-team" : undefined,
+    event.targetId === owner.value?.participantId || event.participantId === owner.value?.participantId
+      ? "owner-event"
+      : undefined,
+  ]
+}
+
 function timelineMarkerTitle(event: TimelineEvent) {
   const time = `${event.approximate ? "≈" : ""}${eventTime(event.timestamp)}`
   if (event.category === "kill") {
-    const killer = killActor(event)?.summonerName
-    const victim = killTargetName(event)
-    return `${time} · ${killer ?? event.actorName ?? "Unknown killer"} killed ${victim}`
+    const killer = killActorName(event)
+    return `${time} · ${killTargetName(event)} died to ${killer}`
   }
   if (event.category === "item") {
     const player = participant(event.participantId)?.summonerName ?? `Player ${event.participantId}`
@@ -338,6 +363,10 @@ function timelineMarkerTitle(event: TimelineEvent) {
     const player = participant(event.participantId)?.summonerName ?? `Player ${event.participantId}`
     const ability = abilityAsset(event)?.name ?? abilityKey(event.skillSlot)
     return `${time} · ${player} ranked ${ability} (${abilityKey(event.skillSlot)})`
+  }
+  if (event.type === "LEVEL_UP") {
+    const player = participant(event.participantId)?.summonerName ?? `Player ${event.participantId}`
+    return `${time} · ${player} reached level ${event.level ?? "?"}`
   }
   return `${time} · ${objectiveName(event.objective || event.type)}`
 }
@@ -358,6 +387,7 @@ const timelineCursor = computed(() => {
   if (timestamp === undefined || !summary) return undefined
   const blueGold = timelineTeamGoldAt(timestamp, summary.frames, 100)
   const redGold = timelineTeamGoldAt(timestamp, summary.frames, 200)
+  const difference = blueGold - redGold
   let blueKills = 0
   let redKills = 0
   for (const event of summary.events) {
@@ -371,8 +401,8 @@ const timelineCursor = computed(() => {
     x: timelineChartX(timestamp, timelineDomain.value),
     blueGold,
     redGold,
-    blueY: timelineTeamGoldY(blueGold, timelineDomain.value),
-    redY: timelineTeamGoldY(redGold, timelineDomain.value),
+    difference,
+    differenceY: timelineChartY(difference, timelineDomain.value),
     blueKills,
     redKills,
   }
@@ -692,56 +722,44 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="review-page">
-    <header class="page-head">
-      <div>
-        <h1>Match Review</h1>
-        <p class="muted">Turn permanent local history into concrete, measurable follow-up.</p>
-      </div>
-      <div class="tabs" role="tablist">
-        <button v-for="name in (['review', 'sessions', 'bookmarks', 'experiments'] as Tab[])"
-          :key="name" class="league-button" :class="{ active: tab === name }"
-          @click="tab = name">
-          {{ name === "review" ? "Current match" : name[0].toUpperCase() + name.slice(1) }}
-        </button>
-      </div>
-    </header>
+  <div class="page review-page">
+    <PageHeader
+      title="Match Review"
+      eyebrow="Performance archive"
+      description="Turn permanent local history into concrete, measurable follow-up."
+    >
+      <template #actions>
+        <Tabs v-model="tab" :options="pageTabs" label="Review areas" variant="compact" class="review-area-tabs" />
+      </template>
+    </PageHeader>
 
-    <p v-if="error" class="error">{{ error }}</p>
-    <div v-if="busy && !review" class="card muted">Loading your review…</div>
+    <EmptyState
+      v-if="error"
+      compact
+      tone="danger"
+      title="Review unavailable"
+      :description="error"
+    />
+    <EmptyState
+      v-else-if="busy && !review"
+      compact
+      title="Loading your review"
+      description="Recall is assembling the match evidence and timeline."
+    />
+    <EmptyState
+      v-else-if="tab === 'review' && !review"
+      compact
+      title="No match selected"
+      description="Your most recent recorded match will appear here once Recall has one to review."
+    />
 
     <template v-if="tab === 'review' && review">
       <MatchReviewHero :review="review" :champions="champions" @bookmark="toggleBookmark" />
 
-      <nav class="match-tabs" role="tablist" aria-label="Match review sections">
-        <button
-          v-for="item in matchTabs"
-          :key="item.id"
-          type="button"
-          role="tab"
-          :aria-selected="matchTab === item.id"
-          :class="{ active: matchTab === item.id }"
-          @click="matchTab = item.id"
-        >
-          {{ item.label }}
-        </button>
-        <div v-if="matchBans.length" class="match-bans" aria-label="Champion bans">
-          <span>Bans</span>
-          <img v-for="championId in matchBans" :key="championId" :src="championIconUrl(championId)" alt="" />
-        </div>
-      </nav>
+      <section class="insight-shell card" aria-label="Match insights">
+        <Tabs v-model="insightTab" :options="insightTabs" label="Match insights" class="insight-tabs" />
 
-      <section v-if="matchTab === 'overview'" class="insight-shell card" role="tabpanel">
-        <nav class="insight-tabs" role="tablist" aria-label="Match insights">
-          <button role="tab" :aria-selected="insightTab === 'rvi'" :class="{ active: insightTab === 'rvi' }" @click="insightTab = 'rvi'">
-            RVI profile
-          </button>
-          <button role="tab" :aria-selected="insightTab === 'performance'" :class="{ active: insightTab === 'performance' }" @click="insightTab = 'performance'">
-            Grade &amp; context
-          </button>
-        </nav>
-
-        <div v-if="insightTab === 'rvi' && rviDimensions.length" class="rvi-review">
+        <div v-if="insightTab === 'rvi' && rviDimensions.length" class="rvi-review" role="tabpanel">
           <div class="rvi-copy">
             <span class="eyebrow">Recall Vector Index</span>
             <h2>This game's performance shape</h2>
@@ -761,14 +779,14 @@ onBeforeUnmount(() => {
             height="310px"
           />
         </div>
-        <div v-else-if="insightTab === 'rvi'" class="rvi-empty">
+        <div v-else-if="insightTab === 'rvi'" class="rvi-empty" role="tabpanel">
           <strong>Match RVI is still building</strong>
           <span>This game does not contain enough measured vectors for a truthful radar.</span>
-          <button class="league-button" @click="insightTab = 'performance'">Open grade &amp; context</button>
+          <Button size="compact" @click="insightTab = 'performance'">Open grade &amp; context</Button>
         </div>
       </section>
 
-      <div v-if="matchTab === 'overview' && insightTab === 'performance'" class="review-grid insight-performance">
+      <div v-if="insightTab === 'performance'" class="review-grid insight-performance" role="tabpanel">
         <section class="card grade-card">
           <div class="section-heading compact-heading">
             <div><span class="eyebrow">Performance model</span><h2 class="section-title">Why this grade</h2></div>
@@ -851,6 +869,17 @@ onBeforeUnmount(() => {
         </section>
       </div>
 
+      <section class="match-content-shell">
+        <Tabs v-model="matchTab" :options="matchTabOptions" label="Match review sections" class="match-tabs">
+          <template #after>
+            <div v-if="matchBans.length" class="match-bans" aria-label="Champion bans">
+              <span>Bans</span>
+              <img v-for="championId in matchBans" :key="championId" :src="championIconUrl(championId)" alt="" />
+            </div>
+          </template>
+        </Tabs>
+
+        <div class="match-tab-surface">
       <section v-if="matchTab === 'overview'" class="scoreboard-section" role="tabpanel">
         <div class="section-heading scoreboard-heading">
           <h2 class="section-title">Scoreboard</h2>
@@ -939,66 +968,81 @@ onBeforeUnmount(() => {
             <span class="eyebrow">Match chronology</span>
             <h2 class="section-title">Timeline</h2>
           </div>
-          <span class="muted">Interactive team gold with match events at each snapshot</span>
+          <span class="muted">Interactive gold advantage, death positions, and match events</span>
         </div>
         <div v-if="review.timeline.status === 'ready' && review.timeline.summary">
-          <div class="gold-chart-wrap" tabindex="0" aria-label="Interactive team gold chart. Use left and right arrow keys to inspect each minute."
-            @pointermove="setTimelineCursor" @pointerleave="timelineCursorTimestamp = undefined"
-            @focus="timelineCursorTimestamp ??= timelineDomain.maximumTimestamp"
-            @keydown.left.prevent="moveTimelineCursor(-1)" @keydown.right.prevent="moveTimelineCursor(1)">
-            <svg class="gold-chart" viewBox="0 0 100 100" preserveAspectRatio="none"
-              aria-label="Blue and Red team total gold across the match">
-              <line class="grid-line top" x1="0" y1="25" x2="100" y2="25" />
-              <line class="grid-line" x1="0" y1="50" x2="100" y2="50" />
-              <line class="grid-line bottom" x1="0" y1="75" x2="100" y2="75" />
-              <polyline class="blue-series" :points="timelineBluePoints" />
-              <polyline class="red-series" :points="timelineRedPoints" />
-            </svg>
-            <template v-if="timelineCursor">
-              <span class="chart-crosshair" :style="{ left: `${timelineCursor.x}%` }" />
-              <span class="cursor-dot blue" :style="{ left: `${timelineCursor.x}%`, top: `${timelineCursor.blueY}%` }" />
-              <span class="cursor-dot red" :style="{ left: `${timelineCursor.x}%`, top: `${timelineCursor.redY}%` }" />
-              <output class="chart-tooltip" :class="{ flip: timelineCursor.x > 68 }" :style="{ left: `${timelineCursor.x}%` }">
-                <strong>{{ eventTime(timelineCursor.timestamp) }}</strong>
-                <span class="blue">Blue {{ timelineCursor.blueGold.toLocaleString() }}g · {{ timelineCursor.blueKills }} kills</span>
-                <span class="red">Red {{ timelineCursor.redGold.toLocaleString() }}g · {{ timelineCursor.redKills }} kills</span>
-                <small>{{ Math.abs(timelineCursor.blueGold - timelineCursor.redGold).toLocaleString() }}g {{ timelineCursor.blueGold >= timelineCursor.redGold ? "Blue" : "Red" }} lead</small>
-              </output>
-            </template>
-            <span
-              v-for="tick in timelineGoldTicks"
-              :key="tick.gold"
-              class="gold-axis-label"
-              :style="{ top: `${tick.y}%` }"
-            >{{ compactGold(tick.gold) }}</span>
-            <span
-              v-for="marker in timelineMarkers"
-              :key="marker.event.eventId"
-              class="chart-marker"
-              :class="marker.event.category"
-              :style="{ left: `${marker.x}%`, top: `${marker.y}%` }"
-              :title="timelineMarkerTitle(marker.event)"
-              :aria-label="timelineMarkerTitle(marker.event)"
-              role="img"
-              tabindex="0"
-            >
-              <img
-                v-if="timelineMarkerIcon(marker.event)"
-                :src="timelineMarkerIcon(marker.event)"
-                alt=""
-              />
-              <span v-else>{{ timelineMarkerGlyph(marker.event) }}</span>
-            </span>
-            <span class="time-axis start">0:00</span>
-            <span class="time-axis end">{{ formatDuration(timelineDomain.maximumTimestamp / 1_000) }}</span>
-          </div>
-          <div v-if="finalTimelineFrame" class="gold-legend" aria-label="Final team gold totals">
-            <span class="blue"><i />Blue <strong>{{ compactGold(finalTimelineFrame.blueGold) }}</strong></span>
-            <span class="red"><i />Red <strong>{{ compactGold(finalTimelineFrame.redGold) }}</strong></span>
-            <span class="difference" :class="finalGoldDifference >= 0 ? 'blue' : 'red'">
-              {{ finalGoldDifference >= 0 ? "Blue" : "Red" }} finished
-              {{ Math.abs(finalGoldDifference).toLocaleString() }}g ahead
-            </span>
+          <div class="timeline-visuals">
+            <div class="gold-chart-column">
+              <header class="timeline-card-heading">
+                <div><span class="eyebrow">Economy</span><h3>Team gold advantage</h3></div>
+                <span class="muted">Blue + / Red −</span>
+              </header>
+              <div class="gold-chart-wrap" tabindex="0" aria-label="Interactive team gold advantage chart. Use left and right arrow keys to inspect each minute."
+                @pointermove="setTimelineCursor" @pointerleave="timelineCursorTimestamp = undefined"
+                @focus="timelineCursorTimestamp ??= timelineDomain.maximumTimestamp"
+                @keydown.left.prevent="moveTimelineCursor(-1)" @keydown.right.prevent="moveTimelineCursor(1)">
+                <svg class="gold-chart" viewBox="0 0 100 100" preserveAspectRatio="none"
+                  aria-label="Blue versus Red team gold advantage across the match">
+                  <defs>
+                    <clipPath id="blue-advantage-clip"><rect x="0" y="0" width="100" height="50" /></clipPath>
+                    <clipPath id="red-advantage-clip"><rect x="0" y="50" width="100" height="50" /></clipPath>
+                  </defs>
+                  <line v-for="tick in timelineGoldTicks" :key="tick.gold" class="grid-line"
+                    x1="0" :y1="tick.y" x2="100" :y2="tick.y" />
+                  <polygon class="advantage-fill blue" :points="`2,50 ${timelineDifferencePoints} 98,50`" clip-path="url(#blue-advantage-clip)" />
+                  <polygon class="advantage-fill red" :points="`2,50 ${timelineDifferencePoints} 98,50`" clip-path="url(#red-advantage-clip)" />
+                  <polyline class="blue-series" :points="timelineDifferencePoints" clip-path="url(#blue-advantage-clip)" />
+                  <polyline class="red-series" :points="timelineDifferencePoints" clip-path="url(#red-advantage-clip)" />
+                </svg>
+                <template v-if="timelineCursor">
+                  <span class="chart-crosshair" :style="{ left: `${timelineCursor.x}%` }" />
+                  <span class="cursor-dot" :class="timelineCursor.difference >= 0 ? 'blue' : 'red'"
+                    :style="{ left: `${timelineCursor.x}%`, top: `${timelineCursor.differenceY}%` }" />
+                  <output class="chart-tooltip" :class="{ flip: timelineCursor.x > 68 }" :style="{ left: `${timelineCursor.x}%` }">
+                    <strong>{{ eventTime(timelineCursor.timestamp) }}</strong>
+                    <span class="blue">Blue {{ timelineCursor.blueGold.toLocaleString() }}g · {{ timelineCursor.blueKills }} kills</span>
+                    <span class="red">Red {{ timelineCursor.redGold.toLocaleString() }}g · {{ timelineCursor.redKills }} kills</span>
+                    <small>{{ Math.abs(timelineCursor.difference).toLocaleString() }}g {{ timelineCursor.difference >= 0 ? "Blue" : "Red" }} lead</small>
+                  </output>
+                </template>
+                <span v-for="tick in timelineGoldTicks" :key="tick.gold" class="gold-axis-label"
+                  :style="{ top: `${tick.y}%` }">{{ signedCompactGold(tick.gold) }}</span>
+                <span class="time-axis start">0:00</span>
+                <span class="time-axis end">{{ formatDuration(timelineDomain.maximumTimestamp / 1_000) }}</span>
+              </div>
+              <div v-if="timelineEventTracks.length" class="timeline-event-tracks" aria-label="Match events aligned to the gold timeline">
+                <div v-for="track in timelineEventTracks" :key="track.id" class="timeline-event-track" :class="track.id">
+                  <strong>{{ track.label }}</strong>
+                  <span
+                    v-for="marker in track.markers"
+                    :key="marker.event.eventId"
+                    class="event-track-marker"
+                    :class="timelineMarkerClasses(marker.event)"
+                    :style="{ left: `${marker.x}%`, top: `${marker.top}px` }"
+                    :title="timelineMarkerTitle(marker.event)"
+                    :aria-label="timelineMarkerTitle(marker.event)"
+                    role="img"
+                    tabindex="0"
+                  >
+                    <img v-if="timelineMarkerIcon(marker.event)" :src="timelineMarkerIcon(marker.event)" alt="" />
+                    <span v-else>{{ timelineMarkerGlyph(marker.event) }}</span>
+                  </span>
+                </div>
+              </div>
+              <div v-if="finalTimelineFrame" class="gold-legend" aria-label="Final team gold totals">
+                <span class="blue"><i />Blue <strong>{{ compactGold(finalTimelineFrame.blueGold) }}</strong></span>
+                <span class="red"><i />Red <strong>{{ compactGold(finalTimelineFrame.redGold) }}</strong></span>
+                <span class="difference" :class="finalGoldDifference >= 0 ? 'blue' : 'red'">
+                  {{ finalGoldDifference >= 0 ? "Blue" : "Red" }} finished
+                  {{ Math.abs(finalGoldDifference).toLocaleString() }}g ahead
+                </span>
+              </div>
+            </div>
+            <MatchDeathMap
+              :match="review.match"
+              :participants="review.scoreboard"
+              :events="review.timeline.summary.events"
+            />
           </div>
           <div class="timeline-filters">
             <button v-for="filter in timelineFilters"
@@ -1103,6 +1147,8 @@ onBeforeUnmount(() => {
           {{ review.timeline.status === 'loading' ? 'Loading…' : 'Load timeline' }}
         </button>
       </section>
+        </div>
+      </section>
     </template>
 
     <section v-else-if="tab === 'sessions'" class="session-list">
@@ -1200,29 +1246,29 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.review-page { display: flex; flex-direction: column; gap: var(--space-4); max-width: 1480px; margin: 0 auto; }
-.page-head, .session-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
-h1 { margin: 0; font: 22px var(--font-display); color: var(--gold-bright); }
+.review-page { gap: var(--ui-space-4); max-width: 1480px; margin: 0 auto; }
+.session-head { display: flex; align-items: center; justify-content: space-between; gap: var(--ui-space-4); }
 h2 { margin: 0; }
-.page-head p { margin: 2px 0 0; font-size: 13px; }
-.tabs { display: flex; gap: var(--space-2); flex-wrap: wrap; }
-.tabs button, .bookmark, .timeline-empty button, .inline button, .experiments-page button { padding: var(--space-2) var(--space-3); }
-.match-tabs { position: sticky; z-index: 12; top: -28px; display: flex; align-items: center; min-height: 54px; overflow-x: auto; border: 1px solid var(--border-subtle); border-radius: 12px; background: color-mix(in srgb, var(--surface-1) 96%, transparent); box-shadow: 0 9px 25px rgba(0,0,0,.18); }
-.match-tabs > button { align-self: stretch; min-width: max-content; padding: 0 20px; border: 0; border-bottom: 3px solid transparent; background: transparent; color: var(--text-muted); font: 13px var(--font-heading); cursor: pointer; }.match-tabs > button:hover { color: var(--text-primary); }.match-tabs > button.active { border-bottom-color: var(--gold); color: var(--text-primary); }
+.bookmark, .timeline-empty button, .inline button, .experiments-page button { padding: var(--ui-space-2) var(--ui-space-3); }
+.match-content-shell { min-width: 0; }
+.match-tabs { position: relative; z-index: 1; align-items: center; min-height: 48px; }
 .match-bans { display: flex; align-items: center; gap: 4px; min-width: max-content; margin-left: auto; padding: 0 14px; }.match-bans span { margin-right: 4px; color: var(--text-muted); font-size: 11px; letter-spacing: .65px; text-transform: uppercase; }.match-bans img { width: 25px; height: 25px; border: 1px solid var(--border-subtle); border-radius: 3px; object-fit: cover; filter: saturate(.72); }
-.insight-shell { padding: 0; overflow: hidden; }.insight-tabs { display: flex; border-bottom: 1px solid var(--border-subtle); background: color-mix(in srgb, var(--surface-0) 48%, transparent); }.insight-tabs button { min-width: 150px; padding: 11px 16px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-muted); font: 12px var(--font-heading); letter-spacing: .55px; text-transform: uppercase; cursor: pointer; }.insight-tabs button.active { border-bottom-color: var(--cyan); color: var(--text-primary); }
-.rvi-review { display: grid; grid-template-columns: minmax(240px, .65fr) minmax(460px, 1.35fr); align-items: center; min-height: 340px; padding: 12px 22px; background: radial-gradient(circle at 77% 50%, rgba(10,203,230,.055), transparent 38%); }.rvi-copy { padding-left: 12px; }.rvi-copy h2 { margin-top: 4px; color: var(--text-primary); font: 20px var(--font-heading); }.rvi-copy p { max-width: 44ch; color: var(--text-muted); font-size: 13px; line-height: 1.5; }.rvi-score { display: flex; align-items: baseline; gap: 8px; margin-top: 18px; }.rvi-score strong { color: var(--gold-bright); font: 34px var(--font-display); }.rvi-score span { color: var(--text-muted); font-size: 12px; letter-spacing: .65px; text-transform: uppercase; }
-.rvi-empty { display: flex; align-items: center; gap: 12px; min-height: 100px; padding: 18px; }.rvi-empty strong { color: var(--text-primary); }.rvi-empty span { flex: 1; color: var(--text-muted); font-size: 11px; }.rvi-empty button { padding: 7px 10px; }
-.insight-performance { margin-top: calc(var(--space-4) * -1 + 1px); }.scoreboard-section, .match-tab-panel { min-width: 0; }.scoreboard-section { padding: 16px; border: 1px solid var(--border-subtle); border-radius: 14px; background: linear-gradient(145deg, var(--surface-2), var(--surface-1)); }.scoreboard-heading { padding-inline: 2px; }.scoreboard-scroll { overflow-x: auto; padding-bottom: 4px; }.annotation-grid { align-items: stretch; }
+.match-tab-surface { display: flex; flex-direction: column; gap: var(--ui-space-4); min-width: 0; padding: clamp(12px, 1.5vw, 18px); border: 1px solid var(--ui-border); border-top: 0; border-radius: 0 0 var(--ui-radius-lg) var(--ui-radius-lg); background: var(--ui-surface-panel); }
+.match-tab-surface > .scoreboard-section, .match-tab-surface > .match-tab-panel { border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.insight-shell { padding: 0; overflow: hidden; }.insight-tabs { border: 0; border-bottom: 1px solid var(--ui-divider); border-radius: 0; }
+.rvi-review { display: grid; grid-template-columns: minmax(220px, .68fr) minmax(0, 1.32fr); align-items: center; min-height: 340px; padding: 12px 22px; background: radial-gradient(circle at 77% 50%, rgba(10,203,230,.055), transparent 38%); }.rvi-review > *, .rvi-copy { min-width: 0; }.rvi-copy { padding-left: 12px; }.rvi-copy h2 { margin-top: 4px; color: var(--text-primary); font: 20px var(--font-heading); }.rvi-copy p { max-width: 44ch; color: var(--text-muted); font-size: 13px; line-height: 1.5; }.rvi-score { display: flex; align-items: baseline; gap: 8px; margin-top: 18px; }.rvi-score strong { color: var(--gold-bright); font: 34px var(--font-display); }.rvi-score span { color: var(--text-muted); font-size: 12px; letter-spacing: .65px; text-transform: uppercase; }
+.rvi-empty { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; min-height: 100px; padding: 18px; }.rvi-empty strong { color: var(--text-primary); }.rvi-empty span { flex: 1 1 280px; color: var(--text-muted); font-size: 11px; }.rvi-empty button { padding: 7px 10px; }
+.insight-performance { grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr)); }.scoreboard-section, .match-tab-panel { min-width: 0; }.scoreboard-section { padding: 0; }.scoreboard-heading { padding-inline: 2px; }.scoreboard-scroll { overflow-x: auto; padding-bottom: 4px; }.annotation-grid { align-items: stretch; }
 .eyebrow { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .8px; }
 .compact-session { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); }.compact-session > div { display: flex; flex-direction: column; }.compact-session button { padding: var(--space-2) var(--space-3); }
 .review-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
-.grade-card, .baseline-card { min-height: 380px; }
+.grade-card, .baseline-card { min-width: 0; min-height: 0; }
 .components, .baseline, .highlights, .scoreboard, .events, .turning-points { display: grid; gap: var(--space-2); }
 .section-heading { display: flex; justify-content: space-between; align-items: end; gap: var(--space-3); margin-bottom: var(--space-3); }
-.compact-heading { align-items: start; margin-bottom: var(--space-3); }
-.algorithm-label, .sample-badge { padding: 4px 8px; border: 1px solid var(--border-subtle); border-radius: 999px; color: var(--text-muted); background: var(--surface-1); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; white-space: nowrap; }
-.grade-story { display: grid; grid-template-columns: 104px minmax(0, 1fr); align-items: center; gap: var(--space-4); }
+.compact-heading { align-items: start; flex-wrap: wrap; margin-bottom: var(--space-3); }
+.compact-heading > * { min-width: 0; }
+.algorithm-label, .sample-badge { max-width: 100%; padding: 4px 8px; border: 1px solid var(--border-subtle); border-radius: 999px; color: var(--text-muted); background: var(--surface-1); font-size: 11px; text-align: right; text-transform: uppercase; letter-spacing: .6px; white-space: normal; }
+.grade-story { display: grid; grid-template-columns: minmax(84px, 104px) minmax(0, 1fr); align-items: center; gap: clamp(10px, 1.5vw, var(--space-4)); }
 .grade-orbit { display: grid; place-items: center; width: 94px; height: 94px; border-radius: 50%; background: conic-gradient(var(--gold-bright) var(--grade-percent), var(--surface-3) 0); box-shadow: 0 0 24px rgba(200,170,109,.16); }
 .grade-orbit::before { content: ""; grid-area: 1 / 1; width: 76px; height: 76px; border-radius: 50%; background: radial-gradient(circle at 50% 24%, var(--surface-2), var(--surface-0)); box-shadow: inset 0 0 0 1px var(--border-subtle); }
 .grade-orbit > div { z-index: 1; grid-area: 1 / 1; display: flex; flex-direction: column; align-items: center; }
@@ -1236,7 +1282,7 @@ h2 { margin: 0; }
 .component .median { position: absolute; left: 50%; top: -2px; width: 1px; height: 10px; background: rgba(255,255,255,.28); }
 .component-percent { color: var(--text-primary); font-size: 11px; text-align: right; }
 .numeric { text-align: right; font-variant-numeric: tabular-nums; }
-.highlights { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: var(--space-4); }
+.highlights { grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); margin-top: var(--space-4); }
 .highlight { position: relative; display: grid; grid-template-columns: 28px minmax(0,1fr); gap: 7px; min-height: 82px; padding: 9px; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: linear-gradient(140deg, var(--surface-2), var(--surface-1)); }
 .highlight::after { content: ""; position: absolute; right: -24px; bottom: -28px; width: 72px; height: 72px; border-radius: 50%; background: currentColor; opacity: .06; }
 .highlight.strength, .highlight.improvement { color: var(--win); }.highlight.opportunity, .highlight.regression { color: var(--loss); }
@@ -1249,24 +1295,35 @@ h2 { margin: 0; }
 .baseline-summary { display: grid; grid-template-columns: repeat(3, 1fr); margin-bottom: var(--space-3); overflow: hidden; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); }
 .baseline-summary span { display: flex; justify-content: center; align-items: baseline; gap: 4px; padding: 7px; border-left: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .45px; }
 .baseline-summary span:first-child { border-left: 0; }.baseline-summary strong { font-size: 13px; }
-.baseline { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 12px; }
+.baseline { grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: 7px 12px; }
 .baseline-row { display: grid; gap: 5px; padding-bottom: 7px; border-bottom: 1px solid var(--border-subtle); }
 .baseline-row header, .baseline-row footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .baseline-row header > strong { color: var(--text-secondary); font-size: 12px; }.baseline-row header > span { font-size: 11px; font-weight: 700; }
 .baseline-axis { position: relative; height: 5px; border-radius: 4px; background: var(--surface-3); }
 .baseline-axis .zero { position: absolute; z-index: 1; left: 50%; top: -2px; width: 1px; height: 9px; background: var(--text-muted); opacity: .7; }
 .baseline-axis > span { position: absolute; top: 0; height: 100%; border-radius: 4px; background: currentColor; }
-.baseline-row footer span { display: flex; align-items: baseline; gap: 4px; }.baseline-row footer small { color: var(--text-muted); font-size: 12px; }.baseline-row footer strong { color: var(--text-primary); font-size: 11px; }
+.baseline-row footer { flex-wrap: wrap; }.baseline-row footer span { display: flex; align-items: baseline; gap: 4px; min-width: 0; }.baseline-row footer small { color: var(--text-muted); font-size: 12px; }.baseline-row footer strong { color: var(--text-primary); font-size: 11px; }
 .baseline-scope { margin: var(--space-3) 0 0; font-size: 11px; text-align: right; }
 .positive { color: var(--win); }.negative, .error { color: var(--loss); }
 .owner-augment-context { display: grid; gap: 9px; padding-top: var(--space-3); }.owner-augment-context > header { display: flex; align-items: end; justify-content: space-between; gap: var(--space-3); }.owner-augment-context h3 { margin: 2px 0 0; color: var(--text-primary); font: 14px var(--font-heading); }.owner-augment-context > header > span { font-size: 12px; }.augment-grid { display: grid; grid-template-columns: repeat(4, minmax(210px, 1fr)); gap: 8px; }.policy-note { margin: 0; color: var(--text-muted); font-size: 11px; }
 textarea { width: 100%; box-sizing: border-box; min-height: 110px; resize: vertical; background: var(--surface-0); color: var(--text-primary); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: var(--space-3); font: 12px var(--font-body); }
 .tag-list, .inline, .experiment-outcome, .session-games { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-2); }.tag { border: 1px solid var(--border-subtle); background: var(--surface-2); color: var(--text-secondary); border-radius: 99px; padding: 4px 9px; }.tag.selected { color: var(--gold-bright); border-color: var(--gold); }
 .inline input { flex: 1; }.experiment-outcome { justify-content: space-between; align-items: center; }.outcome-note { flex-basis: 100%; }
-.gold-chart-wrap { position: relative; height: 238px; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: linear-gradient(180deg, color-mix(in srgb, var(--surface-2) 82%, #0b2742) 0%, var(--surface-0) 58%, color-mix(in srgb, var(--surface-2) 84%, #35131c) 100%); }
+.timeline-visuals { display: grid; grid-template-columns: minmax(0, 1fr) minmax(310px, 380px); align-items: start; gap: clamp(18px, 2.5vw, 34px); }
+.timeline-card-heading { display: flex; align-items: end; justify-content: space-between; gap: 10px; min-height: 34px; margin-bottom: 8px; }.timeline-card-heading h3 { margin: 1px 0 0; color: var(--gold-bright); font: 16px var(--font-heading); }.timeline-card-heading > span { font-size: 11px; }
+.gold-chart-wrap { position: relative; height: 318px; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: linear-gradient(180deg, color-mix(in srgb, var(--surface-2) 82%, #0b2742) 0%, var(--surface-0) 50%, color-mix(in srgb, var(--surface-2) 84%, #35131c) 100%); }
 .gold-chart-wrap:focus-visible { outline: 1px solid var(--gold); outline-offset: 2px; }
-.gold-chart { display: block; width: 100%; height: 100%; }.gold-chart line { stroke: var(--border-strong); stroke-width: .35; stroke-dasharray: 2 2; }.gold-chart .grid-line.top, .gold-chart .grid-line.bottom { stroke: var(--border-subtle); }.gold-chart polyline { fill: none; stroke-width: 2.2; vector-effect: non-scaling-stroke; }.gold-chart .blue-series { stroke: #35b9dd; filter: drop-shadow(0 0 4px rgba(53, 185, 221, .45)); }.gold-chart .red-series { stroke: #e45868; filter: drop-shadow(0 0 4px rgba(228, 88, 104, .38)); }
-.chart-marker { position: absolute; z-index: 2; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; transform: translate(-50%, -50%); border: 2px solid var(--surface-0); border-radius: 50%; background: var(--surface-3); color: var(--gold-bright); box-shadow: 0 2px 7px rgba(0, 0, 0, .5); cursor: help; transition: width .12s ease, height .12s ease, z-index .12s ease; }.chart-marker:hover, .chart-marker:focus-visible { z-index: 5; width: 30px; height: 30px; outline: 2px solid var(--gold); }.chart-marker img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }.chart-marker span { font: 12px var(--font-heading); }.chart-marker.objective { border-color: var(--gold); }.chart-marker.item { border-radius: var(--radius-sm); border-color: var(--win); }.chart-marker.game { border-color: var(--loss); }
+.gold-chart { display: block; width: 100%; height: 100%; }.gold-chart line { stroke: var(--border-strong); stroke-width: .35; stroke-dasharray: 2 2; }.gold-chart polyline { fill: none; stroke-width: 2.2; vector-effect: non-scaling-stroke; }.gold-chart .blue-series { stroke: #35b9dd; filter: drop-shadow(0 0 4px rgba(53, 185, 221, .45)); }.gold-chart .red-series { stroke: #e45868; filter: drop-shadow(0 0 4px rgba(228, 88, 104, .38)); }.advantage-fill.blue { fill: rgba(31, 126, 165, .28); }.advantage-fill.red { fill: rgba(172, 34, 59, .34); }
+.timeline-event-tracks { border: 1px solid var(--border-subtle); border-top: 0; background: var(--surface-0); }
+.timeline-event-track { position: relative; height: 43px; overflow: visible; border-bottom: 1px solid var(--border-subtle); background: linear-gradient(90deg, color-mix(in srgb, var(--surface-2) 90%, transparent), transparent 26%); }
+.timeline-event-track:last-child { border-bottom: 0; }.timeline-event-track::after { content: ""; position: absolute; top: 50%; right: 0; left: 0; height: 1px; background: color-mix(in srgb, var(--border-strong) 55%, transparent); }
+.timeline-event-track > strong { position: absolute; z-index: 1; top: 4px; left: 7px; color: var(--text-muted); font-size: 9px; letter-spacing: .7px; text-transform: uppercase; pointer-events: none; }
+.event-track-marker { position: absolute; z-index: 2; display: grid; place-items: center; box-sizing: border-box; width: 22px; height: 22px; transform: translate(-50%, -50%); border: 2px solid var(--surface-0); border-radius: 50%; background: var(--surface-3); color: var(--gold-bright); box-shadow: 0 2px 7px rgba(0, 0, 0, .55); cursor: help; transition: transform .12s ease, z-index .12s ease, filter .12s ease; }
+.event-track-marker:hover, .event-track-marker:focus-visible { z-index: 8; transform: translate(-50%, -50%) scale(1.38); outline: 1px solid var(--gold); filter: brightness(1.12); }
+.event-track-marker img { display: block; width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }.event-track-marker > span { font: 10px var(--font-heading); line-height: 1; }
+.event-track-marker.kill::after { content: "×"; position: absolute; right: -5px; bottom: -5px; display: grid; place-items: center; width: 12px; height: 12px; border: 1px solid var(--surface-0); border-radius: 50%; background: var(--loss); color: white; font: 10px/1 var(--font-heading); }
+.event-track-marker.blue-team { border-color: #35b9dd; }.event-track-marker.red-team { border-color: #e45868; }.event-track-marker.owner-event { box-shadow: 0 0 0 1px var(--gold), 0 2px 8px rgba(0, 0, 0, .65); }
+.event-track-marker.item { border-radius: var(--radius-sm); border-color: var(--win); }.event-track-marker.objective { border-color: var(--gold); }.event-track-marker.level { border-color: #8d7edb; background: #211d3c; }.event-track-marker.game { border-color: var(--loss); }
 .gold-axis-label { position: absolute; left: 7px; z-index: 1; transform: translateY(-50%); color: var(--text-muted); font-size: 10px; font-variant-numeric: tabular-nums; pointer-events: none; }.time-axis { position: absolute; bottom: 5px; z-index: 1; color: var(--text-muted); font-size: 10px; pointer-events: none; }.time-axis.start { left: 7px; }.time-axis.end { right: 7px; }.gold-legend { display: flex; align-items: center; gap: var(--space-3); min-height: 34px; padding: 6px 9px; border: 1px solid var(--border-subtle); border-top: 0; border-radius: 0 0 var(--radius-md) var(--radius-md); background: var(--surface-2); color: var(--text-secondary); font-size: 12px; }.gold-legend > span { display: inline-flex; align-items: center; gap: 5px; }.gold-legend i { width: 14px; height: 3px; border-radius: 2px; }.gold-legend .blue i { background: #35b9dd; }.gold-legend .red i { background: #e45868; }.gold-legend strong { color: var(--text-primary); }.gold-legend .difference { margin-left: auto; }.gold-legend .difference.blue { color: #60cbea; }.gold-legend .difference.red { color: #ef7b88; }
 .chart-crosshair { position: absolute; z-index: 3; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,.48); pointer-events: none; }
 .cursor-dot { position: absolute; z-index: 4; width: 9px; height: 9px; transform: translate(-50%,-50%); border: 2px solid var(--surface-0); border-radius: 50%; pointer-events: none; }.cursor-dot.blue { background: #35b9dd; }.cursor-dot.red { background: #e45868; }
@@ -1283,8 +1340,13 @@ textarea { width: 100%; box-sizing: border-box; min-height: 110px; resize: verti
 .experiments-page { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }.experiments-page .card:first-child { display: grid; gap: var(--space-2); }.status { margin-left: var(--space-2); color: var(--gold); text-transform: uppercase; font-size: 12px; }
 .scope-label { display: grid; gap: 4px; font-size: 11px; }.scope-label select { min-height: 72px; }.experiment-actions { display: flex; gap: var(--space-2); margin-top: var(--space-2); }.experiment-actions button { padding: 4px 8px; font-size: 12px; }
 .bookmark-row { width: 100%; display: grid; grid-template-columns: 34px 1fr 36px; align-items: center; gap: var(--space-2); padding: var(--space-2); background: var(--surface-2); color: var(--text-primary); border: 1px solid var(--border-subtle); text-align: left; }.bookmark-row img { width: 32px; height: 32px; border-radius: 50%; }
-@media (max-width: 1120px) { .augment-grid { grid-template-columns: repeat(2, minmax(220px, 1fr)); } }
-@media (max-width: 900px) { .rvi-review { grid-template-columns: 1fr; }.rvi-copy { padding: 12px 4px 0; }.match-bans { display: none; } }
-@media (max-width: 800px) { .review-grid { grid-template-columns: 1fr; }.page-head { align-items: flex-start; flex-wrap: wrap; }.section-heading { align-items: flex-start; flex-direction: column; }.event-row { grid-template-columns: 36px 26px minmax(0, 1fr); }.event-row.kill .kill-event { grid-column: 2 / -1; }.match-tabs { top: -16px; }.match-tabs > button { padding-inline: 14px; }.rvi-review { padding-inline: 14px; } }
+@media (max-width: 1120px) { .augment-grid { grid-template-columns: repeat(2, minmax(220px, 1fr)); }.timeline-visuals { grid-template-columns: 1fr; }.gold-chart-wrap { height: 280px; }.match-bans { display: none; } }
+@media (max-width: 980px) { .rvi-review { grid-template-columns: 1fr; }.rvi-copy { padding: 16px 4px 0; }.rvi-copy p { max-width: 62ch; } }
+@media (max-width: 800px) { .review-grid { grid-template-columns: 1fr; }.page-head { align-items: flex-start; flex-wrap: wrap; }.section-heading, .owner-augment-context > header { align-items: flex-start; flex-direction: column; }.event-row { grid-template-columns: 36px 26px minmax(0, 1fr); }.event-row.kill .kill-event { grid-column: 2 / -1; }.match-tabs > button { padding-inline: 14px; }.rvi-review { padding-inline: 14px; }.augment-grid { grid-template-columns: 1fr; } }
+@media (max-width: 560px) { :deep(.review-area-tabs) { width: 100%; }.review-area-tabs :deep(button) { flex: 1 1 0; min-width: 0; padding-inline: 7px; font-size: 9px; letter-spacing: .65px; }.insight-tabs button { flex: 1 1 50%; min-width: 0; padding-inline: 10px; font-size: 11px; }.match-tab-surface { padding: 10px; }.grade-story { grid-template-columns: 1fr; }.grade-orbit { width: 82px; height: 82px; }.grade-orbit::before { width: 66px; height: 66px; }.baseline-summary span { flex-direction: column; align-items: center; gap: 1px; font-size: 10px; }.match-tabs > button { flex: 1 0 auto; padding-inline: 12px; }.gold-legend { align-items: flex-start; flex-wrap: wrap; }.gold-legend .difference { flex-basis: 100%; margin-left: 0; } }
+@container recall-content (max-width: 1120px) { .augment-grid { grid-template-columns: repeat(2, minmax(220px, 1fr)); }.timeline-visuals { grid-template-columns: 1fr; }.gold-chart-wrap { height: 280px; }.match-bans { display: none; } }
+@container recall-content (max-width: 980px) { .rvi-review { grid-template-columns: 1fr; }.rvi-copy { padding: 16px 4px 0; }.rvi-copy p { max-width: 62ch; } }
+@container recall-content (max-width: 900px) { .review-grid { grid-template-columns: 1fr; }.section-heading, .owner-augment-context > header { align-items: flex-start; flex-direction: column; }.event-row { grid-template-columns: 36px 26px minmax(0, 1fr); }.event-row.kill .kill-event { grid-column: 2 / -1; }.rvi-review { padding-inline: 14px; }.augment-grid { grid-template-columns: 1fr; } }
+@container recall-content (max-width: 560px) { .match-tab-surface { padding: 10px; }.grade-story { grid-template-columns: 1fr; }.grade-orbit { width: 82px; height: 82px; }.grade-orbit::before { width: 66px; height: 66px; }.baseline-summary span { flex-direction: column; align-items: center; gap: 1px; font-size: 10px; }.gold-legend { align-items: flex-start; flex-wrap: wrap; }.gold-legend .difference { flex-basis: 100%; margin-left: 0; } }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
 </style>

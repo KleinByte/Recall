@@ -3,6 +3,7 @@ import type { EChartsCoreOption } from "echarts/core"
 import { computed } from "vue"
 import BaseEChart from "../charts/BaseEChart.vue"
 import { escapeTooltip } from "../../charts/formatters"
+import { CHART_COLOURS, CHART_STYLES } from "../../charts/recall-chart-theme"
 import type { PerformanceProfile } from "../../types/stats"
 
 const props = defineProps<{ profile: PerformanceProfile }>()
@@ -28,7 +29,7 @@ const option = computed<EChartsCoreOption>(() => ({
     min: -extent.value,
     max: extent.value,
     axisLabel: { formatter: (value: number) => `${value > 0 ? "+" : ""}${value}` },
-    splitLine: { lineStyle: { color: "rgba(200, 170, 109, .1)" } },
+    splitLine: { lineStyle: { color: CHART_STYLES.gridSoft } },
   },
   yAxis: {
     type: "category",
@@ -42,18 +43,18 @@ const option = computed<EChartsCoreOption>(() => ({
       label: row.label,
       baseline: row.score,
       recent: row.recentScore,
-      itemStyle: { color: row.delta! >= 0 ? "#2ec4a6" : "#d85b74", borderRadius: 3 },
+      itemStyle: { color: row.delta! >= 0 ? CHART_COLOURS.positive : CHART_COLOURS.negative, borderRadius: 3 },
     })),
     barMaxWidth: 18,
     label: {
       show: true,
       position: "outside",
-      color: "#f0e6d2",
+      color: CHART_COLOURS.text,
       fontSize: 11,
       fontWeight: 700,
       textBorderWidth: 0,
       textShadowBlur: 4,
-      textShadowColor: "rgba(0, 0, 0, .75)",
+      textShadowColor: CHART_STYLES.labelShadow,
       formatter: (raw: unknown) => {
         const value = Number((raw as { value?: unknown }).value) || 0
         return `${value > 0 ? "+" : ""}${value}`

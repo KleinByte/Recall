@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue"
 import ChallengeRowView from "../components/ChallengeRow.vue"
+import {
+  Button,
+  EmptyState,
+  Field,
+  PageHeader,
+  Surface,
+} from "../components/ui"
 import { api } from "../helpers/api"
 import { useApiEvents } from "../helpers/use-api-events"
 import { useCoalescedTask } from "../helpers/use-coalesced-task"
@@ -261,64 +268,65 @@ const splitChampions = (challenge: ChallengeRow) => {
 
 <template>
   <div class="page">
-    <header class="page-head">
-      <div>
-        <h1>Challenges</h1>
-        <p class="muted subtitle">
-          Showing {{ filtered.length }} of {{ challenges.length }} tracked
-          challenges
-        </p>
-      </div>
+    <PageHeader
+      title="Challenges"
+      eyebrow="Collection objectives"
+      :description="`Showing ${filtered.length} of ${challenges.length} tracked challenges`"
+    >
+      <template #actions>
+        <Field label="Search challenges" compact class="search-field">
+          <input
+            v-model="search"
+            class="league-input search"
+            type="search"
+            placeholder="Name or description"
+          />
+        </Field>
+      </template>
+    </PageHeader>
 
-      <input
-        v-model="search"
-        class="league-input search"
-        type="search"
-        placeholder="Search challenges"
-      />
-    </header>
-
-    <div class="filters card">
-      <label class="field">
-        <span class="muted field-label">Category</span>
+    <Surface
+      as="section"
+      variant="toolbar"
+      padding="compact"
+      class="filters"
+      aria-label="Challenge filters"
+    >
+      <Field label="Category" compact>
         <select v-model="category" class="league-select">
           <option v-for="option in CATEGORIES" :key="option" :value="option">
             {{ option === "All" ? "All categories" : option }}
           </option>
         </select>
-      </label>
+      </Field>
 
-      <label class="field">
-        <span class="muted field-label">Tier</span>
+      <Field label="Tier" compact>
         <select v-model="level" class="league-select">
           <option v-for="option in LEVELS" :key="option" :value="option">
             {{ option === "All" ? "All tiers" : option }}
           </option>
         </select>
-      </label>
+      </Field>
 
-      <label class="field">
-        <span class="muted field-label">Game mode</span>
+      <Field label="Game mode" compact>
         <select v-model="gameMode" class="league-select">
           <option value="">All game modes</option>
           <option v-for="mode in gameModeOptions" :key="mode" :value="mode">
             {{ challengeGameModeLabel(mode) }}
           </option>
         </select>
-      </label>
+      </Field>
 
-      <label class="field">
-        <span class="muted field-label">Map</span>
+      <Field label="Map" compact>
         <select v-model="challengeMap" class="league-select">
           <option value="">All maps</option>
           <option v-for="map in mapOptions" :key="map" :value="map">
             {{ map }}
           </option>
         </select>
-      </label>
+      </Field>
 
-      <label class="field">
-        <span class="muted field-label">Sort</span>
+      <Field label="Sort" compact>
         <select v-model="sortBy" class="league-select">
           <option
             v-for="option in SORTS"
@@ -328,10 +336,12 @@ const splitChampions = (challenge: ChallengeRow) => {
             {{ option.label }}
           </option>
         </select>
-      </label>
+      </Field>
 
-      <button
-        class="league-button direction"
+      <Button
+        class="direction"
+        size="compact"
+        icon-only
         type="button"
         :title="sortDirection === 'desc' ? 'Sort descending' : 'Sort ascending'"
         :aria-label="
@@ -340,7 +350,7 @@ const splitChampions = (challenge: ChallengeRow) => {
         @click="sortDirection = sortDirection === 'desc' ? 'asc' : 'desc'"
       >
         {{ sortDirection === "desc" ? "↓" : "↑" }}
-      </button>
+      </Button>
 
       <label class="toggle">
         <input type="checkbox" v-model="championOnly" />
@@ -356,14 +366,20 @@ const splitChampions = (challenge: ChallengeRow) => {
         <input type="checkbox" v-model="showRetired" />
         <span>Retired challenges</span>
       </label>
-    </div>
+    </Surface>
 
     <p v-if="showRetired" class="muted note">
       Retired challenges can no longer be progressed. They are kept for
       reference only.
     </p>
 
-    <div v-if="pinnedChallenges.length" class="card pinned-panel">
+    <Surface
+      v-if="pinnedChallenges.length"
+      as="section"
+      variant="quiet"
+      padding="compact"
+      class="pinned-panel"
+    >
       <h2 class="section-title">
         Chasing ({{ pinnedChallenges.length }})
       </h2>
@@ -383,18 +399,16 @@ const splitChampions = (challenge: ChallengeRow) => {
           <span class="muted">×</span>
         </button>
       </div>
-    </div>
+    </Surface>
 
-    <div v-if="challenges.length === 0" class="card notice">
-      <h2 class="section-title">No challenge data yet</h2>
-      <p class="muted">
-        {{
-          connected
-            ? "Recall is importing your challenges — this takes a moment."
-            : "Start the League client and Recall will import all of your challenges."
-        }}
-      </p>
-    </div>
+    <EmptyState
+      v-if="challenges.length === 0"
+      class="notice"
+      title="No challenge data yet"
+      :description="connected
+        ? 'Recall is importing your challenges — this takes a moment.'
+        : 'Start the League client and Recall will import all of your challenges.'"
+    />
 
     <div class="list">
       <ChallengeRowView
@@ -461,17 +475,20 @@ const splitChampions = (challenge: ChallengeRow) => {
       </ChallengeRowView>
     </div>
 
-    <button
+    <Button
       v-if="visible.length < filtered.length"
-      class="league-button more"
+      class="more"
       @click="visibleCount += 60"
     >
       Show more ({{ filtered.length - visible.length }} remaining)
-    </button>
+    </Button>
 
-    <p v-if="filtered.length === 0 && challenges.length > 0" class="muted empty">
-      No challenges match these filters.
-    </p>
+    <EmptyState
+      v-if="filtered.length === 0 && challenges.length > 0"
+      compact
+      title="No challenges match these filters"
+      description="Adjust the category, tier, mode, map, or completion filters to widen the list."
+    />
   </div>
 </template>
 
@@ -482,50 +499,17 @@ const splitChampions = (challenge: ChallengeRow) => {
   gap: var(--space-4);
 }
 
-.page-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: var(--space-4);
-  flex-wrap: wrap;
-}
-
-h1 {
-  font-family: var(--font-display);
-  font-size: 22px;
-  letter-spacing: 1px;
-  margin: 0;
-  color: var(--gold-bright);
-}
-
-.subtitle {
-  margin: var(--space-1) 0 0;
-  font-size: 12px;
-}
-
-.search {
-  width: 240px;
-}
+.search-field { width: min(280px, 34vw); }
+.search { width: 100%; }
 
 .filters {
   display: flex;
-  gap: var(--space-4);
+  gap: var(--ui-space-3);
   align-items: flex-end;
   flex-wrap: wrap;
-  padding: var(--space-3) var(--space-4);
 }
 
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.field-label {
-  font-size: 12px;
-  letter-spacing: 1.2px;
-  text-transform: uppercase;
-}
+.filters > :deep(.ui-field) { flex: 1 1 140px; }
 
 .toggle {
   display: flex;
@@ -673,14 +657,22 @@ h1 {
   max-width: 60ch;
 }
 
-.notice p {
-  margin: 0;
-  font-size: 13px;
-}
-
 .empty {
   font-size: 12px;
   text-align: center;
   padding: var(--space-5);
+}
+
+@container recall-content (max-width: 680px) {
+  .search-field { width: 100%; }
+  .filters { align-items: stretch; }
+  .filters > :deep(.ui-field) { flex-basis: calc(50% - var(--ui-space-2)); }
+  .direction { align-self: end; }
+  .toggle { flex: 1 1 180px; padding: var(--ui-space-2) 0 0; }
+}
+
+@container recall-content (max-width: 430px) {
+  .filters > :deep(.ui-field),
+  .toggle { flex-basis: 100%; }
 }
 </style>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue"
+import { computed, ref, watch } from "vue"
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
 import { faMedal, faTrophy } from "@fortawesome/free-solid-svg-icons"
 import GradeBadge from "./GradeBadge.vue"
@@ -39,6 +39,20 @@ const kda = computed(() => props.review.match.deaths === 0
   ? props.review.match.kills + props.review.match.assists
   : (props.review.match.kills + props.review.match.assists) / props.review.match.deaths)
 const patch = computed(() => props.review.match.gameVersion.split(".").slice(0, 2).join("."))
+const showAllRecords = ref(false)
+const showAllLabels = ref(false)
+const visibleRecords = computed(() => showAllRecords.value
+  ? props.review.records
+  : props.review.records.slice(0, 4))
+const visibleLabels = computed(() => showAllLabels.value
+  ? props.review.labels
+  : props.review.labels.slice(0, 4))
+
+watch(() => props.review.match.gameId, () => {
+  showAllRecords.value = false
+  showAllLabels.value = false
+})
+
 const evidence = (label: MatchReview["labels"][number]) =>
   Object.entries(label.evidence).map(([key, value]) => `${key}: ${value}`).join(", ")
 </script>
@@ -108,17 +122,26 @@ const evidence = (label: MatchReview["labels"][number]) =>
         <span><strong>Current personal records</strong><small>This game still holds {{ review.records.length }} {{ review.records.length === 1 ? "record" : "records" }} in its mode.</small></span>
       </div>
       <div class="record-chips">
-        <span v-for="record in review.records" :key="record.key" :title="`${record.category} record`">
+        <span v-for="record in visibleRecords" :key="record.key" :title="`${record.category} record`">
           <small>Personal best</small>
           <strong>{{ record.label }}</strong>
           <b>{{ formatRecordValue(record) }}</b>
         </span>
+        <button
+          v-if="review.records.length > 4"
+          type="button"
+          class="reveal-card"
+          :aria-expanded="showAllRecords"
+          @click="showAllRecords = !showAllRecords"
+        >
+          {{ showAllRecords ? "Show fewer" : `+${review.records.length - 4} more records` }}
+        </button>
       </div>
     </div>
 
     <div v-if="review.labels.length" class="hero-labels" aria-label="Game labels">
       <article
-        v-for="label in review.labels"
+        v-for="label in visibleLabels"
         :key="label.id"
         :class="label.polarity"
         :title="`${label.tooltip} Evidence: ${evidence(label)}`"
@@ -126,6 +149,15 @@ const evidence = (label: MatchReview["labels"][number]) =>
         <span class="label-icon"><FontAwesomeIcon :icon="labelIcon(label.id)" aria-hidden="true" /></span>
         <span><strong>{{ label.name }}</strong><small>{{ label.tooltip }}</small></span>
       </article>
+      <button
+        v-if="review.labels.length > 4"
+        type="button"
+        class="reveal-card label-reveal"
+        :aria-expanded="showAllLabels"
+        @click="showAllLabels = !showAllLabels"
+      >
+        {{ showAllLabels ? "Show fewer" : `+${review.labels.length - 4} more labels` }}
+      </button>
     </div>
   </section>
 </template>
@@ -141,7 +173,8 @@ const evidence = (label: MatchReview["labels"][number]) =>
 .hero-kpis { display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 1px; padding: 0 12px; background: color-mix(in srgb, var(--surface-0) 55%, transparent); }
 .record-holders { display: grid; grid-template-columns: minmax(210px, .72fr) minmax(0, 2.28fr); gap: 14px; padding: 11px 13px; border-top: 1px solid rgba(200,170,109,.24); border-bottom: 1px solid rgba(200,170,109,.16); background: radial-gradient(circle at 7% 50%, rgba(10,200,220,.1), transparent 32%), linear-gradient(90deg, rgba(200,170,109,.075), rgba(1,10,19,.16)); }
 .record-heading { display: flex; align-items: center; gap: 10px; color: var(--gold-bright); }.record-heading > svg { width: 20px; height: 20px; padding: 8px; border: 1px solid rgba(10,200,220,.38); border-radius: 50%; background: rgba(10,200,220,.08); color: var(--cyan); filter: drop-shadow(0 0 7px rgba(10,200,220,.4)); }.record-heading > span { display: flex; flex-direction: column; }.record-heading strong { font: 12px var(--font-heading); letter-spacing: .75px; text-transform: uppercase; }.record-heading small { margin-top: 3px; color: var(--text-muted); font-size: 11px; line-height: 1.3; }
-.record-chips { display: flex; gap: 8px; overflow-x: auto; padding: 1px 1px 3px; }.record-chips > span { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; flex: 0 0 184px; min-height: 49px; padding: 8px 10px 7px 12px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--gold) 42%, var(--border-subtle)); border-radius: 7px; background: linear-gradient(145deg, rgba(200,170,109,.1), rgba(1,10,19,.58)); box-shadow: inset 2px 0 var(--gold-dim), 0 4px 12px rgba(0,0,0,.12); }.record-chips small { grid-column: 1 / -1; color: var(--gold); font-size: 8px; letter-spacing: .75px; text-transform: uppercase; }.record-chips strong { align-self: end; overflow: hidden; color: var(--text-secondary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }.record-chips b { align-self: end; margin-left: 9px; color: var(--gold-bright); font: 13px var(--font-heading); white-space: nowrap; }
-.hero-labels { display: flex; gap: 8px; min-height: 66px; padding: 9px 13px 11px; overflow-x: auto; background: rgba(1,10,19,.12); }.hero-labels article { --label-tone: var(--gold); display: grid; grid-template-columns: 34px minmax(0,1fr); align-items: center; gap: 9px; flex: 0 0 210px; width: 210px; height: 54px; padding: 7px 10px 7px 8px; border: 1px solid color-mix(in srgb, var(--label-tone) 35%, var(--border-subtle)); border-radius: 8px; background: radial-gradient(circle at 0 50%, color-mix(in srgb, var(--label-tone) 13%, transparent), transparent 48%), linear-gradient(145deg, var(--surface-2), var(--surface-1)); color: var(--gold-bright); box-shadow: inset 2px 0 color-mix(in srgb, var(--label-tone) 72%, transparent), 0 4px 12px rgba(0,0,0,.12); }.hero-labels article.negative { --label-tone: var(--loss); color: color-mix(in srgb, var(--loss) 80%, white); }.hero-labels article.mixed { --label-tone: var(--text-muted); color: var(--text-secondary); }.label-icon { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid color-mix(in srgb, var(--label-tone) 43%, transparent); border-radius: 50%; background: color-mix(in srgb, var(--label-tone) 9%, var(--surface-0)); color: currentColor; }.hero-labels article > span:last-child { display: flex; flex-direction: column; min-width: 0; }.hero-labels strong { overflow: hidden; color: currentColor; font: 11px var(--font-heading); text-overflow: ellipsis; text-transform: uppercase; letter-spacing: .55px; white-space: nowrap; }.hero-labels small { display: -webkit-box; overflow: hidden; margin-top: 3px; color: var(--text-muted); font-size: 10px; line-height: 1.2; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.record-chips { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 8px; min-width: 0; padding: 1px; }.record-chips > span { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; min-width: 0; min-height: 49px; padding: 8px 10px 7px 12px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--gold) 42%, var(--border-subtle)); border-radius: 7px; background: linear-gradient(145deg, rgba(200,170,109,.1), rgba(1,10,19,.58)); box-shadow: inset 2px 0 var(--gold-dim), 0 4px 12px rgba(0,0,0,.12); }.record-chips small { grid-column: 1 / -1; color: var(--gold); font-size: 8px; letter-spacing: .75px; text-transform: uppercase; }.record-chips strong { align-self: end; overflow: hidden; color: var(--text-secondary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }.record-chips b { align-self: end; margin-left: 9px; color: var(--gold-bright); font: 13px var(--font-heading); white-space: nowrap; }
+.hero-labels { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; padding: 9px 13px 11px; background: rgba(1,10,19,.12); }.hero-labels article { --label-tone: var(--gold); display: grid; grid-template-columns: 34px minmax(0,1fr); align-items: center; gap: 9px; min-width: 0; min-height: 54px; padding: 7px 10px 7px 8px; border: 1px solid color-mix(in srgb, var(--label-tone) 35%, var(--border-subtle)); border-radius: 8px; background: radial-gradient(circle at 0 50%, color-mix(in srgb, var(--label-tone) 13%, transparent), transparent 48%), linear-gradient(145deg, var(--surface-2), var(--surface-1)); color: var(--gold-bright); box-shadow: inset 2px 0 color-mix(in srgb, var(--label-tone) 72%, transparent), 0 4px 12px rgba(0,0,0,.12); }.hero-labels article.negative { --label-tone: var(--loss); color: color-mix(in srgb, var(--loss) 80%, white); }.hero-labels article.mixed { --label-tone: var(--text-muted); color: var(--text-secondary); }.label-icon { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid color-mix(in srgb, var(--label-tone) 43%, transparent); border-radius: 50%; background: color-mix(in srgb, var(--label-tone) 9%, var(--surface-0)); color: currentColor; }.hero-labels article > span:last-child { display: flex; flex-direction: column; min-width: 0; }.hero-labels strong { overflow: hidden; color: currentColor; font: 11px var(--font-heading); text-overflow: ellipsis; text-transform: uppercase; letter-spacing: .55px; white-space: nowrap; }.hero-labels small { display: -webkit-box; overflow: hidden; margin-top: 3px; color: var(--text-muted); font-size: 10px; line-height: 1.2; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.reveal-card { min-height: 49px; padding: 8px 12px; border: 1px dashed var(--border-strong); border-radius: 7px; background: color-mix(in srgb, var(--surface-2) 72%, transparent); color: var(--gold); font: 11px var(--font-heading); letter-spacing: .6px; cursor: pointer; }.reveal-card:hover { border-color: var(--gold); background: color-mix(in srgb, var(--gold) 7%, var(--surface-2)); }.label-reveal { min-height: 54px; }
 @media (max-width: 880px) { .hero-main { align-items: flex-start; flex-wrap: wrap; }.hero-kpis { grid-template-columns: repeat(3, 1fr); }.bookmark { margin-left: auto; }.record-holders { grid-template-columns: 1fr; } }
 </style>

@@ -14,16 +14,17 @@ export function timelineChartDomain(
   frames: TimelineFrame[],
   events: TimelineEvent[],
 ): TimelineChartDomain {
+  const observedDifference = Math.max(
+    1_000,
+    ...frames.map((frame) => Math.abs(frame.blueGold - frame.redGold)),
+  )
   return {
     maximumTimestamp: Math.max(
       1,
       ...frames.map((frame) => frame.timestamp),
       ...events.map((event) => event.timestamp),
     ),
-    maximumDifference: Math.max(
-      1_000,
-      ...frames.map((frame) => Math.abs(frame.blueGold - frame.redGold)),
-    ),
+    maximumDifference: Math.ceil(observedDifference / 1_000) * 1_000,
     maximumGold: Math.max(
       1_000,
       ...frames.flatMap((frame) => [frame.blueGold, frame.redGold]),
@@ -44,6 +45,24 @@ export function timelineChartY(
   domain: TimelineChartDomain,
 ): number {
   return 50 - difference * 42 / domain.maximumDifference
+}
+
+/**
+ * League's post-game "Champion Gold" graph is a zero-centred advantage
+ * curve, not two ever-increasing absolute-gold lines. Positive values are a
+ * Blue lead and negative values are a Red lead.
+ */
+export function timelineGoldDifferencePoints(
+  frames: TimelineFrame[],
+  domain: TimelineChartDomain,
+): string {
+  return frames
+    .map((frame) => {
+      const x = timelineChartX(frame.timestamp, domain)
+      const y = timelineChartY(frame.blueGold - frame.redGold, domain)
+      return `${x},${y}`
+    })
+    .join(" ")
 }
 
 export function timelineTeamGoldY(

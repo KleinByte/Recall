@@ -112,21 +112,27 @@ const historyMeta = computed(() => {
   >
     <template #actions>
       <div class="rank-controls">
-        <label class="sr-only" for="ranked-queue">Ranked queue</label>
-        <select id="ranked-queue" v-model="selectedQueue" class="league-select compact-select">
-          <option v-for="queue in queues" :key="queue.queue" :value="queue.queue">
-            {{ queue.label }}
-          </option>
-        </select>
-        <template v-if="allowSeasonSelection">
-          <label class="sr-only" for="ranked-season">Ranked season</label>
-          <select id="ranked-season" v-model="selectedSeason" class="league-select compact-select">
-            <option value="all">All seasons</option>
-            <option v-for="season in seasons" :key="season.id" :value="season.id">
-              {{ season.label }}
-            </option>
-          </select>
-        </template>
+        <label class="rank-control" for="ranked-queue">
+          <span class="control-label">Queue</span>
+          <span class="select-well">
+            <select id="ranked-queue" v-model="selectedQueue" class="instrument-select">
+              <option v-for="queue in queues" :key="queue.queue" :value="queue.queue">
+                {{ queue.label }}
+              </option>
+            </select>
+          </span>
+        </label>
+        <label v-if="allowSeasonSelection" class="rank-control" for="ranked-season">
+          <span class="control-label">Season</span>
+          <span class="select-well">
+            <select id="ranked-season" v-model="selectedSeason" class="instrument-select">
+              <option value="all">All seasons</option>
+              <option v-for="season in seasons" :key="season.id" :value="season.id">
+                {{ season.label }}
+              </option>
+            </select>
+          </span>
+        </label>
       </div>
     </template>
 
@@ -161,15 +167,74 @@ const historyMeta = computed(() => {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: var(--space-2);
+  gap: 6px;
+  margin-left: auto;
 }
 
-.compact-select {
-  min-width: 112px;
-  max-width: 170px;
-  min-height: 30px;
-  padding-block: 4px;
-  font-size: 11px;
+.rank-control {
+  display: grid;
+  gap: 2px;
+  min-width: 118px;
+  cursor: pointer;
+}
+
+.control-label {
+  padding-left: 7px;
+  color: var(--ui-text-muted);
+  font: 8px var(--font-heading);
+  letter-spacing: 1.35px;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.select-well {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  border: 1px solid var(--ui-control-border);
+  border-radius: var(--ui-radius-xs);
+  background: var(--ui-surface-inset);
+  box-shadow: var(--ui-shadow-inset);
+  transition: border-color 120ms ease;
+}
+
+.select-well::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  width: 6px;
+  height: 6px;
+  border-right: 1px solid var(--ui-accent-strong);
+  border-bottom: 1px solid var(--ui-accent-strong);
+  pointer-events: none;
+  transform: translateY(-70%) rotate(45deg);
+}
+
+.select-well:focus-within {
+  border-color: var(--ui-focus-ring);
+  box-shadow:
+    var(--ui-shadow-inset),
+    var(--ui-shadow-focus);
+}
+
+.instrument-select {
+  width: 100%;
+  min-height: 29px;
+  padding: 4px 28px 4px 9px;
+  appearance: none;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ui-control-text);
+  font: 10px var(--font-heading);
+  letter-spacing: .55px;
+  cursor: pointer;
+}
+
+.instrument-select option {
+  background: var(--ui-shell);
+  color: var(--ui-text);
 }
 
 .rank-summary {
@@ -231,7 +296,13 @@ const historyMeta = computed(() => {
 }
 
 @media (max-width: 620px) {
-  .rank-controls { justify-content: flex-start; width: 100%; }
-  .compact-select { flex: 1; max-width: none; }
+  .ranked-history-panel :deep(.head) { flex-wrap: wrap; }
+  .rank-controls {
+    flex-basis: 100%;
+    justify-content: flex-start;
+    width: 100%;
+    margin-left: 0;
+  }
+  .rank-control { flex: 1 1 118px; }
 }
 </style>

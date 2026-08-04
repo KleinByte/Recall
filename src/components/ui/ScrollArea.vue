@@ -11,7 +11,7 @@ defineProps<{ maxHeight?: string }>()
 <style scoped>
 .scroll {
   overflow-y: auto;
-  padding-right: var(--space-2);
+  padding-right: var(--ui-space-2);
 }
 
 .scroll::-webkit-scrollbar {
@@ -19,16 +19,16 @@ defineProps<{ maxHeight?: string }>()
 }
 
 .scroll::-webkit-scrollbar-track {
-  background: var(--surface-2);
-  border-radius: var(--radius-sm);
+  background: var(--ui-surface-inset);
+  border-radius: var(--ui-radius-sm);
 }
 
 .scroll::-webkit-scrollbar-thumb {
-  background: var(--gold-faint);
-  border-radius: var(--radius-sm);
+  background: var(--ui-accent-dim);
+  border-radius: var(--ui-radius-sm);
 }
 
 .scroll::-webkit-scrollbar-thumb:hover {
-  background: var(--gold-dim);
+  background: var(--ui-accent);
 }
 </style>

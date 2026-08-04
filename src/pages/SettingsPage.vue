@@ -1,5 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
+import {
+  Button as UiButton,
+  EmptyState,
+  Field as UiField,
+  PageHeader,
+  Panel,
+  Surface,
+} from "../components/ui"
 import { api } from "../helpers/api"
 import { useApiEvents } from "../helpers/use-api-events"
 import { updatePresentation } from "../helpers/update"
@@ -227,12 +235,13 @@ const formatDate = (value?: number) =>
 
 <template>
   <div class="page">
-    <header class="page-head">
-      <h1>Settings</h1>
-    </header>
+    <PageHeader
+      title="Settings"
+      eyebrow="Recall configuration"
+      description="Control how Recall starts, stores data, and connects to optional services."
+    />
 
-    <section class="card">
-      <h2 class="section-title">Display</h2>
+    <Panel title="Display">
 
       <label class="setting">
         <input
@@ -275,39 +284,36 @@ const formatDate = (value?: number) =>
           <span class="muted hint">Opens hidden in the notification area so game recording is ready.</span>
         </span>
       </label>
-    </section>
+    </Panel>
 
-    <section class="card">
-      <h2 class="section-title">Application updates</h2>
+    <Panel title="Application updates">
       <p class="muted note">{{ update.message }}</p>
       <div class="actions update-actions">
-        <button
-          class="league-button action"
+        <UiButton
           type="button"
           :disabled="updateStatus.kind === 'checking'"
           @click="checkForApplicationUpdates"
         >
           {{ updateStatus.kind === "checking" ? "Checking…" : "Check for updates" }}
-        </button>
-        <button
+        </UiButton>
+        <UiButton
           v-if="update.action"
-          class="league-button action"
+          variant="primary"
           @click="runUpdateAction(update.action!.command)"
         >
           {{ update.action!.label }}
-        </button>
-        <button
-          class="league-button action"
+        </UiButton>
+        <UiButton
+          variant="ghost"
           type="button"
           @click="emit('view-patch-notes')"
         >
           View patch notes
-        </button>
+        </UiButton>
       </div>
-    </section>
+    </Panel>
 
-    <section class="card">
-      <h2 class="section-title">Riot API</h2>
+    <Panel title="Riot API" class="riot-panel">
       <p class="muted note">
         Used only for the full Match-V5 history import you start here. Normal
         post-game details, scoreboards, and recent timelines come directly from
@@ -318,7 +324,7 @@ const formatDate = (value?: number) =>
         Paste the Web API key beginning with <code>RGAPI-</code>. An RSO client
         secret or access token cannot be used for Match-V5.
       </p>
-      <div class="portal-callout">
+      <Surface as="div" variant="inset" padding="compact" class="portal-callout">
         <div>
           <strong>Need a Riot API key?</strong>
           <span>
@@ -328,57 +334,58 @@ const formatDate = (value?: number) =>
           </span>
         </div>
         <a
-          class="league-button portal-link"
+          class="portal-link"
           href="https://developer.riotgames.com/"
           target="_blank"
           rel="noreferrer"
         >
           Open Riot Developer Portal <span aria-hidden="true">↗</span>
         </a>
-      </div>
+      </Surface>
       <p v-if="!riotKeyProtected" class="muted note danger-note">
         Secure local storage is unavailable, so Recall will not save an API key on this computer.
       </p>
       <div class="key-row">
-        <input
-          v-model="riotApiKey"
-          type="password"
-          class="league-input"
-          autocomplete="off"
-          spellcheck="false"
-          placeholder="Paste a regenerated Riot API key"
-          :disabled="!riotKeyProtected"
-          @keyup.enter="saveRiotKey"
-        />
-        <button class="league-button action" :disabled="!riotApiKey || !riotKeyProtected" @click="saveRiotKey">
+        <UiField label="Riot API key" compact class="api-key-field">
+          <input
+            v-model="riotApiKey"
+            type="password"
+            class="league-input"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="Paste a regenerated Riot API key"
+            :disabled="!riotKeyProtected"
+            @keyup.enter="saveRiotKey"
+          />
+        </UiField>
+        <UiButton variant="primary" :disabled="!riotApiKey || !riotKeyProtected" @click="saveRiotKey">
           {{ riotKeyConfigured ? "Replace key" : "Save key" }}
-        </button>
-        <button v-if="riotKeyConfigured" class="league-button action danger" @click="clearRiotKey">Remove key</button>
+        </UiButton>
+        <UiButton v-if="riotKeyConfigured" variant="danger" @click="clearRiotKey">Remove key</UiButton>
       </div>
       <p class="muted note">{{ riotKeyMessage || (riotKeyConfigured ? "A key is configured on this device." : "No API key configured.") }}</p>
       <p v-if="riotKeyConfigured" class="muted note" :class="{ 'danger-note': riotHistory?.status === 'error' }">
         {{ riotHistoryMessage }}
       </p>
       <div v-if="riotKeyConfigured && (riotHistory?.status === 'error' || riotHistory?.status === 'paused')" class="actions">
-        <button class="league-button action" :disabled="!connected" @click="retryRiotHistory">
+        <UiButton :disabled="!connected" @click="retryRiotHistory">
           Resume history import
-        </button>
+        </UiButton>
       </div>
       <div v-if="riotKeyConfigured" class="actions">
-        <button class="league-button action"
+        <UiButton
           :disabled="riotHistory?.status === 'running'"
           @click="reimportRiotDetails">
           Enrich historical details
-        </button>
+        </UiButton>
       </div>
       <p v-if="riotKeyConfigured" class="muted note">
         Replays Match‑V5 history through the shared rate limiter to capture augments
         and newly supported fields. Progress is durable and resumes after restart.
       </p>
-    </section>
+    </Panel>
 
-    <section class="card">
-      <h2 class="section-title">Recorded data</h2>
+    <Panel title="Recorded data">
 
       <dl class="meta">
         <div>
@@ -402,39 +409,36 @@ const formatDate = (value?: number) =>
       </p>
 
       <div class="actions">
-        <button class="league-button action" :disabled="busy || !connected" @click="resync">
+        <UiButton :disabled="busy || !connected" @click="resync">
           Resync now
-        </button>
-        <button class="league-button action" :disabled="busy" @click="exportHistory">
+        </UiButton>
+        <UiButton :disabled="busy" @click="exportHistory">
           Export JSON
-        </button>
-        <button
-          class="league-button action danger"
+        </UiButton>
+        <UiButton
+          variant="danger"
           :disabled="busy"
           @click="clearHistory"
         >
           Clear history
-        </button>
+        </UiButton>
       </div>
 
       <p v-if="message" class="muted note">{{ message }}</p>
-    </section>
+    </Panel>
 
-    <section class="card trust-center">
-      <div class="trust-head">
-        <div>
-          <h2 class="section-title">Data Trust Center</h2>
-          <span class="trust-state" :class="trust?.state">
-            {{ (trust?.state ?? "checking").replace("_", " ") }}
-          </span>
-        </div>
-        <button class="league-button action" :disabled="trustBusy" @click="loadTrust(true)">
+    <Panel title="Data Trust Center" class="trust-center">
+      <template #actions>
+        <span class="trust-state" :class="trust?.state">
+          {{ (trust?.state ?? "checking").replace("_", " ") }}
+        </span>
+        <UiButton size="compact" :disabled="trustBusy" @click="loadTrust(true)">
           {{ trustBusy ? "Checking…" : "Check now" }}
-        </button>
-      </div>
+        </UiButton>
+      </template>
 
       <div v-if="trust" class="trust-grid">
-        <article class="trust-card">
+        <Surface as="article" variant="inset" padding="compact" class="trust-card">
           <h3>Local database</h3>
           <dl class="trust-list">
             <div><dt>Integrity</dt><dd>{{ trust.database.integrity }}</dd></div>
@@ -449,9 +453,9 @@ const formatDate = (value?: number) =>
             <div><dt>Schema drift</dt><dd>{{ trust.database.schemaDriftMatchCount }}</dd></div>
           </dl>
           <p class="path">{{ trust.database.path }}</p>
-        </article>
+        </Surface>
 
-        <article class="trust-card">
+        <Surface as="article" variant="inset" padding="compact" class="trust-card">
           <h3>League client sync</h3>
           <dl class="trust-list">
             <div><dt>Client</dt><dd>{{ connected ? "Connected" : "Offline" }}</dd></div>
@@ -460,9 +464,9 @@ const formatDate = (value?: number) =>
             <div><dt>Latest inserted</dt><dd>{{ trust.leagueClient.itemsWritten }}</dd></div>
           </dl>
           <p v-if="trust.leagueClient.lastError" class="danger-note">{{ trust.leagueClient.lastError }}</p>
-        </article>
+        </Surface>
 
-        <article class="trust-card">
+        <Surface as="article" variant="inset" padding="compact" class="trust-card">
           <h3>Riot history</h3>
           <p class="muted">{{ trust.riotHistory.keyConfigured ? "Protected API key configured" : "Local only — no Riot key" }}</p>
           <dl class="trust-list">
@@ -491,47 +495,56 @@ const formatDate = (value?: number) =>
               Next eligible request: {{ formatDate(trust.riotHistory.nextEligibleAt) }}
             </span>
           </div>
-        </article>
+        </Surface>
 
-        <article class="trust-card backups">
+        <Surface as="article" variant="inset" padding="compact" class="trust-card backups">
           <div class="trust-head">
             <h3>Backups</h3>
-            <button class="league-button mini" :disabled="trustBusy" @click="createBackup">Create backup</button>
+            <UiButton size="compact" :disabled="trustBusy" @click="createBackup">Create backup</UiButton>
           </div>
-          <p v-if="trust.backups.length === 0" class="muted">No managed backups yet.</p>
+          <EmptyState
+            v-if="trust.backups.length === 0"
+            compact
+            title="No managed backups yet"
+            description="Create a verified snapshot before making major data changes."
+          />
           <div v-for="backup in trust.backups" :key="backup.fileName" class="backup-row">
             <div><strong>{{ backup.reason }}</strong>
               <span class="muted">{{ formatDate(backup.createdAt) }} · {{ backup.matchCount }} matches · {{ bytes(backup.sizeBytes) }} · {{ backup.integrity }}</span></div>
             <div class="actions">
-              <button class="league-button mini" :disabled="backup.integrity !== 'ok'" @click="restoreBackup(backup.fileName)">Restore</button>
-              <button class="league-button mini danger" @click="deleteBackup(backup.fileName)">Delete</button>
+              <UiButton size="compact" :disabled="backup.integrity !== 'ok'" @click="restoreBackup(backup.fileName)">Restore</UiButton>
+              <UiButton size="compact" variant="danger" @click="deleteBackup(backup.fileName)">Delete</UiButton>
             </div>
           </div>
-        </article>
+        </Surface>
       </div>
-    </section>
+      <EmptyState
+        v-else
+        compact
+        title="Checking local data"
+        description="Recall is verifying database integrity and sync coverage."
+      />
+    </Panel>
 
-    <section class="card">
-      <h2 class="section-title">Challenge data</h2>
+    <Panel title="Challenge data">
       <div class="actions">
-        <button class="league-button action" @click="emit('refetch')">
+        <UiButton @click="emit('refetch')">
           Refresh challenges
-        </button>
-        <button class="league-button action" @click="emit('refetch-aram-stats')">
+        </UiButton>
+        <UiButton @click="emit('refetch-aram-stats')">
           Refresh ARAM balance data
-        </button>
+        </UiButton>
       </div>
-    </section>
+    </Panel>
 
-    <section class="card">
-      <h2 class="section-title">About Recall</h2>
+    <Panel title="About Recall" variant="quiet">
       <p class="muted note">
         Recall is not endorsed by Riot Games and does not reflect the views or
         opinions of Riot Games or anyone officially involved in producing or
         managing Riot Games properties. Riot Games and all associated
         properties are trademarks or registered trademarks of Riot Games, Inc.
       </p>
-    </section>
+    </Panel>
   </div>
 </template>
 
@@ -539,37 +552,23 @@ const formatDate = (value?: number) =>
 .page {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--ui-space-4);
   max-width: 1120px;
-}
-
-h1 {
-  font-family: var(--font-display);
-  font-size: 22px;
-  letter-spacing: 1px;
-  margin: 0;
-  color: var(--gold-bright);
-}
-
-.page-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-4);
+  container: recall-content / inline-size;
 }
 
 .setting {
   display: flex;
   align-items: flex-start;
-  gap: var(--space-3);
-  padding: var(--space-2) 0;
+  gap: var(--ui-space-3);
+  padding: var(--ui-space-2) 0;
   font-size: 13px;
   cursor: pointer;
 }
 
 .setting input {
   margin-top: 3px;
-  accent-color: var(--gold);
+  accent-color: var(--ui-accent-strong);
 }
 
 .hint {
@@ -616,7 +615,7 @@ h1 {
 
 .actions {
   display: flex;
-  gap: var(--space-2);
+  gap: var(--ui-space-2);
   flex-wrap: wrap;
 }
 
@@ -628,14 +627,12 @@ h1 {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  margin-top: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  gap: var(--space-3);
-  border: 1px solid rgba(10, 203, 230, .22);
-  border-radius: var(--radius-md);
+  margin-top: var(--ui-space-3);
+  gap: var(--ui-space-3);
+  border-color: color-mix(in srgb, var(--ui-live) 35%, transparent);
   background:
-    radial-gradient(circle at 8% 0, rgba(10, 203, 230, .09), transparent 48%),
-    var(--surface-1);
+    radial-gradient(circle at 8% 0, color-mix(in srgb, var(--ui-live) 9%, transparent), transparent 48%),
+    var(--ui-surface-inset);
 }
 
 .portal-callout > div {
@@ -645,14 +642,14 @@ h1 {
 }
 
 .portal-callout strong {
-  color: var(--gold-bright);
-  font: 500 14px var(--font-heading);
+  color: var(--ui-text-heading);
+  font: 500 14px var(--ui-font-heading);
   letter-spacing: .35px;
 }
 
 .portal-callout span {
   max-width: 690px;
-  color: var(--text-secondary);
+  color: var(--ui-text-subtle);
   font-size: 11px;
   line-height: 1.5;
 }
@@ -661,67 +658,62 @@ h1 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  color: var(--cyan);
+  gap: var(--ui-space-2);
+  min-height: var(--ui-control-height);
+  padding: 6px var(--ui-space-3);
+  border: 1px solid var(--ui-control-border);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-control-background);
+  color: var(--ui-live);
+  font: var(--ui-body-size) var(--ui-font-body);
   text-decoration: none;
   white-space: nowrap;
 }
+
+.portal-link:hover { border-color: var(--ui-control-border-hover); background: var(--ui-control-background-hover); }
 
 .portal-link span { color: inherit; font-size: 12px; }
 
 .key-row {
   display: flex;
-  gap: var(--space-2);
-  align-items: center;
-  margin-top: var(--space-3);
+  gap: var(--ui-space-2);
+  align-items: end;
+  margin-top: var(--ui-space-3);
 }
+
+.api-key-field { flex: 1; }
 
 .league-input {
   min-width: 0;
   flex: 1;
   padding: var(--space-2) var(--space-3);
-  color: var(--text-primary);
-  background: var(--surface-0);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  font: 12px var(--font-body);
+  color: var(--ui-text);
+  background: var(--ui-control-background);
+  border: 1px solid var(--ui-control-border);
+  border-radius: var(--ui-radius-sm);
+  font: 12px var(--ui-font-body);
 }
 
-.league-input:focus { outline: none; border-color: var(--gold); }
-.danger-note { color: var(--loss); }
+.league-input:focus { outline: none; border-color: var(--ui-border-emphasis); }
+.danger-note { color: var(--ui-negative); }
 
-@media (max-width: 620px) {
+@container recall-content (max-width: 620px) {
   .key-row { align-items: stretch; flex-direction: column; }
   .portal-callout { grid-template-columns: 1fr; }
   .portal-link { width: 100%; }
 }
 
-.action {
-  padding: var(--space-2) var(--space-4);
-}
-
-.action:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.danger:not(:disabled):hover {
-  border-color: var(--loss);
-  color: var(--loss);
-}
-
 .trust-center { max-width: 1080px; }
+.trust-center :deep(.head) { flex-wrap: wrap; }
 .trust-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
-.trust-head h2, .trust-head h3 { margin-bottom: 0; }
-.trust-state { display: inline-block; margin-top: 4px; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; color: var(--text-secondary); }
-.trust-state.healthy { color: var(--win); }.trust-state.needs_attention { color: var(--loss); }.trust-state.syncing { color: var(--gold); }
-.trust-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); margin-top: var(--space-3); }
-.trust-card { background: var(--surface-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: var(--space-3); }
-.trust-card h3 { margin: 0 0 var(--space-2); font: 15px var(--font-heading); color: var(--gold-bright); }
-.trust-list { margin: 0; display: grid; gap: 4px; font-size: 11px; }.trust-list div { display: flex; justify-content: space-between; gap: var(--space-2); }.trust-list dt { color: var(--text-secondary); }.trust-list dd { margin: 0; text-align: right; }
-.backups { grid-column: 1 / -1; }.backup-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-top: 1px solid var(--border-subtle); }.backup-row > div:first-child { display: flex; flex-direction: column; font-size: 11px; }
-.rate-limits { display: grid; gap: 2px; margin-top: var(--space-2); font-size: 12px; color: var(--text-secondary); }
-.mini { padding: 4px 8px; font-size: 12px; }
-@media (max-width: 760px) { .trust-grid { grid-template-columns: 1fr; }.backups { grid-column: auto; }.backup-row { align-items: flex-start; flex-direction: column; } }
+.trust-head h3 { margin-bottom: 0; }
+.trust-state { display: inline-block; margin-top: 4px; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; color: var(--ui-text-subtle); }
+.trust-state.healthy { color: var(--ui-positive); }.trust-state.needs_attention { color: var(--ui-negative); }.trust-state.syncing { color: var(--ui-accent); }
+.trust-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--ui-space-3); margin-top: var(--ui-space-3); }
+.trust-card { box-shadow: none; }
+.trust-card h3 { margin: 0 0 var(--ui-space-2); font: 15px var(--ui-font-heading); color: var(--ui-text-heading); }
+.trust-list { margin: 0; display: grid; gap: 4px; font-size: 11px; }.trust-list div { display: flex; justify-content: space-between; gap: var(--ui-space-2); }.trust-list dt { color: var(--ui-text-subtle); }.trust-list dd { margin: 0; text-align: right; }
+.backups { grid-column: 1 / -1; }.backup-row { display: flex; align-items: center; justify-content: space-between; gap: var(--ui-space-3); padding: var(--ui-space-2) 0; border-top: 1px solid var(--ui-divider); }.backup-row > div:first-child { display: flex; flex-direction: column; font-size: 11px; }
+.rate-limits { display: grid; gap: 2px; margin-top: var(--ui-space-2); font-size: 12px; color: var(--ui-text-subtle); }
+@container recall-content (max-width: 760px) { .trust-grid { grid-template-columns: 1fr; }.backups { grid-column: auto; }.backup-row { align-items: flex-start; flex-direction: column; } }
 </style>

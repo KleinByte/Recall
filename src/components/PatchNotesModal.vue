@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue"
+import { computed, ref } from "vue"
 import { currentAppVersion, patchNotes } from "../data/patch-notes"
+import Button from "./ui/Button.vue"
+import Dialog from "./ui/Dialog.vue"
 
 const emit = defineEmits<{
   (event: "close"): void
 }>()
 
-const dialog = ref<HTMLElement | null>(null)
 const selectedVersion = ref(
   patchNotes.some((release) => release.version === currentAppVersion)
     ? currentAppVersion
@@ -19,10 +20,6 @@ const selected = computed(
     patchNotes[0],
 )
 
-function closeOnEscape(event: KeyboardEvent) {
-  if (event.key === "Escape") emit("close")
-}
-
 function displayDate(value: string) {
   return new Intl.DateTimeFormat("en-US", {
     month: "long",
@@ -32,39 +29,31 @@ function displayDate(value: string) {
   }).format(new Date(`${value}T00:00:00Z`))
 }
 
-onMounted(() => {
-  window.addEventListener("keydown", closeOnEscape)
-  dialog.value?.focus()
-})
-
-onBeforeUnmount(() => window.removeEventListener("keydown", closeOnEscape))
 </script>
 
 <template>
-  <Teleport to="body">
-    <div class="backdrop" @click.self="emit('close')">
-      <section
-        ref="dialog"
-        class="dialog card"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="patch-notes-title"
-        tabindex="-1"
-      >
+  <Dialog
+    labelled-by="patch-notes-title"
+    size="large"
+    padding="none"
+    @close="emit('close')"
+  >
         <header class="dialog-head">
           <div>
             <p class="eyebrow">What's new in Recall</p>
             <h2 id="patch-notes-title">Patch notes</h2>
           </div>
-          <button
+          <Button
             class="close"
-            type="button"
+            variant="ghost"
+            size="compact"
+            icon-only
             title="Close patch notes"
             aria-label="Close patch notes"
             @click="emit('close')"
           >
             ×
-          </button>
+          </Button>
         </header>
 
         <div class="release-layout">
@@ -119,61 +108,34 @@ onBeforeUnmount(() => window.removeEventListener("keydown", closeOnEscape))
 
         <footer>
           <span class="muted">You're running Recall {{ currentAppVersion }}.</span>
-          <button class="league-button" type="button" @click="emit('close')">
+          <Button variant="primary" @click="emit('close')">
             Got it
-          </button>
+          </Button>
         </footer>
-      </section>
-    </div>
-  </Teleport>
+  </Dialog>
 </template>
 
 <style scoped>
-.backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 80;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow-y: auto;
-  padding: var(--space-5);
-  background: rgba(3, 8, 18, 0.82);
-}
-
-.dialog {
-  width: min(860px, 100%);
-  max-height: min(760px, calc(100vh - 40px));
-  display: flex;
-  flex-direction: column;
-  padding: 0;
-  overflow: hidden;
-}
-
-.dialog:focus {
-  outline: none;
-}
-
 .dialog-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: var(--space-4);
-  padding: var(--space-5);
-  border-bottom: 1px solid var(--border-subtle);
+  gap: var(--ui-space-4);
+  padding: var(--ui-space-5);
+  border-bottom: 1px solid var(--ui-divider);
   background:
     radial-gradient(
       circle at 10% 0%,
-      rgba(200, 170, 109, 0.12),
+    color-mix(in srgb, var(--ui-accent) 12%, transparent),
       transparent 52%
     ),
-    var(--surface-2);
+    var(--ui-surface-raised);
 }
 
 .eyebrow {
   margin: 0 0 3px;
-  color: var(--gold);
-  font-family: var(--font-heading);
+  color: var(--ui-accent);
+  font-family: var(--ui-font-heading);
   font-size: 12px;
   letter-spacing: 1.8px;
   text-transform: uppercase;
@@ -181,23 +143,15 @@ onBeforeUnmount(() => window.removeEventListener("keydown", closeOnEscape))
 
 h2 {
   margin: 0;
-  color: var(--gold-bright);
-  font-family: var(--font-display);
+  color: var(--ui-text-heading);
+  font-family: var(--ui-font-display);
   font-size: 25px;
   letter-spacing: 0.8px;
 }
 
 .close {
-  border: 0;
-  background: none;
-  color: var(--text-secondary);
-  cursor: pointer;
   font-size: 27px;
   line-height: 1;
-}
-
-.close:hover {
-  color: var(--text-primary);
 }
 
 .release-layout {
@@ -210,9 +164,9 @@ h2 {
 .release-list {
   min-height: 0;
   overflow-y: auto;
-  padding: var(--space-3);
-  border-right: 1px solid var(--border-subtle);
-  background: var(--surface-1);
+  padding: var(--ui-space-3);
+  border-right: 1px solid var(--ui-divider);
+  background: var(--ui-surface-inset);
 }
 
 .release-tab {
@@ -220,50 +174,50 @@ h2 {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: var(--space-3);
+  padding: var(--ui-space-3);
   border: 1px solid transparent;
   border-left: 2px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-sm);
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--ui-text-subtle);
   cursor: pointer;
-  font: 12px var(--font-body);
+  font: 12px var(--ui-font-body);
   text-align: left;
 }
 
 .release-tab small {
-  color: var(--text-muted);
+  color: var(--ui-text-muted);
   font-size: 11px;
 }
 
 .release-tab:hover {
-  background: var(--surface-2);
-  color: var(--text-primary);
+  background: var(--ui-surface-hover);
+  color: var(--ui-text);
 }
 
 .release-tab.active {
-  border-color: var(--border-subtle);
-  border-left-color: var(--gold);
-  background: var(--surface-3);
-  color: var(--gold-bright);
+  border-color: var(--ui-border);
+  border-left-color: var(--ui-accent);
+  background: var(--ui-surface-selected);
+  color: var(--ui-text-heading);
 }
 
 .release {
   min-height: 0;
   overflow-y: auto;
-  padding: var(--space-5);
+  padding: var(--ui-space-5);
 }
 
 .release-heading {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: var(--space-4);
+  gap: var(--ui-space-4);
 }
 
 .version {
-  color: var(--gold);
-  font-family: var(--font-heading);
+  color: var(--ui-accent);
+  font-family: var(--ui-font-heading);
   font-size: 12px;
   letter-spacing: 1.2px;
   text-transform: uppercase;
@@ -271,69 +225,60 @@ h2 {
 
 h3 {
   margin: 3px 0 0;
-  color: var(--text-primary);
-  font: 20px var(--font-display);
+  color: var(--ui-text);
+  font: 20px var(--ui-font-display);
 }
 
 time {
-  color: var(--text-muted);
+  color: var(--ui-text-muted);
   font-size: 12px;
   white-space: nowrap;
 }
 
 .summary {
-  margin: var(--space-3) 0 var(--space-5);
-  color: var(--text-secondary);
+  margin: var(--ui-space-3) 0 var(--ui-space-5);
+  color: var(--ui-text-subtle);
   font-size: 13px;
   line-height: 1.65;
 }
 
 .notes-section + .notes-section {
-  margin-top: var(--space-5);
+  margin-top: var(--ui-space-5);
 }
 
 h4 {
-  margin: 0 0 var(--space-2);
-  color: var(--gold-bright);
-  font: 13px var(--font-heading);
+  margin: 0 0 var(--ui-space-2);
+  color: var(--ui-text-heading);
+  font: 13px var(--ui-font-heading);
   letter-spacing: 0.4px;
 }
 
 ul {
   display: grid;
-  gap: var(--space-2);
+  gap: var(--ui-space-2);
   margin: 0;
   padding-left: 19px;
-  color: var(--text-secondary);
+  color: var(--ui-text-subtle);
   font-size: 12px;
   line-height: 1.55;
 }
 
 li::marker {
-  color: var(--gold);
+  color: var(--ui-accent);
 }
 
 footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-4);
-  padding: var(--space-3) var(--space-5);
-  border-top: 1px solid var(--border-subtle);
-  background: var(--surface-2);
+  gap: var(--ui-space-4);
+  padding: var(--ui-space-3) var(--ui-space-5);
+  border-top: 1px solid var(--ui-divider);
+  background: var(--ui-surface-raised);
   font-size: 12px;
 }
 
 @media (max-width: 680px) {
-  .backdrop {
-    align-items: flex-start;
-    padding: var(--space-3);
-  }
-
-  .dialog {
-    max-height: calc(100vh - 24px);
-  }
-
   .release-layout {
     grid-template-columns: 1fr;
   }
@@ -341,10 +286,10 @@ footer {
   .release-list {
     display: flex;
     flex: 0 0 auto;
-    gap: var(--space-1);
+    gap: var(--ui-space-1);
     overflow-x: auto;
     border-right: 0;
-    border-bottom: 1px solid var(--border-subtle);
+    border-bottom: 1px solid var(--ui-divider);
   }
 
   .release-tab {
@@ -354,7 +299,7 @@ footer {
 
   .release-heading {
     flex-direction: column;
-    gap: var(--space-1);
+    gap: var(--ui-space-1);
   }
 }
 </style>

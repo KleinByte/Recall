@@ -275,12 +275,37 @@ export class LiveGameCaptureRepository {
     )
     if (derived.length === 0) return timeline
 
-    const liveLevels = new Set(derived.flatMap((event) =>
+    const enrichedDerived = derived.map((event) => {
+      if (event.type !== "CHAMPION_KILL") return event
+      const recorded = timeline.events.find((candidate) =>
+        candidate.type === "CHAMPION_KILL" &&
+        candidate.targetId === event.targetId &&
+        Math.abs(candidate.timestamp - event.timestamp) <= 2_000,
+      )
+      if (!recorded) return event
+
+      // Live Client Data gives us reliable Riot IDs, while the post-game LCU
+      // event contains the exact map coordinate and combat payload. Combining
+      // them keeps the richer kill instead of silently dropping its position.
+      return {
+        ...recorded,
+        participantId: event.participantId ?? recorded.participantId,
+        assistingParticipantIds: event.assistingParticipantIds?.length
+          ? event.assistingParticipantIds
+          : recorded.assistingParticipantIds,
+        teamId: event.teamId ?? recorded.teamId,
+        targetId: event.targetId ?? recorded.targetId,
+        actorName: event.actorName ?? recorded.actorName,
+        targetName: event.targetName ?? recorded.targetName,
+        position: event.position ?? recorded.position,
+      }
+    })
+    const liveLevels = new Set(enrichedDerived.flatMap((event) =>
       event.type === "LEVEL_UP" && event.participantId && event.level
         ? [`${event.participantId}:${event.level}`]
         : [],
     ))
-    const liveKills = derived.filter((event) => event.type === "CHAMPION_KILL")
+    const liveKills = enrichedDerived.filter((event) => event.type === "CHAMPION_KILL")
     const retained = timeline.events.filter((event) =>
       !(event.type === "CHAMPION_KILL" && liveKills.some((live) =>
         live.targetId === event.targetId && Math.abs(live.timestamp - event.timestamp) <= 2_000,
@@ -292,7 +317,7 @@ export class LiveGameCaptureRepository {
         liveLevels.has(`${event.participantId}:${event.level}`)
       ),
     )
-    const added = derived.filter((event) => {
+    const added = enrichedDerived.filter((event) => {
       if (event.category === "level") {
         return !retained.some((existing) =>
           existing.type === "LEVEL_UP" &&

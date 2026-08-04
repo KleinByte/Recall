@@ -20,6 +20,8 @@ describe("personal record surfaces", () => {
     expect(center).toContain("faBell")
     expect(center).toContain("unread-count")
     expect(center).toContain("Open match review")
+    expect(center).toContain("Clear all Recall notifications")
+    expect(app).toContain("clearRecordNotifications")
   })
 
   it("marks every record currently held by the reviewed game", () => {
@@ -27,13 +29,17 @@ describe("personal record surfaces", () => {
     expect(hero).toContain("Current personal records")
     expect(hero).toContain("Personal best")
     expect(hero).toContain("review.records")
-    expect(hero).toContain("flex: 0 0 210px")
+    expect(hero).toContain("visibleRecords")
+    expect(hero).toContain("visibleLabels")
+    expect(hero).toContain("reveal-card")
+    expect(hero).not.toContain("overflow-x: auto")
   })
 
   it("organizes the expanded Progress catalog into readable groups", () => {
     const progress = read("../src/pages/ProgressPage.vue")
     expect(progress).toContain("RECORD_CATEGORY_ORDER")
     expect(progress).toContain("recordGroups")
-    expect(progress).toContain("group.entries")
+    expect(progress).toContain("activeRecordGroup")
+    expect(progress).toContain("reviewMatch(record.gameId)")
   })
 })

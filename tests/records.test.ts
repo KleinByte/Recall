@@ -152,7 +152,7 @@ describe("expanded personal records", () => {
 
     expect(keys).toEqual(expect.arrayContaining([
       "grade", "damage_taken", "damage_mitigated", "healing", "crowd_control",
-      "damage_per_minute", "kill_participation", "damage_share", "carry_score",
+      "damage_per_minute", "damage_share", "carry_score",
       "objective_damage", "objective_steals", "vision_per_minute", "fastest_win",
       "biggest_comeback", "largest_team_lead", "largest_personal_lead",
       "largest_tempo_swing", "fastest_penta", "kills_in_minute",
@@ -162,6 +162,7 @@ describe("expanded personal records", () => {
       "mayhem_tempo",
     ]))
     expect(keys).not.toContain("lobby_place")
+    expect(keys).not.toContain("kill_participation")
     expect(records.find((record) => record.key === "biggest_comeback")?.value).toBe(2_500)
     expect(records.find((record) => record.key === "fastest_penta")?.value).toBe(15)
   })

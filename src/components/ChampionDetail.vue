@@ -2,7 +2,14 @@
 import { computed, ref, watch } from "vue"
 import GradeBadge from "./GradeBadge.vue"
 import StyleRadar from "./StyleRadar.vue"
-import ScrollArea from "./ui/ScrollArea.vue"
+import {
+  Button as UiButton,
+  Dialog as UiDialog,
+  EmptyState,
+  ScrollArea,
+  Surface,
+  TelemetryGrid,
+} from "./ui"
 import { api } from "../helpers/api"
 import { closeChampion } from "../helpers/navigation"
 import {
@@ -103,6 +110,40 @@ const detail = computed(() => championStyle.value?.detail)
 const averageGrade = computed(() => gradeFromScore(summary.value?.avgGradeScore))
 const hasGames = computed(() => (summary.value?.games ?? 0) > 0)
 
+type TelemetryReading = {
+  label: string
+  value: string
+  hint?: string
+  tone?: "neutral" | "win" | "loss"
+}
+
+const telemetryReadings = computed<TelemetryReading[]>(() => {
+  if (!summary.value) return []
+  return [
+    {
+      label: "Games",
+      value: summary.value.games.toString(),
+      hint: `${summary.value.wins}W · ${summary.value.losses}L`,
+    },
+    {
+      label: "Win rate",
+      value: formatPercent(summary.value.winRate),
+      tone: summary.value.winRate >= 0.5 ? "win" : "loss",
+    },
+    {
+      label: "Avg grade",
+      value: averageGrade.value ?? "–",
+      hint: `${summary.value.gradedGames} graded`,
+    },
+    { label: "KDA", value: formatDecimal(summary.value.kda, 2) },
+    ...(detail.value ? [
+      { label: "Damage / min", value: formatCompact(detail.value.damagePerMin) },
+      { label: "Gold / min", value: formatCompact(detail.value.goldPerMin) },
+      { label: "Deaths / game", value: formatDecimal(detail.value.avgDeaths, 1) },
+    ] : []),
+  ]
+})
+
 /**
  * How this champion differs from the way you play everything else.
  *
@@ -142,12 +183,18 @@ const gradeBars = computed(() => {
 </script>
 
 <template>
-  <div class="backdrop" @click.self="closeChampion()">
-    <div class="sheet card">
+  <UiDialog
+    labelled-by="champion-detail-title"
+    size="wide"
+    align="top"
+    padding="none"
+    @close="closeChampion()"
+  >
+    <div class="sheet">
       <header class="sheet-head">
         <img :src="championIconUrl(championId)" :alt="name" class="portrait" />
         <div>
-          <h2 class="name">{{ name }}</h2>
+          <h2 id="champion-detail-title" class="name">{{ name }}</h2>
           <p v-if="summary && hasGames" class="muted line">
             {{ summary.games }} games · {{ summary.wins }}W {{ summary.losses }}L
             · {{ formatPercent(summary.winRate) }} win rate
@@ -155,41 +202,29 @@ const gradeBars = computed(() => {
           <p v-else class="muted line">No recorded games yet</p>
         </div>
         <GradeBadge v-if="averageGrade" :grade="averageGrade" size="lg" />
-        <button class="close" title="Close" @click="closeChampion()">×</button>
+        <UiButton
+          class="close"
+          variant="ghost"
+          icon-only
+          size="compact"
+          title="Close champion details"
+          aria-label="Close champion details"
+          @click="closeChampion()"
+        >×</UiButton>
       </header>
 
-      <p v-if="loading" class="muted note">Reading your games…</p>
+      <EmptyState
+        v-if="loading"
+        compact
+        title="Reading your games"
+        :description="`Recall is assembling your ${name} profile.`"
+      />
 
       <template v-else-if="hasGames">
-        <div class="kpis">
-          <div class="kpi">
-            <span class="muted kpi-label">KDA</span>
-            <span class="numeric kpi-value">
-              {{ formatDecimal(summary!.kda, 2) }}
-            </span>
-          </div>
-          <div v-if="detail" class="kpi">
-            <span class="muted kpi-label">Damage / min</span>
-            <span class="numeric kpi-value">
-              {{ formatCompact(detail.damagePerMin) }}
-            </span>
-          </div>
-          <div v-if="detail" class="kpi">
-            <span class="muted kpi-label">Gold / min</span>
-            <span class="numeric kpi-value">
-              {{ formatCompact(detail.goldPerMin) }}
-            </span>
-          </div>
-          <div v-if="detail" class="kpi">
-            <span class="muted kpi-label">Deaths / game</span>
-            <span class="numeric kpi-value">
-              {{ formatDecimal(detail.avgDeaths, 1) }}
-            </span>
-          </div>
-        </div>
+        <TelemetryGrid label="Champion telemetry" :readings="telemetryReadings" />
 
         <div class="body">
-          <div class="chart-side">
+          <Surface as="section" variant="inset" padding="compact" class="chart-side">
             <StyleRadar
               v-if="championStyle && overallStyle"
               :axes="championStyle.axes"
@@ -201,9 +236,9 @@ const gradeBars = computed(() => {
               Gold is {{ name }}. Blue is how you play
               {{ family === "sr" ? "Summoner's Rift" : family === "classic" ? "League Classic" : "ARAM" }} overall.
             </p>
-          </div>
+          </Surface>
 
-          <div class="reading-side">
+          <Surface as="section" variant="quiet" padding="compact" class="reading-side">
             <div v-if="strengths.length" class="block">
               <h3 class="block-title">Better than your usual</h3>
               <ul class="delta-list">
@@ -244,11 +279,11 @@ const gradeBars = computed(() => {
                 </div>
               </div>
             </div>
-          </div>
+          </Surface>
         </div>
 
         <div class="split">
-          <div v-if="best.length" class="block">
+          <Surface v-if="best.length" as="section" variant="inset" padding="compact" class="block game-block">
             <h3 class="block-title">Your best games</h3>
             <ul class="game-list">
               <li v-for="game in best" :key="game.gameId">
@@ -260,9 +295,9 @@ const gradeBars = computed(() => {
                 <span class="muted">{{ formatRelativeDate(game.playedAt) }}</span>
               </li>
             </ul>
-          </div>
+          </Surface>
 
-          <div v-if="worst.length" class="block">
+          <Surface v-if="worst.length" as="section" variant="inset" padding="compact" class="block game-block">
             <h3 class="block-title">Your worst games</h3>
             <ul class="game-list">
               <li v-for="game in worst" :key="game.gameId">
@@ -274,15 +309,18 @@ const gradeBars = computed(() => {
                 <span class="muted">{{ formatRelativeDate(game.playedAt) }}</span>
               </li>
             </ul>
-          </div>
+          </Surface>
         </div>
       </template>
 
-      <p v-else class="muted note">
-        Recall has not recorded a game on {{ name }} yet.
-      </p>
+      <EmptyState
+        v-else
+        compact
+        title="No recorded games yet"
+        :description="`Recall has not recorded a game on ${name} yet.`"
+      />
 
-      <div v-if="needs.length" class="block">
+      <Surface v-if="needs.length" as="section" variant="inset" padding="compact" class="block needs-block">
         <h3 class="block-title">
           Challenges {{ name }} still counts towards ({{ needs.length }})
         </h3>
@@ -299,50 +337,47 @@ const gradeBars = computed(() => {
             </li>
           </ul>
         </ScrollArea>
-      </div>
+      </Surface>
     </div>
-  </div>
+  </UiDialog>
 </template>
 
 <style scoped>
-.backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(3, 8, 18, 0.72);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: var(--space-6) var(--space-5);
-  z-index: 50;
-  overflow-y: auto;
-}
-
 .sheet {
-  width: min(980px, 100%);
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
-  padding: var(--space-4) var(--space-5) var(--space-5);
+  min-height: 0;
+  width: 100%;
+  gap: var(--ui-space-4);
+  padding: var(--ui-space-5);
+  overflow-y: auto;
+  container: champion-detail / inline-size;
+}
+
+.sheet > * {
+  flex: 0 0 auto;
 }
 
 .sheet-head {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--ui-space-3);
+  padding-bottom: var(--ui-space-3);
+  border-bottom: 1px solid var(--ui-divider);
 }
 
 .portrait {
   width: 52px;
   height: 52px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-strong);
+  border-radius: var(--ui-radius-md);
+  border: 1px solid var(--ui-border-emphasis);
 }
 
 .name {
-  font-family: var(--font-display);
+  font-family: var(--ui-font-display);
   font-size: 20px;
   margin: 0;
-  color: var(--gold-bright);
+  color: var(--ui-text-heading);
   letter-spacing: 0.6px;
 }
 
@@ -354,16 +389,8 @@ const gradeBars = computed(() => {
 .close {
   margin-left: auto;
   align-self: flex-start;
-  background: none;
-  border: none;
-  color: var(--text-secondary);
   font-size: 24px;
   line-height: 1;
-  cursor: pointer;
-}
-
-.close:hover {
-  color: var(--text-primary);
 }
 
 .note {
@@ -371,60 +398,34 @@ const gradeBars = computed(() => {
   margin: 0;
 }
 
-.kpis {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: var(--space-3);
-}
-
-.kpi {
-  background: var(--surface-2);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  padding: var(--space-2) var(--space-3);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.kpi-label {
-  font-size: 12px;
-  letter-spacing: 1.2px;
-  text-transform: uppercase;
-}
-
-.kpi-value {
-  font-size: 18px;
-  color: var(--text-primary);
-}
-
 .body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(260px, 0.9fr);
-  gap: var(--space-5);
+  gap: var(--ui-space-4);
   align-items: start;
 }
 
 .footnote {
   font-size: 11px;
-  margin: var(--space-2) 0 0;
+  margin: var(--ui-space-2) 0 0;
   text-align: center;
 }
 
 .reading-side {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--ui-space-4);
+  box-shadow: none;
 }
 
 .block-title {
-  font-family: var(--font-heading);
+  font-family: var(--ui-font-heading);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 1.2px;
   text-transform: uppercase;
-  color: var(--text-secondary);
-  margin: 0 0 var(--space-2);
+  color: var(--ui-text-subtle);
+  margin: 0 0 var(--ui-space-2);
 }
 
 .delta-list,
@@ -435,7 +436,7 @@ const gradeBars = computed(() => {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--ui-space-2);
   font-size: 12px;
 }
 
@@ -443,33 +444,33 @@ const gradeBars = computed(() => {
 .need-list li {
   display: flex;
   justify-content: space-between;
-  gap: var(--space-3);
+  gap: var(--ui-space-3);
 }
 
 .axis-label,
 .need-name {
-  color: var(--text-secondary);
+  color: var(--ui-text-subtle);
 }
 
 .delta.up {
-  color: var(--win);
+  color: var(--ui-positive);
 }
 
 .delta.down {
-  color: var(--loss);
+  color: var(--ui-negative);
 }
 
 .grades {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--ui-space-2);
 }
 
 .grade-row {
   display: grid;
   grid-template-columns: 38px 1fr 28px;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--ui-space-2);
 }
 
 /* Only the difference from the global bar primitive. */
@@ -485,18 +486,28 @@ const gradeBars = computed(() => {
 .split {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: var(--space-5);
+  gap: var(--ui-space-4);
 }
 
 .game-list li {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--ui-space-3);
 }
 
-@media (max-width: 900px) {
+@container champion-detail (max-width: 720px) {
   .body {
     grid-template-columns: minmax(0, 1fr);
   }
+
+  .sheet-head { align-items: flex-start; flex-wrap: wrap; }
+  .sheet-head .close { margin-left: auto; }
+}
+
+@container champion-detail (max-width: 480px) {
+  .sheet { padding: var(--ui-space-4); }
+  .portrait { width: 44px; height: 44px; }
+  .game-list li { display: grid; grid-template-columns: 34px 1fr; gap: var(--ui-space-2); }
+  .game-list li > :nth-child(n + 3) { grid-column: 2; }
 }
 </style>

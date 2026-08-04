@@ -2,6 +2,7 @@
 import type { EChartsCoreOption } from "echarts/core"
 import { computed } from "vue"
 import BaseEChart from "../charts/BaseEChart.vue"
+import { CHART_COLOURS, CHART_STYLES } from "../../charts/recall-chart-theme"
 import {
   escapeTooltip,
   formatSigned,
@@ -41,7 +42,7 @@ const option = computed<EChartsCoreOption>(() => ({
   xAxis: {
     type: "value",
     axisLabel: { formatter: (value: number) => `${formatSigned(value, 0)} pp` },
-    splitLine: { lineStyle: { color: "rgba(200, 170, 109, 0.14)" } },
+    splitLine: { lineStyle: { color: CHART_STYLES.grid } },
   },
   yAxis: {
     type: "category",
@@ -53,14 +54,14 @@ const option = computed<EChartsCoreOption>(() => ({
     type: "bar",
     data: changes.value.map((change) => ({
       value: change.value,
-      itemStyle: { color: change.value >= 0 ? "#0acbe6" : "#e84057", borderRadius: 3 },
+      itemStyle: { color: change.value >= 0 ? CHART_COLOURS.live : CHART_COLOURS.negative, borderRadius: 3 },
     })),
     barMaxWidth: 24,
     markLine: {
       symbol: "none",
       silent: true,
       label: { show: false },
-      lineStyle: { color: "rgba(240, 230, 210, 0.42)", width: 1 },
+      lineStyle: { color: CHART_STYLES.zeroLine, width: 1 },
       data: [{ xAxis: 0 }],
     },
   }],

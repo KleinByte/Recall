@@ -225,8 +225,7 @@ const itemName = (itemId: number) => itemAsset(itemId).name
   border: 1px solid var(--border-subtle);
   border-left: 4px solid var(--border-strong);
   border-radius: var(--radius-md);
-  background:
-    linear-gradient(100deg, color-mix(in srgb, var(--surface-2) 88%, transparent), var(--surface-1));
+  background: var(--ui-match-row-background);
   box-shadow: 0 8px 22px rgba(0, 0, 0, .12);
 }
 .match-card.won { border-left-color: var(--win); }
@@ -236,12 +235,12 @@ const itemName = (itemId: number) => itemAsset(itemId).name
   width: 100%; padding: 0; border: 0; background: transparent; color: inherit;
   text-align: left; font: inherit; cursor: pointer;
 }
-.card-button:hover { background: color-mix(in srgb, var(--surface-3) 52%, transparent); }
+.card-button:hover { background: var(--ui-match-row-hover-background); }
 
 .card-head {
   display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
   padding: 5px 10px; border-bottom: 1px solid var(--border-subtle);
-  background: color-mix(in srgb, var(--surface-3) 42%, transparent);
+  background: var(--ui-match-row-header-background);
   font-size: 11px;
 }
 .headline { display: flex; align-items: center; gap: 7px; min-width: 0; }

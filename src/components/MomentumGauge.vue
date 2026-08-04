@@ -390,7 +390,7 @@ const streakText = computed(() =>
 /* ---------- ring frame + charge cells ---------- */
 .frame-line {
   fill: none;
-  stroke: rgba(200, 170, 109, .5);
+  stroke: var(--instrument-border);
   stroke-width: 1.2;
   filter: drop-shadow(0 0 3px rgba(200, 155, 60, .25));
 }
@@ -424,36 +424,36 @@ const streakText = computed(() =>
 }
 
 .tick-label {
-  fill: #6b819c;
+  fill: var(--dial-readout-muted);
   font: 10px var(--font-heading);
   text-anchor: middle;
 }
 
 /* ---------- ring end terminals: veins light with the tier in Overdrive ---------- */
 .cap-plate {
-  fill: #0a1420;
-  stroke: rgba(200, 170, 109, .7);
+  fill: var(--dial-ink-800);
+  stroke: var(--instrument-border-strong);
   stroke-width: 1.1;
   stroke-linejoin: bevel;
 }
 
 .cap-blade {
-  fill: #0e1a2a;
-  stroke: rgba(200, 170, 109, .55);
+  fill: var(--dial-navy-700);
+  stroke: var(--instrument-border);
   stroke-width: .9;
   stroke-linejoin: bevel;
 }
 
 .cap-vein {
   fill: none;
-  stroke: #087ea4;
+  stroke: var(--dial-energy-700);
   stroke-width: 1.5;
   stroke-linecap: round;
   transition: stroke .6s ease, filter .6s ease;
 }
 
 .cap-rivet {
-  fill: #c8aa6d;
+  fill: var(--dial-metal-500);
 }
 
 .overdrive .cap-vein {
@@ -468,7 +468,7 @@ const streakText = computed(() =>
 }
 
 .gem-body {
-  stroke: #c8aa6d;
+  stroke: var(--dial-metal-500);
   stroke-width: 1.3;
   stroke-linejoin: bevel;
   transition: stroke .6s ease, filter .6s ease;
@@ -481,13 +481,13 @@ const streakText = computed(() =>
   stroke-width: .6;
 }
 
-.gem-stop-a { stop-color: #17405c; transition: stop-color .6s ease; }
-.gem-stop-b { stop-color: #0a1c2c; transition: stop-color .6s ease; }
-.gem-stop-c { stop-color: #060d16; transition: stop-color .6s ease; }
+.gem-stop-a { stop-color: var(--dial-navy-500); transition: stop-color var(--instrument-motion-material) ease; }
+.gem-stop-b { stop-color: var(--dial-navy-650); transition: stop-color var(--instrument-motion-material) ease; }
+.gem-stop-c { stop-color: var(--dial-ink-950); transition: stop-color var(--instrument-motion-material) ease; }
 
 .gem-shine {
   transform: translateX(-56px) skewX(-18deg);
-  animation: gem-shine 3.6s ease-in-out infinite;
+  animation: gem-shine var(--instrument-motion-ambient) ease-in-out infinite;
 }
 
 .overdrive .gem-body {
@@ -533,7 +533,7 @@ const streakText = computed(() =>
   left: 50%;
   width: 140px;
   transform: translateX(-50%);
-  color: var(--gold);
+  color: var(--dial-metal-500);
   font: 11px var(--font-heading);
   line-height: 1;
   letter-spacing: .8px;

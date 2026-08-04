@@ -391,7 +391,6 @@ const DEFINITIONS: RecordDefinition[] = [
   { key: "cs_per_minute", label: "Highest CS per minute", category: "Economy", format: "per-minute", value: ({ match }) => positive(match.csPerMin ?? (match.totalMinionsKilled + match.neutralMinions) / minutes(match)) },
   { key: "damage_per_gold", label: "Most efficient damage", category: "Economy", format: "decimal", source: "scoreboard", value: damagePerGold },
   { key: "combat_conversion", label: "Best combat conversion", category: "Economy", format: "decimal", source: "scoreboard", value: combatConversion },
-  { key: "kill_participation", label: "Highest kill participation", category: "Performance", format: "percent", source: "scoreboard", value: killParticipation },
   { key: "damage_share", label: "Highest damage share", category: "Performance", format: "percent", source: "scoreboard", value: (context) => teamShare(context, "damageToChampions") },
   { key: "gold_share", label: "Highest gold share", category: "Performance", format: "percent", source: "scoreboard", value: (context) => teamShare(context, "goldEarned") },
   { key: "objective_share", label: "Highest objective contribution", category: "Performance", format: "percent", source: "scoreboard", value: (context) => teamShare(context, "damageObjectives") },

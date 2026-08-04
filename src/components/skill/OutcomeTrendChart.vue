@@ -3,6 +3,7 @@ import type { EChartsCoreOption } from "echarts/core"
 import { computed } from "vue"
 import BaseEChart from "../charts/BaseEChart.vue"
 import { escapeTooltip } from "../../charts/formatters"
+import { CHART_COLOURS, CHART_STYLES } from "../../charts/recall-chart-theme"
 
 const props = defineProps<{
   rows: Array<{ label: string; games: number; wins?: number; winRate: number }>
@@ -41,7 +42,7 @@ const option = computed<EChartsCoreOption>(() => ({
       min: 0,
       max: 100,
       axisLabel: { formatter: (value: number) => `${value}%` },
-      splitLine: { lineStyle: { color: "rgba(200, 170, 109, 0.14)" } },
+      splitLine: { lineStyle: { color: CHART_STYLES.grid } },
     },
   ],
   series: [
@@ -53,10 +54,10 @@ const option = computed<EChartsCoreOption>(() => ({
       data: props.rows.map((row) => ({
         value: row.games,
         itemStyle: {
-          color: row.games === 0 ? "rgba(160, 155, 140, 0.18)" : row.winRate >= 0.5
-            ? "rgba(28, 191, 138, 0.66)"
-            : "rgba(232, 64, 87, 0.64)",
-          borderColor: row.winRate >= 0.5 ? "#1cbf8a" : "#e84057",
+          color: row.games === 0 ? CHART_STYLES.neutralFill : row.winRate >= 0.5
+            ? CHART_STYLES.positiveFill
+            : CHART_STYLES.negativeFill,
+          borderColor: row.winRate >= 0.5 ? CHART_COLOURS.positive : CHART_COLOURS.negative,
           borderWidth: 1,
           borderRadius: [4, 4, 0, 0],
         },
@@ -69,9 +70,9 @@ const option = computed<EChartsCoreOption>(() => ({
       smooth: 0.32,
       connectNulls: false,
       symbolSize: 8,
-      lineStyle: { color: "#0acbe6", width: 2.5 },
-      itemStyle: { color: "#f0e6d2", borderColor: "#0acbe6", borderWidth: 2 },
-      areaStyle: { color: "rgba(10, 203, 230, 0.12)" },
+      lineStyle: { color: CHART_COLOURS.live, width: 2.5 },
+      itemStyle: { color: CHART_COLOURS.text, borderColor: CHART_COLOURS.live, borderWidth: 2 },
+      areaStyle: { color: CHART_STYLES.liveArea },
       data: props.rows.map((row) => row.games ? Math.round(row.winRate * 100) : null),
     },
   ],

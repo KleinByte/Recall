@@ -10,6 +10,70 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.29",
+    releasedAt: "2026-08-04",
+    title: "A sharper command deck",
+    summary:
+      "Recall's redesigned interface is now consistent from navigation through deep analysis, with denser responsive layouts, clearer records, and match evidence that remains usable at compact window sizes.",
+    sections: [
+      {
+        title: "Dashboard and navigation",
+        items: [
+          "The Dashboard now uses a connected telemetry deck, a more focused performance layout, responsive champion rows, and a rebuilt rank-history control.",
+          "The sidebar uses destination-specific League artwork, a clearer grouped hierarchy, compact navigation states, and a proper flat Settings glyph.",
+          "Shared components and semantic tokens now carry the same Recall visual language across every primary page while preserving special game-specific visuals.",
+        ],
+      },
+      {
+        title: "Review evidence that scales",
+        items: [
+          "Match Review keeps RVI and grade context above its attached Overview, Stats, Timeline, and Win Probability workspace without overlapping at narrow widths.",
+          "Gold advantage, event tracks, death maps, champion portraits, and Summoner's Rift, ARAM, and League Classic map coordinates are clearer and more accurate.",
+          "Crowded game labels and personal records expand in place instead of forcing sideways scrolling, and Recall notifications now include an explicit Clear action.",
+        ],
+      },
+      {
+        title: "Champion, Skill, and Progress clarity",
+        items: [
+          "Champion details now open with connected performance telemetry and scroll through the complete breakdown without clipping lower sections.",
+          "Skill Overview begins with the same compact telemetry language as the Dashboard.",
+          "Progress records now use a compact mode selector, category browser, and review-linked ledger; capped kill participation is no longer treated as a meaningful personal best.",
+        ],
+      },
+    ],
+  },
+  {
+    version: "2.0.28",
+    releasedAt: "2026-08-04",
+    title: "One visual system, clearer match evidence",
+    summary:
+      "Recall now carries the Dashboard's visual language throughout the app, keeps dense screens stable as the window narrows, and makes timeline deaths and map evidence easier to inspect.",
+    sections: [
+      {
+        title: "A shared Recall interface",
+        items: [
+          "Every reachable page now shares semantic design tokens and reusable headers, panels, controls, tabs, fields, dialogs, readouts, and empty states.",
+          "Chart palettes use the same semantic roles as the interface, so future visual retunes can be made centrally without flattening game-specific meaning.",
+          "The Momentum Dial, live Tempo gauge, grades, ranks, tiers, runes, maps, and team colors keep their distinct evidence-driven identity.",
+        ],
+      },
+      {
+        title: "Responsive review and navigation",
+        items: [
+          "Review profile and grade context stay above attached Overview, Stats, Timeline, and Win Probability content instead of shifting into detached card fragments.",
+          "Filters, telemetry, tables, dialogs, notifications, and analytical layouts now respond to the actual content column behind the sidebar, including compact window sizes.",
+        ],
+      },
+      {
+        title: "Timelines and death maps",
+        items: [
+          "Gold-over-time plotting follows team totals instead of misleading personal deltas, with clearer tracks for kills, deaths, levels, items, and objectives.",
+          "ARAM, Summoner's Rift, and League Classic reviews map champion deaths with map-aware coordinates, readable markers, champion filtering, and correctly fitted portraits.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.27",
     releasedAt: "2026-08-03",
     title: "Records worth ringing in",
@@ -82,7 +146,7 @@ export const patchNotes: readonly PatchNoteRelease[] = [
   },
   {
     version: "2.0.24",
-    releasedAt: "2026-08-04",
+    releasedAt: "2026-08-03",
     title: "Grades that mean something, dials that feel right",
     summary:
       "The grade model is rebuilt around rank-and-magnitude comparisons with class-aware expectations and regrades your history automatically, while the momentum dial and live Tempo gauge learn to celebrate streaks properly and stop panicking over even trades.",

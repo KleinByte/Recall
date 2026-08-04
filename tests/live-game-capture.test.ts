@@ -245,4 +245,57 @@ describe("LiveGameCaptureRepository", () => {
     ])
     expect(enriched.events.some((event) => event.category === "item")).toBe(true)
   })
+
+  it("keeps the exact post-game position when adding live kill names", () => {
+    const db = new Database(":memory:")
+    applyMigrations(db)
+    const repo = new LiveGameCaptureRepository(db as never)
+    repo.record(10, "owner", snapshot(412.3, {
+      enemies: [{
+        ...snapshot(412.3).allies[0],
+        championName: "Amumu",
+        riotId: "Amumu Main#NA1",
+        team: "CHAOS",
+        isLocal: false,
+      }],
+      events: [{
+        id: 44,
+        name: "ChampionKill",
+        time: 412.3,
+        killerName: "Owner",
+        victimName: "Amumu Main",
+        assisters: [],
+      }],
+    }))
+    const timeline: CompactTimeline = {
+      frames: [],
+      events: [{
+        eventId: "post-game-kill",
+        timestamp: 412_275,
+        type: "CHAMPION_KILL",
+        category: "kill",
+        participantId: 1,
+        targetId: 6,
+        teamId: 100,
+        bounty: 300,
+        position: { x: 7_033, y: 7_097 },
+      }],
+      turningPoints: [],
+    }
+
+    const enriched = repo.enrichTimeline(10, "owner", timeline, [
+      { participantId: 1, teamId: 100, isPlayer: 1, summonerName: "Owner#NA1" },
+      { participantId: 6, teamId: 200, isPlayer: 0, summonerName: "Amumu Main#NA1" },
+    ])
+
+    expect(enriched.events.filter((event) => event.type === "CHAMPION_KILL")).toEqual([
+      expect.objectContaining({
+        eventId: "post-game-kill",
+        actorName: "Owner",
+        targetName: "Amumu Main",
+        bounty: 300,
+        position: { x: 7_033, y: 7_097 },
+      }),
+    ])
+  })
 })

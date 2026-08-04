@@ -2,6 +2,8 @@
 import { computed, onMounted, ref } from "vue"
 import AugmentRecommendations from "../components/AugmentRecommendations.vue"
 import TempoGauge from "../components/TempoGauge.vue"
+import EmptyState from "../components/ui/EmptyState.vue"
+import PageHeader from "../components/ui/PageHeader.vue"
 import { api } from "../helpers/api"
 import { useApiEvents } from "../helpers/use-api-events"
 import {
@@ -362,16 +364,13 @@ function eventLabel(name: string) {
 
 <template>
   <div class="page live-page">
-    <header class="page-head">
-      <div>
-        <p class="eyebrow">
-          {{ live.phase === "InProgress" ? "In game" : "Live companion" }}
-        </p>
-        <h1>
-          {{ live.phase === "Idle"
-            ? "Live Game"
-            : live.queueName ?? live.gameMode ?? "League of Legends" }}
-        </h1>
+    <PageHeader
+      :eyebrow="live.phase === 'InProgress' ? 'In game' : 'Live companion'"
+      :title="live.phase === 'Idle'
+        ? 'Live Game'
+        : live.queueName ?? live.gameMode ?? 'League of Legends'"
+    >
+      <template #description>
         <p v-if="live.phase === 'ChampSelect'" class="muted subtitle">
           Champion select
           <template v-if="live.secondsRemaining !== undefined">
@@ -381,30 +380,31 @@ function eventLabel(name: string) {
         <p v-else-if="live.phase === 'InProgress'" class="muted subtitle">
           Live data from this computer only.
         </p>
-      </div>
-      <div class="status-cluster">
-        <span v-if="live.phase === 'ChampSelect' && live.rerollsRemaining !== undefined" class="status-pill">
-          {{ live.rerollsRemaining }} reroll{{ live.rerollsRemaining === 1 ? "" : "s" }}
-        </span>
-        <span class="phase" :class="live.phase.toLowerCase()">
-          {{ live.phase === "Idle"
-            ? "Waiting for game"
-            : live.phase === "InProgress"
-              ? live.game ? "Live feed" : "Connecting to match"
-              : "Champion select" }}
-        </span>
-      </div>
-    </header>
+      </template>
+      <template #actions>
+        <div class="status-cluster">
+          <span v-if="live.phase === 'ChampSelect' && live.rerollsRemaining !== undefined" class="status-pill">
+            {{ live.rerollsRemaining }} reroll{{ live.rerollsRemaining === 1 ? "" : "s" }}
+          </span>
+          <span class="phase" :class="live.phase.toLowerCase()">
+            {{ live.phase === "Idle"
+              ? "Waiting for game"
+              : live.phase === "InProgress"
+                ? live.game ? "Live feed" : "Connecting to match"
+                : "Champion select" }}
+          </span>
+        </div>
+      </template>
+    </PageHeader>
 
-    <section v-if="live.phase === 'Idle'" class="card empty-state">
-      <span class="empty-mark">◈</span>
-      <div>
-        <h2>Waiting for champion select</h2>
-        <p class="muted">
-          Recall opens this page once per game without taking focus away from League.
-        </p>
-      </div>
-    </section>
+    <EmptyState
+      v-if="live.phase === 'Idle'"
+      class="empty-state"
+      title="Waiting for champion select"
+      description="Recall opens this page once per game without taking focus away from League."
+    >
+      <template #icon><span class="empty-mark">◈</span></template>
+    </EmptyState>
 
     <template v-else-if="live.phase === 'ChampSelect'">
       <section v-if="live.mode === 'aram' || live.mode === 'mayhem'" class="card decision-board">
@@ -804,8 +804,8 @@ function eventLabel(name: string) {
 </template>
 
 <style scoped>
-.live-page { gap: var(--space-4); width: min(100%, 1480px); margin-inline: auto; padding-bottom: var(--space-5); }
-.page-head, .section-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-4); }
+.live-page { gap: var(--ui-space-4); width: min(100%, 1480px); margin-inline: auto; padding-bottom: var(--ui-space-5); }
+.section-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--ui-space-4); }
 .section-head.compact { align-items: center; }
 .eyebrow { margin: 0 0 3px; font: 12px var(--font-heading); letter-spacing: 1.5px; text-transform: uppercase; color: var(--gold); }
 .subtitle, .hint { margin: var(--space-1) 0 0; font-size: 12px; }.hint { max-width: 68ch; font-size: 11px; }
@@ -814,10 +814,11 @@ function eventLabel(name: string) {
 .phase, .status-pill { border: 1px solid var(--border-strong); border-radius: 999px; padding: 6px 10px; font: 12px var(--font-heading); letter-spacing: .8px; text-transform: uppercase; color: var(--text-secondary); white-space: nowrap; }
 .phase.champselect { color: var(--gold); border-color: var(--gold); }.phase.inprogress { color: var(--win); border-color: var(--win); }
 .status-pill { color: var(--gold-bright); background: var(--surface-2); }
-.empty-state, .game-connecting { min-height: 120px; display: flex; align-items: center; gap: var(--space-4); }
-.empty-state h2, .game-connecting h2 { margin: 0; font: 18px var(--font-heading); color: var(--gold-bright); }
-.empty-state p, .game-connecting p { margin: 4px 0 0; font-size: 12px; }
-.empty-mark { display: grid; place-items: center; width: 48px; height: 48px; border: 1px solid var(--border-strong); border-radius: 50%; color: var(--gold); font-size: 24px; }
+.empty-state, .game-connecting { min-height: 120px; }
+.game-connecting { display: flex; align-items: center; gap: var(--ui-space-4); }
+.game-connecting h2 { margin: 0; font: 18px var(--ui-font-heading); color: var(--ui-text-heading); }
+.game-connecting p { margin: 4px 0 0; font-size: 12px; }
+.empty-mark { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--ui-border-emphasis); border-radius: 50%; color: var(--ui-accent); font-size: 22px; }
 .decision-board, .selected-card, .composition-card, .roster-card, .live-scoreboard, .loadout-card, .event-card, .augment-advisor-card { padding: 16px 18px; }
 .objective-row { display: grid; grid-template-columns: auto minmax(150px, auto); align-items: center; gap: 4px var(--space-2); font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-secondary); }
 .objective-row .loading-label { grid-column: 2; text-transform: none; letter-spacing: 0; }
@@ -863,9 +864,9 @@ function eventLabel(name: string) {
 .lobby-player div { min-width: 0; display: flex; flex-direction: column; }.lobby-player strong, .lobby-player span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.lobby-player strong { font-size: 12px; }.lobby-player div span { color: var(--text-secondary); font-size: 12px; }
 .augment-advisor-card { overflow: hidden; background: radial-gradient(circle at 8% 0, rgba(142, 115, 220, .1), transparent 34%), linear-gradient(145deg, var(--surface-2), var(--surface-1)); }
 .live-augment-advisor { margin-top: 0; }
-.live-summary { display: grid; grid-template-columns: repeat(6, minmax(110px, 1fr)); gap: 12px; }
-.metric-card { display: flex; flex-direction: column; justify-content: center; gap: 4px; min-height: 68px; padding: 12px 14px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: linear-gradient(145deg, var(--surface-2), var(--surface-1)); }
-.metric-card span { color: var(--text-secondary); font-size: 12px; letter-spacing: 1px; text-transform: uppercase; }.metric-card strong { color: var(--gold-bright); font: 21px var(--font-display); }.metric-card.score strong { color: var(--win); }.metric-card.score i { color: var(--text-muted); font-style: normal; }
+.live-summary { display: grid; grid-template-columns: repeat(6, minmax(110px, 1fr)); overflow: hidden; border: 1px solid var(--ui-border); border-radius: var(--ui-radius-sm); background: var(--ui-surface-inset); box-shadow: var(--ui-shadow-inset); }
+.metric-card { display: flex; flex-direction: column; justify-content: center; gap: 3px; min-height: 66px; padding: 10px 13px; border-left: 1px solid var(--ui-divider); }
+.metric-card:first-child { border-left: 0; }.metric-card span { color: var(--ui-text-muted); font: 10px var(--ui-font-heading); letter-spacing: 1px; text-transform: uppercase; }.metric-card strong { color: var(--ui-text-heading); font: 20px var(--ui-font-display); }.metric-card.score strong { color: var(--ui-live); }.metric-card.score i { color: var(--ui-text-muted); font-style: normal; }
 .live-intelligence { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(310px, .72fr); gap: 14px; align-items: stretch; }
 .resource-card, .tempo-card { padding: 17px 18px; overflow: hidden; }.resource-card { background: radial-gradient(circle at 8% 0, rgba(36, 164, 203, .12), transparent 38%), linear-gradient(145deg, var(--surface-2), var(--surface-1)); }.tempo-card { display: flex; flex-direction: column; background: radial-gradient(circle at 50% 36%, rgba(34, 188, 176, .09), transparent 43%), linear-gradient(160deg, var(--surface-2), var(--surface-1)); }
 .estimate-quality, .tempo-direction { padding: 4px 7px; border: 1px solid var(--border-subtle); border-radius: 999px; color: var(--text-secondary); font-size: 10px; letter-spacing: .7px; text-transform: uppercase; }.estimate-quality.strong { color: var(--win); border-color: var(--win-dim); }.estimate-quality.fair { color: var(--gold); }.tempo-direction.up { color: #39d8b0; border-color: rgba(57, 216, 176, .35); }.tempo-direction.down { color: var(--loss); border-color: var(--loss-dim); }
@@ -890,6 +891,7 @@ function eventLabel(name: string) {
   .choice-row { grid-template-columns: minmax(200px, 1.3fr) 90px 145px 90px minmax(180px, 1fr); }
   .lobby-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
   .live-summary { grid-template-columns: repeat(3, minmax(110px, 1fr)); }
+  .metric-card:nth-child(4) { border-left: 0; }.metric-card:nth-child(n + 4) { border-top: 1px solid var(--ui-divider); }
   .live-intelligence { grid-template-columns: minmax(0, 1fr) 310px; }
   .in-game-grid { grid-template-columns: 1fr; }.game-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
@@ -900,11 +902,33 @@ function eventLabel(name: string) {
   .live-player { grid-template-columns: 34px minmax(120px, 1fr) 58px minmax(120px, .8fr); }.live-player .live-cs { display: none; }
 }
 @media (max-width: 620px) {
-  .page-head, .section-head { flex-direction: column; }.status-cluster { justify-content: flex-start; }
+  .section-head { flex-direction: column; }.status-cluster { justify-content: flex-start; }
   .objective-row { width: 100%; grid-template-columns: 1fr; }.objective-row .loading-label { grid-column: auto; }
   .choice-row { grid-template-columns: 1fr 70px; }.choice-row .record-cell { grid-column: 1 / -1; padding-top: 0; }.champion-cell { grid-template-columns: 22px 36px minmax(0, 1fr); }.champion-cell img { width: 34px; height: 34px; }.current-tag { display: none; }
-  .live-summary { grid-template-columns: repeat(2, minmax(100px, 1fr)); }.game-rail { grid-template-columns: 1fr; }
+  .live-summary { grid-template-columns: repeat(2, minmax(100px, 1fr)); }.metric-card:nth-child(odd) { border-left: 0; }.metric-card:nth-child(n + 3) { border-top: 1px solid var(--ui-divider); }.game-rail { grid-template-columns: 1fr; }
   .resource-totals { gap: var(--space-2); }.resource-totals strong { font-size: 21px; }.resource-lead { padding: 4px 7px; }.resource-lead strong { font-size: 13px; }.win-outlook { grid-template-columns: 1fr; gap: var(--space-2); }
+  .live-player { grid-template-columns: 32px minmax(100px, 1fr) 52px; }.live-player .live-items { display: none; }
+}
+@container recall-content (max-width: 1160px) {
+  .choice-row { grid-template-columns: minmax(200px, 1.3fr) 90px 145px 90px minmax(180px, 1fr); }
+  .lobby-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .live-summary { grid-template-columns: repeat(3, minmax(110px, 1fr)); }
+  .metric-card:nth-child(4) { border-left: 0; }.metric-card:nth-child(n + 4) { border-top: 1px solid var(--ui-divider); }
+  .live-intelligence { grid-template-columns: minmax(0, 1fr) 310px; }
+  .in-game-grid { grid-template-columns: 1fr; }.game-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container recall-content (max-width: 900px) {
+  .choice-head { display: none; }.choice-row { grid-template-columns: minmax(190px, 1.3fr) 78px 130px; }.choice-row > * { padding: var(--ui-space-2); }.choice-row .confidence-cell { display: none; }.choice-row .reason-cell { grid-column: 1 / -1; padding-top: 0; }
+  .prep-grid { grid-template-columns: 1fr; }.selected-stats { grid-template-columns: repeat(2, 1fr); }
+  .live-intelligence { grid-template-columns: 1fr; }.tempo-card { min-height: 230px; }
+  .live-player { grid-template-columns: 34px minmax(120px, 1fr) 58px minmax(120px, .8fr); }.live-player .live-cs { display: none; }
+}
+@container recall-content (max-width: 620px) {
+  .section-head { flex-direction: column; }.status-cluster { justify-content: flex-start; }
+  .objective-row { width: 100%; grid-template-columns: 1fr; }.objective-row .loading-label { grid-column: auto; }
+  .choice-row { grid-template-columns: 1fr 70px; }.choice-row .record-cell { grid-column: 1 / -1; padding-top: 0; }.champion-cell { grid-template-columns: 22px 36px minmax(0, 1fr); }.champion-cell img { width: 34px; height: 34px; }.current-tag { display: none; }
+  .live-summary { grid-template-columns: repeat(2, minmax(100px, 1fr)); }.metric-card:nth-child(odd) { border-left: 0; }.metric-card:nth-child(n + 3) { border-top: 1px solid var(--ui-divider); }.game-rail { grid-template-columns: 1fr; }
+  .resource-totals { gap: var(--ui-space-2); }.resource-totals strong { font-size: 21px; }.resource-lead { padding: 4px 7px; }.resource-lead strong { font-size: 13px; }.win-outlook { grid-template-columns: 1fr; gap: var(--ui-space-2); }
   .live-player { grid-template-columns: 32px minmax(100px, 1fr) 52px; }.live-player .live-items { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .pulse { animation: none; }.ally-fill { transition: none; } }

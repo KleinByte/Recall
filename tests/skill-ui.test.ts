@@ -43,7 +43,8 @@ describe("Skill Overview", () => {
   it("uses literal Recall and an RVI-native identity", () => {
     const overview = read("src/components/skill/SkillOverview.vue")
 
-    expect(overview).toContain("Avg Recall grade")
+    expect(overview).toContain("Avg grade")
+    expect(overview).toContain("TelemetryGrid")
     expect(overview).toContain("graded")
     expect(overview).toContain("rviIdentity")
     expect(overview).not.toMatch(/strengths|weaknesses|you play best|to work on/i)
@@ -258,7 +259,8 @@ describe("Skill page coordination", () => {
     expect(analyze).toContain("per-match comparison percentiles, not RVI vector scores")
     expect(signatures).toContain('type: "parallel"')
     expect(form).toContain("dimension.delta")
-    expect(form).toContain('color: "#f0e6d2"')
+    expect(form).toContain('import { CHART_COLOURS, CHART_STYLES } from "../../charts/recall-chart-theme"')
+    expect(form).toContain("color: CHART_COLOURS.text")
     expect(form).toContain("textBorderWidth: 0")
     expect(analyze).toContain("align-items: stretch")
     expect(analyze).toContain("height: 100%")

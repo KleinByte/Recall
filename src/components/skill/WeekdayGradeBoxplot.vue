@@ -3,6 +3,7 @@ import type { EChartsCoreOption } from "echarts/core"
 import { computed } from "vue"
 import BaseEChart from "../charts/BaseEChart.vue"
 import { registerInsightCharts } from "../../charts/register-insights"
+import { CHART_COLOURS, CHART_STYLES } from "../../charts/recall-chart-theme"
 import { boxplot } from "../../charts/statistics"
 import { recallGradeFromScore } from "../../shared/recall-grade"
 import type { SkillHistoryPoint } from "../../types/stats"
@@ -31,12 +32,12 @@ const option = computed<EChartsCoreOption>(() => ({
   yAxis: {
     type: "value",
     axisLabel: { formatter: (value: number) => recallGradeFromScore(value) ?? "D" },
-    splitLine: { lineStyle: { color: "rgba(200, 170, 109, 0.12)" } },
+    splitLine: { lineStyle: { color: CHART_STYLES.gridSoft } },
   },
   series: [{
     type: "boxplot",
     data: groups.value.map((values) => values.length ? boxplot(values) : [0, 0, 0, 0, 0]),
-    itemStyle: { color: "rgba(10, 203, 230, 0.22)", borderColor: "#0acbe6" },
+    itemStyle: { color: CHART_STYLES.liveArea, borderColor: CHART_COLOURS.live },
   }],
 }))
 </script>

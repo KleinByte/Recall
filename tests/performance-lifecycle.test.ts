@@ -4,17 +4,25 @@ import { describe, expect, it } from "vitest"
 const read = (path: string) => readFileSync(path, "utf8")
 
 describe("performance and resource lifecycle", () => {
+  it("uses the in-app champion-select banner without an overlay window", () => {
+    const app = read("src/App.vue")
+    const main = read("electron/main/index.ts")
+    const entry = read("src/main.ts")
+
+    expect(app).toContain("ChampSelectBanner")
+    expect(main).toContain('broadcast(win, "pick", championId)')
+    expect(main).not.toContain("updateOverlay")
+    expect(entry).not.toContain("#overlay")
+  })
+
   it("owns one native IPC callback per channel and removes it when empty", () => {
     const preload = read("electron/preload/index.ts")
-    const overlay = read("src/Overlay.vue")
 
     expect(preload).toContain("channelSubscriptions")
     expect(preload).toContain("one native listener per channel")
     expect(preload).toContain("subscription.listeners.delete(subscriptionId)")
     expect(preload).toContain("ipcRenderer.off(channel, subscription.wrapped)")
     expect(preload).toContain('removeEventListener("readystatechange", handleReadyState)')
-    expect(overlay).toContain("useApiEvents")
-    expect(overlay).not.toContain("window.ipcRenderer.on")
   })
 
   it("keeps League discovery singular, non-overlapping, and cheap while idle", () => {

@@ -1,210 +1,48 @@
 @import "./design/tokens.css";
 
 :root {
-  font-family: var(--font-body);
+  font-family: var(--ui-font-body);
   line-height: 1.5;
   font-weight: 400;
-
   color-scheme: dark;
-  color: var(--text-primary);
-  background-color: var(--surface-0);
-
+  color: var(--ui-text);
+  background-color: var(--ui-canvas);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-text-size-adjust: 100%;
-
-  --main-text-color: var(--text-primary);
-  --main-bg-gradient: linear-gradient(to left, #091428, #0a1428);
+  --main-text-color: var(--ui-text);
+  --main-bg-gradient: linear-gradient(to left, var(--ui-shell), var(--ui-canvas));
 }
-
-body {
-  height: 100vh;
-  overflow: hidden;
-  background: var(--surface-0);
-  margin: 0;
-}
-
-*, *::before, *::after {
-  box-sizing: border-box;
-}
-
-/* The overlay window is frameless and transparent, so nothing behind its own
-   panel may paint a background. */
-body.overlay-window,
-body.overlay-window #app {
-  background: transparent;
-}
-
-/*
- * A bar and its fill.
- *
- * Declared once, globally. A scoped copy that relies on being a grid item to
- * become block-level silently breaks the moment the bar is moved into a plain
- * container, which is exactly what happened to the lobby panel.
- */
-.track {
-  display: block;
-  width: 100%;
-  height: 6px;
-  background: var(--surface-3);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-
-.track .fill,
-.fill {
-  display: block;
-  height: 100%;
-  background: linear-gradient(90deg, var(--gold-dim), var(--gold));
-}
-
-.fill.strong {
-  background: linear-gradient(90deg, var(--win-dim), var(--win));
-}
-
-.track.thin {
-  height: 4px;
-}
-
 
 @font-face {
   font-family: "BeaufortforLOL";
   src: url("./fonts/BeaufortforLOL-Regular.ttf");
 }
-
 @font-face {
   font-family: "BeaufortforLOL Bold";
   src: url("./fonts/BeaufortforLOL-Bold.ttf");
 }
-
 @font-face {
   font-family: "BeaufortforLOL Medium";
   src: url("./fonts/BeaufortforLOL-Medium.ttf");
 }
-
 @font-face {
   font-family: "Spiegel";
   src: url("./fonts/Spiegel_TT_Regular.ttf");
 }
 
-.league-button {
-  font-family: var(--font-body);
-  font-size: 13px;
-  letter-spacing: 0.5px;
-  background: var(--surface-2);
-  color: var(--gold);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  min-height: 34px;
-  padding-inline: var(--space-3);
-  transition:
-    background 0.12s ease,
-    border-color 0.12s ease,
-    color 0.12s ease;
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  height: 100vh;
+  overflow: hidden;
+  margin: 0;
+  background: var(--ui-canvas);
 }
 
-.league-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.48;
-}
-
-.league-button:hover {
-  background: var(--surface-3);
-  border-color: var(--border-strong);
-  color: var(--gold-bright);
-  cursor: pointer;
-}
-
-.league-button:active {
-  background: var(--surface-1);
-}
-
-.league-button.active {
-  background: var(--surface-3);
-  border-color: var(--gold);
-  color: var(--gold-bright);
-}
-
-.league-button:focus-visible {
-  outline: 2px solid var(--gold);
-  outline-offset: 1px;
-}
-
-.league-select {
-  font-family: var(--font-body);
-  font-size: 13px;
-  letter-spacing: 0.5px;
-  padding: var(--space-2) var(--space-3);
-  background: var(--surface-2);
-  color: var(--gold);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  min-height: 36px;
-}
-
-.league-select:hover {
-  background: var(--surface-3);
-  border-color: var(--border-strong);
-  cursor: pointer;
-}
-
-.league-select:focus-visible {
-  outline: 2px solid var(--gold);
-  outline-offset: 1px;
-}
-
-.league-select > option {
-  font-family: var(--font-body);
-  font-size: 13px;
-  background: var(--surface-2);
-  color: var(--gold);
-}
-
-.league-select > option.selected {
-  font-weight: bold;
-  color: var(--accent);
-}
-
-.league-input {
-  font-family: var(--font-body);
-  font-size: 13px;
-  letter-spacing: 0.5px;
-  padding: var(--space-2) var(--space-3);
-  background: var(--surface-2);
-  color: var(--text-primary);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  min-height: 36px;
-}
-
-/* Shared page rhythm. Individual pages own their dense inner layouts, while
-   the shell keeps headings, width, and responsive spacing consistent. */
-.content > .page {
-  width: min(100%, 1440px);
-  min-height: 100%;
-  margin-inline: auto;
-  padding-bottom: var(--space-6);
-}
-
-.content > .page > .page-head {
-  padding: 2px 2px var(--space-4);
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.content > .page h1 {
-  font-size: clamp(22px, 2vw, 28px);
-  line-height: 1.08;
-}
-
-.content table {
-  font-variant-numeric: tabular-nums;
-}
-
-button, select, input, textarea {
-  accent-color: var(--gold);
-}
+button, select, input, textarea { font: inherit; accent-color: var(--ui-accent); }
 
 button:focus-visible,
 select:focus-visible,
@@ -212,42 +50,205 @@ input:focus-visible,
 textarea:focus-visible,
 a:focus-visible,
 [tabindex]:focus-visible {
-  outline: 2px solid var(--gold);
+  outline: 2px solid var(--ui-focus-ring);
   outline-offset: 2px;
+  box-shadow: var(--ui-shadow-focus);
 }
 
-@media (max-width: 900px) {
-  .content > .page {
-    padding-bottom: var(--space-5);
-  }
+/* Shared control recipe. Legacy class names remain supported during migration. */
+.league-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ui-space-2);
+  min-height: var(--ui-control-height);
+  padding: 6px var(--ui-space-3);
+  border: 1px solid var(--ui-control-border);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-control-background);
+  color: var(--ui-control-text);
+  font-family: var(--ui-font-body);
+  font-size: var(--ui-body-size);
+  letter-spacing: .35px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.league-button:hover:not(:disabled) {
+  border-color: var(--ui-control-border-hover);
+  background: var(--ui-control-background-hover);
+  color: var(--ui-text-heading);
+}
+.league-button:active { background: var(--ui-surface-inset); }
+.league-button.active {
+  border-color: var(--ui-border-emphasis);
+  background: var(--ui-surface-selected);
+  color: var(--ui-accent-strong);
+}
+.league-button:disabled { opacity: .46; cursor: not-allowed; }
+.league-button.danger {
+  border-color: color-mix(in srgb, var(--ui-negative) 46%, transparent);
+  color: var(--ui-negative-text);
+}
+.league-button.danger:hover:not(:disabled) {
+  border-color: var(--ui-negative);
+  background: color-mix(in srgb, var(--ui-negative) 12%, var(--ui-canvas));
 }
 
-@media (max-width: 620px) {
-  .content > .page > .page-head {
-    padding-bottom: var(--space-3);
-  }
+.league-select,
+.league-input {
+  width: auto;
+  min-height: var(--ui-control-height);
+  padding: 7px var(--ui-space-3);
+  border: 1px solid var(--ui-control-border);
+  border-radius: var(--ui-radius-sm);
+  background-color: var(--dial-ink-850);
+  color: var(--ui-control-text);
+  font-family: var(--ui-font-body);
+  font-size: var(--ui-body-size);
+  letter-spacing: .25px;
+  box-shadow: var(--ui-shadow-inset);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.league-select {
+  padding-right: 32px;
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--ui-accent) 50%),
+    linear-gradient(135deg, var(--ui-accent) 50%, transparent 50%),
+    linear-gradient(180deg, var(--ui-control-sheen), transparent);
+  background-position:
+    calc(100% - 15px) 50%,
+    calc(100% - 10px) 50%,
+    0 0;
+  background-size: 5px 5px, 5px 5px, 100% 100%;
+  background-repeat: no-repeat;
+}
+.league-select:hover,
+.league-input:hover { border-color: var(--ui-control-border-hover); }
+.league-select:focus-visible,
+.league-input:focus-visible { border-color: var(--ui-focus-ring); }
+.league-select:disabled,
+.league-input:disabled { opacity: .5; cursor: not-allowed; }
+.league-select[multiple] {
+  padding-right: var(--ui-space-3);
+  appearance: auto;
+  background-image: none;
+}
+.league-select > option { background: var(--dial-ink-850); color: var(--ui-text); }
+.league-input::placeholder { color: var(--ui-text-faint); }
+.league-input::-webkit-search-cancel-button { font-size: 14px; cursor: pointer; }
+
+/* Shared progress recipe. MiniBar and legacy feature meters both consume it. */
+.track {
+  display: block;
+  width: 100%;
+  height: 6px;
+  overflow: hidden;
+  border: 1px solid var(--ui-divider);
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-surface-inset);
+  box-shadow: var(--ui-shadow-inset);
+}
+.track .fill,
+.fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--ui-accent-dim), var(--ui-accent));
+}
+.fill.strong { background: linear-gradient(90deg, var(--ui-live-dim), var(--ui-live)); }
+.track.thin { height: 4px; }
+
+/* Page shell and stable containment recipes. */
+.content > .page {
+  display: grid;
+  align-content: start;
+  gap: var(--ui-space-5);
+  width: min(100%, var(--ui-page-max));
+  min-height: 100%;
+  margin-inline: auto;
+  padding-bottom: var(--ui-space-6);
+}
+.content > .page > .page-head {
+  padding: 3px 3px var(--ui-space-4);
+  border-bottom: 1px solid var(--ui-divider);
+}
+.content > .page > .page-head h1 {
+  margin: 0;
+  color: var(--ui-text-heading);
+  font: clamp(23px, 2vw, 29px)/1.08 var(--ui-font-display);
+}
+.content > .page > .page-head .subtitle { margin: 7px 0 0; color: var(--ui-text-subtle); font-size: 12px; }
+
+.eyebrow,
+.deck-kicker {
+  color: var(--ui-text-muted);
+  font: var(--ui-label-size) var(--ui-font-heading);
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+}
+
+.ui-toolbar {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: var(--ui-space-3);
+  padding: var(--ui-space-3);
+  border: 1px solid var(--ui-divider);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-surface-inset);
+  box-shadow: var(--ui-shadow-inset);
+}
+.ui-table-frame {
+  min-width: 0;
+  overflow: auto;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-surface-inset);
+  box-shadow: var(--ui-shadow-inset);
+}
+.ui-chart-well {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--ui-divider);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-inset);
+  box-shadow: var(--ui-shadow-inset);
+}
+.ui-data-row {
+  min-width: 0;
+  border: 1px solid var(--ui-divider);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-data-row-background);
+}
+.ui-data-row:hover { border-color: var(--ui-border-emphasis); background: var(--ui-surface-selected); }
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-pill);
+  background: var(--ui-surface-inset);
+  color: var(--ui-text-subtle);
+  font-size: 10px;
+  letter-spacing: .55px;
+}
+
+.content table { font-variant-numeric: tabular-nums; }
+
+@container recall-content (max-width: 680px) {
+  .content > .page { gap: var(--ui-space-4); padding-bottom: var(--ui-space-5); }
+  .content > .page > .page-head { align-items: stretch; flex-direction: column; gap: var(--ui-space-3); }
+  .ui-toolbar { align-items: stretch; }
+  .ui-toolbar > * { flex: 1 1 140px; min-width: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     scroll-behavior: auto !important;
-    animation-duration: 0.01ms !important;
+    animation-duration: .01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition-duration: .01ms !important;
   }
 }
-
-.league-input::placeholder {
-  color: var(--text-muted);
-}
-
-.league-input::-webkit-search-cancel-button {
-  font-size: 14px;
-  cursor: pointer;
-}
-
-.league-input:focus {
-  outline: none;
-  border-color: var(--gold);
-}
-

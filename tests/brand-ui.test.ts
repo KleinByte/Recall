@@ -15,7 +15,7 @@ describe("Recall branding", () => {
     expect(sidebar).toContain('aria-label="Recall"')
     expect(sidebar).toContain("ECALL")
     expect(sidebar).toContain('class="brand-row"')
-    expect(sidebar).not.toContain("position: absolute")
+    expect(sidebar).not.toMatch(/\.brand-title\s*\{[^}]*position:\s*absolute/s)
   })
 
   it("supports a persistent collapsible icon rail with accessible controls", () => {
@@ -31,6 +31,31 @@ describe("Recall branding", () => {
     expect(app).toContain("sidebarCollapsed")
     expect(app).toContain("@update:collapsed")
     expect(app).toContain("sidebarCollapsed: sidebarCollapsed.value")
+  })
+
+  it("uses local League artwork for every navigation destination", () => {
+    const sidebar = read("src/components/AppSidebar.vue")
+
+    expect(sidebar).toContain("const navSections: NavigationSection[]")
+    for (const icon of [
+      "dashboard.svg",
+      "live.svg",
+      "review.svg",
+      "matches.svg",
+      "skill.svg",
+      "progress.svg",
+      "champions.svg",
+      "challenges.svg",
+      "settings.svg",
+    ]) {
+      expect(sidebar).toContain(`/game-data/ui/sidebar/${icon}`)
+    }
+    expect(sidebar).not.toContain("/game-data/rune-styles/")
+    expect(sidebar).not.toContain("/game-data/spells/")
+    expect(sidebar).toContain('class="nav-emblem"')
+    expect(sidebar).toContain('aria-current="page === item.id ? \'page\' : undefined"')
+    expect(sidebar).not.toContain("faChartSimple")
+    expect(sidebar).not.toContain("faGear")
   })
 
   it("uses one stable Windows taskbar identity for the app and package", () => {

@@ -31,13 +31,38 @@ describe("consolidated match review UI", () => {
     expect(review).toContain("<MatchStatsTable")
     expect(review).toContain("<PerformanceRadar")
     expect(review).toContain("<WinProbabilityChart")
+    expect(review).toContain("<MatchDeathMap")
+    expect(review).toContain("Team gold advantage")
     expect(review).toContain("RVI profile")
-    expect(review).toContain("Grade &amp; context")
+    expect(review).toContain('label: "Grade & context"')
+    expect(review).toContain('class="match-content-shell"')
+    expect(review).toContain('class="match-tab-surface"')
+    expect(review).toContain('<section class="insight-shell card"')
+    expect(review).not.toContain('<section v-if="matchTab === \'overview\'" class="insight-shell card"')
+    expect(review).not.toContain('matchTab === \'overview\' && insightTab')
+    expect(review.indexOf('class="insight-shell card"')).toBeLessThan(
+      review.indexOf('class="match-tabs"'),
+    )
     expect(review).not.toContain('id: "gold"')
     expect(review).toContain('v-if="matchTab === \'timeline\'" class="card match-tab-panel"')
     expect(review).toContain('class="gold-chart-wrap"')
     expect(review).not.toContain("Every build, role, rune page, and contribution at a glance")
     expect(review).not.toContain("Complete lobby")
+  })
+
+  it("offers mode-aware, champion-filtered death positions beside the gold curve", () => {
+    const deathMap = read("src/components/MatchDeathMap.vue")
+    const coordinates = read("src/helpers/map-coordinate.ts")
+
+    expect(deathMap).toContain("reviewMapId(props.match.modeFamily)")
+    expect(deathMap).toContain("mapPositionPercent")
+    expect(coordinates).toContain('if (modeFamily === "classic") return 453')
+    expect(coordinates).toContain("14_881")
+    expect(deathMap).toContain("selectedParticipantId")
+    expect(deathMap).toContain('event.type !== "CHAMPION_KILL"')
+    expect(fs.statSync("public/game-data/ui/map11.png").size).toBeGreaterThan(100_000)
+    expect(fs.statSync("public/game-data/ui/map12.png").size).toBeGreaterThan(100_000)
+    expect(fs.statSync("public/game-data/ui/map453.png").size).toBeGreaterThan(100_000)
   })
 
   it("returns teams and labels as part of the unified review payload", () => {

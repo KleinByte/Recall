@@ -165,6 +165,10 @@ function markRecordNotificationsRead() {
   }))
 }
 
+function clearRecordNotifications() {
+  recordNotifications.value = []
+}
+
 function openRecordNotification(gameId: number) {
   markRecordNotificationsRead()
   reviewMatch(gameId)
@@ -253,6 +257,7 @@ onMounted(async () => {
     <WindowTitleBar
       :record-notifications="recordNotifications"
       @mark-records-read="markRecordNotificationsRead"
+      @clear-records="clearRecordNotifications"
       @open-record="openRecordNotification"
     />
 
@@ -390,26 +395,28 @@ onMounted(async () => {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  background: var(--surface-0);
+  background: var(--ui-canvas);
 }
 
 .app {
   display: flex;
   min-height: 0;
   flex: 1;
-  background: var(--surface-0);
-  color: var(--text-primary);
+  background: var(--ui-canvas);
+  color: var(--ui-text);
 }
 
 .content {
+  container-name: recall-content;
+  container-type: inline-size;
   flex: 1;
   min-width: 0;
   overflow-y: auto;
   padding: 28px clamp(var(--space-4), 2.4vw, var(--space-6));
   background:
-    radial-gradient(circle at 82% 0%, rgba(10, 203, 230, 0.045), transparent 32%),
-    radial-gradient(circle at 15% 0%, rgba(200, 170, 109, 0.055), transparent 28%),
-    var(--surface-0);
+    radial-gradient(circle at 82% 0%, var(--ui-page-ambient-energy), transparent 32%),
+    radial-gradient(circle at 15% 0%, var(--ui-page-ambient-metal), transparent 28%),
+    var(--ui-canvas);
 }
 
 @media (max-width: 700px) {

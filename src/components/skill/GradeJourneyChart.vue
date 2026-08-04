@@ -2,7 +2,7 @@
 import type { EChartsCoreOption } from "echarts/core"
 import { computed } from "vue"
 import BaseEChart from "../charts/BaseEChart.vue"
-import { CHART_COLOURS } from "../../charts/recall-chart-theme"
+import { CHART_COLOURS, CHART_STYLES } from "../../charts/recall-chart-theme"
 import { escapeTooltip } from "../../charts/formatters"
 import { recallGradeFromScore } from "../../shared/recall-grade"
 import { championNameById } from "../../helpers/format"
@@ -37,7 +37,7 @@ const option = computed<EChartsCoreOption>(() => ({
     min: (value: { min: number }) => Math.min(-1.6, Math.floor(value.min * 2) / 2),
     max: (value: { max: number }) => Math.max(1.6, Math.ceil(value.max * 2) / 2),
     axisLabel: { formatter: (value: number) => recallGradeFromScore(value) ?? "D" },
-    splitLine: { lineStyle: { color: "rgba(200, 170, 109, 0.12)" } },
+    splitLine: { lineStyle: { color: CHART_STYLES.gridSoft } },
   },
   dataZoom: graded.value.length > 30 ? [{ type: "inside", start: Math.max(0, 100 - 30 / graded.value.length * 100), end: 100 }, { type: "slider", height: 18, bottom: 8 }] : [],
   series: [{
@@ -50,21 +50,21 @@ const option = computed<EChartsCoreOption>(() => ({
       value: game.gradeScore,
       itemStyle: { color: game.win ? CHART_COLOURS.positive : CHART_COLOURS.negative },
     })),
-    lineStyle: { color: CHART_COLOURS.goldBright, width: 2 },
-    areaStyle: { color: "rgba(200, 170, 109, 0.11)" },
+    lineStyle: { color: CHART_COLOURS.accentStrong, width: 2 },
+    areaStyle: { color: CHART_STYLES.accentArea },
     markLine: {
       symbol: "none",
       silent: true,
       data: [{ yAxis: 0, label: {
         formatter: "Lobby average",
         position: "insideEndTop",
-        color: CHART_COLOURS.cyan,
-        backgroundColor: "rgba(6, 14, 28, .82)",
+        color: CHART_COLOURS.live,
+        backgroundColor: CHART_STYLES.labelBackdrop,
         borderRadius: 3,
         padding: [3, 5],
         textBorderWidth: 0,
       } }],
-      lineStyle: { color: CHART_COLOURS.cyan, type: "dashed", opacity: 0.62 },
+      lineStyle: { color: CHART_COLOURS.live, type: "dashed", opacity: 0.62 },
     },
   }],
 }))

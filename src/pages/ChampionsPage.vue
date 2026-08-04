@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
 import GradeBadge from "../components/GradeBadge.vue"
-import StatCard from "../components/StatCard.vue"
+import {
+  Button,
+  EmptyState,
+  Field,
+  PageHeader,
+  StatTile,
+  Surface,
+} from "../components/ui"
 import { api } from "../helpers/api"
 import { useApiEvents } from "../helpers/use-api-events"
 import { useCoalescedTask } from "../helpers/use-coalesced-task"
@@ -277,81 +284,104 @@ function clearFilters() {
 
 <template>
   <div class="page">
-    <header class="page-head">
-      <div>
-        <h1>Champions</h1>
-        <p class="muted subtitle">
-          Mastery, your recorded results, and which challenges each champion
-          still counts toward.
-        </p>
-      </div>
+    <PageHeader
+      title="Champions"
+      eyebrow="Mastery archive"
+      description="Mastery, recorded results, and the challenges each champion still counts toward."
+    >
+      <template #actions>
+        <Field label="Search champions" compact class="search-field">
+          <input
+            v-model="search"
+            class="league-input search"
+            type="search"
+            placeholder="Champion name"
+            aria-label="Search champions"
+          />
+        </Field>
+      </template>
+    </PageHeader>
 
-      <input
-        v-model="search"
-        class="league-input search"
-        type="search"
-        placeholder="Search champions"
-        aria-label="Search champions"
-      />
-    </header>
-
-    <div v-if="!champions" class="card notice">
-      <h2 class="section-title">Champion list unavailable</h2>
-      <p class="muted">
-        Start the League client so Recall can read your champion collection.
-      </p>
-    </div>
+    <EmptyState
+      v-if="!champions"
+      class="notice"
+      title="Champion list unavailable"
+      description="Start the League client so Recall can read your champion collection."
+    />
 
     <template v-else>
-      <section class="kpis">
-        <StatCard
+      <Surface
+        as="section"
+        variant="quiet"
+        padding="compact"
+        class="kpis"
+        aria-label="Champion pool summary"
+      >
+        <StatTile
+          density="compact"
           label="Champions played"
           :value="pool.playedChampions.toString()"
           :hint="`of ${pool.totalChampions} owned`"
         />
-        <StatCard
+        <StatTile
+          density="compact"
           label="Pool win rate"
           :value="pool.games > 0 ? formatPercent(pool.winRate) : '–'"
           :hint="pool.games > 0 ? `${pool.wins}W · ${pool.losses}L` : 'Nothing recorded yet'"
           :tone="pool.games === 0 ? 'neutral' : pool.winRate >= 0.5 ? 'win' : 'loss'"
         />
-        <StatCard
+        <StatTile
+          density="compact"
           label="Average grade"
           :value="gradeFromScore(pool.averageGrade) ?? '–'"
           hint="Across graded champions"
         />
-        <StatCard
+        <StatTile
+          density="compact"
           label="Challenges remaining"
           :value="pool.needsTotal.toString()"
           :hint="`Spread over ${pool.needsChampions} champions`"
         />
-      </section>
+      </Surface>
 
-      <div class="card toolbar">
+      <Surface
+        as="section"
+        variant="toolbar"
+        padding="compact"
+        class="toolbar"
+        aria-label="Champion table controls"
+      >
         <div class="chip-row" role="group" aria-label="Filter champions">
-          <button
+          <Button
             v-for="option in FILTERS"
             :key="option.value"
             type="button"
-            class="league-button chip"
-            :class="{ active: filter === option.value }"
+            class="chip"
+            size="compact"
+            :active="filter === option.value"
             :aria-pressed="filter === option.value"
             @click="filter = option.value"
           >
             {{ option.label }}
             <span class="chip-count numeric">{{ filterCounts[option.value] }}</span>
-          </button>
+          </Button>
         </div>
 
         <p class="muted result-count">
           {{ rows.length }} shown
-          <button v-if="isFiltered" class="link" type="button" @click="clearFilters">
+          <Button
+            v-if="isFiltered"
+            variant="ghost"
+            size="compact"
+            type="button"
+            @click="clearFilters"
+          >
             Reset
-          </button>
+          </Button>
         </p>
-      </div>
+      </Surface>
 
-      <div class="card table-card">
+      <Surface variant="inset" padding="none" class="table-card">
         <div class="table-scroll">
           <table class="champions">
             <thead>
@@ -520,15 +550,19 @@ function clearFilters() {
             </tbody>
           </table>
 
-          <p v-if="rows.length === 0" class="muted empty">
-            No champions match this view.
-            <button class="link" type="button" @click="clearFilters">
-              Reset the filters
-            </button>
-            to see everything.
-          </p>
+          <EmptyState
+            v-if="rows.length === 0"
+            compact
+            class="empty"
+            title="No champions match this view"
+            description="Reset the filters to return to your full champion collection."
+          >
+            <template #actions>
+              <Button size="compact" @click="clearFilters">Reset filters</Button>
+            </template>
+          </EmptyState>
         </div>
-      </div>
+      </Surface>
 
       <p class="muted footnote">
         Your grade weighs a champion's results against how much you have played
@@ -543,34 +577,11 @@ function clearFilters() {
 .page {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--ui-space-5);
 }
 
-.page-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: var(--space-4);
-  flex-wrap: wrap;
-}
-
-h1 {
-  font-family: var(--font-display);
-  font-size: 22px;
-  letter-spacing: 1px;
-  margin: 0;
-  color: var(--gold-bright);
-}
-
-.subtitle {
-  margin: var(--space-1) 0 0;
-  font-size: 12px;
-  max-width: 60ch;
-}
-
-.search {
-  width: 240px;
-}
+.search-field { width: min(280px, 34vw); }
+.search { width: 100%; }
 
 .kpis {
   display: grid;
@@ -581,9 +592,8 @@ h1 {
 .toolbar {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--ui-space-3);
   flex-wrap: wrap;
-  padding: var(--space-2) var(--space-3);
 }
 
 .chip-row {
@@ -614,21 +624,6 @@ h1 {
   font-size: 11px;
   letter-spacing: 0.6px;
   text-transform: uppercase;
-}
-
-.link {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: var(--gold);
-  font: inherit;
-  padding: 0 0 0 var(--space-2);
-  cursor: pointer;
-  text-decoration: underline;
-}
-
-.link:hover {
-  color: var(--gold-bright);
 }
 
 /* The table is contained rather than left to run the length of the page, so
@@ -900,19 +895,11 @@ td.champ-col {
 }
 
 .empty {
-  padding: var(--space-5);
-  text-align: center;
-  font-size: 12px;
-  color: var(--text-muted);
+  margin: var(--ui-space-4);
 }
 
 .notice {
   max-width: 60ch;
-}
-
-.notice p {
-  margin: 0;
-  font-size: 13px;
 }
 
 .footnote {
@@ -929,14 +916,14 @@ td.champ-col {
   white-space: nowrap;
 }
 
-@media (max-width: 1180px) {
+@container recall-content (max-width: 1180px) {
   .riot-col,
   .need-names {
     display: none;
   }
 }
 
-@media (max-width: 900px) {
+@container recall-content (max-width: 900px) {
   th.mastery-col,
   td.mastery-col,
   th.rank-col,
@@ -944,8 +931,14 @@ td.champ-col {
     display: none;
   }
 
-  .search {
-    width: 100%;
-  }
+  .search-field { width: 100%; }
+  .toolbar { align-items: stretch; }
+  .chip-row { flex: 1 1 100%; }
+  .result-count { display: flex; align-items: center; margin-left: 0; }
+}
+
+@container recall-content (max-width: 520px) {
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .chip-row > :deep(.ui-button) { flex: 1 1 calc(50% - var(--ui-space-1)); }
 }
 </style>

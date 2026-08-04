@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type { UpdateStatus } from "../types/update"
+import Button from "./ui/Button.vue"
+import Surface from "./ui/Surface.vue"
 
 defineProps<{
   status: UpdateStatus
@@ -12,30 +14,42 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <section v-if="status.kind === 'downloaded'" class="update-ready" role="status">
+  <Surface
+    v-if="status.kind === 'downloaded'"
+    as="section"
+    variant="raised"
+    padding="compact"
+    class="update-ready"
+    role="status"
+  >
     <div class="body">
       <strong>Recall {{ status.version }} is ready to install.</strong>
       <span>The update will restart Recall and finish in the background.</span>
     </div>
-    <button class="league-button" @click="emit('install')">
+    <Button class="restart" variant="primary" size="compact" @click="emit('install')">
       Restart to update
-    </button>
-    <button class="dismiss" title="Later" aria-label="Later" @click="emit('dismiss')">×</button>
-  </section>
+    </Button>
+    <Button
+      class="dismiss"
+      variant="ghost"
+      size="compact"
+      icon-only
+      title="Later"
+      aria-label="Later"
+      @click="emit('dismiss')"
+    >
+      ×
+    </Button>
+  </Surface>
 </template>
 
 <style scoped>
 .update-ready {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  margin-bottom: var(--space-4);
-  background: var(--surface-2);
-  border: 1px solid var(--border-strong);
-  border-left: 3px solid var(--gold);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-card);
+  gap: var(--ui-space-3);
+  margin-bottom: var(--ui-space-4);
+  border-left: 3px solid var(--ui-accent);
 }
 
 .body {
@@ -47,33 +61,30 @@ const emit = defineEmits<{
 }
 
 .body strong {
-  font-family: var(--font-heading);
+  color: var(--ui-text-heading);
+  font-family: var(--ui-font-heading);
   font-weight: 500;
   letter-spacing: 0.6px;
-  color: var(--gold-bright);
 }
 
 .body span {
-  color: var(--text-secondary);
+  color: var(--ui-text-subtle);
   font-size: 12px;
 }
 
-.league-button {
-  padding: var(--space-2) var(--space-3);
+.restart {
   white-space: nowrap;
 }
 
 .dismiss {
-  padding: 0 var(--space-1);
-  background: none;
-  border: none;
-  color: var(--text-secondary);
   font-size: 20px;
   line-height: 1;
-  cursor: pointer;
 }
 
-.dismiss:hover {
-  color: var(--text-primary);
+@container recall-content (max-width: 620px) {
+  .update-ready { align-items: flex-start; flex-wrap: wrap; }
+  .body { order: 1; flex-basis: calc(100% - 44px); }
+  .dismiss { order: 2; margin-left: auto; }
+  .restart { order: 3; width: 100%; }
 }
 </style>

@@ -6,7 +6,7 @@ import PerformanceProfile from "./PerformanceProfile.vue"
 import OutcomeTrendChart from "./OutcomeTrendChart.vue"
 import MiniBar from "../ui/MiniBar.vue"
 import Panel from "../ui/Panel.vue"
-import StatTile from "../ui/StatTile.vue"
+import TelemetryGrid from "../ui/TelemetryGrid.vue"
 import { itemAsset } from "../../helpers/items"
 import { classifyRviIdentity } from "../../helpers/rvi-identity"
 import {
@@ -32,6 +32,40 @@ const summary = computed(() => props.overview.summary)
 const detail = computed(() => props.overview.style?.career.detail)
 const averageGrade = computed(() => gradeFromScore(summary.value.avgGradeScore))
 const SHOW_RANKED_HISTORY = false
+
+type TelemetryReading = {
+  label: string
+  value: string
+  hint?: string
+  tone?: "neutral" | "win" | "loss"
+}
+
+const telemetryReadings = computed<TelemetryReading[]>(() => [
+  {
+    label: "Games",
+    value: summary.value.games.toString(),
+    hint: `${summary.value.wins}W · ${summary.value.losses}L`,
+  },
+  {
+    label: "Win rate",
+    value: formatPercent(summary.value.winRate),
+    tone: summary.value.winRate >= 0.5 ? "win" : "loss",
+  },
+  {
+    label: "Avg grade",
+    value: averageGrade.value ?? "–",
+    hint: `${summary.value.gradedGames} graded`,
+  },
+  { label: "KDA", value: formatDecimal(summary.value.kda, 2) },
+  ...(detail.value ? [
+    { label: "Damage / min", value: formatCompact(detail.value.damagePerMin) },
+    { label: "Gold / min", value: formatCompact(detail.value.goldPerMin) },
+    { label: "CS / min", value: formatDecimal(detail.value.csPerMin, 1) },
+    ...(props.family === "sr" || props.family === "classic"
+      ? [{ label: "Vision / min", value: formatDecimal(detail.value.visionPerMin, 2) }]
+      : []),
+  ] : []),
+])
 
 const gradeBars = computed(() => {
   const byGrade = new Map(props.overview.grades.map((entry) => [entry.grade, entry.count]))
@@ -62,40 +96,7 @@ const rviIdentity = computed(() => props.overview.performance
 
 <template>
   <div class="overview">
-    <section class="kpis">
-      <StatTile
-        label="Games"
-        :value="summary.games.toString()"
-        :hint="`${summary.wins}W · ${summary.losses}L`"
-      />
-      <StatTile label="Win rate" :value="formatPercent(summary.winRate)" />
-      <StatTile
-        label="Avg Recall grade"
-        :value="averageGrade ?? '–'"
-        :hint="`${summary.gradedGames} graded of ${summary.games}`"
-      />
-      <StatTile label="KDA" :value="formatDecimal(summary.kda, 2)" />
-      <StatTile
-        v-if="detail"
-        label="Damage / min"
-        :value="formatCompact(detail.damagePerMin)"
-      />
-      <StatTile
-        v-if="detail"
-        label="Gold / min"
-        :value="formatCompact(detail.goldPerMin)"
-      />
-      <StatTile
-        v-if="detail"
-        label="CS / min"
-        :value="formatDecimal(detail.csPerMin, 1)"
-      />
-      <StatTile
-        v-if="detail && (family === 'sr' || family === 'classic')"
-        label="Vision / min"
-        :value="formatDecimal(detail.visionPerMin, 2)"
-      />
-    </section>
+    <TelemetryGrid label="Scope telemetry" :readings="telemetryReadings" />
 
     <RankedHistoryPanel
       v-if="SHOW_RANKED_HISTORY && ranked.length"
@@ -244,13 +245,6 @@ const rviIdentity = computed(() => props.overview.performance
   flex-direction: column;
   gap: var(--space-4);
   min-width: 0;
-}
-
-.kpis {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
-  grid-auto-rows: 1fr;
-  gap: var(--space-3);
 }
 
 .overview-rank {
@@ -480,11 +474,6 @@ const rviIdentity = computed(() => props.overview.performance
 }
 
 @media (max-width: 560px) {
-  .kpis {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-2);
-  }
-
   .overview-grid { grid-template-columns: minmax(0, 1fr); }
 }
 </style>

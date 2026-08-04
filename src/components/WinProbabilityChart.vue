@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
+import { CHART_COLOURS } from "../charts/recall-chart-theme"
 import {
   reviewWinProbability,
   winProbabilityLabel,
@@ -64,8 +65,8 @@ const time = (timestamp: number) =>
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
         <defs>
           <linearGradient id="probability-fill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stop-color="#2fc2e8" stop-opacity=".28" />
-            <stop offset="1" stop-color="#2fc2e8" stop-opacity="0" />
+            <stop offset="0" :stop-color="CHART_COLOURS.teamBlue" stop-opacity=".28" />
+            <stop offset="1" :stop-color="CHART_COLOURS.teamBlue" stop-opacity="0" />
           </linearGradient>
         </defs>
         <line x1="0" y1="25" x2="100" y2="25" />
@@ -101,11 +102,105 @@ const time = (timestamp: number) =>
 </template>
 
 <style scoped>
-.probability-panel { overflow: hidden; border: 1px solid var(--border-subtle); border-radius: 14px; background: linear-gradient(145deg, var(--surface-2), var(--surface-1)); }
-.probability-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 18px; border-bottom: 1px solid var(--border-subtle); }.eyebrow { color: var(--gold); font-size: 11px; letter-spacing: .8px; text-transform: uppercase; }.probability-panel h2 { margin: 3px 0 2px; color: var(--text-primary); font: 18px var(--font-heading); }.probability-panel header p { margin: 0; color: var(--text-muted); font-size: 12px; }
-.final-reading { display: flex; flex-direction: column; align-items: flex-end; }.final-reading span { color: var(--text-muted); font-size: 10px; text-transform: uppercase; }.final-reading strong { color: #65d4ef; font: 22px var(--font-display); }.final-reading small { color: var(--text-secondary); font-size: 11px; }
-.probability-chart { position: relative; height: 360px; overflow: hidden; background: linear-gradient(180deg, rgba(23,89,128,.22), transparent 49%, rgba(115,28,37,.19)); }.probability-chart:focus-visible { outline: 1px solid var(--gold); outline-offset: -2px; }.probability-chart svg { width: 100%; height: 100%; }.probability-chart svg line { stroke: var(--border-strong); stroke-width: .35; stroke-dasharray: 2 2; }.probability-chart svg .even-line { stroke: rgba(200,170,109,.45); }.probability-chart svg polyline { fill: none; stroke: #36c4e8; stroke-width: 2.1; vector-effect: non-scaling-stroke; filter: drop-shadow(0 0 4px rgba(54,196,232,.42)); }
-.axis { position: absolute; left: 8px; z-index: 1; color: var(--text-muted); font-size: 10px; pointer-events: none; }.axis.blue { top: 7px; color: #67d5ef; }.axis.even { top: 50%; transform: translateY(-50%); }.axis.red { bottom: 7px; color: #ef7b88; }.time { position: absolute; bottom: 7px; color: var(--text-muted); font-size: 10px; }.time.start { left: 8px; }.time.end { right: 8px; }
-.crosshair { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,.45); pointer-events: none; }.point { position: absolute; width: 10px; height: 10px; transform: translate(-50%,-50%); border: 2px solid var(--surface-0); border-radius: 50%; background: #36c4e8; box-shadow: 0 0 9px rgba(54,196,232,.6); pointer-events: none; }.tooltip { position: absolute; z-index: 3; top: 12px; display: flex; flex-direction: column; gap: 3px; min-width: 170px; padding: 9px 10px; transform: translateX(9px); border: 1px solid var(--border-strong); border-radius: 6px; background: rgba(5,12,24,.96); color: var(--text-secondary); font-size: 11px; pointer-events: none; }.tooltip.flip { transform: translateX(calc(-100% - 9px)); }.tooltip strong { color: var(--gold-bright); }.blue-copy { color: #67d5ef; }.red-copy { color: #ef7b88; }.tooltip small { color: var(--text-muted); }
-.probability-panel > footer { display: flex; align-items: center; gap: 16px; padding: 9px 14px; border-top: 1px solid var(--border-subtle); color: var(--text-secondary); font-size: 11px; }.probability-panel footer span { display: inline-flex; align-items: center; gap: 5px; }.probability-panel footer i { width: 8px; height: 8px; border-radius: 50%; }.blue-dot { background: #36c4e8; }.red-dot { background: #e45868; }.probability-panel footer small { margin-left: auto; color: var(--text-muted); }.empty { padding: 50px 18px; color: var(--text-muted); text-align: center; }
+.probability-panel {
+  overflow: hidden;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-lg);
+  background: var(--ui-surface-panel);
+  box-shadow: var(--ui-shadow-panel);
+}
+.probability-panel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--ui-divider);
+}
+.eyebrow { color: var(--ui-accent); font-size: 11px; letter-spacing: .8px; text-transform: uppercase; }
+.probability-panel h2 { margin: 3px 0 2px; color: var(--ui-text-heading); font: 18px var(--ui-font-heading); }
+.probability-panel header p { margin: 0; color: var(--ui-text-muted); font-size: 12px; }
+.final-reading { display: flex; flex-direction: column; align-items: flex-end; }
+.final-reading span { color: var(--ui-text-muted); font-size: 10px; text-transform: uppercase; }
+.final-reading strong { color: var(--ui-team-blue); font: 22px var(--ui-font-display); }
+.final-reading small { color: var(--ui-text-subtle); font-size: 11px; }
+.probability-chart {
+  position: relative;
+  height: 360px;
+  overflow: hidden;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--ui-team-blue) 20%, transparent),
+    transparent 49%,
+    color-mix(in srgb, var(--ui-team-red) 18%, transparent)
+  );
+}
+.probability-chart:focus-visible { outline: 2px solid var(--ui-focus-ring); outline-offset: -2px; }
+.probability-chart svg { width: 100%; height: 100%; }
+.probability-chart svg line { stroke: var(--ui-border-emphasis); stroke-width: .35; stroke-dasharray: 2 2; }
+.probability-chart svg .even-line { stroke: color-mix(in srgb, var(--ui-accent) 45%, transparent); }
+.probability-chart svg polyline {
+  fill: none;
+  stroke: var(--ui-team-blue);
+  stroke-width: 2.1;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--ui-team-blue) 42%, transparent));
+}
+.axis { position: absolute; left: 8px; z-index: 1; color: var(--ui-text-muted); font-size: 10px; pointer-events: none; }
+.axis.blue { top: 7px; color: var(--ui-team-blue); }
+.axis.even { top: 50%; transform: translateY(-50%); }
+.axis.red { bottom: 7px; color: var(--ui-team-red); }
+.time { position: absolute; bottom: 7px; color: var(--ui-text-muted); font-size: 10px; }
+.time.start { left: 8px; }
+.time.end { right: 8px; }
+.crosshair { position: absolute; top: 0; bottom: 0; width: 1px; background: color-mix(in srgb, var(--ui-text) 45%, transparent); pointer-events: none; }
+.point {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  transform: translate(-50%,-50%);
+  border: 2px solid var(--ui-canvas);
+  border-radius: 50%;
+  background: var(--ui-team-blue);
+  box-shadow: 0 0 9px color-mix(in srgb, var(--ui-team-blue) 60%, transparent);
+  pointer-events: none;
+}
+.tooltip {
+  position: absolute;
+  z-index: 3;
+  top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 170px;
+  padding: 9px 10px;
+  transform: translateX(9px);
+  border: 1px solid var(--ui-border-emphasis);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-overlay);
+  box-shadow: var(--ui-shadow-raised);
+  color: var(--ui-text-subtle);
+  font-size: 11px;
+  pointer-events: none;
+}
+.tooltip.flip { transform: translateX(calc(-100% - 9px)); }
+.tooltip strong { color: var(--ui-text-heading); }
+.blue-copy { color: var(--ui-team-blue); }
+.red-copy { color: var(--ui-team-red); }
+.tooltip small { color: var(--ui-text-muted); }
+.probability-panel > footer {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 9px 14px;
+  border-top: 1px solid var(--ui-divider);
+  color: var(--ui-text-subtle);
+  font-size: 11px;
+}
+.probability-panel footer span { display: inline-flex; align-items: center; gap: 5px; }
+.probability-panel footer i { width: 8px; height: 8px; border-radius: 50%; }
+.blue-dot { background: var(--ui-team-blue); }
+.red-dot { background: var(--ui-team-red); }
+.probability-panel footer small { margin-left: auto; color: var(--ui-text-muted); }
+.empty { padding: 50px 18px; color: var(--ui-text-muted); text-align: center; }
 </style>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue"
+import { Surface } from "./ui"
 import { api } from "../helpers/api"
 import { useApiEvents } from "../helpers/use-api-events"
 import { championIconUrl, championNameById } from "../helpers/format"
@@ -54,10 +55,14 @@ const done = computed(() => statuses.value.filter((row) => row.completed))
 </script>
 
 <template>
-  <div
+  <Surface
     v-if="championId !== null && statuses.length"
+    as="aside"
+    variant="quiet"
+    padding="compact"
     class="banner"
     :class="needed.length ? 'needed' : 'done'"
+    aria-label="Selected champion challenge progress"
   >
     <img :src="championIconUrl(championId)" :alt="name" class="portrait" />
 
@@ -84,36 +89,33 @@ const done = computed(() => statuses.value.filter((row) => row.completed))
         </li>
       </ul>
     </div>
-  </div>
+  </Surface>
 </template>
 
 <style scoped>
 .banner {
   display: flex;
   align-items: flex-start;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  margin-bottom: var(--space-4);
-  background: var(--surface-2);
-  border: 1px solid var(--border-subtle);
+  gap: var(--ui-space-3);
+  margin-bottom: var(--ui-space-4);
   border-left-width: 3px;
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-card);
+  container: champ-banner / inline-size;
 }
 
 .banner.needed {
-  border-left-color: var(--gold);
+  border-left-color: var(--ui-accent);
 }
 
 .banner.done {
-  border-left-color: var(--text-muted);
+  border-left-color: var(--ui-text-muted);
 }
 
 .portrait {
   width: 44px;
   height: 44px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-subtle);
+  flex: 0 0 auto;
+  border-radius: var(--ui-radius-sm);
+  border: 1px solid var(--ui-border);
 }
 
 .body {
@@ -124,15 +126,15 @@ const done = computed(() => statuses.value.filter((row) => row.completed))
 .headline {
   display: flex;
   align-items: baseline;
-  gap: var(--space-3);
+  gap: var(--ui-space-3);
   flex-wrap: wrap;
 }
 
 .headline strong {
-  font-family: var(--font-heading);
+  font-family: var(--ui-font-heading);
   font-weight: 500;
   letter-spacing: 0.6px;
-  color: var(--gold-bright);
+  color: var(--ui-text-heading);
   font-size: 15px;
 }
 
@@ -142,26 +144,26 @@ const done = computed(() => statuses.value.filter((row) => row.completed))
 }
 
 .needed-tag {
-  color: var(--gold);
+  color: var(--ui-accent);
 }
 
 .done-tag {
-  color: var(--text-secondary);
+  color: var(--ui-text-subtle);
 }
 
 .challenges {
   list-style: none;
-  margin: var(--space-2) 0 0;
+  margin: var(--ui-space-2) 0 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--ui-space-1);
 }
 
 .challenges li {
   display: flex;
   align-items: baseline;
-  gap: var(--space-2);
+  gap: var(--ui-space-2);
   font-size: 12px;
 }
 
@@ -170,32 +172,42 @@ const done = computed(() => statuses.value.filter((row) => row.completed))
 }
 
 .mark {
-  font-family: var(--font-heading);
+  font-family: var(--ui-font-heading);
   font-size: 11px;
   letter-spacing: 1px;
   text-transform: uppercase;
   padding: 1px 5px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ui-radius-sm);
   min-width: 48px;
   text-align: center;
 }
 
 .needed-mark {
-  background: rgba(200, 170, 109, 0.18);
-  color: var(--gold);
+  background: color-mix(in srgb, var(--ui-accent) 18%, transparent);
+  color: var(--ui-accent);
 }
 
 .done-mark {
-  background: var(--surface-3);
-  color: var(--text-muted);
+  background: var(--ui-surface-hover);
+  color: var(--ui-text-muted);
 }
 
 .challenge-name {
-  color: var(--text-primary);
+  color: var(--ui-text);
 }
 
 .count {
   font-size: 11px;
   margin-left: auto;
+}
+
+@container champ-banner (max-width: 520px) {
+  .headline { align-items: flex-start; flex-direction: column; gap: var(--ui-space-1); }
+  .challenges li { display: grid; grid-template-columns: 48px minmax(0, 1fr); }
+  .count { grid-column: 2; margin-left: 0; }
+}
+
+@container champ-banner (max-width: 360px) {
+  .portrait { width: 38px; height: 38px; }
 }
 </style>

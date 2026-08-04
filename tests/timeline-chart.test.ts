@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest"
 import {
   timelineChartDomain,
+  timelineChartY,
+  timelineGoldDifferencePoints,
   timelineChartPoints,
   timelineChartX,
   timelineTeamGoldPoints,
@@ -50,6 +52,19 @@ describe("timeline chart geometry", () => {
       Number(red[1].split(",")[1]),
     )
     expect(timelineTeamGoldY(domain.maximumGold, domain)).toBeCloseTo(8)
+  })
+
+  it("matches the League client with a rounded, zero-centred advantage curve", () => {
+    const frames = [frame(0, 0), frame(60_000, 612), frame(120_000, -5_361)]
+    const domain = timelineChartDomain(frames, [])
+    const points = timelineGoldDifferencePoints(frames, domain).split(" ")
+
+    expect(domain.maximumDifference).toBe(6_000)
+    expect(Number(points[0].split(",")[1])).toBeCloseTo(50)
+    expect(Number(points[1].split(",")[1])).toBeLessThan(50)
+    expect(Number(points[2].split(",")[1])).toBeGreaterThan(50)
+    expect(timelineChartY(6_000, domain)).toBeCloseTo(8)
+    expect(timelineChartY(-6_000, domain)).toBeCloseTo(92)
   })
 
   it("includes end-of-game events in the time scale", () => {

@@ -6,9 +6,9 @@ import GradeBadge from "../components/GradeBadge.vue"
 import MomentumGauge from "../components/MomentumGauge.vue"
 import RankedHistoryPanel from "../components/RankedHistoryPanel.vue"
 import PerformanceRadar from "../components/skill/PerformanceRadar.vue"
+import EmptyState from "../components/ui/EmptyState.vue"
 import MiniBar from "../components/ui/MiniBar.vue"
 import Panel from "../components/ui/Panel.vue"
-import StatTile from "../components/ui/StatTile.vue"
 import { api } from "../helpers/api"
 import { useApiEvents } from "../helpers/use-api-events"
 import { useCoalescedTask } from "../helpers/use-coalesced-task"
@@ -212,6 +212,54 @@ const lpToday = computed(() => {
   return change
 })
 
+type TelemetryReading = {
+  label: string
+  value: string
+  hint?: string
+  tone?: "win" | "loss"
+}
+
+const sessionTelemetry = computed<TelemetryReading[]>(() => [
+  {
+    label: "Today",
+    value: playedToday.value ? `${session.value!.wins}W ${session.value!.losses}L` : "–",
+    hint: playedToday.value ? `${playedToday.value} games · ${sessionTime.value}` : "No games yet",
+    tone: playedToday.value
+      ? session.value!.winRate >= 0.5 ? "win" : "loss"
+      : undefined,
+  },
+  {
+    label: "LP today",
+    value: lpToday.value === 0 ? "–" : `${lpToday.value > 0 ? "+" : ""}${lpToday.value}`,
+    tone: lpToday.value > 0 ? "win" : lpToday.value < 0 ? "loss" : undefined,
+  },
+  {
+    label: "Streak",
+    value: formatStreak(summary.value!.currentStreak),
+    hint: `Best ${summary.value!.longestWinStreak}`,
+    tone: summary.value!.currentStreak >= 0 ? "win" : "loss",
+  },
+])
+
+const archiveTelemetry = computed<TelemetryReading[]>(() => [
+  {
+    label: "Games",
+    value: summary.value!.games.toString(),
+    hint: `${summary.value!.wins}W · ${summary.value!.losses}L`,
+  },
+  {
+    label: "Win rate",
+    value: formatPercent(summary.value!.winRate),
+    tone: summary.value!.winRate >= 0.5 ? "win" : "loss",
+  },
+  { label: "KDA", value: formatDecimal(summary.value!.kda, 2) },
+  {
+    label: "Avg grade",
+    value: averageGrade.value ?? "–",
+    hint: `${summary.value!.gradedGames} graded`,
+  },
+])
+
 const sessionTime = computed(() => {
   const seconds = (session.value?.avgDurationSecs ?? 0) * playedToday.value
   return seconds > 0 ? formatDuration(seconds) : "–"
@@ -255,82 +303,70 @@ const championName = (id: number) => championNameById(props.champions, id)
 
 <template>
   <div class="page">
-    <header class="page-head">
-      <div>
-        <h1>Dashboard</h1>
+    <header class="page-head dashboard-hero">
+      <div class="hero-copy">
+        <span class="hero-kicker">Recall performance archive</span>
+        <h1>Performance dashboard</h1>
         <p class="muted subtitle">
-          Everything Recall has recorded, across every tracked mode.
+          Your current form, long-term profile, and next objectives in one command deck.
         </p>
       </div>
 
       <div v-if="profile?.challenges" class="overall">
-        <div class="overall-level">{{ profile.challenges.overallLevel }}</div>
-        <div class="muted overall-meta">
-          {{ profile.challenges.totalScore.toLocaleString() }} points
-          <span v-if="profile.challenges.percentile !== null">
-            · top {{ formatDecimal(profile.challenges.percentile) }}%
-          </span>
+        <span class="overall-kicker">Challenge standing</span>
+        <div class="overall-readout">
+          <div class="overall-level">{{ profile.challenges.overallLevel }}</div>
+          <div class="muted overall-meta">
+            {{ profile.challenges.totalScore.toLocaleString() }} points
+            <span v-if="profile.challenges.percentile !== null">
+              · top {{ formatDecimal(profile.challenges.percentile) }}%
+            </span>
+          </div>
         </div>
       </div>
     </header>
 
-    <div v-if="!connected && !hasGames" class="card notice">
-      <h2 class="section-title">League client not detected</h2>
-      <p class="muted">
-        Start the client to record games and challenge progress. Anything
-        already recorded stays saved.
-      </p>
-    </div>
+    <EmptyState
+      v-if="!connected && !hasGames"
+      class="notice"
+      title="League client not detected"
+      description="Start the client to record games and challenge progress. Anything already recorded stays saved."
+    />
 
     <template v-if="hasGames">
-      <section class="kpis">
-        <StatTile
-          label="Today"
-          :value="playedToday ? `${session!.wins}W ${session!.losses}L` : '–'"
-          :hint="playedToday ? `${playedToday} games · ${sessionTime}` : 'No games yet today'"
-          :tone="playedToday && session!.winRate >= 0.5 ? 'win' : playedToday ? 'loss' : 'neutral'"
-        />
-        <StatTile
-          label="LP today"
-          :value="lpToday === 0 ? '–' : `${lpToday > 0 ? '+' : ''}${lpToday}`"
-          :tone="lpToday > 0 ? 'win' : lpToday < 0 ? 'loss' : 'neutral'"
-        />
-        <StatTile
-          label="Streak"
-          :value="formatStreak(summary!.currentStreak)"
-          :tone="summary!.currentStreak >= 0 ? 'win' : 'loss'"
-          :hint="`best ${summary!.longestWinStreak}`"
-        />
-        <StatTile
-          label="Games recorded"
-          :value="summary!.games.toString()"
-          :hint="`${summary!.wins}W · ${summary!.losses}L`"
-        />
-        <StatTile
-          label="Win rate"
-          :value="formatPercent(summary!.winRate)"
-          :tone="summary!.winRate >= 0.5 ? 'win' : 'loss'"
-        />
-        <StatTile label="KDA" :value="formatDecimal(summary!.kda, 2)" />
-        <StatTile
-          label="Avg grade"
-          :value="averageGrade ?? '–'"
-          :hint="`${summary!.gradedGames} graded`"
-        />
+      <section class="status-deck" aria-labelledby="status-deck-title">
+        <header class="deck-heading">
+          <div>
+            <span class="deck-kicker">Current readings</span>
+            <h2 id="status-deck-title">Performance telemetry</h2>
+          </div>
+          <span class="muted">Live session and all recorded games</span>
+        </header>
+        <div class="telemetry-board">
+          <section class="telemetry-bank" aria-label="Current session readings">
+            <span class="telemetry-bank-label">Session</span>
+            <dl class="telemetry-readings session-readings">
+              <div v-for="reading in sessionTelemetry" :key="reading.label" class="telemetry-reading">
+                <dt>{{ reading.label }}</dt>
+                <dd class="numeric telemetry-value" :class="reading.tone">{{ reading.value }}</dd>
+                <span v-if="reading.hint" class="telemetry-hint">{{ reading.hint }}</span>
+              </div>
+            </dl>
+          </section>
+          <section class="telemetry-bank" aria-label="Recorded performance readings">
+            <span class="telemetry-bank-label">Archive</span>
+            <dl class="telemetry-readings archive-readings">
+              <div v-for="reading in archiveTelemetry" :key="reading.label" class="telemetry-reading">
+                <dt>{{ reading.label }}</dt>
+                <dd class="numeric telemetry-value" :class="reading.tone">{{ reading.value }}</dd>
+                <span v-if="reading.hint" class="telemetry-hint">{{ reading.hint }}</span>
+              </div>
+            </dl>
+          </section>
+        </div>
       </section>
 
       <section v-if="form.length" class="form-momentum-grid">
-        <Panel title="Recent form" :meta="`${form.length} games`" class="form-panel">
-          <div class="form-summary">
-            <div>
-              <strong>{{ recentFormWins }}W · {{ form.length - recentFormWins }}L</strong>
-              <span class="muted">Oldest to newest · hover for detail</span>
-            </div>
-            <strong class="form-rate">{{ formatPercent(recentFormRate) }}</strong>
-          </div>
-          <FormStrip :matches="form" :champions="champions" />
-        </Panel>
-
         <Panel title="The Dial" :meta="momentum.label" class="momentum-panel">
           <span v-for="corner in ['tl', 'tr', 'bl', 'br']" :key="corner" class="corner-brace" :class="corner" aria-hidden="true" />
           <MomentumGauge
@@ -340,17 +376,36 @@ const championName = (id: number) => championNameById(props.champions, id)
             :overdrive-tier="momentum.overdriveTier"
           />
         </Panel>
+
+        <Panel title="Recent form" :meta="`${form.length} games`" class="dashboard-panel form-panel">
+          <div class="form-summary">
+            <div>
+              <strong>{{ recentFormWins }}W · {{ form.length - recentFormWins }}L</strong>
+              <span class="muted">Oldest to newest · hover for detail</span>
+            </div>
+            <strong class="form-rate">{{ formatPercent(recentFormRate) }}</strong>
+          </div>
+          <FormStrip :matches="form" :champions="champions" />
+        </Panel>
       </section>
 
-      <section class="dashboard-columns">
-        <div class="dashboard-column left-column">
-          <RankedHistoryPanel
-            v-if="ranked.length"
-            :histories="ranked"
-            class="rank-panel"
-          />
+      <section class="dashboard-grid" aria-label="Performance analysis">
+        <RankedHistoryPanel
+          v-if="ranked.length"
+          :histories="ranked"
+          class="dashboard-panel rank-panel"
+        />
 
-          <Panel v-if="recent.length" title="Recent games" class="recent-panel">
+        <Panel
+          v-if="rviProfile"
+          title="Recall Vector Index"
+          :meta="`${rviProfile.score} · ${rviFamily === 'sr' ? `Summoner's Rift` : rviFamily === 'classic' ? 'League Classic' : 'ARAM'}`"
+          class="dashboard-panel rvi-panel"
+        >
+          <PerformanceRadar :dimensions="rviProfile.dimensions" height="270px" />
+        </Panel>
+
+        <Panel v-if="recent.length" title="Recent games" class="dashboard-panel recent-panel">
             <ul class="game-list">
               <li
                 v-for="game in recent"
@@ -380,24 +435,13 @@ const championName = (id: number) => championNameById(props.champions, id)
                 </div>
               </li>
             </ul>
-          </Panel>
-        </div>
+        </Panel>
 
-        <div class="dashboard-column right-column">
-          <Panel
-            v-if="rviProfile"
-            title="Recall Vector Index"
-            :meta="`${rviProfile.score} · ${rviFamily === 'sr' ? `Summoner's Rift` : rviFamily === 'classic' ? 'League Classic' : 'ARAM'}`"
-            class="rvi-panel"
-          >
-            <PerformanceRadar :dimensions="rviProfile.dimensions" height="270px" />
-          </Panel>
-
-          <Panel
+        <Panel
             v-if="ranking?.best.length"
             title="Champions in form"
             meta="Performance adjusted for sample size"
-            class="champions-panel"
+            class="dashboard-panel champions-panel"
           >
             <p class="muted champion-intro">
               Your strongest Recall grades, with one-game standouts pulled
@@ -439,54 +483,66 @@ const championName = (id: number) => championNameById(props.champions, id)
                       <small>KDA</small>
                     </span>
                   </span>
-                  <GradeBadge :grade="gradeFromScore(row.adjustedGrade)" size="lg" />
+                  <span class="champion-grade">
+                    <GradeBadge :grade="gradeFromScore(row.adjustedGrade)" size="lg" />
+                  </span>
                 </button>
               </li>
             </ol>
             <p class="muted champion-footnote">Open a champion for its full breakdown.</p>
-          </Panel>
-        </div>
+        </Panel>
       </section>
     </template>
 
-    <Panel v-if="categories.length" title="Challenge categories">
-      <div class="categories">
-        <div v-for="entry in categories" :key="entry.category" class="category">
-          <div class="category-head">
-            <span class="category-name">{{ entry.category }}</span>
-            <span class="muted numeric small">
-              {{ entry.current.toLocaleString() }} /
-              {{ entry.max.toLocaleString() }}
-            </span>
-          </div>
-          <MiniBar :value="entry.current / Math.max(1, entry.max)" />
-          <div class="muted category-foot">
-            {{ entry.level }} · top {{ formatDecimal(entry.positionPercentile) }}%
-          </div>
+    <section v-if="categories.length || nearlyThere.length" class="challenge-deck" aria-labelledby="challenge-deck-title">
+      <header class="deck-heading">
+        <div>
+          <span class="deck-kicker">Progression archive</span>
+          <h2 id="challenge-deck-title">Challenge objectives</h2>
         </div>
-      </div>
-    </Panel>
+        <span class="muted">Long-term progress and nearest upgrades</span>
+      </header>
+      <div class="challenge-grid">
+        <Panel v-if="categories.length" title="Challenge categories" class="dashboard-panel categories-panel">
+          <div class="categories">
+            <div v-for="entry in categories" :key="entry.category" class="category">
+              <div class="category-head">
+                <span class="category-name">{{ entry.category }}</span>
+                <span class="muted numeric small">
+                  {{ entry.current.toLocaleString() }} /
+                  {{ entry.max.toLocaleString() }}
+                </span>
+              </div>
+              <MiniBar :value="entry.current / Math.max(1, entry.max)" />
+              <div class="muted category-foot">
+                {{ entry.level }} · top {{ formatDecimal(entry.positionPercentile) }}%
+              </div>
+            </div>
+          </div>
+        </Panel>
 
-    <Panel v-if="nearlyThere.length" title="Closest to the next tier">
-      <div class="near-list">
-        <button
-          v-for="entry in nearlyThere"
-          :key="entry.challengeId"
-          class="near"
-          :title="`View details for ${entry.name}`"
-          @click="selectedChallenge = entry"
-        >
-          <GradeBadge :grade="entry.currentLevel.slice(0, 1)" />
-          <div class="near-body">
-            <div class="near-name">{{ entry.name }}</div>
-            <MiniBar :value="entry.progress" />
+        <Panel v-if="nearlyThere.length" title="Closest to the next tier" class="dashboard-panel near-panel">
+          <div class="near-list">
+            <button
+              v-for="entry in nearlyThere"
+              :key="entry.challengeId"
+              class="near"
+              :title="`View details for ${entry.name}`"
+              @click="selectedChallenge = entry"
+            >
+              <GradeBadge :grade="entry.currentLevel.slice(0, 1)" />
+              <div class="near-body">
+                <div class="near-name">{{ entry.name }}</div>
+                <MiniBar :value="entry.progress" />
+              </div>
+              <div class="muted numeric small">
+                {{ formatDecimal(entry.remaining, 0) }} to go
+              </div>
+            </button>
           </div>
-          <div class="muted numeric small">
-            {{ formatDecimal(entry.remaining, 0) }} to go
-          </div>
-        </button>
+        </Panel>
       </div>
-    </Panel>
+    </section>
 
     <ChallengeDetailModal
       v-if="selectedChallenge"
@@ -500,53 +556,218 @@ const championName = (id: number) => championNameById(props.champions, id)
 .page {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: clamp(var(--space-4), 2vw, var(--space-5));
 }
 
 .page-head {
+  position: relative;
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--space-5);
   flex-wrap: wrap;
 }
 
+.dashboard-hero {
+  min-height: 104px;
+  padding: 18px 20px !important;
+  overflow: hidden;
+  border: 1px solid var(--instrument-border-soft) !important;
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(90deg, rgba(200, 170, 109, .05), transparent 38%),
+    var(--instrument-surface);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .2);
+}
+
+.dashboard-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: linear-gradient(180deg, transparent, var(--dial-metal-500) 28% 72%, transparent);
+}
+
+.dashboard-hero::after {
+  content: "";
+  position: absolute;
+  right: -70px;
+  bottom: -105px;
+  width: 260px;
+  height: 180px;
+  border: 1px solid rgba(200, 170, 109, .07);
+  transform: rotate(-30deg);
+  pointer-events: none;
+}
+
+.hero-copy { min-width: 0; }
+.hero-kicker,
+.deck-kicker,
+.overall-kicker {
+  color: var(--dial-readout-muted);
+  font: 10px var(--font-heading);
+  letter-spacing: 1.7px;
+  text-transform: uppercase;
+}
+
 h1 {
   font-family: var(--font-display);
-  font-size: 22px;
-  letter-spacing: 1px;
-  margin: 0;
+  font-size: clamp(24px, 2.4vw, 32px);
+  line-height: 1.05;
+  letter-spacing: .8px;
+  margin: 3px 0 0;
   color: var(--gold-bright);
 }
 
 .subtitle {
-  margin: var(--space-1) 0 0;
-  font-size: 12px;
+  max-width: 66ch;
+  margin: 6px 0 0;
+  font-size: 13px;
 }
 
 .overall {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  min-width: 190px;
+  padding: 10px 13px;
+  border: 1px solid var(--instrument-border-soft);
+  border-right-color: var(--instrument-border-strong);
+  border-radius: var(--radius-sm);
+  background: rgba(6, 13, 22, .5);
   text-align: right;
 }
 
+.overall-readout { display: flex; align-items: baseline; justify-content: flex-end; gap: 10px; }
 .overall-level {
   font-family: var(--font-display);
-  font-size: 20px;
-  color: var(--gold);
-  letter-spacing: 1px;
+  font-size: 24px;
+  line-height: 1;
+  color: var(--instrument-title);
+  letter-spacing: .7px;
 }
 
 .overall-meta {
-  font-size: 12px;
+  max-width: 130px;
+  font-size: 11px;
+  line-height: 1.3;
 }
 
-.kpis {
+.status-deck,
+.challenge-deck {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(138px, 1fr));
-  grid-auto-rows: 1fr;
   gap: var(--space-3);
+  min-width: 0;
 }
 
-.dashboard-columns {
+.deck-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: 0 3px 8px;
+  border-bottom: 1px solid var(--ui-divider);
+}
+
+.deck-heading h2 {
+  margin: 2px 0 0;
+  color: var(--ui-text-heading);
+  font: 15px var(--font-heading);
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+
+.deck-heading > span { font-size: 11px; text-align: right; }
+
+.telemetry-board {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 4fr);
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-inset);
+  box-shadow: var(--ui-shadow-inset);
+}
+
+.telemetry-bank {
+  position: relative;
+  min-width: 0;
+  padding-top: 22px;
+}
+
+.telemetry-bank + .telemetry-bank {
+  border-left: 1px solid var(--ui-divider);
+}
+
+.telemetry-bank-label {
+  position: absolute;
+  inset: 0 0 auto;
+  padding: 5px 10px 4px;
+  border-bottom: 1px solid var(--ui-divider);
+  color: var(--ui-text-muted);
+  font: 9px var(--font-heading);
+  letter-spacing: 1.7px;
+  text-transform: uppercase;
+}
+
+.telemetry-readings {
+  display: grid;
+  min-height: 62px;
+  margin: 0;
+}
+
+.session-readings { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.archive-readings { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+.telemetry-reading {
+  display: grid;
+  align-content: center;
+  min-width: 0;
+  padding: 8px 11px 9px;
+}
+
+.telemetry-reading + .telemetry-reading {
+  border-left: 1px solid var(--ui-divider);
+}
+
+.telemetry-reading dt {
+  overflow: hidden;
+  color: var(--ui-text-muted);
+  font: 9px var(--font-heading);
+  letter-spacing: 1.15px;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.telemetry-value {
+  margin: 1px 0 0;
+  overflow: hidden;
+  color: var(--ui-text);
+  font-size: 19px;
+  line-height: 1.05;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.telemetry-value.win { color: var(--win); }
+.telemetry-value.loss { color: var(--loss); }
+
+.telemetry-hint {
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--ui-text-muted);
+  font-size: 9px;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-4);
@@ -555,28 +776,62 @@ h1 {
 
 .form-momentum-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(270px, .8fr);
+  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
   gap: var(--space-4);
   align-items: stretch;
 }
 
 .form-panel,
 .momentum-panel {
-  height: 204px;
+  height: 220px;
   box-sizing: border-box;
   overflow: hidden;
 }
 
+.dashboard-panel {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border-color: var(--ui-border);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-surface-panel-quiet);
+  box-shadow: var(--ui-shadow-panel);
+}
+
+.dashboard-panel::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  inset: 0 22% auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--ui-border-emphasis), transparent);
+  pointer-events: none;
+}
+
+.dashboard-panel :deep(.head) {
+  align-items: center;
+  min-height: 29px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--ui-divider);
+}
+
+.dashboard-panel :deep(.section-title) {
+  color: var(--ui-text-heading);
+  letter-spacing: 1.65px;
+}
+
+.dashboard-panel :deep(.meta) { color: var(--ui-text-muted); }
+
 /* Hextech reliquary plate: chamfered gold frame over an engraved hex lattice. */
 .momentum-panel {
-  --chamfer: 16px;
+  --chamfer: var(--instrument-chamfer-md);
   position: relative;
   isolation: isolate;
   padding: 12px 16px 15px;
   border: 0;
   border-radius: 0;
   background: transparent;
-  box-shadow: 0 16px 36px rgba(0, 0, 0, .42);
+  box-shadow: var(--instrument-shadow-raised);
   clip-path: polygon(
     var(--chamfer) 0, calc(100% - var(--chamfer)) 0, 100% var(--chamfer),
     100% calc(100% - var(--chamfer)), calc(100% - var(--chamfer)) 100%,
@@ -589,7 +844,7 @@ h1 {
   position: absolute;
   z-index: -2;
   inset: 0;
-  background: linear-gradient(155deg, #8a6a2f, #e8d29a 26%, #6d5426 52%, #c8aa6d 78%, #7a5c28);
+  background: var(--instrument-frame);
 }
 
 .momentum-panel::after {
@@ -603,10 +858,10 @@ h1 {
     15px 100%, 0 calc(100% - 15px), 0 15px
   );
   background:
-    radial-gradient(ellipse 72% 62% at 50% 66%, rgba(9, 151, 178, .12), transparent 62%),
-    repeating-linear-gradient(60deg, rgba(200, 170, 109, .03) 0 1px, transparent 1px 13px),
-    repeating-linear-gradient(-60deg, rgba(200, 170, 109, .03) 0 1px, transparent 1px 13px),
-    linear-gradient(168deg, #101a2c, #0a111d 55%, #070d16);
+    var(--instrument-surface-energized),
+    var(--instrument-lattice),
+    var(--instrument-lattice-reverse),
+    var(--instrument-surface);
 }
 
 .momentum-panel .corner-brace {
@@ -614,7 +869,7 @@ h1 {
   z-index: 5;
   width: 24px;
   height: 24px;
-  background: linear-gradient(135deg, transparent 11.5px, rgba(216, 188, 125, .8) 12px, rgba(216, 188, 125, .8) 13.2px, transparent 13.8px);
+  background: linear-gradient(135deg, transparent 11.5px, var(--instrument-border-strong) 12px, var(--instrument-border-strong) 13.2px, transparent 13.8px);
   pointer-events: none;
 }
 
@@ -639,7 +894,7 @@ h1 {
   display: inline-flex;
   align-items: center;
   gap: 12px;
-  color: #ead9a8;
+  color: var(--instrument-title);
   font-size: 12px;
   letter-spacing: 2.4px;
   text-transform: uppercase;
@@ -651,11 +906,11 @@ h1 {
   flex: none;
   width: 36px;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(200, 170, 109, .75));
+  background: linear-gradient(90deg, transparent, var(--instrument-border-strong));
 }
 
 .momentum-panel :deep(.section-title)::after {
-  background: linear-gradient(270deg, transparent, rgba(200, 170, 109, .75));
+  background: linear-gradient(270deg, transparent, var(--instrument-border-strong));
 }
 
 /* Engraved divider under the plaque, anchored by a nexus-crystal stud. */
@@ -666,7 +921,7 @@ h1 {
   bottom: -6px;
   left: 10%;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(200, 170, 109, .5) 22%, rgba(200, 170, 109, .5) 78%, transparent);
+  background: linear-gradient(90deg, transparent, var(--instrument-border) 22%, var(--instrument-border) 78%, transparent);
 }
 
 .momentum-panel :deep(.head)::before {
@@ -676,9 +931,9 @@ h1 {
   left: 50%;
   width: 9px;
   height: 9px;
-  border: 1px solid #d8bc7d;
-  background: radial-gradient(circle at 32% 28%, #dff8ff 0 14%, #35d4f0 36%, #0a86b4 64%, #063a52);
-  box-shadow: 0 0 8px rgba(10, 200, 230, .6);
+  border: 1px solid var(--dial-metal-300);
+  background: radial-gradient(circle at 32% 28%, var(--dial-energy-100) 0 14%, var(--dial-energy-400) 36%, var(--dial-energy-600) 64%, var(--dial-energy-800));
+  box-shadow: var(--instrument-shadow-energy);
   transform: translateX(-50%) rotate(45deg);
 }
 
@@ -687,7 +942,9 @@ h1 {
   align-items: end;
   justify-content: space-between;
   gap: var(--space-3);
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-3);
+  padding: 2px 2px 10px;
+  border-bottom: 1px solid rgba(200, 170, 109, .1);
 }
 
 .form-summary > div {
@@ -698,7 +955,7 @@ h1 {
 
 .form-summary > div > strong,
 .form-rate {
-  color: var(--gold-bright);
+  color: var(--instrument-title);
   font: 19px var(--font-display);
   letter-spacing: .5px;
 }
@@ -708,25 +965,22 @@ h1 {
 }
 
 .form-rate {
-  color: var(--win);
+  color: var(--instrument-energy);
   font-size: 23px;
-}
-
-.dashboard-column {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  min-width: 0;
-  gap: var(--space-4);
 }
 
 .rank-panel,
 .rvi-panel {
-  height: 340px;
+  height: 360px;
 }
 
 .recent-panel,
 .champions-panel {
-  height: 100%;
+  min-height: 0;
+}
+
+.champions-panel {
+  container-type: inline-size;
 }
 
 .game-list,
@@ -736,31 +990,48 @@ h1 {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 6px;
 }
 
 .game {
+  position: relative;
   display: grid;
   grid-template-columns: 34px 28px 1fr auto auto;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-2);
+  min-height: 48px;
+  padding: 7px 9px;
+  overflow: hidden;
+  border: 1px solid rgba(200, 170, 109, .1);
   border-radius: var(--radius-sm);
-  border-left: 2px solid transparent;
+  background: rgba(6, 13, 22, .36);
   cursor: pointer;
   font-size: 12px;
+  transition: border-color var(--instrument-motion-fast) ease, background var(--instrument-motion-fast) ease;
+}
+
+.game::before {
+  content: "";
+  position: absolute;
+  inset: 7px auto 7px 0;
+  width: 2px;
+  background: transparent;
 }
 
 .game.won {
-  border-left-color: var(--win);
+  --game-state: var(--win);
 }
 
 .game.lost {
-  border-left-color: var(--loss);
+  --game-state: var(--loss);
 }
 
+.game.won::before,
+.game.lost::before { background: var(--game-state); }
+
 .game:hover {
-  background: var(--surface-2);
+  border-color: var(--instrument-border-soft);
+  background: rgba(23, 64, 92, .2);
 }
 
 .game:hover .game-name {
@@ -768,7 +1039,8 @@ h1 {
 }
 
 .game-name {
-  font-size: 13px;
+  color: var(--text-primary);
+  font: 13px var(--font-heading);
 }
 
 .game-meta,
@@ -777,29 +1049,32 @@ h1 {
 }
 
 .game-kda {
-  color: var(--text-primary);
+  color: var(--instrument-title);
 }
 
 .champion {
+  position: relative;
   display: grid;
-  grid-template-columns: 18px 42px minmax(84px, 1fr) minmax(168px, 1.2fr) 54px;
+  grid-template-columns: 18px 42px minmax(0, 1fr) 52px;
   align-items: center;
   gap: var(--space-2);
   width: 100%;
   padding: var(--space-2);
-  background: linear-gradient(105deg, var(--surface-2), rgba(20, 36, 61, .45));
-  border: 1px solid var(--border-subtle);
+  overflow: hidden;
+  background: linear-gradient(105deg, rgba(14, 26, 42, .88), rgba(6, 13, 22, .54));
+  border: 1px solid rgba(200, 170, 109, .13);
   border-radius: var(--radius-sm);
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
   font-size: 13px;
+  transition: border-color var(--instrument-motion-fast) ease, background var(--instrument-motion-fast) ease;
 }
 
 .champion:hover {
-  border-color: var(--border-strong);
-  background: linear-gradient(105deg, var(--surface-3), var(--surface-2));
+  border-color: var(--instrument-border);
+  background: linear-gradient(105deg, rgba(23, 64, 92, .38), rgba(14, 26, 42, .8));
 }
 
 .champion:hover .champion-name {
@@ -811,6 +1086,8 @@ h1 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--text-primary);
+  font-family: var(--font-heading);
 }
 
 .champion-list {
@@ -837,7 +1114,7 @@ h1 {
 }
 
 .champion-rank {
-  color: var(--gold);
+  color: var(--instrument-title);
   font-size: 14px;
   text-align: center;
 }
@@ -855,7 +1132,14 @@ h1 {
 .champion-stats {
   display: grid;
   grid-template-columns: repeat(3, minmax(54px, 1fr));
+  grid-column: 3 / -1;
   gap: var(--space-1);
+}
+
+.champion-grade {
+  grid-column: 4;
+  grid-row: 1;
+  justify-self: end;
 }
 
 .champion-stats > span {
@@ -863,7 +1147,7 @@ h1 {
   flex-direction: column;
   align-items: flex-end;
   padding-right: var(--space-2);
-  border-right: 1px solid var(--border-subtle);
+  border-right: 1px solid var(--instrument-border-soft);
 }
 
 .champion-stats strong {
@@ -890,7 +1174,8 @@ h1 {
   width: 26px;
   height: 26px;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--instrument-border-soft);
+  object-fit: cover;
 }
 
 .champion .portrait {
@@ -898,23 +1183,62 @@ h1 {
   height: 42px;
 }
 
+@container (min-width: 650px) {
+  .champion {
+    grid-template-columns: 18px 42px minmax(84px, 1fr) minmax(168px, 1.2fr) 54px;
+  }
+
+  .champion-stats,
+  .champion-grade {
+    grid-column: auto;
+    grid-row: auto;
+  }
+}
+
+@container (max-width: 430px) {
+  .champion { grid-template-columns: 18px 36px minmax(0, 1fr) 44px; }
+  .champion .portrait { width: 36px; height: 36px; }
+  .champion-stats { grid-column: 1 / -1; }
+}
+
 .small {
   font-size: 11px;
 }
 
+.challenge-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(340px, .9fr);
+  gap: var(--space-4);
+  align-items: stretch;
+}
+
+.categories-panel,
+.near-panel { min-height: 0; }
+
 .categories {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
   grid-auto-rows: 1fr;
-  gap: var(--space-4);
+  gap: 9px;
+}
+
+.category {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(200, 170, 109, .11);
+  border-radius: var(--radius-sm);
+  background: rgba(6, 13, 22, .34);
 }
 
 .category-head {
   display: flex;
   justify-content: space-between;
+  gap: var(--space-2);
   font-size: 12px;
   margin-bottom: var(--space-2);
 }
+
+.category-name { color: var(--text-primary); font-family: var(--font-heading); }
 
 .category-foot {
   font-size: 11px;
@@ -923,21 +1247,23 @@ h1 {
 
 .near-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: 1fr;
   grid-auto-rows: 1fr;
-  gap: var(--space-3);
+  gap: 7px;
 }
 
 .near {
+  position: relative;
   display: grid;
   grid-template-columns: 34px 1fr auto;
   align-items: center;
   gap: var(--space-3);
   width: 100%;
-  background: none;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  padding: var(--space-2);
+  overflow: hidden;
+  background: rgba(6, 13, 22, .34);
+  border: 1px solid rgba(200, 170, 109, .11);
+  border-radius: var(--radius-sm);
+  padding: 9px;
   font: inherit;
   color: inherit;
   text-align: left;
@@ -945,8 +1271,8 @@ h1 {
 }
 
 .near:hover {
-  background: var(--surface-2);
-  border-color: var(--border-subtle);
+  background: rgba(23, 64, 92, .22);
+  border-color: var(--instrument-border);
 }
 
 .near:hover .near-name {
@@ -954,7 +1280,8 @@ h1 {
 }
 
 .near-name {
-  font-size: 13px;
+  color: var(--text-primary);
+  font: 13px var(--font-heading);
   margin-bottom: var(--space-1);
 }
 
@@ -962,27 +1289,29 @@ h1 {
   max-width: 60ch;
 }
 
-@media (max-width: 820px) {
-  .form-momentum-grid {
-    grid-template-columns: minmax(0, 1.25fr) minmax(250px, .75fr);
-  }
+@media (max-width: 1100px) {
+  .challenge-grid { grid-template-columns: 1fr; }
+}
 
-  .dashboard-columns {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .dashboard-column {
-    grid-template-rows: auto;
-  }
+@media (max-width: 980px) {
+  .dashboard-grid { grid-template-columns: minmax(0, 1fr); }
 
   .rank-panel,
   .rvi-panel {
     height: auto;
-    min-height: 340px;
+    min-height: 360px;
   }
 }
 
-@media (max-width: 620px) {
+@media (max-width: 900px) {
+  .telemetry-board { grid-template-columns: minmax(0, 1fr); }
+  .telemetry-bank + .telemetry-bank {
+    border-top: 1px solid var(--ui-divider);
+    border-left: 0;
+  }
+}
+
+@media (max-width: 760px) {
   .form-momentum-grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -990,15 +1319,30 @@ h1 {
   .form-panel,
   .momentum-panel {
     height: auto;
-    min-height: 190px;
+    min-height: 210px;
   }
 
-  .champion {
-    grid-template-columns: 18px 42px minmax(0, 1fr) 54px;
-  }
-
-  .champion-stats {
-    grid-column: 2 / -1;
-  }
+  .deck-heading { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .deck-heading > span { text-align: left; }
 }
+
+@media (max-width: 620px) {
+  .game { grid-template-columns: 34px 28px minmax(0, 1fr) auto; gap: var(--space-2); }
+  .game-date { display: none; }
+
+  .dashboard-hero { align-items: flex-start; padding: 16px !important; }
+  .overall { width: 100%; align-items: flex-start; text-align: left; }
+  .overall-readout { justify-content: flex-start; }
+  .overall-meta { max-width: none; }
+}
+
+@media (max-width: 500px) {
+  .archive-readings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .archive-readings .telemetry-reading:nth-child(odd) { border-left: 0; }
+  .archive-readings .telemetry-reading:nth-child(n + 3) { border-top: 1px solid var(--ui-divider); }
+
+  .near { grid-template-columns: 34px minmax(0, 1fr); }
+  .near > .small { grid-column: 2; }
+}
+
 </style>
