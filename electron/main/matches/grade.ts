@@ -44,6 +44,8 @@ export interface GradeInput {
   /** Primary Riot class tag; scales damage and objective expectations. */
   championClass?: ChampionClass
   role?: string
+  /** Explicit owner anchor used by Grade v3 lobby validation. */
+  isPlayer?: boolean
 }
 
 export interface GradeResult {
@@ -269,6 +271,9 @@ export function gradeLobby(lobby: GradeInput[], family: ModeFamily): Map<number,
     }]
   }))
 }
+
+/** Explicit compatibility name used by dual-version orchestration. */
+export const gradeLobbyV2 = gradeLobby
 
 export function gradeMatch(lobby: GradeInput[], participantId: number, family: ModeFamily): GradeResult | undefined {
   return gradeLobby(lobby, family).get(participantId)

@@ -430,8 +430,7 @@ const championName = (id: number) => championNameById(props.champions, id)
             class="dashboard-panel champions-panel"
           >
             <p class="muted champion-intro">
-              Your strongest Recall grades, with one-game standouts pulled
-              back toward your usual performance.
+              Your strongest Recall grades among champions with at least five graded games.
             </p>
             <ol class="champion-list">
               <li v-for="(row, index) in ranking.best" :key="row.championId">
@@ -477,6 +476,7 @@ const championName = (id: number) => championNameById(props.champions, id)
             </ol>
             <p class="muted champion-footnote">Open a champion for its full breakdown.</p>
         </Panel>
+
       </section>
     </template>
 

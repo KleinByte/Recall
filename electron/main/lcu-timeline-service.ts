@@ -9,6 +9,13 @@ import {
   TIMELINE_MAPPER_VERSION,
   type CompactTimeline,
 } from "./riot/timeline-mapper.js"
+import {
+  MatchSourceRepository,
+  canonicalJson,
+  type RawPayloadIdentity,
+} from "./database/match-source-repo.js"
+import { createHash } from "node:crypto"
+import { refreshTimelineCompatibilityCache } from "./matches/timeline-source-selector.js"
 
 type TimelineFrames = Parameters<typeof mapTimeline>[0]
 
@@ -108,10 +115,24 @@ export class LcuTimelineService {
     this.write(gameId, puuid, match.riotMatchId, "loading")
     this.onUpdated(gameId)
 
+    let rawPayload: RawPayloadIdentity | undefined
+    let sourceRepository: MatchSourceRepository | undefined
     try {
       const dto = await client.request<LcuTimelineResponse>(
         `/lol-match-history/v1/game-timelines/${gameId}`,
       )
+      const fetchedAt = Date.now()
+      sourceRepository = new MatchSourceRepository(this.db)
+      rawPayload = sourceRepository.persistRawPayload({
+        ownerPuuid: puuid,
+        source: "league_client",
+        sourceMatchId: String(gameId),
+        gameId,
+        kind: "timeline",
+        body: dto,
+        mapperVersion: TIMELINE_MAPPER_VERSION,
+        fetchedAt,
+      })
       const frames = Array.isArray(dto) ? dto : dto.frames ?? dto.info?.frames
       const participants = this.db.prepare(
         `SELECT participant_id AS participantId, team_id AS teamId,
@@ -143,16 +164,23 @@ export class LcuTimelineService {
         participants,
       ) ?? summary
       this.write(gameId, puuid, match.riotMatchId, "ready", {
-        fetchedAt: Date.now(),
+        fetchedAt,
         data: summary,
-        raw: dto,
+        sourcePayload: rawPayload,
       })
+      sourceRepository.setMappingResult(rawPayload, "mapped", fetchedAt, { gameId })
       try {
         await this.onReady?.(gameId, puuid, summary)
       } catch (error) {
         console.warn(`Timeline labels could not be evaluated: ${(error as Error).message}`)
       }
     } catch (error) {
+      if (rawPayload && sourceRepository) {
+        sourceRepository.setMappingResult(rawPayload, "unmappable", Date.now(), {
+          gameId,
+          error: error instanceof Error ? error.message.slice(0, 500) : "timeline_unmappable",
+        })
+      }
       const unavailable = error instanceof LcuRequestError && error.status === 404
       this.write(
         gameId,
@@ -246,8 +274,54 @@ export class LcuTimelineService {
       error?: string
       data?: CompactTimeline
       raw?: LcuTimelineResponse
+      sourcePayload?: RawPayloadIdentity
     } = {},
   ) {
+    if (status === "ready" && values.data) {
+      const dataJson = canonicalJson(values.data)
+      const dataSha256 = createHash("sha256").update(dataJson).digest("hex")
+      const capturedAt = values.fetchedAt ?? Date.now()
+      this.db.prepare(`
+        INSERT INTO match_timeline_sources
+          (game_id, puuid, source, source_match_id, mapper_version, status,
+           data_json, data_sha256, event_categories_json, evidence_counts_json,
+           source_payload_sha256, captured_at, updated_at)
+        VALUES (?, ?, 'league_client', ?, ?, 'ready', ?, ?, '[]', ?, ?, ?, ?)
+        ON CONFLICT(game_id, puuid, source, mapper_version) DO UPDATE SET
+          source_match_id = excluded.source_match_id, status = 'ready',
+          data_json = excluded.data_json, data_sha256 = excluded.data_sha256,
+          event_categories_json = excluded.event_categories_json,
+          evidence_counts_json = excluded.evidence_counts_json,
+          source_payload_sha256 = excluded.source_payload_sha256,
+          captured_at = excluded.captured_at, updated_at = excluded.updated_at
+      `).run(
+        gameId, puuid, String(gameId), TIMELINE_MAPPER_VERSION, dataJson, dataSha256,
+        canonicalJson({
+          version: 1,
+          participants: { expected: null, observed: values.data.frames[0]?.participants.length ?? 0 },
+          frames: {
+            total: values.data.frames.length,
+            economy: values.data.frames.length,
+            progression: values.data.frames.length,
+            farm: values.data.frames.length,
+            position: values.data.frames.filter((frame) =>
+              frame.participants.some((participant) => participant.position)).length,
+          },
+          events: {
+            championKill: values.data.events.filter((event) => event.category === "kill").length,
+            item: values.data.events.filter((event) => event.category === "item").length,
+            neutralObjective: values.data.events.filter((event) => event.category === "objective").length,
+            structure: 0, ward: values.data.events.filter((event) => event.category === "vision").length,
+            levelExact: values.data.events.filter((event) => event.category === "level" && !event.approximate).length,
+            gameEnd: values.data.events.filter((event) => event.category === "game").length,
+            augmentSelection: 0, unknownVariant: 0,
+          },
+        }),
+        values.sourcePayload?.sha256 ?? null, capturedAt, Date.now(),
+      )
+      refreshTimelineCompatibilityCache(this.db, gameId, puuid)
+      return
+    }
     this.db.prepare(
       `INSERT INTO match_timeline_cache
        (game_id, puuid, riot_match_id, status, mapper_version,

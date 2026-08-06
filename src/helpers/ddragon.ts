@@ -17,7 +17,7 @@ const FALLBACK_VERSION = "16.14.1"
 const version = ref(FALLBACK_VERSION)
 
 export async function loadDataDragonVersion() {
-  const cached = await api.getSetting<string>("ddragon-version")
+  const cached = await api.getDataDragonVersion()
   if (cached) version.value = cached
 
   try {
@@ -29,7 +29,7 @@ export async function loadDataDragonVersion() {
 
     if (versions[0]) {
       version.value = versions[0]
-      api.setSetting("ddragon-version", versions[0])
+      void api.saveDataDragonVersion(versions[0])
     }
   } catch {
     // Offline, or Riot's CDN is having a day. The cached version still works.

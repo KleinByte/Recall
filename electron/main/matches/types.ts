@@ -276,6 +276,8 @@ export interface MatchRow {
   /** Rank among the lobby by Recall grade; absent unless every player is graded. */
   lobbyPlace?: number
   lobbySize?: number
+  /** Versioned eligibility metadata added by the data-integrity rollout. */
+  eligibility?: import("./eligibility.js").MatchEligibilityResult
   /** Scoreboard rows attached only for rich match-card responses. */
   participants?: ParticipantRow[]
 }
@@ -293,4 +295,5 @@ export interface PerformanceLabel {
   source: "match_v5" | "timeline"
   confidence: PerformanceLabelConfidence
   priority: number
+  evaluatorVersion?: number
 }

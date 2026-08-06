@@ -9,6 +9,8 @@ import {
   playbackCoverage,
   playbackPositionsAt,
   playbackTrailSamples,
+  playbackWorldMarkers,
+  spreadOverlappingMapPoints,
 } from "../helpers/timeline-playback"
 import type { MatchRow, ParticipantRow } from "../types/stats"
 import type { TimelineEvent, TimelineFrame } from "../types/review"
@@ -21,15 +23,20 @@ const props = defineProps<{
   frames: TimelineFrame[]
   events: TimelineEvent[]
   timestamp: number
+  compact?: boolean
 }>()
 const emit = defineEmits<{ "update:timestamp": [timestamp: number] }>()
 
 const playing = ref(false)
 const speed = ref(1)
+const speedOptions = [1, 2, 4, 10] as const
 const visibility = ref<Visibility>("all")
+const focusedParticipantId = ref<number>()
 const visibilityOptions: Visibility[] = ["all", "blue", "red", "you"]
 let animationFrame: number | undefined
 let previousAnimationTime: number | undefined
+let playbackClock = props.timestamp
+let lastEmittedTimestamp: number | undefined
 
 const mapId = computed(() => reviewMapId(props.match.modeFamily))
 const mapName = computed(() => mapId.value === 12
@@ -66,12 +73,23 @@ const visibleParticipants = computed(() => props.participants.filter((participan
   if (visibility.value === "you") return participant.isPlayer === 1
   return true
 }))
-const visibleTokens = computed(() => visibleParticipants.value.flatMap((participant) => {
-  const current = currentPositions.value.get(participant.participantId)
-  if (!current) return []
-  const plotted = mapPositionPercent(current.position, mapId.value)
-  return [{ participant, current, plotted }]
-}))
+const visibleTokens = computed(() => {
+  const tokens = visibleParticipants.value.flatMap((participant) => {
+    const current = currentPositions.value.get(participant.participantId)
+    if (!current) return []
+    const plotted = mapPositionPercent(current.position, mapId.value)
+    return [{ participant, current, plotted }]
+  })
+  const spread = new Map(spreadOverlappingMapPoints(tokens.map(({ participant, plotted }) => ({
+    id: participant.participantId,
+    left: plotted.left,
+    top: plotted.top,
+  }))).map((point) => [point.id, point]))
+  return tokens.map((token) => ({
+    ...token,
+    display: spread.get(token.participant.participantId)!,
+  }))
+})
 const trails = computed(() => visibleTokens.value.flatMap(({ participant, current }) => {
   const latestDeath = props.events.filter((event) =>
     event.type === "CHAMPION_KILL" &&
@@ -104,6 +122,15 @@ const currentEvents = computed(() => props.events.flatMap((event) => {
   ) return []
   return [{ event, plotted: mapPositionPercent(event.position!, mapId.value) }]
 }))
+const worldMarkers = computed(() => playbackWorldMarkers(
+  props.events,
+  props.timestamp,
+  mapId.value,
+  props.match.mode,
+).map((marker) => ({
+  ...marker,
+  plotted: mapPositionPercent(marker.position, mapId.value),
+})))
 
 function formatTime(timestamp: number) {
   const seconds = Math.max(0, Math.floor(timestamp / 1_000))
@@ -115,11 +142,25 @@ function participantName(participant: ParticipantRow) {
 }
 
 function tokenStyle(token: typeof visibleTokens.value[number]) {
-  return { left: `${token.plotted.left}%`, top: `${token.plotted.top}%` }
+  return { left: `${token.display.left}%`, top: `${token.display.top}%` }
 }
 
 function eventStyle(marker: typeof currentEvents.value[number]) {
   return { left: `${marker.plotted.left}%`, top: `${marker.plotted.top}%` }
+}
+
+function worldMarkerStyle(marker: typeof worldMarkers.value[number]) {
+  return { left: `${marker.plotted.left}%`, top: `${marker.plotted.top}%` }
+}
+
+function worldMarkerGlyph(marker: typeof worldMarkers.value[number]) {
+  if (marker.kind === "tower") return "♜"
+  if (marker.kind === "inhibitor") return "◇"
+  if (marker.kind === "nexus") return "◆"
+  if (marker.kind === "camp") return "•"
+  if (marker.kind === "baron") return "B"
+  if (marker.kind === "elder") return "E"
+  return "D"
 }
 
 function eventTitle(event: TimelineEvent) {
@@ -137,7 +178,10 @@ function objectiveIcon(event: TimelineEvent) {
 }
 
 function setTimestamp(timestamp: number) {
-  emit("update:timestamp", Math.max(0, Math.min(duration.value, timestamp)))
+  const bounded = Math.max(0, Math.min(duration.value, timestamp))
+  playbackClock = bounded
+  lastEmittedTimestamp = bounded
+  emit("update:timestamp", bounded)
 }
 
 function seek(event: Event) {
@@ -155,7 +199,7 @@ function animate(now: number) {
   if (!playing.value) return
   const previous = previousAnimationTime ?? now
   previousAnimationTime = now
-  const next = props.timestamp + (now - previous) * speed.value
+  const next = playbackClock + (now - previous) * speed.value
   if (next >= duration.value) {
     setTimestamp(duration.value)
     stop()
@@ -171,9 +215,10 @@ function togglePlayback() {
     return
   }
   if (!available.value) return
-  if (props.timestamp >= duration.value || props.timestamp < firstPositionTimestamp.value) {
-    setTimestamp(Number.isFinite(firstPositionTimestamp.value) ? firstPositionTimestamp.value : 0)
-  }
+  const start = props.timestamp >= duration.value || props.timestamp < firstPositionTimestamp.value
+    ? Number.isFinite(firstPositionTimestamp.value) ? firstPositionTimestamp.value : 0
+    : props.timestamp
+  setTimestamp(start)
   playing.value = true
   previousAnimationTime = undefined
   animationFrame = requestAnimationFrame(animate)
@@ -187,6 +232,14 @@ function skip(delta: number) {
 watch(() => props.match.gameId, () => {
   stop()
   visibility.value = "all"
+  focusedParticipantId.value = undefined
+})
+watch(() => props.timestamp, (timestamp) => {
+  if (lastEmittedTimestamp !== undefined && Math.abs(timestamp - lastEmittedTimestamp) < .5) {
+    lastEmittedTimestamp = undefined
+    return
+  }
+  playbackClock = timestamp
 })
 watch(available, (value) => {
   if (!value) stop()
@@ -195,7 +248,7 @@ onBeforeUnmount(stop)
 </script>
 
 <template>
-  <section class="playback-panel" :aria-label="`${mapName} estimated champion movement playback`">
+  <section class="playback-panel" :class="{ compact }" :aria-label="`${mapName} estimated champion movement playback`">
     <header class="playback-heading">
       <div>
         <span class="eyebrow">Positioning</span>
@@ -219,22 +272,56 @@ onBeforeUnmount(stop)
             ]"
             :points="trail.points"
           />
+          <line
+            v-for="token in visibleTokens.filter((entry) => entry.display.overlapping)"
+            :key="`overlap:${token.participant.participantId}`"
+            class="overlap-link"
+            :class="token.participant.teamId === 100 ? 'blue' : 'red'"
+            :x1="token.display.sourceLeft"
+            :y1="token.display.sourceTop"
+            :x2="token.display.left"
+            :y2="token.display.top"
+          />
         </svg>
 
         <span
+          v-for="marker in worldMarkers"
+          :key="marker.id"
+          class="world-marker"
+          :class="[
+            marker.kind,
+            marker.state,
+            marker.teamId === 100 ? 'blue' : marker.teamId === 200 ? 'red' : 'neutral',
+          ]"
+          :style="worldMarkerStyle(marker)"
+          :title="`${marker.label} · ${marker.state} at ${formatTime(timestamp)}`"
+          :aria-label="`${marker.label} ${marker.state} at ${formatTime(timestamp)}`"
+          role="img"
+        >{{ worldMarkerGlyph(marker) }}</span>
+
+        <button
           v-for="token in visibleTokens"
           :key="token.participant.participantId"
+          type="button"
           class="champion-token"
           :class="[
             token.participant.teamId === 100 ? 'blue' : 'red',
-            { owner: token.participant.isPlayer === 1, exact: token.current.exact },
+            {
+              owner: token.participant.isPlayer === 1,
+              exact: token.current.exact,
+              overlapping: token.display.overlapping,
+              focused: focusedParticipantId === token.participant.participantId,
+            },
           ]"
           :style="tokenStyle(token)"
           :title="`${participantName(token.participant)} · ${token.current.exact ? 'observed' : 'estimated'} position at ${formatTime(timestamp)}`"
+          :aria-label="`${participantName(token.participant)} at ${formatTime(timestamp)}`"
+          :aria-pressed="focusedParticipantId === token.participant.participantId"
+          @click="focusedParticipantId = focusedParticipantId === token.participant.participantId ? undefined : token.participant.participantId"
         >
           <img :src="championIconUrl(token.participant.championId)" alt="" />
-          <span v-if="token.participant.isPlayer === 1">YOU</span>
-        </span>
+          <span v-if="focusedParticipantId === token.participant.participantId">{{ participantName(token.participant) }}</span>
+        </button>
 
         <span
           v-for="marker in currentEvents"
@@ -289,7 +376,7 @@ onBeforeUnmount(stop)
         <div class="control-group">
           <span>Speed</span>
           <div class="segmented">
-            <button v-for="option in [1, 2, 4]" :key="option" type="button"
+            <button v-for="option in speedOptions" :key="option" type="button"
               :class="{ selected: speed === option }" :aria-pressed="speed === option"
               @click="speed = option">{{ option }}×</button>
           </div>
@@ -305,7 +392,9 @@ onBeforeUnmount(stop)
         </div>
 
         <p class="accuracy-note">
-          Dotted trails are estimates between periodic observations. Exact routes, recalls, and ability movement are not recorded.
+          Curved trails estimate movement between periodic observations. Exact routes, recalls, and ability movement are not recorded.
+          Fixed structures and camp locations use the Summoner's Rift layout. Recorded events update structure and epic-monster state;
+          ordinary camp availability is not exposed by the timeline.
         </p>
       </aside>
     </div>
@@ -322,8 +411,10 @@ onBeforeUnmount(stop)
 .playback-map { position: relative; width: 100%; aspect-ratio: 1; overflow: hidden; border: 1px solid var(--ui-border-emphasis); border-radius: var(--ui-radius-md); background-position: center; background-size: 100% 100%; box-shadow: var(--ui-shadow-inset); }
 .trail-layer { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .trail-layer polyline { fill: none; stroke-width: .55; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1.2 1.2; vector-effect: non-scaling-stroke; opacity: .52; }.trail-layer .blue { stroke: var(--ui-team-blue); }.trail-layer .red { stroke: var(--ui-team-red); }.trail-layer .owner { stroke-width: 1.05; opacity: .95; filter: drop-shadow(0 0 2px var(--ui-accent)); }
-.champion-token { --team: var(--ui-team-blue); position: absolute; z-index: 4; width: 34px; height: 34px; transform: translate(-50%, -50%); border: 2px solid var(--team); border-radius: 50%; background: var(--ui-canvas); box-shadow: 0 2px 7px color-mix(in srgb, var(--ui-canvas) 90%, transparent), 0 0 6px color-mix(in srgb, var(--team) 60%, transparent); transition: left 80ms linear, top 80ms linear, opacity 120ms ease; }
-.champion-token.red { --team: var(--ui-team-red); }.champion-token.owner { z-index: 5; width: 40px; height: 40px; border-color: var(--ui-accent-strong); box-shadow: 0 0 0 2px var(--ui-canvas), 0 0 12px var(--ui-accent); }.champion-token.exact { border-style: solid; }
+.overlap-link { stroke-width: .42; stroke-dasharray: .8 .7; vector-effect: non-scaling-stroke; opacity: .8; }
+.world-marker { position: absolute; z-index: 2; display: grid; place-items: center; width: 16px; height: 16px; transform: translate(-50%, -50%); border: 1px solid currentColor; border-radius: 50%; background: color-mix(in srgb, var(--ui-canvas) 86%, transparent); color: var(--ui-accent-strong); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ui-canvas) 70%, transparent); font: 9px var(--ui-font-heading); pointer-events: none; }.world-marker.tower { width: 13px; height: 13px; border-radius: 3px; font-size: 9px; }.world-marker.inhibitor { width: 14px; height: 14px; border-radius: 3px; }.world-marker.nexus { width: 17px; height: 17px; }.world-marker.camp { z-index: 1; width: 8px; height: 8px; border-style: dotted; background: color-mix(in srgb, var(--ui-canvas) 50%, transparent); font-size: 10px; opacity: .72; }.world-marker.destroyed { border-style: dashed; background: transparent; opacity: .28; }.world-marker.dormant, .world-marker.respawning { filter: grayscale(.7); opacity: .45; }.world-marker.blue { color: var(--ui-team-blue); }.world-marker.red { color: var(--ui-team-red); }.world-marker.baron { color: #b88cff; }.world-marker.dragon, .world-marker.elder { color: var(--ui-warning); }
+.champion-token { --team: var(--ui-team-blue); position: absolute; z-index: 4; width: 22px; height: 22px; padding: 0; transform: translate(-50%, -50%); border: 1.5px solid var(--team); border-radius: 50%; background: var(--ui-canvas); box-shadow: 0 1px 4px color-mix(in srgb, var(--ui-canvas) 90%, transparent), 0 0 4px color-mix(in srgb, var(--team) 55%, transparent); cursor: pointer; transition: left 80ms linear, top 80ms linear, opacity 120ms ease, transform 120ms ease; }
+.champion-token.red { --team: var(--ui-team-red); }.champion-token.owner { z-index: 5; width: 25px; height: 25px; border-color: var(--ui-accent-strong); box-shadow: 0 0 0 1px var(--ui-canvas), 0 0 7px var(--ui-accent); }.champion-token.focused { z-index: 7; transform: translate(-50%, -50%) scale(1.28); box-shadow: 0 0 0 2px var(--ui-canvas), 0 0 10px var(--team); }.champion-token.exact { border-style: solid; }
 .champion-token img { display: block; width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }.champion-token > span { position: absolute; top: calc(100% + 2px); left: 50%; padding: 1px 4px; transform: translateX(-50%); border-radius: 2px; background: var(--ui-canvas); color: var(--ui-accent-strong); font: 8px var(--ui-font-heading); white-space: nowrap; }
 .playback-event { position: absolute; z-index: 6; display: grid; place-items: center; width: 25px; height: 25px; transform: translate(-50%, -50%); border: 1px solid var(--ui-accent-strong); border-radius: 50%; background: var(--ui-surface-overlay); color: var(--ui-loss); box-shadow: 0 0 14px currentColor; pointer-events: none; }.playback-event.kill { font: 24px/1 var(--ui-font-heading); }.playback-event img { width: 100%; height: 100%; object-fit: contain; }
 .map-empty { position: absolute; z-index: 8; top: 50%; left: 50%; display: grid; gap: 3px; min-width: 210px; padding: 10px 12px; transform: translate(-50%, -50%); border: 1px solid var(--ui-border-emphasis); border-radius: var(--ui-radius-sm); background: var(--ui-surface-overlay); color: var(--ui-text-subtle); font-size: 11px; text-align: center; }.map-empty strong { color: var(--ui-text); font: 12px var(--ui-font-heading); }
@@ -332,9 +423,10 @@ onBeforeUnmount(stop)
 .scrubber { width: 100%; accent-color: var(--ui-accent); cursor: pointer; }.scrubber:disabled { cursor: not-allowed; opacity: .45; }
 .control-group { display: grid; gap: 6px; }.control-group > span { color: var(--ui-text-muted); font-size: 10px; letter-spacing: .7px; text-transform: uppercase; }.segmented button { flex: 0 1 54px; min-height: 27px; padding: 3px 7px; font-size: 10px; }.visibility-controls button { flex: 1 1 0; }
 .accuracy-note { margin: 2px 0 0; padding: 10px 11px; border-left: 2px solid var(--ui-accent); background: color-mix(in srgb, var(--ui-accent) 5%, transparent); color: var(--ui-text-muted); font-size: 10px; line-height: 1.5; }
+.playback-panel.compact .playback-heading { align-items: flex-start; flex-direction: column; }.playback-panel.compact .coverage { text-align: left; }.playback-panel.compact .playback-layout { grid-template-columns: 1fr; gap: 12px; }.playback-panel.compact .playback-sidebar { gap: 10px; }.playback-panel.compact .clock strong { font-size: 25px; }.playback-panel.compact .accuracy-note { padding-block: 7px; }
 @media (max-width: 900px) { .playback-layout { grid-template-columns: 1fr; }.playback-map { max-width: 620px; margin-inline: auto; }.playback-sidebar { grid-template-columns: auto minmax(220px, 1fr); align-items: center; }.scrubber, .accuracy-note { grid-column: 1 / -1; } }
-@media (max-width: 560px) { .playback-heading { align-items: flex-start; flex-direction: column; }.coverage { text-align: left; }.playback-layout { display: block; }.playback-sidebar { display: grid; grid-template-columns: 1fr; margin-top: 14px; }.scrubber, .accuracy-note { grid-column: auto; }.champion-token { width: 28px; height: 28px; }.champion-token.owner { width: 34px; height: 34px; } }
+@media (max-width: 560px) { .playback-heading { align-items: flex-start; flex-direction: column; }.coverage { text-align: left; }.playback-layout { display: block; }.playback-sidebar { display: grid; grid-template-columns: 1fr; margin-top: 14px; }.scrubber, .accuracy-note { grid-column: auto; }.champion-token { width: 19px; height: 19px; }.champion-token.owner { width: 22px; height: 22px; } }
 @container recall-content (max-width: 900px) { .playback-layout { grid-template-columns: 1fr; }.playback-map { max-width: 620px; margin-inline: auto; }.playback-sidebar { grid-template-columns: auto minmax(220px, 1fr); align-items: center; }.scrubber, .accuracy-note { grid-column: 1 / -1; } }
-@container recall-content (max-width: 560px) { .playback-heading { align-items: flex-start; flex-direction: column; }.coverage { text-align: left; }.playback-layout { display: block; }.playback-sidebar { display: grid; grid-template-columns: 1fr; margin-top: 14px; }.scrubber, .accuracy-note { grid-column: auto; }.champion-token { width: 28px; height: 28px; }.champion-token.owner { width: 34px; height: 34px; } }
+@container recall-content (max-width: 560px) { .playback-heading { align-items: flex-start; flex-direction: column; }.coverage { text-align: left; }.playback-layout { display: block; }.playback-sidebar { display: grid; grid-template-columns: 1fr; margin-top: 14px; }.scrubber, .accuracy-note { grid-column: auto; }.champion-token { width: 19px; height: 19px; }.champion-token.owner { width: 22px; height: 22px; } }
 @media (prefers-reduced-motion: reduce) { .champion-token { transition: none; } }
 </style>

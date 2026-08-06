@@ -119,12 +119,13 @@ describe("RiotApiClient", () => {
       limiter: limiter as never,
     })
 
-    await expect(client.get("/matches", "ids")).rejects.toThrow(message)
+    await expect(client.get("/lol/match/v5/matches/NA1_1", "detail")).rejects.toThrow(message)
   })
 
-  it("identifies Account-V1 failures without exposing the Riot ID", async () => {
+  it("rejects Account-V1 before making a request", async () => {
+    const fetcher = vi.fn()
     const client = new RiotApiClient("RGAPI-test", "americas", {
-      fetch: vi.fn().mockResolvedValue(new Response("", { status: 400 })),
+      fetch: fetcher,
       limiter: {
         acquire: vi.fn().mockResolvedValue(undefined),
         observe: vi.fn(),
@@ -133,7 +134,8 @@ describe("RiotApiClient", () => {
 
     await expect(
       client.get("/account-path-containing-a-name", "account"),
-    ).rejects.toThrow("Recall's Account-V1 request")
+    ).rejects.toThrow("riot_web_api_path_not_allowed")
+    expect(fetcher).not.toHaveBeenCalled()
   })
 
   it("honours Retry-After and keeps the key out of the URL", async () => {
@@ -161,7 +163,7 @@ describe("RiotApiClient", () => {
       },
     })
 
-    await expect(client.get<string[]>("/matches", "ids")).resolves.toEqual([
+    await expect(client.get<string[]>("/lol/match/v5/matches/by-puuid/local-puuid/ids?start=0&count=100", "ids")).resolves.toEqual([
       "NA1_1",
     ])
     expect(sleeps).toEqual([2_050])

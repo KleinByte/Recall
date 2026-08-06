@@ -12,22 +12,16 @@ import {
 } from "node:fs"
 import { createHash } from "node:crypto"
 import path from "node:path"
+import {
+  BACKUP_RELEASE_SEQUENCE,
+  protectionForReason,
+  type ManagedBackupManifestV2,
+  type ManagedBackupReason,
+} from "./retention-service.js"
 
-export type BackupReason =
-  | "daily"
-  | "manual"
-  | "pre-update"
-  | "pre-migration"
-  | "pre-restore"
+export type BackupReason = ManagedBackupReason
 
-export interface BackupManifest {
-  fileName: string
-  createdAt: number
-  reason: BackupReason
-  sha256: string
-  schemaVersion: number
-  sizeBytes: number
-  matchCount: number
+export type BackupManifest = Omit<ManagedBackupManifestV2, "integrity"> & {
   integrity: "ok" | "failed"
 }
 
@@ -79,6 +73,8 @@ export class BackupManager {
     private readonly options: {
       DatabaseClass?: typeof Database
       now?: () => number
+      appVersion?: string
+      releaseSequence?: number
     } = {},
   ) {}
 
@@ -108,9 +104,15 @@ export class BackupManager {
       copyFileSync(this.databasePath, staging)
       const details = inspect(staging, this.DatabaseClass)
       const manifest: BackupManifest = {
+        format: "recall-managed-backup",
+        manifestVersion: 2,
         fileName,
         createdAt,
         reason,
+        protection: protectionForReason(reason,
+          this.options.releaseSequence ?? BACKUP_RELEASE_SEQUENCE),
+        appVersion: this.options.appVersion ?? "development",
+        releaseSequence: this.options.releaseSequence ?? BACKUP_RELEASE_SEQUENCE,
         sha256: sha256(staging),
         schemaVersion: details.schemaVersion,
         sizeBytes: statSync(staging).size,
@@ -120,7 +122,6 @@ export class BackupManager {
       writeFileSync(manifestStaging, JSON.stringify(manifest, null, 2), "utf8")
       renameSync(staging, destination)
       renameSync(manifestStaging, manifestPath)
-      this.applyRetention()
       return manifest
     } finally {
       rmSync(staging, { force: true })
@@ -244,7 +245,7 @@ export class BackupManager {
         keep.add(backup.fileName)
       }
     }
-    for (const reason of ["pre-update", "pre-migration", "pre-restore"] as const) {
+    for (const reason of ["pre-update", "pre-migration", "pre-repair", "pre-restore", "pre-cleanup"] as const) {
       all.filter((backup) => backup.reason === reason)
         .slice(0, 3)
         .forEach((backup) => keep.add(backup.fileName))

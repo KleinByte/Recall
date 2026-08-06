@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest"
 import {
+  configuredLcuLockfilePath,
   parseLeagueClientInstallPath,
   parseLcuLockfile,
 } from "../electron/main/lcu-discovery.js"
+import path from "node:path"
 
 describe("parseLeagueClientInstallPath", () => {
   it("extracts the installation directory when League quotes the complete switch", () => {
@@ -45,5 +47,13 @@ describe("parseLcuLockfile", () => {
 
   it("rejects malformed lockfile content", () => {
     expect(parseLcuLockfile("not-a-lockfile")).toBeUndefined()
+  })
+})
+
+describe("configuredLcuLockfilePath", () => {
+  it("allows a non-Windows container to discover an explicitly mounted lockfile", () => {
+    expect(configuredLcuLockfilePath({ RECALL_LCU_LOCKFILE: "/league-client/lockfile" }))
+      .toBe(path.resolve("/league-client/lockfile"))
+    expect(configuredLcuLockfilePath({ RECALL_LCU_LOCKFILE: "  " })).toBeUndefined()
   })
 })

@@ -36,9 +36,16 @@ export interface HistoryCoverage {
 }
 
 export interface BackupSummary {
+  format: "recall-managed-backup"
+  manifestVersion: 2
   fileName: string
   createdAt: number
-  reason: "daily" | "manual" | "pre-update" | "pre-migration" | "pre-restore"
+  reason: "daily" | "manual" | "pre-update" | "pre-migration" | "pre-repair" |
+    "pre-restore" | "pre-clear" | "pre-cleanup"
+  protection: { kind: "none" } | { kind: "through_release"; throughReleaseSequence: number } |
+    { kind: "until_user_deletes" }
+  appVersion: string
+  releaseSequence: number
   schemaVersion: number
   matchCount: number
   sizeBytes: number
@@ -48,6 +55,28 @@ export interface BackupSummary {
 
 export interface DataTrustReport {
   state: DataTrustState
+  clientHealth: {
+    status: "healthy" | "needs_attention"
+    totalStoredMatches: number
+    eligibleStatisticalMatches: number
+    gradableMatches: number
+    currentVersionEligibleGrades: number
+    intentionallyUngradedModes: number
+    gradeCoverage: number | null
+    endpoint: SyncHealth
+  }
+  optionalHistory: {
+    status: "not_configured" | "configured" | "running" | "key_expired" | "needs_attention"
+    configured: boolean
+    route?: string
+    idsDiscovered: number
+    detailReady: number
+    imported: number
+    unresolved: number
+    range: { earliestVerifiedAt?: number; latestVerifiedAt?: number; requestedThrough?: number }
+    resumePosition: number
+    pauseReason?: string
+  }
   database: {
     path: string
     sizeBytes: number
@@ -107,6 +136,7 @@ export interface GradeBreakdown {
   compositePercentile: number
   components: GradeComponent[]
   unavailableReason?: string
+  version?: number
 }
 
 export interface BaselineMetric {
@@ -116,6 +146,9 @@ export interface BaselineMetric {
   baseline: number
   difference: number
   preferredDirection: "higher" | "lower"
+  evidenceGames: number
+  robustScale: number
+  effect: number
 }
 
 export interface PersonalBaseline {
@@ -227,6 +260,7 @@ export interface ChampionChoice {
   kda: number
   confidence: Confidence
   recentDirection: "up" | "down" | "stable" | "unknown"
+  recentInterval?: { low: number; high: number; level: .95 }
   challengeNames: string[]
   signals: ChoiceSignal[]
 }

@@ -7,15 +7,12 @@ import { CHART_COLOURS, CHART_STYLES } from "../../charts/recall-chart-theme"
 import { boxplot } from "../../charts/statistics"
 import { recallGradeFromScore } from "../../shared/recall-grade"
 import type { SkillHistoryPoint } from "../../types/stats"
+import { weekdayGradeGroups } from "../../charts/evidence-adapters"
 
 registerInsightCharts()
 
 const props = defineProps<{ history: SkillHistoryPoint[] }>()
-const labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-
-const groups = computed(() => labels.map((_, index) => props.history
-  .filter((game) => ((new Date(game.playedAt).getDay() + 6) % 7) === index && game.gradeScore !== undefined)
-  .map((game) => game.gradeScore!)))
+const groups = computed(() => weekdayGradeGroups(props.history))
 
 const option = computed<EChartsCoreOption>(() => ({
   grid: { top: 20, right: 24, bottom: 34, left: 46 },
@@ -23,12 +20,13 @@ const option = computed<EChartsCoreOption>(() => ({
     trigger: "item",
     formatter: (raw: unknown) => {
       const item = raw as { dataIndex: number; value: number[] }
-      const values = groups.value[item.dataIndex] ?? []
-      const median = item.value?.[2] ?? 0
-      return `<strong>${labels[item.dataIndex]}</strong><br/>${values.length} graded games<br/>Median ${recallGradeFromScore(median)} (${median.toFixed(2)})<br/>Box = middle 50% of games`
+      const group = groups.value[item.dataIndex]
+      const median = item.value?.[2]
+      if (!group || !Number.isFinite(median)) return "Insufficient evidence"
+      return `<strong>${group.label}</strong><br/>${group.values.length} graded games<br/>Median ${recallGradeFromScore(median)} (${median.toFixed(2)})<br/>Box = middle 50% of games`
     },
   },
-  xAxis: { type: "category", data: labels, boundaryGap: true },
+  xAxis: { type: "category", data: groups.value.map((group) => group.label), boundaryGap: true },
   yAxis: {
     type: "value",
     axisLabel: { formatter: (value: number) => recallGradeFromScore(value) ?? "D" },
@@ -36,7 +34,7 @@ const option = computed<EChartsCoreOption>(() => ({
   },
   series: [{
     type: "boxplot",
-    data: groups.value.map((values) => values.length ? boxplot(values) : [0, 0, 0, 0, 0]),
+    data: groups.value.map((group) => boxplot(group.values)),
     itemStyle: { color: CHART_STYLES.liveArea, borderColor: CHART_COLOURS.live },
   }],
 }))

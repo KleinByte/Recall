@@ -5,7 +5,8 @@ import {
   RiotBackfillRepository,
   type RiotBackfillState,
 } from "../database/riot-backfill-repo.js"
-import { gradeLobby } from "../matches/grade.js"
+import { gradeLobbyV2 } from "../matches/grade.js"
+import { gradeLobbyV3 } from "../matches/grade-v3.js"
 import { evaluateMatchLabels } from "../matches/labels.js"
 import type { QueueIndex } from "../matches/queues.js"
 import { RiotApiClient, RiotApiError } from "./api-client.js"
@@ -20,12 +21,8 @@ interface MatchApi {
 
 interface BackfillOptions {
   api?: MatchApi
-  riotId?: {
-    gameName: string
-    tagLine: string
-  }
+  matchPuuid?: string
   onProgress?: (state: RiotBackfillState) => void
-  onAccountResolved?: (matchPuuid: string) => void
   champSelect?: ChampSelectRepository
 }
 
@@ -43,9 +40,8 @@ const gameIdFromMatchId = (matchId: string) => {
 export class RiotHistoryBackfill {
   private readonly api: MatchApi
   private readonly progress: RiotBackfillRepository
-  private readonly riotId: BackfillOptions["riotId"]
+  private readonly matchPuuid: string
   private readonly onProgress: (state: RiotBackfillState) => void
-  private readonly onAccountResolved: (matchPuuid: string) => void
   private readonly champSelect?: ChampSelectRepository
 
   constructor(
@@ -61,9 +57,8 @@ export class RiotHistoryBackfill {
     this.api =
       options.api ?? new RiotApiClient(this.apiKey, this.regionalRoute)
     this.progress = progress
-    this.riotId = options.riotId
+    this.matchPuuid = options.matchPuuid ?? puuid
     this.onProgress = options.onProgress ?? (() => undefined)
-    this.onAccountResolved = options.onAccountResolved ?? (() => undefined)
     this.champSelect = options.champSelect
   }
 
@@ -81,7 +76,7 @@ export class RiotHistoryBackfill {
       : restart ? undefined : persistedStart
     let state = existing
     try {
-      const matchPuuid = await this.resolveMatchPuuid(signal)
+      const matchPuuid = this.matchPuuid
       if (
         !restart &&
         existing?.status === "complete" &&
@@ -233,17 +228,21 @@ export class RiotHistoryBackfill {
                 ),
               ]),
             )
-            const grades = gradeLobby(
-              mapped.gradeInputs.map((input) => ({
+            const gradeInputs = mapped.gradeInputs.map((input) => ({
                 ...input,
+                isPlayer: owner?.participantId === input.participantId,
                 role: positionByParticipant.get(input.participantId),
-              })),
-              mapped.match.modeFamily,
-            )
+              }))
+            const grades = gradeLobbyV2(gradeInputs, mapped.match.modeFamily)
             this.participants.setGrades(
               mapped.match.gameId,
               this.puuid,
               grades,
+            )
+            this.participants.setGradesV3(
+              mapped.match.gameId,
+              this.puuid,
+              gradeLobbyV3(gradeInputs, mapped.match.modeFamily),
             )
             const grade = owner && grades.get(owner.participantId)
             if (grade) {
@@ -252,6 +251,8 @@ export class RiotHistoryBackfill {
                 this.puuid,
                 grade.grade,
                 grade.score,
+                grade.breakdown.compositePercentile,
+                grade.breakdown.algorithmVersion,
               )
             }
           }
@@ -306,28 +307,6 @@ export class RiotHistoryBackfill {
       this.onProgress(state)
       throw error
     }
-  }
-
-  /**
-   * The League client now exposes a local 36-character account UUID, while
-   * Match-V5 still requires Riot's encrypted PUUID. Resolve it from the
-   * signed-in Riot ID and retain the local UUID as Recall's storage key.
-   */
-  private async resolveMatchPuuid(signal?: AbortSignal): Promise<string> {
-    if (!this.riotId) return this.puuid
-
-    const account = await this.api.get<{ puuid?: unknown }>(
-      `/riot/account/v1/accounts/by-riot-id/` +
-        `${encodeURIComponent(this.riotId.gameName)}/` +
-        `${encodeURIComponent(this.riotId.tagLine)}`,
-      "account",
-      signal,
-    )
-    if (typeof account.puuid !== "string" || account.puuid.length === 0) {
-      throw new Error("Riot's account response did not include a PUUID")
-    }
-    this.onAccountResolved(account.puuid)
-    return account.puuid
   }
 
   private advanceOne(

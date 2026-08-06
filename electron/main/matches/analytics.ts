@@ -1,5 +1,16 @@
 export interface Interval { low: number; high: number; level: 0.95 }
-export interface SessionInput { gameId: number; startedAt: number; endedAt?: number }
+import {
+  DEFAULT_ANALYTIC_SESSION_GAP_MS,
+  groupTimedGames,
+} from "../../../src/helpers/time-contract-core.js"
+
+export interface SessionInput {
+  gameId: number
+  startedAt: number
+  durationSecs?: number
+  /** @deprecated Supply normalized durationSecs; retained for old in-memory callers. */
+  endedAt?: number
+}
 export interface SessionGame extends SessionInput {
   session: number
   sessionGame: number
@@ -11,7 +22,7 @@ export type EvidenceConfidence = "high" | "medium" | "low" | "insufficient"
 /**
  * Wilson score confidence interval for binomial proportion
  */
-export function wilsonInterval(wins: number, games: number, z = 1.96): Interval {
+export function wilsonInterval(wins: number, games: number, z = 1.959963984540054): Interval {
   if (games === 0) {
     return { low: 0, high: 1, level: 0.95 }
   }
@@ -72,41 +83,37 @@ export function empiricalPercentile(values: number[], value: number): number {
  * Detect play sessions from game timestamps
  */
 export function sessionize<T extends SessionInput>(games: T[], breakMinutes = 90): Array<T & SessionGame> {
-  if (games.length === 0) return []
-  
+  const normalized = games.map((game) => ({
+    ...game,
+    playedAt: game.startedAt,
+    durationSecs: game.durationSecs ?? (
+      Number.isSafeInteger(game.endedAt) && game.endedAt! > game.startedAt
+        ? Math.trunc((game.endedAt! - game.startedAt) / 1000)
+        : undefined
+    ),
+  }))
+  const gapMs = breakMinutes === 90
+    ? DEFAULT_ANALYTIC_SESSION_GAP_MS
+    : breakMinutes * 60_000
+  const groups = groupTimedGames(normalized, gapMs)
   const results: Array<T & SessionGame> = []
-  let currentSession = 1
-  let sessionGame = 1
   let previousEnd: number | undefined
-  
-  for (const game of games) {
-    let restMinutes: number | undefined
-    
-    if (previousEnd !== undefined && game.endedAt !== undefined) {
-      const gapMs = game.startedAt - previousEnd
-      restMinutes = gapMs / 60_000
-      
-      if (restMinutes > breakMinutes) {
-        currentSession++
-        sessionGame = 1
-      }
-    } else if (previousEnd === undefined && results.length > 0) {
-      // Missing end time breaks the session
-      currentSession++
-      sessionGame = 1
-    }
-    
-    results.push({
-      ...game,
-      session: currentSession,
-      sessionGame: sessionGame,
-      restMinutes,
+  groups.forEach((group, groupIndex) => {
+    group.matches.forEach((entry, gameIndex) => {
+      const restMinutes = previousEnd === undefined || entry.playedAt === undefined
+        ? undefined
+        : Math.max(0, entry.playedAt - previousEnd) / 60_000
+      results.push({
+        ...entry,
+        session: groupIndex + 1,
+        sessionGame: gameIndex + 1,
+        restMinutes,
+      })
+      previousEnd = entry.durationSecs && entry.playedAt !== undefined
+        ? entry.playedAt + entry.durationSecs * 1000
+        : undefined
     })
-    
-    sessionGame++
-    previousEnd = game.endedAt
-  }
-  
+  })
   return results
 }
 

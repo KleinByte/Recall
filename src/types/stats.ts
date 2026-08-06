@@ -426,6 +426,7 @@ export interface InsightsReport {
 
 export interface ChampionRanking {
   ranked: RankedChampion[]
+  earlySignals: RankedChampion[]
   best: RankedChampion[]
   worst: RankedChampion[]
 }
@@ -549,6 +550,18 @@ export interface MatchRow {
   /** Rank among the lobby by Recall grade; absent unless every player is graded. */
   lobbyPlace?: number
   lobbySize?: number
+  eligibility?: {
+    stored: true
+    analyticsEligible: boolean
+    gradeEligible: boolean
+    timelineEligible: boolean
+    reason: "eligible" | "unmatched" | "bot_or_tutorial" | "unsupported_mode" |
+      "short_game" | "invalid_duration" | "incomplete_lobby" | "missing_core_metric" |
+      "missing_source_fact" | "terminated" | "ineligible_for_progression" | "legacy_unknown"
+    normalizedDurationSeconds: number | null
+    durationQuality: "verified" | "source_reported" | "legacy" | "inconsistent" | "invalid"
+    sourceFactsComplete: boolean
+  }
   /** Scoreboard rows attached only for rich match-card responses. */
   participants?: ParticipantRow[]
 }
@@ -668,6 +681,7 @@ export interface SkillChampionPoint {
 }
 
 export type PerformanceConfidence = "learning" | "provisional" | "established"
+export type PerformanceScoringContext = "profile" | "match"
 
 export interface PerformanceMetricScore {
   key: string
@@ -704,6 +718,7 @@ export interface PerformanceProfile {
   dimensions: PerformanceDimensionScore[]
   strongestKey?: string
   growthKey?: string
+  version?: number
 }
 
 export interface SkillDeathPoint {

@@ -1,0 +1,41 @@
+FROM node:20-bookworm
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    g++ \
+    libasound2 \
+    libatspi2.0-0 \
+    libdrm2 \
+    libgbm1 \
+    libgtk-3-0 \
+    libnss3 \
+    libxss1 \
+    libxtst6 \
+    make \
+    novnc \
+    openbox \
+    python3 \
+    websockify \
+    x11vnc \
+    xvfb \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN corepack enable
+
+WORKDIR /workspace
+
+COPY package.json pnpm-lock.yaml .npmrc ./
+RUN pnpm install --frozen-lockfile
+
+COPY . ./
+COPY docker/start-dev.sh /usr/local/bin/start-recall-dev
+
+RUN useradd --create-home --uid 1000 recall \
+  && mkdir /recall-data \
+  && chown -R recall:recall /workspace /recall-data /usr/local/bin/start-recall-dev \
+  && chmod +x /usr/local/bin/start-recall-dev
+
+USER recall
+
+CMD ["/usr/local/bin/start-recall-dev"]

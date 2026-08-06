@@ -179,6 +179,51 @@ pnpm build
 Electron, while `better-sqlite3-node` provides the regular Node ABI used by the
 test suite.
 
+### Isolated Docker development profile
+
+Recall uses an embedded SQLite database rather than a network database server.
+The Compose setup therefore gives the development app a dedicated Docker volume
+for its full Electron user-data directory (`stats.db`, settings, and backups).
+It never mounts, copies, or migrates the normal Recall profile.
+
+```sh
+docker compose up --build
+```
+
+Open [noVNC](http://localhost:6080/vnc.html?autoconnect=true&resize=remote) to
+use the development Electron window. The Vite server is also available at
+http://localhost:3344. The database is retained when you stop the stack with
+`docker compose down`; it is isolated in the `recall-development_recall-dev-user-data`
+named volume.
+
+To inspect that development database, while the app is stopped, run:
+
+```sh
+docker compose run --rm sqlite
+```
+
+The container cannot discover or connect to a League client running on Windows,
+so use this profile for UI and database debugging with test data. For a local
+desktop debug run that still talks to League, set `RECALL_USER_DATA_DIR` to an
+empty directory before running `pnpm dev`; that uses the same isolated-profile
+guard without Docker.
+
+To let the Docker development app connect to League on Windows, first enable
+Docker Desktop's opt-in **host networking** feature and restart Docker Desktop.
+Start and sign in to League, then run the additional Compose profile:
+
+```powershell
+$env:RECALL_LEAGUE_DIR = "C:\Riot Games\League of Legends" # change if needed
+docker compose -f compose.yaml -f compose.league.yaml up --build
+```
+
+Open the same noVNC URL. The override mounts the League installation read-only
+so Recall can watch its rotating lockfile, and host networking lets the
+container reach the LCU and in-game Live Client APIs on Windows loopback. It
+does not publish either authenticated Riot API port. Host networking gives the
+container broader access to host TCP/UDP services, so use this only with the
+local Recall image and dependencies you trust.
+
 ## Data and privacy
 
 Recall stores match history, challenge snapshots, review notes, and settings

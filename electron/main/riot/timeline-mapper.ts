@@ -1,4 +1,4 @@
-export const TIMELINE_MAPPER_VERSION = 7
+export const TIMELINE_MAPPER_VERSION = 8
 
 export type TimelineEventCategory =
   | "kill"

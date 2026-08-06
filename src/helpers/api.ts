@@ -1,6 +1,7 @@
 import type { AramStats, Challenge, Champion, Summoner } from "../types/lol"
 import type { RawChallenge } from "../types/lcu"
 import type { UpdateStatus } from "../types/update"
+import type { StoredSettings } from "../types/app"
 import type {
   ChallengeFilter,
   ChallengeHistoryRow,
@@ -20,6 +21,7 @@ import type {
   MatchRow,
   ModeFamily,
   PerformanceProfile,
+  PerformanceScoringContext,
   PersonalRecord,
   ProfileSummary,
   RankedHistory,
@@ -174,12 +176,64 @@ export const api = {
     return lcuRequest("/lol-challenges/v1/challenges/local-player")
   },
 
-  getSetting<T>(key: string): Promise<T | undefined> {
-    return invoke<T | undefined>("store-get", key)
+  getUiSettings(): Promise<StoredSettings | undefined> {
+    return invoke("settings:ui:get")
   },
 
-  setSetting(key: string, value: unknown) {
-    send("store-set", key, value)
+  saveUiSettings(value: StoredSettings): Promise<StoredSettings> {
+    return invoke("settings:ui:set", value)
+  },
+
+  getRecommendationObjective(): Promise<ChampionChoiceObjective | undefined> {
+    return invoke("settings:recommendation-objective:get")
+  },
+
+  saveRecommendationObjective(value: ChampionChoiceObjective): Promise<ChampionChoiceObjective> {
+    return invoke("settings:recommendation-objective:set", value)
+  },
+
+  getLastSeenPatchNotesVersion(): Promise<string | undefined> {
+    return invoke("settings:last-seen-patch-notes-version:get")
+  },
+
+  saveLastSeenPatchNotesVersion(value: string): Promise<string> {
+    return invoke("settings:last-seen-patch-notes-version:set", value)
+  },
+
+  getLaunchAtLogin(): Promise<boolean | undefined> {
+    return invoke("settings:launch-at-login:get")
+  },
+
+  saveLaunchAtLogin(value: boolean): Promise<boolean> {
+    return invoke("settings:launch-at-login:set", value)
+  },
+
+  getDisplayTimezone(): Promise<{ timeZone: string; override?: string }> {
+    return invoke("settings:display-timezone:get")
+  },
+
+  saveDisplayTimezone(value: string): Promise<{ timeZone: string; override: string }> {
+    return invoke("settings:display-timezone:set", value)
+  },
+
+  useSystemTimezone(): Promise<{ timeZone: string }> {
+    return invoke("settings:display-timezone:use-system")
+  },
+
+  getAramStats<T extends Record<string, unknown>>(): Promise<T | undefined> {
+    return invoke("cache:aram-stats:get")
+  },
+
+  saveAramStats(value: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return invoke("cache:aram-stats:set", value)
+  },
+
+  getDataDragonVersion(): Promise<string | undefined> {
+    return invoke("cache:ddragon-version:get")
+  },
+
+  saveDataDragonVersion(value: string): Promise<string> {
+    return invoke("cache:ddragon-version:set", value)
   },
 
   getRiotApiKeyStatus(): Promise<{
@@ -279,8 +333,9 @@ export const api = {
   getRviProfile(
     filter: Partial<StatsFilter>,
     family: ModeFamily,
+    scoringContext: PerformanceScoringContext = "profile",
   ): Promise<PerformanceProfile | undefined> {
-    return invoke("stats:rvi", filter, family)
+    return invoke("stats:rvi", filter, family, scoringContext)
   },
 
   getDrift(
@@ -373,7 +428,11 @@ export const api = {
     return invoke("stats:export")
   },
 
-  clearHistory(): Promise<{ deleted: number }> {
+  createFullBackup(): Promise<{ created: boolean; path?: string }> {
+    return invoke("stats:full-backup")
+  },
+
+  clearHistory(): Promise<{ deleted: number; recoveryPoint?: string }> {
     return invoke("stats:clear")
   },
 

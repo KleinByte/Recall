@@ -42,8 +42,8 @@ interface RiotApiClientOptions {
 
 const RETRYABLE = new Set([500, 502, 503, 504])
 
-function failureMessage(status: number, scope: string) {
-  const api = scope === "account" ? "Account-V1" : "Match-V5"
+function failureMessage(status: number) {
+  const api = "Match-V5"
   switch (status) {
     case 400:
       return (
@@ -62,6 +62,18 @@ function failureMessage(status: number, scope: string) {
       )
     default:
       return `Riot API request failed (${status}).`
+  }
+}
+
+const MATCH_ID = "[A-Za-z0-9_-]{1,96}"
+const PUUID = "[A-Za-z0-9_-]{1,128}"
+const LIST_PATH = new RegExp(`^/lol/match/v5/matches/by-puuid/${PUUID}/ids(?:\\?[^#]*)?$`)
+const ARTIFACT_PATH = new RegExp(`^/lol/match/v5/matches/${MATCH_ID}(?:/timeline)?$`)
+
+/** Rejects every Riot Web API path outside explicit Match-V5 history. */
+export function assertAllowedMatchV5Path(path: string): void {
+  if (!LIST_PATH.test(path) && !ARTIFACT_PATH.test(path)) {
+    throw new Error("riot_web_api_path_not_allowed")
   }
 }
 
@@ -85,6 +97,7 @@ export class RiotApiClient {
   }
 
   async get<T>(path: string, scope: string, signal?: AbortSignal): Promise<T> {
+    assertAllowedMatchV5Path(path)
     let transientAttempts = 0
 
     while (true) {
@@ -140,7 +153,7 @@ export class RiotApiClient {
       }
 
       throw new RiotApiError(
-        failureMessage(response.status, scope),
+        failureMessage(response.status),
         response.status,
       )
     }

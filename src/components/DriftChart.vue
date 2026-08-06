@@ -4,6 +4,7 @@ import type { EChartsCoreOption } from "echarts/core"
 import BaseEChart from "./charts/BaseEChart.vue"
 import { CHART_COLOURS } from "../charts/recall-chart-theme"
 import type { StyleAxis } from "../types/stats"
+import { driftSeries } from "../charts/evidence-adapters"
 
 const props = defineProps<{
   windows: { label: string; axes: StyleAxis[] }[]
@@ -21,13 +22,12 @@ const COLOURS = [
 const series = computed(() => (props.windows[0]?.axes ?? []).map((axis, index) => ({
   name: axis.label,
   type: "line" as const,
-  data: props.windows.map((window) =>
-    Math.round((window.axes.find((entry) => entry.key === axis.key)?.value ?? 0) * 100),
-  ),
+  data: driftSeries(props.windows, axis.key),
   symbolSize: 5,
   lineStyle: { color: COLOURS[index % COLOURS.length], width: 1.5 },
   itemStyle: { color: COLOURS[index % COLOURS.length] },
   smooth: 0.25,
+  connectNulls: false,
 })))
 
 const option = computed<EChartsCoreOption>(() => ({

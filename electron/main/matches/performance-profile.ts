@@ -10,12 +10,14 @@ import {
   type ClassResolver,
 } from "./class-expectations.js"
 import type { ModeFamily } from "./types.js"
+import { groupTimedGames } from "../../../src/helpers/time-contract-core.js"
 
 export const RVI_ALGORITHM_VERSION = 2
 export const PERFORMANCE_PROFILE_VERSION = RVI_ALGORITHM_VERSION
 export const PERFORMANCE_RECENT_GAMES = 20
 
 export type PerformanceConfidence = "learning" | "provisional" | "established"
+export type PerformanceScoringContext = "profile" | "match"
 
 export interface PerformanceMetricScore {
   key: string
@@ -259,6 +261,22 @@ function confidenceFor(games: number): PerformanceConfidence {
 function stabilized(raw: number, games: number, priorGames = 12) {
   const reliability = games / (games + priorGames)
   return roundScore(50 + (raw - 50) * reliability)
+}
+
+/**
+ * Career profiles need a neutral prior while match reviews need to show the
+ * bounded result of that match. Keeping that product intent explicit avoids
+ * treating a one-game career profile as if it were a match review.
+ */
+function displayScore(
+  raw: number,
+  games: number,
+  context: PerformanceScoringContext,
+  priorGames = 12,
+) {
+  return context === "match"
+    ? roundScore(raw)
+    : stabilized(raw, games, priorGames)
 }
 
 function componentValues(rows: GradeComponentObservation[], key: string) {
@@ -538,6 +556,7 @@ function buildMeasuredDimension(
   observations: ReadonlyMap<number, InsightObservation>,
   timelines: ReadonlyMap<number, RviTimelineObservation>,
   resolveClass: ClassResolver,
+  scoringContext: PerformanceScoringContext,
 ): PerformanceDimensionScore | undefined {
   const measured = definition.metrics.flatMap((metric) => {
     const sourceKey = metric.sourceKey ?? metric.key
@@ -582,10 +601,15 @@ function buildMeasuredDimension(
           (entry.metric.weight * entry.recentValues.length / Math.max(1, recentRows.length)) / recentWeight, 0)
     : undefined
   const games = Math.max(...measured.map((entry) => entry.values.length))
-  const score = stabilized(raw, games)
-  const recentScore = recentRaw === undefined
+  const score = displayScore(raw, games, scoringContext)
+  const recentScore = scoringContext === "match" || recentRaw === undefined
     ? undefined
-    : stabilized(recentRaw, Math.max(...recentMeasured.map((entry) => entry.recentValues.length)), 8)
+    : displayScore(
+        recentRaw,
+        Math.max(...recentMeasured.map((entry) => entry.recentValues.length)),
+        scoringContext,
+        8,
+      )
 
   return {
     key: definition.key,
@@ -615,16 +639,13 @@ function fatigueResistance(
   rows: GradeComponentObservation[],
   observations: ReadonlyMap<number, InsightObservation>,
 ) {
-  const sessions: GradeComponentObservation[][] = []
-  for (const row of rows) {
-    const current = sessions.at(-1)
-    const previous = current?.at(-1)
-    const gap = previous
-      ? row.playedAt - (observations.get(previous.gameId)?.endedAt ?? previous.playedAt)
-      : Infinity
-    if (!current || gap > 90 * 60_000) sessions.push([row])
-    else current.push(row)
-  }
+  const timed = rows.map((row) => ({
+    ...row,
+    durationSecs: observations.get(row.gameId)?.durationSecs,
+  }))
+  const sessions = groupTimedGames(timed)
+    .filter((session) => session.kind === "analytical")
+    .map((session) => session.matches)
   const changes = sessions.flatMap((session) => session.length >= 2
     ? [session.at(-1)!.compositePercentile - session[0].compositePercentile]
     : [])
@@ -636,6 +657,7 @@ function fatigueResistance(
 function stabilityDimension(
   rows: GradeComponentObservation[],
   observations: ReadonlyMap<number, InsightObservation>,
+  scoringContext: PerformanceScoringContext,
 ): PerformanceDimensionScore | undefined {
   const values = rows.map((row) => clamp01(row.compositePercentile))
   if (!values.length) return undefined
@@ -650,13 +672,13 @@ function stabilityDimension(
   const repeatWeight = .44 / available
   const fatigueWeight = fatigue === undefined ? 0 : .20 / available
   const raw = floor * floorWeight + repeatability * repeatWeight + (fatigue ?? 0) * fatigueWeight
-  const score = stabilized(raw, games)
+  const score = displayScore(raw, games, scoringContext)
   const recent = rows.slice(-PERFORMANCE_RECENT_GAMES)
   const recentValues = recent.map((row) => clamp01(row.compositePercentile))
   const recentAverage = mean(recentValues) ?? .5
   const recentDeviation = Math.sqrt(mean(recentValues.map((value) => (value - recentAverage) ** 2)) ?? 0)
   const recentRaw = quantile(recentValues, .25) * 66 + (1 - clamp01(recentDeviation / .35)) * 34
-  const recentScore = stabilized(recentRaw, recent.length, 8)
+  const recentScore = displayScore(recentRaw, recent.length, scoringContext, 8)
 
   return {
     key: "consistency",
@@ -697,6 +719,7 @@ function adaptabilityDimension(
   observations: ReadonlyMap<number, InsightObservation>,
   primary: PerformanceDimensionScore[],
   timelines: ReadonlyMap<number, RviTimelineObservation>,
+  scoringContext: PerformanceScoringContext,
 ): PerformanceDimensionScore | undefined {
   if (!rows.length || !primary.length) return undefined
   const games = rows.length
@@ -720,7 +743,7 @@ function adaptabilityDimension(
   ]
   const totalWeight = inputs.reduce((total, entry) => total + entry.weight, 0)
   const raw = inputs.reduce((total, entry) => total + entry.score * entry.weight / totalWeight, 0)
-  const score = stabilized(raw, games)
+  const score = displayScore(raw, games, scoringContext)
 
   const recentRows = rows.slice(-PERFORMANCE_RECENT_GAMES)
   const recentEffective = effectiveChampionCount(recentRows, observations)
@@ -734,7 +757,7 @@ function adaptabilityDimension(
   const recentRaw = recentPrimary.length
     ? recentBreadth * .32 + recentPerformance * .36 + quantile(recentPrimary, .25) * 100 * .32
     : recentBreadth * .47 + recentPerformance * .53
-  const recentScore = stabilized(recentRaw, recentRows.length, 8)
+  const recentScore = displayScore(recentRaw, recentRows.length, scoringContext, 8)
 
   return {
     key: "versatility",
@@ -763,6 +786,8 @@ export function buildPerformanceProfile(input: {
   timelineHistory?: RviTimelineObservation[]
   /** Live champion catalog roles, keyed by champion id. */
   championRoles?: ReadonlyMap<number, readonly string[]>
+  /** Profile scores use a confidence prior; match scores show that match directly. */
+  scoringContext?: PerformanceScoringContext
 }): PerformanceProfile | undefined {
   const rows = [...input.gradeComponentHistory]
     .sort((left, right) => left.playedAt - right.playedAt || left.gameId - right.gameId)
@@ -774,13 +799,29 @@ export function buildPerformanceProfile(input: {
   const definitions = input.family === "sr" || input.family === "classic"
     ? RIFT_DIMENSIONS
     : ABYSS_DIMENSIONS
+  const scoringContext = input.scoringContext === "match" ? "match" : "profile"
   const resolveClass = classResolver(input.championRoles)
   const primary = definitions.flatMap((definition) => {
-    const dimension = buildMeasuredDimension(definition, rows, recentRows, observations, timelines, resolveClass)
+    const dimension = buildMeasuredDimension(
+      definition,
+      rows,
+      recentRows,
+      observations,
+      timelines,
+      resolveClass,
+      scoringContext,
+    )
     return dimension ? [dimension] : []
   })
-  const stability = stabilityDimension(rows, observations)
-  const adaptability = adaptabilityDimension(rows, observations, primary, timelines)
+  // A match RVI contains only dimensions that can be observed in that match.
+  // Consistency and versatility require comparisons across games and belong
+  // exclusively to the career profile.
+  const stability = scoringContext === "profile"
+    ? stabilityDimension(rows, observations, scoringContext)
+    : undefined
+  const adaptability = scoringContext === "profile"
+    ? adaptabilityDimension(rows, observations, primary, timelines, scoringContext)
+    : undefined
   const dimensions = [
     ...primary,
     ...(stability ? [stability] : []),
@@ -801,7 +842,9 @@ export function buildPerformanceProfile(input: {
     measuredGames,
     coverage: Math.min(1, measuredGames / Math.max(1, consideredGames)),
     confidence: confidenceFor(measuredGames),
-    comparison: "Role-, team-, and lobby-aware measurements from your recorded games",
+    comparison: scoringContext === "match"
+      ? "Role-, team-, and lobby-aware measurements from this match"
+      : "Role-, team-, and lobby-aware measurements from your recorded games",
     dimensions,
     strongestKey: strongest?.key,
     growthKey: growth?.key,

@@ -95,7 +95,7 @@ const comparisonValue = (metric: LobbyMetric) =>
     : metric.averageRank.toFixed(1)
 
 const comparisonUnit = (scope: "role" | "lobby") =>
-  scope === "role" ? "score" : "/10"
+  scope === "role" ? "score" : ""
 
 const rviIdentity = computed(() => props.overview.performance
   ? classifyRviIdentity(props.overview.performance)
@@ -136,7 +136,7 @@ const rviIdentity = computed(() => props.overview.performance
               <span class="muted metric-scope">{{ comparisonScope(metric.scope) }}</span>
             </div>
             <span class="numeric metric-rank">
-              {{ comparisonValue(metric) }}<span class="muted"> {{ comparisonUnit(metric.scope) }}</span>
+              {{ comparisonValue(metric) }}
             </span>
           </div>
           <MiniBar :value="metric.percentile" />

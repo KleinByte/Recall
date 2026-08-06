@@ -117,8 +117,64 @@ export class DataTrustService {
     const rateLimits = account?.route
       ? schedulerForRoute(account.route).snapshot()
       : []
+    const scalar = (sql: string, ...parameters: unknown[]) => {
+      if (!puuid) return 0
+      try { return Number((this.db.prepare(sql).get(...parameters) as { count: number }).count) }
+      catch { return 0 }
+    }
+    const gradeEligible = scalar(
+      `SELECT COUNT(*) AS count FROM match_grade_attempts
+       WHERE puuid = ? AND algorithm_version = 3 AND grade_status = 'ready'`, puuid,
+    )
+    const currentGrades = scalar(
+      `SELECT COUNT(*) AS count FROM matches
+       WHERE puuid = ? AND grade_status = 'ready' AND grade_algorithm_version = 3`, puuid,
+    )
+    const intentionallyUngraded = scalar(
+      `SELECT COUNT(*) AS count FROM match_grade_attempts
+       WHERE puuid = ? AND algorithm_version = 3 AND grade_status IN
+         ('unsupported_mode','short_game','terminated','ineligible_for_progression','bot_or_tutorial')`, puuid,
+    )
+    const clientStatus = this.lastIntegrity === "failed" || this.startupError || leagueClient.lastError
+      ? "needs_attention" as const : "healthy" as const
+    const optionalStatus = !keyConfigured ? "not_configured" as const :
+      /\b(?:401|403|expired)\b/i.test(String(riotSync.lastError ?? "")) ? "key_expired" as const :
+        history?.status === "running" ? "running" as const :
+          history?.lastError ? "needs_attention" as const : "configured" as const
     return {
       state,
+      clientHealth: {
+        status: clientStatus,
+        totalStoredMatches: counts.matchCount,
+        eligibleStatisticalMatches: scalar(
+          `SELECT COUNT(*) AS count FROM matches
+           WHERE puuid = ? AND is_matched = 1 AND duration_secs >= 300
+             AND mode_family IN ('sr','aram','classic')`, puuid,
+        ),
+        gradableMatches: gradeEligible,
+        currentVersionEligibleGrades: currentGrades,
+        intentionallyUngradedModes: intentionallyUngraded,
+        gradeCoverage: gradeEligible ? currentGrades / gradeEligible : null,
+        endpoint: leagueClient,
+      },
+      optionalHistory: {
+        status: optionalStatus,
+        configured: keyConfigured,
+        route: account?.route,
+        idsDiscovered: Number(history?.idsScanned ?? 0),
+        detailReady: Number(history?.downloaded ?? 0),
+        imported: Number(history?.imported ?? 0),
+        unresolved: Number(history?.skipped ?? 0),
+        range: {
+          earliestVerifiedAt: leagueClient.firstObservedAt,
+          latestVerifiedAt: counts.newestPlayedAt ?? undefined,
+          requestedThrough: typeof history?.endTimeSeconds === "number"
+            ? history.endTimeSeconds * 1000 : undefined,
+        },
+        resumePosition: Number(history?.idsScanned ?? 0),
+        pauseReason: optionalStatus === "key_expired" ? "key_expired" :
+          history?.lastError ? String(history.lastError) : undefined,
+      },
       database: {
         path: this.databasePath,
         sizeBytes: statSync(this.databasePath).size,

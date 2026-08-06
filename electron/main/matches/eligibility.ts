@@ -1,6 +1,118 @@
 import type { LcuGame } from "./types.js"
 import type { QueueInfo } from "./queues.js"
 
+export type MatchEligibilityReason =
+  | "eligible"
+  | "unmatched"
+  | "bot_or_tutorial"
+  | "unsupported_mode"
+  | "short_game"
+  | "invalid_duration"
+  | "incomplete_lobby"
+  | "missing_core_metric"
+  | "missing_source_fact"
+  | "terminated"
+  | "ineligible_for_progression"
+  | "legacy_unknown"
+
+export interface MatchEligibilityResult {
+  stored: true
+  analyticsEligible: boolean
+  gradeEligible: boolean
+  timelineEligible: boolean
+  reason: MatchEligibilityReason
+  normalizedDurationSeconds: number | null
+  durationQuality: "verified" | "source_reported" | "legacy" | "inconsistent" | "invalid"
+  sourceFactsComplete: boolean
+}
+
+export interface EligibilityLobbyParticipant {
+  participantId: number | string | null | undefined
+  teamId: number | string | null | undefined
+  owner?: boolean
+}
+
+export interface MatchEligibilityInput {
+  provenance: "current_source" | "legacy"
+  normalizedDurationSeconds: number | null
+  durationQuality: MatchEligibilityResult["durationQuality"]
+  knownBotTutorial: boolean
+  matched: boolean
+  family: "sr" | "aram" | "classic" | "other" | "unknown"
+  contextComplete: boolean
+  registeredCapability: boolean
+  terminated?: boolean | null
+  eligibleForProgression?: boolean | null
+  requiredSourceFactsComplete: boolean
+  /** True when only the newer end/progression facts are unavailable. */
+  missingOnlyLegacyCompatibleFacts?: boolean
+  lobby?: readonly EligibilityLobbyParticipant[]
+  coreMetricsComplete: boolean
+}
+
+export function isCompleteGradeLobby(
+  participants: readonly EligibilityLobbyParticipant[] | undefined,
+): boolean {
+  if (!participants || participants.length !== 10) return false
+  const participantIds = new Set(participants.map((row) => row.participantId))
+  if (participantIds.size !== 10 || participantIds.has(null) || participantIds.has(undefined)) {
+    return false
+  }
+  const teams = new Map<number | string, number>()
+  for (const participant of participants) {
+    if (participant.teamId === null || participant.teamId === undefined) return false
+    teams.set(participant.teamId, (teams.get(participant.teamId) ?? 0) + 1)
+  }
+  return teams.size === 2 && [...teams.values()].every((count) => count === 5) &&
+    participants.filter((participant) => participant.owner).length === 1
+}
+
+/** The sole pure decision point for stored-match eligibility. */
+export function evaluateMatchEligibility(input: MatchEligibilityInput): MatchEligibilityResult {
+  const durationValid = input.normalizedDurationSeconds !== null &&
+    Number.isSafeInteger(input.normalizedDurationSeconds) && input.normalizedDurationSeconds > 0 &&
+    input.durationQuality !== "invalid" && input.durationQuality !== "inconsistent"
+  const supported = input.family === "sr" || input.family === "aram" || input.family === "classic"
+  const knownUnsupported = input.contextComplete && input.registeredCapability && input.family === "other"
+  const unknownContext = !input.contextComplete || !input.registeredCapability || input.family === "unknown"
+  const legacyException = input.provenance === "legacy" &&
+    input.missingOnlyLegacyCompatibleFacts === true
+  const missingSourceFact = (!input.requiredSourceFactsComplete || unknownContext) && !legacyException
+  const short = durationValid && input.normalizedDurationSeconds! < 300
+  const lobbyComplete = isCompleteGradeLobby(input.lobby)
+
+  const analyticsEligible = durationValid && !input.knownBotTutorial && input.matched &&
+    supported && !input.terminated && input.eligibleForProgression !== false && !short &&
+    !missingSourceFact
+  const gradeEligible = analyticsEligible && lobbyComplete && input.coreMetricsComplete
+  const timelineEligible = analyticsEligible && supported
+
+  let reason: MatchEligibilityReason
+  if (!durationValid) reason = "invalid_duration"
+  else if (input.knownBotTutorial) reason = "bot_or_tutorial"
+  else if (!input.matched) reason = "unmatched"
+  else if (knownUnsupported) reason = "unsupported_mode"
+  else if (input.terminated) reason = "terminated"
+  else if (input.eligibleForProgression === false) reason = "ineligible_for_progression"
+  else if (short) reason = "short_game"
+  else if (!lobbyComplete) reason = "incomplete_lobby"
+  else if (!input.coreMetricsComplete) reason = "missing_core_metric"
+  else if (missingSourceFact) reason = "missing_source_fact"
+  else if (legacyException || input.provenance === "legacy") reason = "legacy_unknown"
+  else reason = "eligible"
+
+  return {
+    stored: true,
+    analyticsEligible,
+    gradeEligible,
+    timelineEligible,
+    reason,
+    normalizedDurationSeconds: durationValid ? input.normalizedDurationSeconds : null,
+    durationQuality: input.durationQuality,
+    sourceFactsComplete: input.requiredSourceFactsComplete && !unknownContext,
+  }
+}
+
 /**
  * Riot's published Co-op vs. AI, Doom Bots, and tutorial queue ids.
  *

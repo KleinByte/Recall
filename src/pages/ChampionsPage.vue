@@ -168,6 +168,10 @@ const rankById = computed(() => {
   return map
 })
 
+const earlyById = computed(() => new Map(
+  (ranking.value?.earlySignals ?? []).map((row) => [row.championId, row]),
+))
+
 const decorated = computed(() => {
   if (!props.champions) return []
 
@@ -176,6 +180,7 @@ const decorated = computed(() => {
     const mastery = masteryById.value.get(champion.id)
     const championNeeds = needs.value[champion.id] ?? []
     const rank = rankById.value.get(champion.id)
+    const earlySignal = earlyById.value.get(champion.id)
 
     return {
       champion,
@@ -190,6 +195,7 @@ const decorated = computed(() => {
       kda: recorded?.kda ?? 0,
       adjustedGrade: rank?.adjustedGrade,
       confidence: rank?.confidence,
+      earlySignal,
     }
   })
 })
@@ -492,6 +498,9 @@ function clearFilters() {
                         :class="{ on: pip <= CONFIDENCE_PIPS[row.confidence] }"
                       />
                     </span>
+                  </span>
+                  <span v-else-if="row.earlySignal" class="early-signal">
+                    Early signal · {{ row.earlySignal.gradedGames }} graded
                   </span>
                   <span v-else class="muted">–</span>
                 </td>

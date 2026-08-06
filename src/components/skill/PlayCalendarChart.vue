@@ -7,28 +7,16 @@ import { escapeTooltip } from "../../charts/formatters"
 import { CHART_COLOURS, CHART_SCORE_RAMP, CHART_STYLES } from "../../charts/recall-chart-theme"
 import { recallGradeFromScore } from "../../shared/recall-grade"
 import type { SkillHistoryPoint } from "../../types/stats"
+import { calendarDays } from "../../charts/evidence-adapters"
 
 registerInsightCharts()
 
 const props = defineProps<{ history: SkillHistoryPoint[] }>()
 
 const days = computed(() => {
-  const grouped = new Map<string, { games: number; wins: number; scores: number[] }>()
-  for (const game of props.history.slice(-365)) {
-    const date = new Date(game.playedAt)
-    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
-    const day = grouped.get(key) ?? { games: 0, wins: 0, scores: [] }
-    day.games += 1
-    day.wins += Number(game.win)
-    if (game.gradeScore !== undefined) day.scores.push(game.gradeScore)
-    grouped.set(key, day)
-  }
-  return [...grouped].map(([date, day]) => [
-    date,
-    day.scores.length ? day.scores.reduce((sum, score) => sum + score, 0) / day.scores.length : 0,
-    day.games,
-    day.wins,
-  ] as [string, number, number, number])
+  return calendarDays(props.history).map((day) => [
+    day.date, day.gradeScore, day.games, day.wins,
+  ] as [string, number | null, number, number])
 })
 
 const range = computed<[string, string]>(() => {
@@ -39,8 +27,11 @@ const range = computed<[string, string]>(() => {
 const option = computed<EChartsCoreOption>(() => ({
   tooltip: {
     formatter: (raw: unknown) => {
-      const [date, score, games, wins] = (raw as { data: [string, number, number, number] }).data
-      return `<strong>${escapeTooltip(new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { dateStyle: "medium" }))}</strong><br/>${games} game${games === 1 ? "" : "s"} · ${wins}W<br/>Average ${escapeTooltip(recallGradeFromScore(score) ?? "ungraded")} (${score.toFixed(2)})`
+      const [date, score, games, wins] = (raw as { data: [string, number | null, number, number] }).data
+      const grade = score === null
+        ? "No graded games"
+        : `Average ${escapeTooltip(recallGradeFromScore(score) ?? "ungraded")} (${score.toFixed(2)})`
+      return `<strong>${escapeTooltip(new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { dateStyle: "medium" }))}</strong><br/>${games} game${games === 1 ? "" : "s"} · ${wins}W<br/>${grade}`
     },
   },
   visualMap: {

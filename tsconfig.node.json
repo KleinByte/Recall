@@ -12,5 +12,11 @@
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true
   },
-  "include": ["vite.config.ts", "electron"]
+  "include": [
+    "vite.config.ts",
+    "electron",
+    "src/helpers/time-contract-core.ts",
+    "src/shared/measurement.ts",
+    "src/shared/recall-grade.ts"
+  ]
 }

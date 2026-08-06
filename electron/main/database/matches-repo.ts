@@ -409,12 +409,22 @@ export class MatchesRepository {
   }
 
   /** Records a grade derived from the full lobby for one stored match. */
-  setGrade(gameId: number, puuid: string, grade: string, score: number) {
+  setGrade(
+    gameId: number,
+    puuid: string,
+    grade: string,
+    score: number,
+    compositePercentile = 0.5,
+    algorithmVersion = 2,
+  ) {
     this.db
       .prepare(
-        "UPDATE matches SET grade = ?, grade_score = ? WHERE game_id = ? AND puuid = ?",
+        `UPDATE matches
+         SET grade = ?, grade_score = ?, grade_algorithm_version = ?,
+             grade_status = 'ready', grade_composite_percentile = ?
+         WHERE game_id = ? AND puuid = ?`,
       )
-      .run(grade, score, gameId, puuid)
+      .run(grade, score, algorithmVersion, compositePercentile, gameId, puuid)
   }
 
   /**

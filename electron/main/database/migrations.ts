@@ -767,6 +767,478 @@ export const migrations: Migration[] = [
       ALTER TABLE match_participants ADD COLUMN rune_selections_json TEXT NOT NULL DEFAULT '[]';
     `,
   },
+  {
+    version: 20,
+    up: `
+      ALTER TABLE matches ADD COLUMN grade_algorithm_version INTEGER;
+      ALTER TABLE matches ADD COLUMN grade_status TEXT;
+      ALTER TABLE matches ADD COLUMN grade_composite_percentile REAL;
+      ALTER TABLE matches ADD COLUMN game_end_timestamp INTEGER;
+      ALTER TABLE matches ADD COLUMN map_id INTEGER;
+      ALTER TABLE matches ADD COLUMN game_type TEXT;
+      ALTER TABLE matches ADD COLUMN end_of_game_result TEXT;
+      ALTER TABLE matches ADD COLUMN owner_eligible_for_progression INTEGER;
+      ALTER TABLE matches ADD COLUMN duration_quality TEXT;
+      ALTER TABLE matches ADD COLUMN resolved_position TEXT;
+      ALTER TABLE matches ADD COLUMN position_resolver_version INTEGER;
+
+      ALTER TABLE match_participants ADD COLUMN eligible_for_progression INTEGER;
+      ALTER TABLE match_participants ADD COLUMN time_played_secs INTEGER;
+      ALTER TABLE match_participants ADD COLUMN control_wards_purchased INTEGER;
+      ALTER TABLE match_participants ADD COLUMN detector_wards_placed INTEGER;
+      ALTER TABLE match_participants ADD COLUMN total_heals_on_teammates INTEGER;
+      ALTER TABLE match_participants ADD COLUMN total_damage_shielded_on_teammates INTEGER;
+      ALTER TABLE match_participants ADD COLUMN damage_dealt_to_buildings INTEGER;
+      ALTER TABLE match_participants ADD COLUMN grade_algorithm_version INTEGER;
+      ALTER TABLE match_participants ADD COLUMN grade_status TEXT;
+      ALTER TABLE match_participants ADD COLUMN grade_composite_percentile REAL;
+      ALTER TABLE match_participants ADD COLUMN lcu_lane TEXT;
+      ALTER TABLE match_participants ADD COLUMN lcu_role TEXT;
+      ALTER TABLE match_participants ADD COLUMN match_v5_team_position TEXT;
+      ALTER TABLE match_participants ADD COLUMN match_v5_individual_position TEXT;
+      ALTER TABLE match_participants ADD COLUMN resolved_position TEXT;
+      ALTER TABLE match_participants ADD COLUMN position_resolver_version INTEGER;
+
+      UPDATE match_participants
+      SET control_wards_purchased = control_wards
+      WHERE control_wards_purchased IS NULL;
+
+      CREATE TABLE match_grade_attempts (
+        game_id INTEGER NOT NULL, puuid TEXT NOT NULL,
+        algorithm_version INTEGER NOT NULL, owner_participant_id INTEGER,
+        grade_status TEXT NOT NULL CHECK (grade_status IN (
+          'ready','unsupported_mode','short_game','invalid_duration','incomplete_lobby',
+          'missing_core_metric','missing_source_fact','terminated',
+          'ineligible_for_progression','unmatched','bot_or_tutorial','legacy_unknown')),
+        input_fingerprint TEXT NOT NULL CHECK (length(input_fingerprint) = 64),
+        attempted_at INTEGER NOT NULL,
+        CHECK (grade_status <> 'ready' OR owner_participant_id IS NOT NULL),
+        PRIMARY KEY (game_id, puuid, algorithm_version),
+        FOREIGN KEY (game_id, puuid) REFERENCES matches (game_id, puuid) ON DELETE CASCADE,
+        FOREIGN KEY (game_id, puuid, owner_participant_id)
+          REFERENCES match_participants (game_id, puuid, participant_id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE match_grade_results (
+        game_id INTEGER NOT NULL, puuid TEXT NOT NULL, participant_id INTEGER NOT NULL,
+        algorithm_version INTEGER NOT NULL,
+        grade TEXT NOT NULL CHECK (grade IN (
+          'S+','S','S-','A+','A','A-','B+','B','B-','C+','C','C-','D')),
+        grade_score REAL NOT NULL CHECK (grade_score BETWEEN -4 AND 4),
+        composite_percentile REAL NOT NULL CHECK (composite_percentile BETWEEN 0 AND 1),
+        grade_status TEXT NOT NULL CHECK (grade_status = 'ready'),
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (game_id, puuid, participant_id, algorithm_version),
+        FOREIGN KEY (game_id, puuid, algorithm_version)
+          REFERENCES match_grade_attempts (game_id, puuid, algorithm_version) ON DELETE CASCADE,
+        FOREIGN KEY (game_id, puuid, participant_id)
+          REFERENCES match_participants (game_id, puuid, participant_id) ON DELETE CASCADE
+      );
+      CREATE INDEX idx_grade_results_owner_version
+        ON match_grade_results (puuid, algorithm_version, game_id);
+
+      CREATE TABLE match_grade_breakdown_versions (
+        game_id INTEGER NOT NULL, puuid TEXT NOT NULL, participant_id INTEGER NOT NULL,
+        algorithm_version INTEGER NOT NULL,
+        composite_percentile REAL NOT NULL CHECK (composite_percentile BETWEEN 0 AND 1),
+        components_json TEXT NOT NULL CHECK (json_valid(components_json)),
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (game_id, puuid, participant_id, algorithm_version),
+        FOREIGN KEY (game_id, puuid, participant_id, algorithm_version)
+          REFERENCES match_grade_results (game_id, puuid, participant_id, algorithm_version)
+          ON DELETE CASCADE
+      );
+
+      CREATE TABLE match_label_evaluation_versions (
+        game_id INTEGER NOT NULL, puuid TEXT NOT NULL, evaluator_version INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('ready','unavailable','ineligible','stale')),
+        status_reason TEXT,
+        input_sources_json TEXT NOT NULL CHECK (json_valid(input_sources_json)),
+        input_fingerprint TEXT NOT NULL CHECK (length(input_fingerprint) = 64),
+        evaluated_at INTEGER NOT NULL,
+        CHECK ((status = 'ready' AND status_reason IS NULL)
+          OR (status <> 'ready' AND status_reason IS NOT NULL)),
+        PRIMARY KEY (game_id, puuid, evaluator_version),
+        FOREIGN KEY (game_id, puuid) REFERENCES matches (game_id, puuid) ON DELETE CASCADE
+      );
+
+      CREATE TABLE match_performance_label_versions (
+        game_id INTEGER NOT NULL, puuid TEXT NOT NULL, label_id TEXT NOT NULL,
+        evaluator_version INTEGER NOT NULL, name TEXT NOT NULL, category TEXT NOT NULL,
+        polarity TEXT NOT NULL CHECK (polarity IN ('positive','negative','mixed')),
+        tooltip TEXT NOT NULL,
+        evidence_json TEXT NOT NULL CHECK (json_valid(evidence_json)),
+        evidence_sources_json TEXT NOT NULL CHECK (json_valid(evidence_sources_json)),
+        confidence TEXT NOT NULL CHECK (confidence IN ('exact','strong','inferred')),
+        priority REAL NOT NULL, created_at INTEGER NOT NULL,
+        PRIMARY KEY (game_id, puuid, label_id, evaluator_version),
+        FOREIGN KEY (game_id, puuid, evaluator_version)
+          REFERENCES match_label_evaluation_versions (game_id, puuid, evaluator_version)
+          ON DELETE CASCADE
+      );
+      CREATE INDEX idx_label_versions_match ON match_performance_label_versions
+        (puuid, evaluator_version, game_id, priority DESC);
+    `,
+  },
+  {
+    version: 21,
+    up: `
+      CREATE TABLE match_source_payloads (
+        owner_puuid TEXT NOT NULL,
+        source TEXT NOT NULL CHECK (source IN ('league_client','match_v5')),
+        source_match_id TEXT NOT NULL, game_id INTEGER,
+        kind TEXT NOT NULL CHECK (
+          (source = 'league_client' AND kind IN (
+            'history_page','history_summary','scoreboard_detail','champ_select','timeline'))
+          OR (source = 'match_v5' AND kind IN ('match_detail','timeline'))),
+        encoding TEXT NOT NULL CHECK (encoding = 'gzip_json_v1'),
+        payload BLOB NOT NULL, sha256 TEXT NOT NULL CHECK (length(sha256) = 64),
+        data_version TEXT, mapper_version INTEGER NOT NULL,
+        serialization_version INTEGER NOT NULL CHECK (serialization_version = 1),
+        mapping_status TEXT NOT NULL CHECK (mapping_status IN ('pending','mapped','unmappable','error')),
+        mapping_error TEXT, mapped_at INTEGER, fetched_at INTEGER NOT NULL,
+        CHECK ((mapping_status = 'pending' AND mapping_error IS NULL AND mapped_at IS NULL)
+          OR (mapping_status = 'mapped' AND (game_id IS NOT NULL OR kind = 'history_page')
+            AND mapping_error IS NULL AND mapped_at IS NOT NULL)
+          OR (mapping_status IN ('unmappable','error')
+            AND mapping_error IS NOT NULL AND mapped_at IS NOT NULL)),
+        PRIMARY KEY (owner_puuid, source, source_match_id, kind, sha256)
+      );
+      CREATE INDEX idx_source_payload_game
+        ON match_source_payloads (owner_puuid, game_id, source, kind);
+
+      CREATE TABLE match_source_captures (
+        game_id INTEGER NOT NULL, puuid TEXT NOT NULL,
+        source TEXT NOT NULL CHECK (source IN ('league_client','match_v5')),
+        capture_status TEXT NOT NULL CHECK (capture_status IN ('ready','partial')),
+        manifest_version INTEGER NOT NULL, match_mapper_version INTEGER,
+        participant_mapper_version INTEGER, champ_select_mapper_version INTEGER,
+        timeline_mapper_version INTEGER, participant_count INTEGER NOT NULL,
+        team_count INTEGER NOT NULL, applicable_json TEXT NOT NULL,
+        captured_json TEXT NOT NULL, partial_json TEXT NOT NULL,
+        unavailable_json TEXT NOT NULL, invalid_json TEXT NOT NULL,
+        not_applicable_json TEXT NOT NULL, intentionally_ignored_json TEXT NOT NULL,
+        unknown_json TEXT NOT NULL, unknown_fields_json TEXT NOT NULL,
+        conflicts_json TEXT NOT NULL, captured_at INTEGER NOT NULL,
+        CHECK (json_valid(applicable_json) AND json_valid(captured_json)
+          AND json_valid(partial_json) AND json_valid(unavailable_json)
+          AND json_valid(invalid_json) AND json_valid(not_applicable_json)
+          AND json_valid(intentionally_ignored_json) AND json_valid(unknown_json)
+          AND json_valid(unknown_fields_json) AND json_valid(conflicts_json)),
+        PRIMARY KEY (game_id, puuid, source),
+        FOREIGN KEY (game_id, puuid) REFERENCES matches (game_id, puuid) ON DELETE CASCADE
+      );
+
+      CREATE TABLE match_source_capture_payloads (
+        game_id INTEGER NOT NULL, puuid TEXT NOT NULL,
+        source TEXT NOT NULL CHECK (source IN ('league_client','match_v5')),
+        source_match_id TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN (
+          'history_summary','scoreboard_detail','champ_select','match_detail','timeline')),
+        sha256 TEXT NOT NULL,
+        PRIMARY KEY (game_id, puuid, source, kind),
+        FOREIGN KEY (game_id, puuid, source)
+          REFERENCES match_source_captures (game_id, puuid, source) ON DELETE CASCADE,
+        FOREIGN KEY (puuid, source, source_match_id, kind, sha256)
+          REFERENCES match_source_payloads (owner_puuid, source, source_match_id, kind, sha256)
+      );
+
+      CREATE TABLE match_timeline_sources (
+        game_id INTEGER NOT NULL, puuid TEXT NOT NULL,
+        source TEXT NOT NULL CHECK (source IN ('league_client','match_v5','live_capture')),
+        source_match_id TEXT, mapper_version INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('ready','partial','unavailable')),
+        data_json TEXT, data_sha256 TEXT, event_categories_json TEXT NOT NULL,
+        evidence_counts_json TEXT NOT NULL, source_payload_sha256 TEXT,
+        captured_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+        CHECK (json_valid(event_categories_json) AND json_valid(evidence_counts_json)
+          AND (data_json IS NULL OR json_valid(data_json))),
+        CHECK (data_sha256 IS NULL OR length(data_sha256) = 64),
+        CHECK (source_payload_sha256 IS NULL OR length(source_payload_sha256) = 64),
+        CHECK (status <> 'ready' OR (data_json IS NOT NULL AND data_sha256 IS NOT NULL)),
+        PRIMARY KEY (game_id, puuid, source, mapper_version),
+        FOREIGN KEY (game_id, puuid) REFERENCES matches (game_id, puuid) ON DELETE CASCADE
+      );
+      CREATE INDEX idx_timeline_sources_current
+        ON match_timeline_sources (puuid, game_id, source, mapper_version, status);
+    `,
+  },
+  {
+    version: 22,
+    up: `
+      CREATE TABLE riot_history_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, puuid TEXT NOT NULL,
+        match_puuid TEXT NOT NULL, platform_route TEXT NOT NULL,
+        regional_route TEXT NOT NULL, start_time_seconds INTEGER,
+        end_time_seconds INTEGER NOT NULL, next_offset INTEGER NOT NULL DEFAULT 0,
+        requested_detail INTEGER NOT NULL CHECK (requested_detail = 1),
+        requested_timeline INTEGER NOT NULL CHECK (requested_timeline IN (0,1)),
+        identity_source TEXT NOT NULL CHECK (identity_source IN ('cache','league_client')),
+        discovery_attempts INTEGER NOT NULL DEFAULT 0,
+        discovery_transient_failures INTEGER NOT NULL DEFAULT 0,
+        discovery_next_retry_at INTEGER, discovery_http_status INTEGER,
+        discovery_status TEXT NOT NULL CHECK (discovery_status IN (
+          'not_requested','pending','running','waiting_retry','paused_key_expired',
+          'paused_offline','paused_user','complete','complete_with_unresolved',
+          'cancelled','error')),
+        detail_status TEXT NOT NULL CHECK (detail_status IN (
+          'not_requested','pending','running','waiting_retry','paused_key_expired',
+          'paused_offline','paused_user','complete','complete_with_unresolved',
+          'cancelled','error')),
+        timeline_status TEXT NOT NULL CHECK (timeline_status IN (
+          'not_requested','pending','running','waiting_retry','paused_key_expired',
+          'paused_offline','paused_user','complete','complete_with_unresolved',
+          'cancelled','error')),
+        stop_reason TEXT, last_error TEXT, started_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL, completed_at INTEGER, terminal_summary_sha256 TEXT,
+        CHECK (terminal_summary_sha256 IS NULL OR length(terminal_summary_sha256) = 64),
+        UNIQUE (id, puuid)
+      );
+      CREATE INDEX idx_riot_history_runs_owner ON riot_history_runs (puuid, updated_at DESC);
+
+      CREATE TABLE riot_match_ingestion (
+        puuid TEXT NOT NULL, regional_route TEXT NOT NULL, riot_match_id TEXT NOT NULL,
+        game_id INTEGER, first_discovered_at INTEGER NOT NULL,
+        last_discovered_at INTEGER NOT NULL,
+        detail_status TEXT NOT NULL CHECK (detail_status IN (
+          'pending','ready','retryable','deferred','unmappable','ineligible','error')),
+        detail_attempts INTEGER NOT NULL DEFAULT 0,
+        detail_transient_failures INTEGER NOT NULL DEFAULT 0,
+        detail_not_found_count INTEGER NOT NULL DEFAULT 0,
+        detail_next_retry_at INTEGER, detail_http_status INTEGER,
+        detail_last_error TEXT, detail_mapper_version INTEGER, detail_fetched_at INTEGER,
+        timeline_status TEXT NOT NULL CHECK (timeline_status IN (
+          'not_requested','pending','ready','retryable','deferred','unmappable','ineligible','error')),
+        timeline_attempts INTEGER NOT NULL DEFAULT 0,
+        timeline_transient_failures INTEGER NOT NULL DEFAULT 0,
+        timeline_not_found_count INTEGER NOT NULL DEFAULT 0,
+        timeline_next_retry_at INTEGER, timeline_http_status INTEGER,
+        timeline_last_error TEXT, timeline_mapper_version INTEGER, timeline_fetched_at INTEGER,
+        eligibility_reason TEXT, updated_at INTEGER NOT NULL,
+        PRIMARY KEY (puuid, riot_match_id)
+      );
+      CREATE INDEX idx_riot_ingestion_detail_work
+        ON riot_match_ingestion (puuid, detail_status, detail_next_retry_at);
+      CREATE INDEX idx_riot_ingestion_timeline_work
+        ON riot_match_ingestion (puuid, timeline_status, timeline_next_retry_at);
+
+      CREATE TABLE riot_history_run_matches (
+        run_id INTEGER NOT NULL, puuid TEXT NOT NULL, riot_match_id TEXT NOT NULL,
+        list_offset INTEGER NOT NULL, discovered_at INTEGER NOT NULL,
+        detail_disposition TEXT NOT NULL DEFAULT 'active'
+          CHECK (detail_disposition IN ('active','waived')),
+        detail_waived_reason TEXT, detail_waived_at INTEGER,
+        timeline_disposition TEXT NOT NULL
+          CHECK (timeline_disposition IN ('active','not_requested','waived')),
+        timeline_waived_reason TEXT, timeline_waived_at INTEGER,
+        detail_terminal_outcome TEXT CHECK (detail_terminal_outcome IS NULL OR
+          detail_terminal_outcome IN ('ready','ineligible','unmappable','error','waived')),
+        detail_terminal_reason TEXT, detail_terminal_at INTEGER,
+        timeline_terminal_outcome TEXT CHECK (timeline_terminal_outcome IS NULL OR
+          timeline_terminal_outcome IN ('ready','ineligible','unmappable','error','waived','not_requested')),
+        timeline_terminal_reason TEXT, timeline_terminal_at INTEGER,
+        CHECK ((detail_disposition = 'waived' AND detail_waived_reason IS NOT NULL AND detail_waived_at IS NOT NULL)
+          OR (detail_disposition = 'active' AND detail_waived_reason IS NULL AND detail_waived_at IS NULL)),
+        CHECK ((timeline_disposition = 'waived' AND timeline_waived_reason IS NOT NULL AND timeline_waived_at IS NOT NULL)
+          OR (timeline_disposition IN ('active','not_requested') AND timeline_waived_reason IS NULL AND timeline_waived_at IS NULL)),
+        CHECK ((detail_terminal_outcome IS NULL AND detail_terminal_reason IS NULL AND detail_terminal_at IS NULL)
+          OR (detail_terminal_outcome IS NOT NULL AND detail_terminal_at IS NOT NULL)),
+        CHECK ((timeline_terminal_outcome IS NULL AND timeline_terminal_reason IS NULL AND timeline_terminal_at IS NULL)
+          OR (timeline_terminal_outcome IS NOT NULL AND timeline_terminal_at IS NOT NULL)),
+        CHECK (detail_terminal_outcome <> 'waived' OR detail_disposition = 'waived'),
+        CHECK (timeline_terminal_outcome <> 'waived' OR timeline_disposition = 'waived'),
+        CHECK (detail_disposition <> 'waived' OR detail_terminal_outcome IS NULL OR detail_terminal_outcome = 'waived'),
+        CHECK (timeline_disposition <> 'waived' OR timeline_terminal_outcome IS NULL OR timeline_terminal_outcome = 'waived'),
+        CHECK (timeline_disposition <> 'not_requested' OR timeline_terminal_outcome IS NULL OR timeline_terminal_outcome = 'not_requested'),
+        CHECK (detail_terminal_outcome IS NULL OR
+          (detail_terminal_outcome = 'ready' AND detail_terminal_reason IS NULL) OR
+          (detail_terminal_outcome IN ('ineligible','unmappable','error','waived') AND detail_terminal_reason IS NOT NULL)),
+        CHECK (timeline_terminal_outcome IS NULL OR
+          (timeline_terminal_outcome IN ('ready','not_requested') AND timeline_terminal_reason IS NULL) OR
+          (timeline_terminal_outcome IN ('ineligible','unmappable','error','waived') AND timeline_terminal_reason IS NOT NULL)),
+        PRIMARY KEY (run_id, puuid, riot_match_id),
+        FOREIGN KEY (run_id, puuid) REFERENCES riot_history_runs (id, puuid) ON DELETE CASCADE,
+        FOREIGN KEY (puuid, riot_match_id) REFERENCES riot_match_ingestion (puuid, riot_match_id)
+      );
+      CREATE INDEX idx_riot_run_matches_offset
+        ON riot_history_run_matches (run_id, list_offset, riot_match_id);
+
+      CREATE TABLE history_remediation_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, puuid TEXT NOT NULL,
+        source_policy TEXT NOT NULL CHECK (source_policy IN ('local_only','explicit_match_v5')),
+        status TEXT NOT NULL CHECK (status IN (
+          'pending','running','paused','complete','complete_with_unresolved','cancelled','error')),
+        stage TEXT NOT NULL CHECK (stage IN (
+          'preflight','remap','optional_history','source_facts','participants',
+          'grade','labels','invalidate_queries','verify')),
+        target_grade_version INTEGER NOT NULL, target_label_version INTEGER NOT NULL,
+        target_rvi_version INTEGER NOT NULL, target_report_version INTEGER NOT NULL,
+        starting_versions_json TEXT NOT NULL, optional_history_run_id INTEGER,
+        last_game_id INTEGER, last_game_puuid TEXT,
+        processed_count INTEGER NOT NULL DEFAULT 0, changed_count INTEGER NOT NULL DEFAULT 0,
+        unresolved_count INTEGER NOT NULL DEFAULT 0, error_count INTEGER NOT NULL DEFAULT 0,
+        backup_path TEXT, backup_sha256 TEXT, last_error TEXT, terminal_reason TEXT,
+        started_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER,
+        UNIQUE (id, puuid),
+        FOREIGN KEY (optional_history_run_id, puuid) REFERENCES riot_history_runs (id, puuid)
+      );
+      CREATE INDEX idx_history_remediation_owner
+        ON history_remediation_runs (puuid, updated_at DESC);
+
+      CREATE TABLE match_enrichment_jobs (
+        game_id INTEGER NOT NULL, puuid TEXT NOT NULL, remediation_run_id INTEGER,
+        kind TEXT NOT NULL CHECK (kind IN (
+          'remap_lcu_detail','remap_lcu_timeline','fetch_v5_detail','fetch_v5_timeline',
+          'repair_source_facts','repair_participants','regrade','relabel')),
+        desired_version INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK (status IN (
+          'pending','running','paused','retryable','complete','unavailable','error')),
+        attempts INTEGER NOT NULL DEFAULT 0, next_retry_at INTEGER, last_error TEXT,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER,
+        PRIMARY KEY (game_id, puuid, kind),
+        FOREIGN KEY (game_id, puuid) REFERENCES matches (game_id, puuid) ON DELETE CASCADE,
+        FOREIGN KEY (remediation_run_id, puuid) REFERENCES history_remediation_runs (id, puuid)
+      );
+    `,
+  },
+  {
+    version: 23,
+    up: `
+      CREATE TABLE live_capture_compactions (
+        game_id INTEGER NOT NULL, puuid TEXT NOT NULL,
+        compact_source TEXT NOT NULL DEFAULT 'live_capture' CHECK (compact_source = 'live_capture'),
+        mapper_version INTEGER NOT NULL, compaction_version INTEGER NOT NULL,
+        source_start_ms INTEGER NOT NULL, source_end_ms INTEGER NOT NULL,
+        raw_event_count INTEGER NOT NULL, compact_event_count INTEGER NOT NULL,
+        raw_sha256 TEXT NOT NULL CHECK (length(raw_sha256) = 64),
+        compact_sha256 TEXT, analytics_fingerprint TEXT,
+        raw_state TEXT NOT NULL DEFAULT 'retained' CHECK (raw_state IN ('retained','pruned')),
+        status TEXT NOT NULL CHECK (status IN ('pending','verified','error')),
+        compacted_at INTEGER, verified_at INTEGER, raw_retain_until INTEGER,
+        raw_pruned_at INTEGER, last_error TEXT, updated_at INTEGER NOT NULL,
+        CHECK (source_start_ms <= source_end_ms),
+        CHECK (raw_event_count >= 0 AND compact_event_count >= 0),
+        CHECK (compact_sha256 IS NULL OR length(compact_sha256) = 64),
+        CHECK (analytics_fingerprint IS NULL OR length(analytics_fingerprint) = 64),
+        CHECK ((raw_state = 'retained' AND raw_pruned_at IS NULL)
+          OR (raw_state = 'pruned' AND raw_pruned_at IS NOT NULL)),
+        CHECK (status <> 'verified' OR (compact_sha256 IS NOT NULL
+          AND analytics_fingerprint IS NOT NULL AND compacted_at IS NOT NULL
+          AND verified_at IS NOT NULL AND raw_retain_until IS NOT NULL)),
+        PRIMARY KEY (game_id, puuid),
+        FOREIGN KEY (game_id, puuid) REFERENCES matches (game_id, puuid) ON DELETE CASCADE
+      );
+
+      CREATE TABLE export_artifacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL CHECK (kind IN ('full_backup','match_summary_csv')),
+        absolute_path TEXT NOT NULL, artifact_sha256 TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('present','missing')),
+        created_at INTEGER NOT NULL, last_verified_at INTEGER,
+        CHECK (length(artifact_sha256) = 64), UNIQUE (absolute_path)
+      );
+
+      CREATE TABLE artifact_publish_journal (
+        operation_id TEXT PRIMARY KEY CHECK (length(operation_id) = 36),
+        kind TEXT NOT NULL CHECK (kind IN ('full_backup','match_summary_csv')),
+        temp_path TEXT NOT NULL, final_path TEXT NOT NULL,
+        expected_sha256 TEXT CHECK (expected_sha256 IS NULL OR length(expected_sha256) = 64),
+        registry_row_json TEXT NOT NULL CHECK (json_valid(registry_row_json)),
+        phase TEXT NOT NULL CHECK (phase IN ('staging','published','registered','rolled_back')),
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, last_error TEXT,
+        CHECK (phase = 'staging' OR expected_sha256 IS NOT NULL), UNIQUE (final_path)
+      );
+
+      CREATE TABLE maintenance_operations (
+        operation_id TEXT PRIMARY KEY CHECK (length(operation_id) = 36),
+        kind TEXT NOT NULL CHECK (kind = 'restore'),
+        phase TEXT NOT NULL CHECK (phase IN (
+          'planned','candidate_verified','writers_quiesced','swapped','merging',
+          'verifying','complete','rolled_back','incomplete')),
+        source_path TEXT, source_sha256 TEXT CHECK (source_sha256 IS NULL OR length(source_sha256) = 64),
+        candidate_path TEXT, rollback_path TEXT,
+        registry_snapshot_json TEXT NOT NULL CHECK (json_valid(registry_snapshot_json)),
+        settings_snapshot_json TEXT NOT NULL CHECK (json_valid(settings_snapshot_json)),
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, last_error TEXT
+      );
+    `,
+  },
+  {
+    version: 24,
+    up: `
+      CREATE TRIGGER matches_grade_pair_insert
+      BEFORE INSERT ON matches
+      WHEN ((NEW.grade IS NULL) <> (NEW.grade_score IS NULL))
+        OR (NEW.grade IS NOT NULL AND
+          (NEW.grade_algorithm_version IS NULL OR COALESCE(NEW.grade_status, '') <> 'ready'
+           OR NEW.grade_composite_percentile IS NULL))
+        OR (NEW.grade IS NULL AND
+          (NEW.grade_composite_percentile IS NOT NULL OR NEW.grade_status = 'ready'
+           OR (NEW.grade_status IS NOT NULL AND NEW.grade_status NOT IN (
+             'unsupported_mode','short_game','invalid_duration','incomplete_lobby',
+             'missing_core_metric','missing_source_fact','terminated',
+             'ineligible_for_progression','unmatched','bot_or_tutorial','legacy_unknown'))))
+      BEGIN SELECT RAISE(ABORT, 'invalid complete grade cache state'); END;
+
+      CREATE TRIGGER matches_grade_pair_update
+      BEFORE UPDATE OF grade, grade_score, grade_algorithm_version,
+                       grade_status, grade_composite_percentile ON matches
+      WHEN ((NEW.grade IS NULL) <> (NEW.grade_score IS NULL))
+        OR (NEW.grade IS NOT NULL AND
+          (NEW.grade_algorithm_version IS NULL OR COALESCE(NEW.grade_status, '') <> 'ready'
+           OR NEW.grade_composite_percentile IS NULL))
+        OR (NEW.grade IS NULL AND
+          (NEW.grade_composite_percentile IS NOT NULL OR NEW.grade_status = 'ready'
+           OR (NEW.grade_status IS NOT NULL AND NEW.grade_status NOT IN (
+             'unsupported_mode','short_game','invalid_duration','incomplete_lobby',
+             'missing_core_metric','missing_source_fact','terminated',
+             'ineligible_for_progression','unmatched','bot_or_tutorial','legacy_unknown'))))
+      BEGIN SELECT RAISE(ABORT, 'invalid complete grade cache state'); END;
+
+      CREATE TRIGGER match_participants_grade_pair_insert
+      BEFORE INSERT ON match_participants
+      WHEN ((NEW.grade IS NULL) <> (NEW.grade_score IS NULL))
+        OR (NEW.grade IS NOT NULL AND
+          (NEW.grade_algorithm_version IS NULL OR COALESCE(NEW.grade_status, '') <> 'ready'
+           OR NEW.grade_composite_percentile IS NULL))
+        OR (NEW.grade IS NULL AND
+          (NEW.grade_composite_percentile IS NOT NULL OR NEW.grade_status = 'ready'
+           OR (NEW.grade_status IS NOT NULL AND NEW.grade_status NOT IN (
+             'unsupported_mode','short_game','invalid_duration','incomplete_lobby',
+             'missing_core_metric','missing_source_fact','terminated',
+             'ineligible_for_progression','unmatched','bot_or_tutorial','legacy_unknown'))))
+      BEGIN SELECT RAISE(ABORT, 'invalid complete grade cache state'); END;
+
+      CREATE TRIGGER match_participants_grade_pair_update
+      BEFORE UPDATE OF grade, grade_score, grade_algorithm_version,
+                       grade_status, grade_composite_percentile ON match_participants
+      WHEN ((NEW.grade IS NULL) <> (NEW.grade_score IS NULL))
+        OR (NEW.grade IS NOT NULL AND
+          (NEW.grade_algorithm_version IS NULL OR COALESCE(NEW.grade_status, '') <> 'ready'
+           OR NEW.grade_composite_percentile IS NULL))
+        OR (NEW.grade IS NULL AND
+          (NEW.grade_composite_percentile IS NOT NULL OR NEW.grade_status = 'ready'
+           OR (NEW.grade_status IS NOT NULL AND NEW.grade_status NOT IN (
+             'unsupported_mode','short_game','invalid_duration','incomplete_lobby',
+             'missing_core_metric','missing_source_fact','terminated',
+             'ineligible_for_progression','unmatched','bot_or_tutorial','legacy_unknown'))))
+      BEGIN SELECT RAISE(ABORT, 'invalid complete grade cache state'); END;
+
+      CREATE TABLE release_cleanup_state (
+        singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+        schema24_first_seen_release_sequence INTEGER NOT NULL,
+        rollback_observed_release_sequence INTEGER,
+        cleanup_eligible_release_sequence INTEGER,
+        repair_verified_at INTEGER, last_gate_error TEXT, updated_at INTEGER NOT NULL,
+        CHECK ((rollback_observed_release_sequence IS NULL) =
+               (cleanup_eligible_release_sequence IS NULL)),
+        CHECK (cleanup_eligible_release_sequence IS NULL OR
+               cleanup_eligible_release_sequence = rollback_observed_release_sequence + 1),
+        CHECK (rollback_observed_release_sequence IS NULL OR
+               (repair_verified_at IS NOT NULL AND repair_verified_at <= updated_at))
+      );
+    `,
+  },
 ]
 
 export const latestSchemaVersion = migrations.at(-1)?.version ?? 0

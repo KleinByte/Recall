@@ -70,7 +70,7 @@ async function fetchAramStats() {
     { cache: "no-cache" },
   )
   const parsed = parseMerakiFile(await response.json())
-  api.setSetting("aram-stats", JSON.stringify(parsed))
+  void api.saveAramStats(parsed)
   stats.value = parsed
 }
 
@@ -83,30 +83,26 @@ async function loadChampions() {
 }
 
 async function loadSettings() {
-  const storedSettings = await api.getSetting<string>("settings")
+  const storedSettings = await api.getUiSettings()
   if (storedSettings) {
-    const parsed: StoredSettings = JSON.parse(storedSettings)
-    isColoredWhenDone.value = parsed.isColoredWhenDone
-    showChampionNames.value = parsed.showChampionNames
-    sidebarCollapsed.value = parsed.sidebarCollapsed ?? false
+    isColoredWhenDone.value = storedSettings.isColoredWhenDone
+    showChampionNames.value = storedSettings.showChampionNames
+    sidebarCollapsed.value = storedSettings.sidebarCollapsed
   }
 }
 
 function persistSettings() {
-  api.setSetting(
-    "settings",
-    JSON.stringify({
-      isColoredWhenDone: isColoredWhenDone.value,
-      showChampionNames: showChampionNames.value,
-      sidebarCollapsed: sidebarCollapsed.value,
-    }),
-  )
+  void api.saveUiSettings({
+    isColoredWhenDone: isColoredWhenDone.value,
+    showChampionNames: showChampionNames.value,
+    sidebarCollapsed: sidebarCollapsed.value,
+  })
 }
 
 async function runStartupTransition() {
   let seenVersion: string | undefined
   try {
-    seenVersion = await api.getSetting<string>("last-seen-patch-notes-version")
+    seenVersion = await api.getLastSeenPatchNotesVersion()
   } catch {
     // Startup animation should still complete if settings are unavailable.
   }
@@ -122,7 +118,7 @@ async function runStartupTransition() {
 
   if (!hasNewPatchNotes) return
   showPatchNotes.value = true
-  void api.setSetting("last-seen-patch-notes-version", currentAppVersion)
+  void api.saveLastSeenPatchNotesVersion(currentAppVersion)
 }
 
 async function installUpdateWithRecall() {
@@ -179,9 +175,9 @@ onMounted(async () => {
   void loadDataDragonVersion()
   void runStartupTransition()
 
-  const storedStats = await api.getSetting<string>("aram-stats")
+  const storedStats = await api.getAramStats<AramStats>()
   if (storedStats) {
-    stats.value = JSON.parse(storedStats)
+    stats.value = storedStats
   } else {
     void fetchAramStats()
   }

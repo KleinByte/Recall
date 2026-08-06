@@ -24,6 +24,9 @@ import {
 import type { TrackedMode, ModeFamily } from "./types.js"
 import { buildPredictiveSection, type PredictiveSection, type PredictiveSignal } from "./predictive-insights.js"
 export { buildPredictiveSection, type PredictiveSection, type PredictiveSignal }
+export { conditionFindingV3, benjaminiHochberg } from "./statistical-contract-v3.js"
+
+export const SKILL_REPORT_VERSION = 3
 
 export type EvidenceLevel = "descriptive" | "comparative" | "experimental"
 export type EvidenceConfidence = "insufficient" | "low" | "medium" | "high"
@@ -239,7 +242,7 @@ export function buildPlayingConditions(
     observations.map((obs) => ({
       gameId: obs.gameId,
       startedAt: obs.playedAt,
-      endedAt: obs.endedAt,
+      durationSecs: obs.durationSecs,
       observation: obs,
     })),
   )

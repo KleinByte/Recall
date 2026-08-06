@@ -117,7 +117,7 @@ describe("Skill Insights", () => {
     expect(finding).toContain("finding.games }} games")
     expect(finding).toContain("finding.eligibleGames }} eligible in scope")
     expect(insights).toContain("timezoneLabel")
-    expect(insights).toContain("percentile point (PP)")
+    expect(insights).toContain("Grade component score")
     expect(insights).toContain('class="detail-pane"')
   })
 
@@ -262,7 +262,7 @@ describe("Skill page coordination", () => {
     expect(analyze).toContain("ChampionQuadrantChart")
     expect(analyze).toContain("ChampionLearningCurve")
     expect(analyze).toContain("classifyRviIdentity")
-    expect(analyze).toContain("per-match comparison percentiles, not RVI vector scores")
+    expect(analyze).toContain("lobby-relative Grade component scores")
     expect(signatures).toContain('type: "parallel"')
     expect(form).toContain("dimension.delta")
     expect(form).toContain('import { CHART_COLOURS, CHART_STYLES } from "../../charts/recall-chart-theme"')

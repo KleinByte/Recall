@@ -4,6 +4,7 @@ import { existsSync, readFileSync, unwatchFile, watchFile } from "node:fs"
 import path from "node:path"
 
 const DISCOVERY_INTERVAL_MS = 10_000
+const EXTERNAL_LOCKFILE_ENV = "RECALL_LCU_LOCKFILE"
 
 export interface LcuCredentials {
   address: string
@@ -46,6 +47,13 @@ export function parseLcuLockfile(lockfile: string): LcuCredentials | undefined {
   }
 }
 
+export function configuredLcuLockfilePath(
+  environment: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const configured = environment[EXTERNAL_LOCKFILE_ENV]?.trim()
+  return configured ? path.resolve(configured) : undefined
+}
+
 export class LcuDiscovery extends EventEmitter {
   private installDirectory?: string
   private discoveryTimer?: NodeJS.Timeout
@@ -55,7 +63,18 @@ export class LcuDiscovery extends EventEmitter {
   private stopped = true
 
   start() {
-    if (process.platform !== "win32" || this.discoveryTimer || !this.stopped) return
+    if (this.discoveryTimer || !this.stopped) return
+
+    const configuredLockfile = configuredLcuLockfilePath()
+    if (configuredLockfile) {
+      this.stopped = false
+      this.lockfilePath = configuredLockfile
+      watchFile(this.lockfilePath, { interval: 1_000 }, () => this.readLockfile())
+      this.readLockfile()
+      return
+    }
+
+    if (process.platform !== "win32") return
 
     this.stopped = false
     void this.discover()

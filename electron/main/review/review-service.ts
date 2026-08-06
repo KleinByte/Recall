@@ -2,7 +2,8 @@ import type { Database } from "better-sqlite3"
 import type { MatchesRepository } from "../database/matches-repo.js"
 import type { ParticipantsRepository } from "../database/participants-repo.js"
 import type { ReviewRepository } from "../database/review-repo.js"
-import { gradeLobby, GRADE_ALGORITHM_VERSION } from "../matches/grade.js"
+import { gradeLobbyV2, GRADE_ALGORITHM_VERSION, type GradeInput } from "../matches/grade.js"
+import { gradeLobbyV3 } from "../matches/grade-v3.js"
 import { resolveChampionClass } from "../matches/class-expectations.js"
 import { recordScopeForMatch } from "../matches/records.js"
 import type { MatchRow } from "../matches/types.js"
@@ -106,9 +107,10 @@ export class ReviewService {
     const detail = this.participants.getMatchDetail(match.gameId, puuid)
     if (detail.participants.length < 10) return false
     const duration = Math.max(1, match.durationSecs / 60)
-    const results = gradeLobby(detail.participants.map((participant) => ({
+    const inputs: GradeInput[] = detail.participants.map((participant) => ({
       participantId: participant.participantId,
       teamId: participant.teamId,
+      isPlayer: participant.isPlayer === 1,
       kills: participant.kills,
       deaths: participant.deaths,
       assists: participant.assists,
@@ -121,13 +123,21 @@ export class ReviewService {
       damageMitigated: participant.damageSelfMitigated,
       championClass: resolveChampionClass(participant.championId),
       role: participant.role,
-    })), match.modeFamily)
+    }))
+    const results = gradeLobbyV2(inputs, match.modeFamily)
     if (results.size === 0) return false
     this.participants.setGrades(match.gameId, puuid, results)
+    this.participants.setGradesV3(
+      match.gameId, puuid, gradeLobbyV3(inputs, match.modeFamily),
+    )
     const owner = detail.participants.find((participant) => participant.isPlayer === 1)
     const ownerGrade = owner ? results.get(owner.participantId) : undefined
     if (ownerGrade) {
-      this.matches.setGrade(match.gameId, puuid, ownerGrade.grade, ownerGrade.score)
+      this.matches.setGrade(
+        match.gameId, puuid, ownerGrade.grade, ownerGrade.score,
+        ownerGrade.breakdown.compositePercentile,
+        ownerGrade.breakdown.algorithmVersion,
+      )
     }
     return true
   }
@@ -197,10 +207,36 @@ function metric(
   get: (row: MatchRow) => number | undefined,
   preferredDirection: "higher" | "lower",
 ) {
-  const values = rows.map(get).filter((value): value is number => value !== undefined)
-  if (current === undefined || values.length === 0) return undefined
-  const baseline = values.reduce((sum, value) => sum + value, 0) / values.length
-  return { key, label, current, baseline, difference: current - baseline, preferredDirection }
+  const values = rows.map(get).filter((value): value is number =>
+    value !== undefined && Number.isFinite(value))
+  const floor = REVIEW_METRIC_FLOORS[key as keyof typeof REVIEW_METRIC_FLOORS]
+  if (current === undefined || !Number.isFinite(current) || values.length < 5 || floor === undefined) {
+    return undefined
+  }
+  const baseline = median(values)
+  const mad = median(values.map((value) => Math.abs(value - baseline)))
+  const robustScale = Math.max(1.4826 * mad, floor)
+  const direction = preferredDirection === "higher" ? 1 : -1
+  const effect = direction * (current - baseline) / robustScale
+  return { key, label, current, baseline, difference: current - baseline,
+    preferredDirection, evidenceGames: values.length, robustScale, effect }
+}
+
+export const REVIEW_METRIC_FLOORS = {
+  grade: .25,
+  kda: .50,
+  damage: 50,
+  deaths: 1,
+  gold: 25,
+  cs: .50,
+  vision: .10,
+  objectives: 25,
+} as const
+
+function median(values: readonly number[]): number {
+  const sorted = [...values].sort((left, right) => left - right)
+  const middle = Math.floor(sorted.length / 2)
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2
 }
 
 function highlights(
@@ -227,11 +263,11 @@ function highlights(
   const personal = [...(baseline?.metrics ?? [])]
     .map((entry) => ({
       ...entry,
-      directional: entry.difference * (entry.preferredDirection === "higher" ? 1 : -1),
-      scale: Math.abs(entry.difference) / Math.max(.01, Math.abs(entry.baseline)),
+      directional: entry.effect,
+      scale: Math.abs(entry.effect),
     }))
     .sort((a, b) => b.scale - a.scale || a.key.localeCompare(b.key))[0]
-  if (personal && personal.scale >= .1) result.push({
+  if (personal && personal.scale >= .5) result.push({
     kind: personal.directional >= 0 ? "improvement" : "regression",
     title: personal.directional >= 0 ? "Personal improvement" : "Personal regression",
     detail: `${personal.label} was ${Math.abs(personal.difference).toFixed(1)} ${personal.directional >= 0 ? "better" : "worse"} than the selected baseline.`,

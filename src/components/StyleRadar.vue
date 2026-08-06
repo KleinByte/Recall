@@ -31,12 +31,17 @@ const option = computed<EChartsCoreOption>(() => {
     areaStyle: { color: CHART_STYLES.accentAreaStrong },
   }]
 
-  if (props.recent) {
+  const recentValues = props.recent && props.axes.every((axis) => {
+    const value = props.recent?.find((entry) => entry.key === axis.key)?.value
+    return Number.isFinite(value)
+  })
+    ? props.axes.map((axis) => valueFor(props.recent!.find((entry) => entry.key === axis.key)!))
+    : undefined
+
+  if (recentValues) {
     seriesData.push({
       name: props.secondaryLabel ?? "Last 10 games",
-      value: props.axes.map((axis) =>
-        valueFor(props.recent?.find((entry) => entry.key === axis.key) ?? axis),
-      ),
+      value: recentValues,
       lineStyle: { color: CHART_COLOURS.live, width: 1.5 },
       itemStyle: { color: CHART_COLOURS.live },
       areaStyle: { color: CHART_STYLES.liveArea },
@@ -52,7 +57,7 @@ const option = computed<EChartsCoreOption>(() => {
         return [
           `<strong>${escapeTooltip(item.name ?? "Playstyle")}</strong>`,
           ...props.axes.map((axis, index) =>
-            `${escapeTooltip(axis.label)}: ${values[index] ?? 0}%<br><span style="color:${CHART_COLOURS.textSubtle}">${escapeTooltip(axis.description)}</span>`,
+            `${escapeTooltip(axis.label)}: ${Number.isFinite(values[index]) ? values[index] : "Unavailable"}%<br><span style="color:${CHART_COLOURS.textSubtle}">${escapeTooltip(axis.description)}</span>`,
           ),
         ].join("<br>")
       },

@@ -142,9 +142,7 @@ async function update(next: LiveSession) {
 }
 
 onMounted(async () => {
-  const stored = await api.getSetting<ChampionChoiceObjective>(
-    "recommendation-objective",
-  )
+  const stored = await api.getRecommendationObjective()
   if (stored) objective.value = stored
   void loadGameAssets().then((result) => { assets.value = result })
   await update(await api.getLiveSession())
@@ -277,7 +275,7 @@ const modifierChips = computed(() => {
 })
 
 async function changeObjective() {
-  api.setSetting("recommendation-objective", objective.value)
+  void api.saveRecommendationObjective(objective.value)
   recommendationSignature = ""
   await loadRecommendations(true)
 }

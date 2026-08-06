@@ -105,6 +105,53 @@ describe("Recall Vector Index performance profile", () => {
     expect(combat.score).toBeLessThan(70)
   })
 
+  it("shows a single match directly without applying the career-profile prior", () => {
+    const singleMatch = observations(1).map((observation) => ({
+      ...observation,
+      metrics: {
+        ...observation.metrics,
+        visionPerMinute: 3.11,
+      },
+    }))
+    const singleHistory = history(1, .9)
+    const match = buildPerformanceProfile({
+      family: "sr",
+      observations: singleMatch,
+      gradeComponentHistory: singleHistory,
+      scoringContext: "match",
+    })!
+    const profile = buildPerformanceProfile({
+      family: "sr",
+      observations: singleMatch,
+      gradeComponentHistory: singleHistory,
+    })!
+    const matchVision = match.dimensions.find((dimension) => dimension.key === "vision")!
+    const profileVision = profile.dimensions.find((dimension) => dimension.key === "vision")!
+
+    expect(matchVision.metrics.find((metric) => metric.key === "vision")?.score).toBe(90)
+    expect(matchVision.metrics.find((metric) => metric.key === "visionPace")?.score).toBe(100)
+    expect(matchVision.score).toBeGreaterThanOrEqual(92)
+    expect(profileVision.score).toBe(53)
+    expect(match.score).toBeGreaterThan(profile.score)
+    expect(match.dimensions).toHaveLength(6)
+    expect(match.dimensions.map((dimension) => dimension.key)).not.toEqual(
+      expect.arrayContaining(["consistency", "versatility"]),
+    )
+    expect(match.dimensions.every((dimension) => dimension.recentScore === undefined)).toBe(true)
+    expect(match.score).toBe(Math.round(
+      match.dimensions.reduce((total, dimension) => total + dimension.score, 0) /
+        match.dimensions.length,
+    ))
+
+    for (const dimension of match.dimensions) {
+      const rawFromDisplayedMetrics = dimension.metrics.reduce(
+        (total, metric) => total + metric.score * metric.weight,
+        0,
+      )
+      expect(dimension.score).toBeCloseTo(rawFromDisplayedMetrics, 0)
+    }
+  })
+
   it("omits unavailable measurements and rebalances the remaining weights", () => {
     const available: GradeComponent["key"][] = [
       "combat", "participation", "economy", "survival", "frontlining", "objectives",
@@ -134,6 +181,26 @@ describe("Recall Vector Index performance profile", () => {
     expect(keys).toHaveLength(8)
     expect(keys).toEqual(expect.arrayContaining(["sustain", "fightControl", "consistency", "versatility"]))
     expect(keys).not.toEqual(expect.arrayContaining(["vision", "objectives"]))
+  })
+
+  it("uses only match-observable Abyss dimensions for a single-match RVI", () => {
+    const match = buildPerformanceProfile({
+      family: "aram",
+      observations: observations(1, "aram"),
+      gradeComponentHistory: history(1, .65, [
+        "combat", "participation", "economy", "survival", "frontlining",
+      ]),
+      scoringContext: "match",
+    })!
+
+    expect(match.dimensions.map((dimension) => dimension.key)).toEqual([
+      "fighting",
+      "survivability",
+      "farming",
+      "teamPresence",
+      "sustain",
+      "fightControl",
+    ])
   })
 
   it("adds distinct fight signals when cached timeline evidence is available", () => {

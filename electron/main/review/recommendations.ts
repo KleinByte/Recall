@@ -1,7 +1,10 @@
 import type { ChampionChoiceObjective, ChoiceSignal } from "./types.js"
 import { confidenceForGames } from "./types.js"
+import { groupTimedGames } from "../../../src/helpers/time-contract-core.js"
+import { interpolatedQuantile, keyedRandom, type ConfidenceInterval } from "../matches/statistics.js"
 
 export interface RecommendationGame {
+  gameId?: number
   championId: number
   championName: string
   playedAt: number
@@ -10,6 +13,7 @@ export interface RecommendationGame {
   deaths: number
   assists: number
   gradeScore?: number
+  durationSecs?: number
 }
 
 export interface RecommendationCandidate {
@@ -32,8 +36,71 @@ export interface ChampionRecommendation {
   kda: number
   confidence: ReturnType<typeof confidenceForGames>
   recentDirection: "up" | "down" | "stable" | "unknown"
+  recentInterval?: ConfidenceInterval
   challengeNames: string[]
   signals: ChoiceSignal[]
+}
+
+export interface RecommendationDirectionV3 {
+  direction: "up" | "down" | "stable" | "unknown"
+  delta: number | null
+  interval: ConfidenceInterval | null
+  latestGames: number
+  precedingGames: number
+  draws: number
+}
+
+/** Fixed latest-ten versus preceding-ten Grade-v3 posterior comparison. */
+export function recommendationDirectionV3(
+  input: readonly RecommendationGame[],
+  family: string,
+  championId: number,
+  careerPriorMean: number,
+): RecommendationDirectionV3 {
+  const ordered = [...input].sort((left, right) =>
+    right.playedAt - left.playedAt || (right.gameId ?? 0) - (left.gameId ?? 0))
+  const labelled = ordered.slice(0, 20).map((game, index) => ({
+    ...game,
+    period: index < 10 ? "latest" as const : "preceding" as const,
+    syntheticId: game.gameId ?? index,
+  }))
+  const latest = labelled.slice(0, 10).filter((game) => Number.isFinite(game.gradeScore))
+  const preceding = labelled.slice(10, 20).filter((game) => Number.isFinite(game.gradeScore))
+  const base = { latestGames: latest.length, precedingGames: preceding.length }
+  if (latest.length < 5 || preceding.length < 5) {
+    return { ...base, direction: "unknown", delta: null, interval: null, draws: 0 }
+  }
+  const sessions = groupTimedGames(labelled.map((game) => ({
+    ...game,
+    gameId: game.syntheticId,
+    playedAt: game.playedAt,
+    durationSecs: game.durationSecs,
+  }))).map((group) => group.matches)
+  const posterior = (games: typeof labelled) => (
+    games.reduce((sum, game) => sum + game.gradeScore!, 0) + 5 * careerPriorMean
+  ) / (games.length + 5)
+  const delta = posterior(latest) - posterior(preceding)
+  const rng = keyedRandom(`recommendation:v3:${family}:${championId}`)
+  const samples: number[] = []
+  for (let attempt = 0; attempt < 10_000 && samples.length < 2_000; attempt += 1) {
+    const latestDraw: typeof labelled = []
+    const precedingDraw: typeof labelled = []
+    for (let index = 0; index < sessions.length; index += 1) {
+      for (const game of sessions[Math.floor(rng() * sessions.length)]) {
+        if (!Number.isFinite(game.gradeScore)) continue
+        ;(game.period === "latest" ? latestDraw : precedingDraw).push(game)
+      }
+    }
+    if (!latestDraw.length || !precedingDraw.length) continue
+    samples.push(posterior(latestDraw) - posterior(precedingDraw))
+  }
+  if (samples.length < 2_000) {
+    return { ...base, direction: "unknown", delta, interval: null, draws: samples.length }
+  }
+  const interval = { low: interpolatedQuantile(samples, .025)!,
+    high: interpolatedQuantile(samples, .975)!, level: .95 as const }
+  return { ...base, delta, interval, draws: samples.length,
+    direction: interval.low > 0 ? "up" : interval.high < 0 ? "down" : "stable" }
 }
 
 const OBJECTIVE_WEIGHTS: Record<
@@ -134,10 +201,11 @@ export function recommendChampions(
     const kills = games.reduce((sum, game) => sum + game.kills, 0)
     const deaths = games.reduce((sum, game) => sum + game.deaths, 0)
     const assists = games.reduce((sum, game) => sum + game.assists, 0)
-    const older = performance(games.slice(10, 20), modeWinRate, modeGrade)
-    const recentSignal = values.recent
-    const olderSignal = .55 * 50 + .45 * (
-      older.winRate > modeWinRate ? 60 : older.winRate < modeWinRate ? 40 : 50
+    const direction = recommendationDirectionV3(
+      games,
+      "active",
+      candidate.championId,
+      modeGrade,
     )
     return {
       championId: candidate.championId,
@@ -155,13 +223,8 @@ export function recommendChampions(
         : undefined,
       kda: deaths ? (kills + assists) / deaths : kills + assists,
       confidence: confidenceForGames(games.length),
-      recentDirection: games.length < 2
-        ? "unknown" as const
-        : recentSignal > olderSignal + 5
-          ? "up" as const
-          : recentSignal < olderSignal - 5
-            ? "down" as const
-            : "stable" as const,
+      recentDirection: direction.direction,
+      recentInterval: direction.interval ?? undefined,
       challengeNames: challenges,
       signals,
     }

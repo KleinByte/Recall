@@ -1,0 +1,30 @@
+name: recall-development
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    command: /bin/sh -ec "pnpm install --frozen-lockfile && exec /usr/local/bin/start-recall-dev"
+    environment:
+      DISPLAY: :99
+      # Electron stores stats.db, settings, and database backups here.
+      RECALL_USER_DATA_DIR: /recall-data
+    ports:
+      - "127.0.0.1:6080:6080"
+      - "127.0.0.1:3344:3344"
+    volumes:
+      - ./:/workspace
+      - recall-dev-node-modules:/workspace/node_modules
+      - recall-dev-user-data:/recall-data
+
+  sqlite:
+    image: keinos/sqlite3:3.46.1
+    profiles: [tools]
+    entrypoint: ["sqlite3", "/recall-data/stats.db"]
+    volumes:
+      - recall-dev-user-data:/recall-data
+
+volumes:
+  recall-dev-node-modules:
+  recall-dev-user-data:

@@ -14,6 +14,8 @@ const ROUTES: Record<string, string> = {
   RU: "europe",
   TR: "europe",
   TR1: "europe",
+  ME: "europe",
+  ME1: "europe",
   JP: "asia",
   JP1: "asia",
   KR: "asia",
@@ -40,6 +42,7 @@ const CANONICAL_PLATFORM: Record<string, string> = {
   NA: "NA1", EUW: "EUW1", EUNE: "EUN1", BR: "BR1", LAN: "LA1",
   LAS: "LA2", OCE: "OC1", JP: "JP1", TR: "TR1", PH: "PH2",
   SG: "SG2", TH: "TH2", TW: "TW2", VN: "VN2",
+  ME: "ME1",
 }
 
 export function canonicalPlatformId(platform: string): string {

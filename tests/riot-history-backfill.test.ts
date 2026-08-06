@@ -155,12 +155,9 @@ describe("RiotHistoryBackfill", () => {
     expect(participants.countGamesWithLobby(PUUID)).toBe(0)
   })
 
-  it("resolves the Match-V5 PUUID from Riot ID but stores under the client identity", async () => {
+  it("uses a locally supplied Match-V5 PUUID and never calls Account-V1", async () => {
     const api = {
       get: vi.fn(async (path: string) => {
-        if (path.includes("/accounts/by-riot-id/")) {
-          return { puuid: MATCH_PUUID }
-        }
         if (path.includes("/ids?")) return ["NA1_7"]
         return dto(7, MATCH_PUUID)
       }),
@@ -175,19 +172,17 @@ describe("RiotHistoryBackfill", () => {
       progress,
       {
         api: api as never,
-        riotId: { gameName: "Space Name", tagLine: "N#A" },
+        matchPuuid: MATCH_PUUID,
       },
     )
 
     await backfill.run(true)
 
     expect(api.get.mock.calls[0][0]).toContain(
-      "/accounts/by-riot-id/Space%20Name/N%23A",
-    )
-    expect(api.get.mock.calls[1][0]).toContain(
       `/by-puuid/${MATCH_PUUID}/ids?`,
     )
-    expect(api.get.mock.calls[1][0]).not.toContain(`/by-puuid/${PUUID}/`)
+    expect(api.get.mock.calls[0][0]).not.toContain(`/by-puuid/${PUUID}/`)
+    expect(api.get.mock.calls.some(([path]) => String(path).includes("/riot/account/"))).toBe(false)
     expect(matches.countMatches(PUUID)).toBe(1)
     expect(participants.getMatchDetail(7, PUUID).participants[0]).toMatchObject({
       isPlayer: 1,

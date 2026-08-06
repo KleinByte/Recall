@@ -5,6 +5,7 @@ import {
   matchAxes,
   pickBestAndWorst,
   rankChampions,
+  splitChampionSignals,
   shrinkToward,
 } from "../electron/main/matches/insights.js"
 import type { ChampionStatRow } from "../electron/main/database/matches-repo.js"
@@ -14,16 +15,16 @@ const champion = (
   overrides: Partial<ChampionStatRow> = {},
 ): ChampionStatRow => ({
   championId: 1,
-  games: 3,
-  wins: 2,
-  winRate: 2 / 3,
+  games: 5,
+  wins: 3,
+  winRate: 3 / 5,
   avgKills: 5,
   avgDeaths: 5,
   avgAssists: 10,
   kda: 3,
   avgDamageToChampions: 20000,
   avgGradeScore: 0,
-  gradedGames: 3,
+  gradedGames: 5,
   ...overrides,
 })
 
@@ -65,36 +66,30 @@ describe("rankChampions", () => {
     expect(ranked[0].championId).toBe(110)
   })
 
-  it("pulls a single outlier most of the way back to the player's average", () => {
-    const [only] = rankChampions(
+  it("keeps a graded singleton only as an unranked early signal", () => {
+    const split = splitChampionSignals(
       [champion({ championId: 40, games: 1, avgGradeScore: 2.0, gradedGames: 1 })],
       0,
     )
 
-    // Reported as 0.5 rather than 2.0: one game is weak evidence.
-    expect(only.adjustedGrade).toBeCloseTo(0.5)
-    expect(only.rawGrade).toBe(2.0)
-  })
-
-  it("does not exclude a champion for a thin sample", () => {
-    const ranked = rankChampions([champion({ games: 1, gradedGames: 1 })], 0)
-
-    expect(ranked).toHaveLength(1)
-    expect(ranked[0].confidence).toBe("thin")
+    expect(split.main).toEqual([])
+    expect(split.earlySignals).toHaveLength(1)
+    expect(split.earlySignals[0]).toMatchObject({ championId: 40, gradedGames: 1, confidence: "thin" })
+    expect(split.earlySignals[0].adjustedGrade).toBeCloseTo(0.5)
   })
 
   it("uses gradedGames for confidence rather than total games", () => {
-    const ranked = rankChampions(
+    const ranked = splitChampionSignals(
       [champion({ games: 20, gradedGames: 3 })],
       0,
-    )
+    ).earlySignals
 
     // 20 total games but only 3 graded → "thin", not "solid".
     expect(ranked[0].confidence).toBe("thin")
     expect(ranked[0].gradedGames).toBe(3)
   })
 
-  it("treats an ungraded champion as average rather than best", () => {
+  it("excludes an ungraded champion from every grade-derived rank", () => {
     const ranked = rankChampions(
       [
         champion({ championId: 7, avgGradeScore: undefined, gradedGames: 0 }),
@@ -103,15 +98,18 @@ describe("rankChampions", () => {
       0,
     )
 
-    expect(ranked[0].championId).toBe(8)
+    expect(ranked.map((row) => row.championId)).toEqual([])
+    expect(splitChampionSignals([
+      champion({ championId: 7, avgGradeScore: undefined, gradedGames: 0 }),
+    ], 0)).toEqual({ main: [], earlySignals: [] })
   })
 
   it("keeps a losing champion out of the top spot", () => {
     // The real defect: three games at -0.39 was being called a best champion.
     const ranked = rankChampions(
       [
-        champion({ championId: 31, games: 3, avgGradeScore: -0.39, gradedGames: 3 }),
-        champion({ championId: 147, games: 2, avgGradeScore: 1.49, gradedGames: 2 }),
+        champion({ championId: 31, games: 5, avgGradeScore: -0.39, gradedGames: 5 }),
+        champion({ championId: 147, games: 6, avgGradeScore: 1.49, gradedGames: 6 }),
       ],
       0.2,
     )

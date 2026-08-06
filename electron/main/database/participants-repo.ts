@@ -6,6 +6,9 @@ import type {
   TrackedMode,
 } from "../matches/types.js"
 import type { GradeResult } from "../matches/grade.js"
+import type { GradeLobbyV3Outcome } from "../matches/grade-v3.js"
+import { createHash } from "node:crypto"
+import { canonicalJson } from "./match-source-repo.js"
 
 export interface LobbyFilter {
   puuid: string
@@ -154,16 +157,23 @@ const TEAM_COLUMNS = [
  * Raise this whenever the scoreboard gains fields worth going back for, and
  * games still inside the client's window will be read again to fill them in.
  */
-export const LOBBY_DETAIL_VERSION = 6
-export const PARTICIPANT_CAPTURE_VERSION = 6
+export const LEGACY_LOBBY_DETAIL_VERSION = 6
+export const PARTICIPANT_DETAIL_VERSION = 7
+export const LOBBY_DETAIL_VERSION = PARTICIPANT_DETAIL_VERSION
+export const CAPTURE_MANIFEST_VERSION = 2
+export const PARTICIPANT_CAPTURE_VERSION = CAPTURE_MANIFEST_VERSION
 
 /**
  * Replaces rather than ignores, so a lobby captured under an earlier, narrower
  * schema is filled in properly the next time the game is read.
  */
+const PARTICIPANT_KEY_COLUMNS = new Set(["game_id", "puuid", "participant_id"])
 const INSERT_SQL = `
-  INSERT OR REPLACE INTO match_participants (${COLUMNS.join(", ")})
+  INSERT INTO match_participants (${COLUMNS.join(", ")})
   VALUES (${COLUMNS.map(() => "?").join(", ")})
+  ON CONFLICT(game_id, puuid, participant_id) DO UPDATE SET
+    ${COLUMNS.filter((column) => !PARTICIPANT_KEY_COLUMNS.has(column))
+      .map((column) => `${column} = excluded.${column}`).join(",\n    ")}
 `
 
 const INSERT_TEAM_SQL = `
@@ -517,7 +527,10 @@ export class ParticipantsRepository {
   setGrades(gameId: number, puuid: string, grades: Map<number, GradeResult>) {
     if (grades.size === 0) return
     const update = this.db.prepare(
-      "UPDATE match_participants SET grade = ?, grade_score = ? WHERE game_id = ? AND puuid = ? AND participant_id = ?",
+      `UPDATE match_participants
+       SET grade = ?, grade_score = ?, grade_algorithm_version = ?,
+           grade_status = 'ready', grade_composite_percentile = ?
+       WHERE game_id = ? AND puuid = ? AND participant_id = ?`,
     )
     const saveBreakdown = this.db.prepare(
       `INSERT OR REPLACE INTO match_grade_breakdowns
@@ -526,8 +539,72 @@ export class ParticipantsRepository {
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
     const save = this.db.transaction(() => {
+      const first = grades.values().next().value as GradeResult | undefined
+      if (!first) return
+      const algorithmVersion = first.breakdown.algorithmVersion
+      if ([...grades.values()].some((result) =>
+        result.breakdown.algorithmVersion !== algorithmVersion)) {
+        throw new Error("mixed_grade_algorithm_versions")
+      }
+      const owner = this.db.prepare(`
+        SELECT participant_id AS participantId FROM match_participants
+        WHERE game_id = ? AND puuid = ? AND is_player = 1
+      `).get(gameId, puuid) as { participantId: number } | undefined
+      if (!owner) throw new Error("grade_owner_participant_missing")
+      const fingerprint = createHash("sha256").update(canonicalJson({
+        algorithmVersion,
+        results: [...grades].sort(([left], [right]) => left - right).map(([participantId, result]) => ({
+          participantId,
+          grade: result.grade,
+          score: result.score,
+          compositePercentile: result.breakdown.compositePercentile,
+          components: result.breakdown.components,
+        })),
+      })).digest("hex")
+      this.db.prepare(`
+        INSERT INTO match_grade_attempts
+          (game_id, puuid, algorithm_version, owner_participant_id,
+           grade_status, input_fingerprint, attempted_at)
+        VALUES (?, ?, ?, ?, 'ready', ?, ?)
+        ON CONFLICT(game_id, puuid, algorithm_version) DO UPDATE SET
+          owner_participant_id = excluded.owner_participant_id,
+          grade_status = 'ready', input_fingerprint = excluded.input_fingerprint,
+          attempted_at = excluded.attempted_at
+      `).run(gameId, puuid, algorithmVersion, owner.participantId, fingerprint, Date.now())
+      const saveResult = this.db.prepare(`
+        INSERT INTO match_grade_results
+          (game_id, puuid, participant_id, algorithm_version, grade, grade_score,
+           composite_percentile, grade_status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'ready', ?)
+        ON CONFLICT(game_id, puuid, participant_id, algorithm_version) DO UPDATE SET
+          grade = excluded.grade, grade_score = excluded.grade_score,
+          composite_percentile = excluded.composite_percentile,
+          grade_status = 'ready', created_at = excluded.created_at
+      `)
+      const saveVersionedBreakdown = this.db.prepare(`
+        INSERT INTO match_grade_breakdown_versions
+          (game_id, puuid, participant_id, algorithm_version,
+           composite_percentile, components_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(game_id, puuid, participant_id, algorithm_version) DO UPDATE SET
+          composite_percentile = excluded.composite_percentile,
+          components_json = excluded.components_json, created_at = excluded.created_at
+      `)
       for (const [participantId, result] of grades) {
-        update.run(result.grade, result.score, gameId, puuid, participantId)
+        const createdAt = Date.now()
+        update.run(
+          result.grade, result.score, result.breakdown.algorithmVersion,
+          result.breakdown.compositePercentile, gameId, puuid, participantId,
+        )
+        saveResult.run(
+          gameId, puuid, participantId, result.breakdown.algorithmVersion,
+          result.grade, result.score, result.breakdown.compositePercentile, createdAt,
+        )
+        saveVersionedBreakdown.run(
+          gameId, puuid, participantId, result.breakdown.algorithmVersion,
+          result.breakdown.compositePercentile,
+          JSON.stringify(result.breakdown.components), createdAt,
+        )
         saveBreakdown.run(
           gameId,
           puuid,
@@ -540,6 +617,62 @@ export class ParticipantsRepository {
       }
     })
     save()
+  }
+
+  /** Persists Grade v3 shadow rows without touching the v2 compatibility cache. */
+  setGradesV3(gameId: number, puuid: string, outcome: GradeLobbyV3Outcome) {
+    const attemptedAt = Date.now()
+    const owner = this.db.prepare(`
+      SELECT participant_id AS participantId FROM match_participants
+      WHERE game_id = ? AND puuid = ? AND is_player = 1
+    `).get(gameId, puuid) as { participantId: number } | undefined
+    const fingerprint = createHash("sha256").update(canonicalJson({
+      algorithmVersion: 3,
+      status: outcome.status,
+      results: [...outcome.results].sort(([left], [right]) => left - right),
+      reason: outcome.reason ?? null,
+    })).digest("hex")
+    this.db.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO match_grade_attempts
+          (game_id, puuid, algorithm_version, owner_participant_id,
+           grade_status, input_fingerprint, attempted_at)
+        VALUES (?, ?, 3, ?, ?, ?, ?)
+        ON CONFLICT(game_id, puuid, algorithm_version) DO UPDATE SET
+          owner_participant_id = excluded.owner_participant_id,
+          grade_status = excluded.grade_status,
+          input_fingerprint = excluded.input_fingerprint,
+          attempted_at = excluded.attempted_at
+      `).run(gameId, puuid, owner?.participantId ?? null, outcome.status,
+        fingerprint, attemptedAt)
+      this.db.prepare(`DELETE FROM match_grade_results
+        WHERE game_id = ? AND puuid = ? AND algorithm_version = 3`)
+        .run(gameId, puuid)
+      if (outcome.status !== "ready") return
+      if (!owner) throw new Error("grade_v3_owner_missing")
+      const resultStatement = this.db.prepare(`
+        INSERT INTO match_grade_results
+          (game_id, puuid, participant_id, algorithm_version, grade,
+           grade_score, composite_percentile, grade_status, created_at)
+        VALUES (?, ?, ?, 3, ?, ?, ?, 'ready', ?)
+      `)
+      const breakdownStatement = this.db.prepare(`
+        INSERT INTO match_grade_breakdown_versions
+          (game_id, puuid, participant_id, algorithm_version,
+           composite_percentile, components_json, created_at)
+        VALUES (?, ?, ?, 3, ?, ?, ?)
+      `)
+      for (const [participantId, result] of outcome.results) {
+        resultStatement.run(gameId, puuid, participantId, result.grade,
+          result.gradeScore, result.compositePercentile, attemptedAt)
+        breakdownStatement.run(gameId, puuid, participantId,
+          result.compositePercentile,
+          canonicalJson({
+            components: result.breakdown.components,
+            omittedComponents: result.breakdown.omittedComponents,
+          }), attemptedAt)
+      }
+    })()
   }
 
   /** The full scoreboard for one game, ordered as it appears in the client. */

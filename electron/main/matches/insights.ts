@@ -58,6 +58,7 @@ export function rankChampions(
   baseline: number,
 ): RankedChampion[] {
   return rows
+    .filter((row) => row.gradedGames >= 5 && Number.isFinite(row.avgGradeScore))
     .map((row) => ({
       championId: row.championId,
       games: row.games,
@@ -66,13 +67,40 @@ export function rankChampions(
       kda: row.kda,
       rawGrade: row.avgGradeScore,
       adjustedGrade: shrinkToward(
-        row.avgGradeScore ?? baseline,
+        row.avgGradeScore!,
         row.gradedGames,
         baseline,
       ),
       confidence: confidenceOf(row.gradedGames),
     }))
-    .sort((a, b) => b.adjustedGrade - a.adjustedGrade)
+    .sort((a, b) =>
+      b.adjustedGrade - a.adjustedGrade ||
+      b.gradedGames - a.gradedGames ||
+      a.championId - b.championId)
+}
+
+export function splitChampionSignals(
+  rows: ChampionStatRow[],
+  baseline: number,
+): { main: RankedChampion[]; earlySignals: RankedChampion[] } {
+  const earlySignals = rows
+    .filter((row) => row.gradedGames >= 1 && row.gradedGames <= 4 &&
+      Number.isFinite(row.avgGradeScore))
+    .map((row) => ({
+      championId: row.championId,
+      games: row.games,
+      gradedGames: row.gradedGames,
+      winRate: row.winRate,
+      kda: row.kda,
+      rawGrade: row.avgGradeScore,
+      adjustedGrade: shrinkToward(row.avgGradeScore!, row.gradedGames, baseline),
+      confidence: confidenceOf(row.gradedGames),
+    }))
+    .sort((a, b) =>
+      b.adjustedGrade - a.adjustedGrade ||
+      b.gradedGames - a.gradedGames ||
+      a.championId - b.championId)
+  return { main: rankChampions(rows, baseline), earlySignals }
 }
 
 /**

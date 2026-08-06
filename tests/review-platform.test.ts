@@ -25,13 +25,13 @@ function match(
 }
 
 describe("review sessions", () => {
-  it("keeps an exact 90 minute idle gap together and splits above it", () => {
+  it("splits at an exact 90 minute idle gap", () => {
     const first = match(1, 0, 1_800)
     const exact = match(2, 1_800_000 + 90 * 60_000)
     const over = match(3, exact.playedAt + 1_800_000 + 90 * 60_000 + 1)
     const sessions = buildSessions([first, exact, over])
-    expect(sessions).toHaveLength(2)
-    expect(sessions[1].matches.map((entry) => entry.gameId)).toEqual([1, 2])
+    expect(sessions).toHaveLength(3)
+    expect(sessions[2].matches.map((entry) => entry.gameId)).toEqual([1])
   })
 
   it("honors split and join overrides and excludes remakes from results", () => {

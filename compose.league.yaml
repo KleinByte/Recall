@@ -1,0 +1,13 @@
+services:
+  app:
+    # Docker Desktop host networking lets the Linux container reach Riot's
+    # loopback-only LCU and Live Client APIs without publishing those ports.
+    network_mode: host
+    ports: !reset []
+    environment:
+      RECALL_LCU_LOCKFILE: /league-client/lockfile
+    volumes:
+      - type: bind
+        source: ${RECALL_LEAGUE_DIR:-C:/Riot Games/League of Legends}
+        target: /league-client
+        read_only: true

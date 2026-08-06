@@ -11,10 +11,14 @@ import {
 } from "electron"
 import electronUpdater from "electron-updater"
 import { fileURLToPath } from "node:url"
-import { writeFileSync } from "node:fs"
+import { renameSync, rmSync, writeFileSync } from "node:fs"
+import { createHash } from "node:crypto"
 import path from "node:path"
 import os from "node:os"
 import Store from "electron-store"
+import { SettingsStore, type UiSettings } from "./settings-store.js"
+import { MatchSourceRepository } from "./database/match-source-repo.js"
+import { resolveDisplayTimezone } from "./matches/time-contract.js"
 import { openDatabase } from "./database/connection.js"
 import {
   createUpdateSnapshot,
@@ -43,10 +47,13 @@ import { RiotBackfillRepository } from "./database/riot-backfill-repo.js"
 import {
   matchAxes,
   pickBestAndWorst,
-  rankChampions,
+  splitChampionSignals,
 } from "./matches/insights.js"
 import { buildSkillReport } from "./matches/skill-report.js"
-import { buildPerformanceProfile } from "./matches/performance-profile.js"
+import {
+  buildPerformanceProfile,
+  type PerformanceScoringContext,
+} from "./matches/performance-profile.js"
 import { recordScopeForMatch } from "./matches/records.js"
 import { championsNeededFor } from "./challenges/champion-needs.js"
 import { championStatusFor } from "./challenges/pinned.js"
@@ -74,6 +81,8 @@ import { canonicalPlatformId, regionalRouteFor } from "./riot/routing.js"
 import { normalizeRiotApiKey } from "./riot/api-client.js"
 import { BackupManager } from "./database/backup-manager.js"
 import { DataTrustService } from "./database/data-trust.js"
+import { ClearHistoryService } from "./database/clear-history-service.js"
+import { ExportService } from "./database/export-service.js"
 import {
   ReviewRepository,
   type ExperimentInput,
@@ -116,6 +125,15 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
   ? path.join(process.env.APP_ROOT, "public")
   : RENDERER_DIST
 
+// A development container (or an explicit local debug session) can keep all
+// Electron state, including the SQLite database and electron-store settings,
+// outside the normal Recall profile. This must happen before any call that
+// reads Electron paths or acquires the single-instance lock.
+const isolatedUserDataDir = process.env.RECALL_USER_DATA_DIR?.trim()
+if (isolatedUserDataDir) {
+  app.setPath("userData", path.resolve(isolatedUserDataDir))
+}
+
 // Disable GPU Acceleration for Windows 7
 if (os.release().startsWith("6.1")) app.disableHardwareAcceleration()
 
@@ -131,9 +149,7 @@ const preload = path.join(__dirname, "../preload/index.mjs")
 const indexHtml = path.join(RENDERER_DIST, "index.html")
 
 let store: Store
-const RIOT_API_KEY_STORE = "riot-api-key-encrypted"
-const CHAMPION_CATALOG_STORE = "champion-catalog"
-const LAUNCH_AT_LOGIN_STORE = "launch-at-login"
+let settingsStore: SettingsStore
 const START_HIDDEN_ARG = "--hidden"
 
 function configureLoginItem(enabled: boolean) {
@@ -150,6 +166,9 @@ function getDatabasePath() {
 }
 
 function getDatabaseBackupDir() {
+  if (isolatedUserDataDir) {
+    return path.join(app.getPath("userData"), "Recall Database Backups")
+  }
   return path.join(app.getPath("appData"), "Recall Database Backups")
 }
 
@@ -385,6 +404,10 @@ function getInsights(): InsightsRepository {
 
 /** Recovers history recorded before the app was renamed to Recall. */
 function adoptPreviousInstallData() {
+  // A deliberately isolated debug profile must always start clean. Importing
+  // the normal profile here would defeat the purpose of RECALL_USER_DATA_DIR.
+  if (isolatedUserDataDir) return
+
   const currentDir = app.getPath("userData")
   const legacyDir = path.join(app.getPath("appData"), "lol-challenge-tracker")
 
@@ -426,7 +449,7 @@ function getDataTrustService() {
 }
 
 function readRiotApiKey(): string | undefined {
-  const encrypted = store.get(RIOT_API_KEY_STORE)
+  const encrypted = settingsStore.getMain("riot-api-key-encrypted")
   if (typeof encrypted !== "string" || !safeStorage.isEncryptionAvailable()) {
     return undefined
   }
@@ -721,6 +744,7 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
     getParticipants(),
     getChampSelect(),
     getLiveGameCaptures(),
+    new MatchSourceRepository(getDatabase()),
   )
   const challengeSync = new ChallengeSync(
     client,
@@ -969,6 +993,17 @@ async function startRiotHistoryBackfill(
   const apiKey = readRiotApiKey()
   if (!active || !active.regionalRoute || !apiKey) return
 
+  const cached = getDatabase().prepare(
+    "SELECT match_puuid AS matchPuuid FROM riot_accounts WHERE puuid = ?",
+  ).get(active.summoner.puuid) as { matchPuuid?: string } | undefined
+  const matchPuuid = cached?.matchPuuid || active.summoner.puuid
+  saveRiotAccount(
+    active.summoner,
+    matchPuuid,
+    active.regionalRoute,
+    active.platformId ?? "",
+  )
+
   const queues = await fetchQueues(active.client)
   if (revision !== riotBackfillRevision || session !== active) return
 
@@ -987,18 +1022,7 @@ async function startRiotHistoryBackfill(
     getRiotBackfills(),
     {
       champSelect: getChampSelect(),
-      riotId: {
-        gameName: active.summoner.gameName,
-        tagLine: active.summoner.tagLine,
-      },
-      onAccountResolved: (matchPuuid) => {
-        saveRiotAccount(
-          active.summoner,
-          matchPuuid,
-          active.regionalRoute!,
-          active.platformId ?? "",
-        )
-      },
+      matchPuuid,
       onProgress: (state) => {
         if (revision !== riotBackfillRevision) return
         broadcast(win, "riot-history:updated", state)
@@ -1232,10 +1256,10 @@ function requireSession() {
  */
 function currentPuuid(): string | undefined {
   if (session) {
-    store.set("last-puuid", session.summoner.puuid)
+    settingsStore.setMain("last-puuid", session.summoner.puuid)
     return session.summoner.puuid
   }
-  return store.get("last-puuid") as string | undefined
+  return settingsStore.getMain("last-puuid")
 }
 
 function withPuuid<T extends object>(filter: T = {} as T): T & { puuid: string } {
@@ -1254,12 +1278,11 @@ function currentRankPoints(puuid: string, queue: string): number {
 
 /** Challenge ids the player is chasing. Kept as a setting, not as history. */
 function readPinned(): number[] {
-  const stored = store.get("pinned-challenges")
-  return Array.isArray(stored) ? (stored as number[]) : []
+  return settingsStore.getMain("pinned-challenges") ?? []
 }
 
 function storedChampionCatalog(): ChampionCatalogEntry[] {
-  return mergeChampionCatalog(store.get(CHAMPION_CATALOG_STORE))
+  return mergeChampionCatalog(settingsStore.getMain("champion-catalog"))
 }
 
 /** Champion class tags from the durable catalog, for class-aware RVI scaling. */
@@ -1269,7 +1292,7 @@ function storedChampionRoles(): ReadonlyMap<number, readonly string[]> {
 
 function rememberChampionCatalog(fetched: unknown): ChampionCatalogEntry[] {
   const merged = mergeChampionCatalog(storedChampionCatalog(), fetched)
-  store.set(CHAMPION_CATALOG_STORE, merged)
+  settingsStore.setMain("champion-catalog", merged)
   championNames = new Map(merged.map((champion) => [champion.id, champion.name]))
   return merged
 }
@@ -1315,21 +1338,53 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
 
   registerUpdaterIpc(ipcMain, updaterService)
 
-  ipcMain.on("store-set", (_event, key: string, value: unknown) => {
-    store.set(key, value)
-    if (key === LAUNCH_AT_LOGIN_STORE && typeof value === "boolean") {
-      configureLoginItem(value)
-    }
+  ipcMain.handle("settings:ui:get", () => settingsStore.getRenderer("settings"))
+  ipcMain.handle("settings:ui:set", (_event, value: UiSettings) =>
+    settingsStore.setRenderer("settings", value))
+  ipcMain.handle("settings:recommendation-objective:get", () =>
+    settingsStore.getRenderer("recommendation-objective"))
+  ipcMain.handle("settings:recommendation-objective:set", (_event, value: unknown) =>
+    settingsStore.setRenderer("recommendation-objective", value))
+  ipcMain.handle("settings:last-seen-patch-notes-version:get", () =>
+    settingsStore.getRenderer("last-seen-patch-notes-version"))
+  ipcMain.handle("settings:last-seen-patch-notes-version:set", (_event, value: unknown) =>
+    settingsStore.setRenderer("last-seen-patch-notes-version", value))
+  ipcMain.handle("settings:launch-at-login:get", () =>
+    settingsStore.getRenderer("launch-at-login"))
+  ipcMain.handle("settings:launch-at-login:set", (_event, value: unknown) => {
+    const enabled = settingsStore.setRenderer("launch-at-login", value) as boolean
+    configureLoginItem(enabled)
+    return enabled
   })
-
-  ipcMain.handle("store-get", (_event, key: string) => store.get(key))
+  ipcMain.handle("settings:display-timezone:get", () => {
+    const override = settingsStore.getRenderer("display-timezone") as string | undefined
+    return { timeZone: resolveDisplayTimezone(override), override }
+  })
+  ipcMain.handle("settings:display-timezone:set", (_event, value: unknown) => {
+    const override = settingsStore.setRenderer("display-timezone", value) as string
+    const timeZone = resolveDisplayTimezone(override)
+    broadcast(win, "recall:timezone-changed", { timeZone, override })
+    return { timeZone, override }
+  })
+  ipcMain.handle("settings:display-timezone:use-system", () => {
+    settingsStore.deleteRenderer("display-timezone")
+    const timeZone = resolveDisplayTimezone()
+    broadcast(win, "recall:timezone-changed", { timeZone })
+    return { timeZone }
+  })
+  ipcMain.handle("cache:aram-stats:get", () => settingsStore.getMain("aram-stats"))
+  ipcMain.handle("cache:aram-stats:set", (_event, value: unknown) =>
+    settingsStore.setMain("aram-stats", value))
+  ipcMain.handle("cache:ddragon-version:get", () => settingsStore.getMain("ddragon-version"))
+  ipcMain.handle("cache:ddragon-version:set", (_event, value: unknown) =>
+    settingsStore.setMain("ddragon-version", value))
 
   ipcMain.handle("champions:catalog", () => loadChampionCatalog())
 
   ipcMain.handle("data-trust:get", () =>
     getDataTrustService().report(
       currentPuuid(),
-      typeof store.get(RIOT_API_KEY_STORE) === "string",
+      settingsStore.getMain("riot-api-key-encrypted") !== undefined,
       safeStorage.isEncryptionAvailable(),
     ),
   )
@@ -1339,7 +1394,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     service.check()
     const report = service.report(
       currentPuuid(),
-      typeof store.get(RIOT_API_KEY_STORE) === "string",
+      settingsStore.getMain("riot-api-key-encrypted") !== undefined,
       safeStorage.isEncryptionAvailable(),
     )
     broadcast(win, "data-trust:updated", report)
@@ -1508,7 +1563,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
           }
         }),
       )
-      store.set("recommendation-objective", objective)
+      settingsStore.setMain("recommendation-objective", objective)
       return recommendChampions(candidates, objective)
     },
   )
@@ -1645,7 +1700,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
   ipcMain.handle("riot-api-key:status", () => {
     const puuid = currentPuuid()
     return {
-      configured: typeof store.get(RIOT_API_KEY_STORE) === "string",
+      configured: settingsStore.getMain("riot-api-key-encrypted") !== undefined,
       protected: safeStorage.isEncryptionAvailable(),
       history: puuid ? getRiotBackfills().getLatest(puuid) : undefined,
     }
@@ -1657,8 +1712,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
       throw new Error("Secure local storage is unavailable on this computer")
     }
     const encrypted = safeStorage.encryptString(apiKey).toString("base64")
-    store.set(RIOT_API_KEY_STORE, encrypted)
-    void startRiotHistoryBackfill(win, true)
+    settingsStore.setMain("riot-api-key-encrypted", encrypted)
     return { configured: true }
   })
 
@@ -1666,7 +1720,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     riotBackfillRevision += 1
     riotBackfillAbort?.abort()
     riotBackfillAbort = undefined
-    store.delete(RIOT_API_KEY_STORE)
+    settingsStore.deleteMain("riot-api-key-encrypted")
     return { configured: false }
   })
 
@@ -1825,14 +1879,15 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     // Champions are judged against how the player performs generally, so a
     // thin sample lands near their own average rather than at an extreme.
     const baseline = repo.getSummary(scoped).avgGradeScore ?? 0
-    const ranked = rankChampions(repo.getChampionStats(scoped), baseline)
+    const signals = splitChampionSignals(repo.getChampionStats(scoped), baseline)
+    const ranked = signals.main
 
-    return { ranked, ...pickBestAndWorst(ranked, 3) }
+    return { ranked, earlySignals: signals.earlySignals, ...pickBestAndWorst(ranked, 3) }
   })
 
   ipcMain.handle(
     "stats:rvi",
-    (_event, filter: Partial<StatsFilter>, family: ModeFamily) => {
+    (_event, filter: Partial<StatsFilter>, family: ModeFamily, scoringContext?: PerformanceScoringContext) => {
       const scoped = withPuuid(filter)
       const insightsRepo = getInsights()
       return buildPerformanceProfile({
@@ -1841,6 +1896,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
         gradeComponentHistory: insightsRepo.getGradeComponentHistory(scoped, 240),
         timelineHistory: insightsRepo.getRviTimelineHistory(scoped, 240),
         championRoles: storedChampionRoles(),
+        scoringContext,
       })
     },
   )
@@ -2012,13 +2068,13 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
   ipcMain.handle("challenges:pin", (_event, challengeId: number) => {
     const pinned = readPinned()
     if (!pinned.includes(challengeId)) {
-      store.set("pinned-challenges", [...pinned, challengeId])
+      settingsStore.setMain("pinned-challenges", [...pinned, challengeId])
     }
     return readPinned()
   })
 
   ipcMain.handle("challenges:unpin", (_event, challengeId: number) => {
-    store.set(
+    settingsStore.setMain(
       "pinned-challenges",
       readPinned().filter((id) => id !== challengeId),
     )
@@ -2092,17 +2148,64 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     const puuid = withPuuid().puuid
 
     const { canceled, filePath } = await dialog.showSaveDialog(win, {
-      title: "Export ARAM history",
-      defaultPath: `aram-history-${new Date().toISOString().slice(0, 10)}.json`,
-      filters: [{ name: "JSON", extensions: ["json"] }],
+      title: "Export Match summary CSV",
+      defaultPath: `recall-match-summary-${new Date().toISOString().slice(0, 10)}.csv`,
+      filters: [{ name: "CSV", extensions: ["csv"] }],
     })
 
     if (canceled || !filePath) return { exported: 0 }
 
     const matches = getRepository().getAllMatches(puuid)
-    writeFileSync(filePath, JSON.stringify(matches, null, 2), "utf8")
+    const columns = ["gameId", "playedAt", "mode", "championId", "win", "kills",
+      "deaths", "assists", "durationSecs", "grade", "gradeScore"] as const
+    const csvCell = (value: unknown) => {
+      const text = value === undefined || value === null ? "" : String(value)
+      return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text
+    }
+    const csv = `${columns.join(",")}\r\n${matches.map((match) =>
+      columns.map((column) => csvCell(match[column])).join(",")).join("\r\n")}\r\n`
+    const temporary = `${filePath}.tmp-${process.pid}`
+    try {
+      writeFileSync(temporary, csv, { encoding: "utf8", flag: "wx" })
+      renameSync(temporary, filePath)
+    } finally {
+      rmSync(temporary, { force: true })
+    }
+    const digest = createHash("sha256").update(csv, "utf8").digest("hex")
+    const now = Date.now()
+    getDatabase().prepare(
+      `INSERT INTO export_artifacts
+       (kind, absolute_path, artifact_sha256, status, created_at, last_verified_at)
+       VALUES ('match_summary_csv', ?, ?, 'present', ?, ?)
+       ON CONFLICT(absolute_path) DO UPDATE SET artifact_sha256=excluded.artifact_sha256,
+         status='present', last_verified_at=excluded.last_verified_at`,
+    ).run(path.resolve(filePath), digest, now, now)
 
     return { exported: matches.length, filePath }
+  })
+
+  ipcMain.handle("stats:full-backup", async () => {
+    const warning = await dialog.showMessageBox(win, {
+      type: "warning",
+      buttons: ["Cancel", "Create full backup"],
+      defaultId: 0,
+      cancelId: 0,
+      title: "Create full Recall backup",
+      message: "This lossless backup contains raw source bodies and player identifiers.",
+      detail: "It excludes the Riot API key, active-account pointer, machine preferences, and caches.",
+    })
+    if (warning.response !== 1) return { created: false }
+    const selected = await dialog.showSaveDialog(win, {
+      title: "Choose full backup name",
+      defaultPath: `recall-${new Date().toISOString().slice(0, 10)}`,
+    })
+    if (selected.canceled || !selected.filePath) return { created: false }
+    const target = selected.filePath.endsWith(".recall-backup")
+      ? selected.filePath : `${selected.filePath}.recall-backup`
+    const manifest = new ExportService(getDatabase(), getDatabasePath(), app.getVersion())
+      .createFullBackup(target, settingsStore.snapshotRestorable())
+    broadcast(win, "data-trust:updated")
+    return { created: true, path: target, manifest }
   })
 
   ipcMain.handle("stats:clear", async () => {
@@ -2110,14 +2213,14 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
 
     const { response } = await dialog.showMessageBox(win, {
       type: "warning",
-      buttons: ["Cancel", "Delete all history"],
+      buttons: ["Cancel", "Clear active history (recoverable)"],
       defaultId: 0,
       cancelId: 0,
-      title: "Delete recorded history",
-      message: "Delete all recorded match history?",
+      title: "Clear active history (recoverable)",
+      message: "Create a protected recovery point, then clear this account's active history?",
       detail:
-        "This removes local matches, scoreboards, live captures, and Riot import progress. " +
-        "Saving an API key again can re-import matches Riot still exposes.",
+        "Recall keeps the backup and existing exports. Collection stays disabled until you explicitly reconnect; " +
+        "reconnecting may re-import matches still in the League client's recent history.",
     })
 
     if (response !== 1) return { deleted: 0 }
@@ -2128,23 +2231,29 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     const activeBackfill = riotBackfillTask
     if (activeBackfill) await activeBackfill.catch(() => undefined)
     riotBackfillTask = undefined
-    getLiveGameCaptures().deleteAll(puuid)
-    getChampSelect().deleteAll(puuid)
-    getMasteryHistory().deleteAll(puuid)
-    getParticipants().deleteAll(puuid)
-    getRiotBackfills().deleteAll(puuid)
-    const deleted = getRepository().deleteAll(puuid)
+    const backup = getBackupManager().create(getDatabase(), "pre-clear")
+    const previousCollectionMode = settingsStore.getMain("collection-mode")
+    settingsStore.setMain("collection-mode", "disabled_after_clear")
+    let result: { deleted: number; recoveryPoint: string }
+    try {
+      result = new ClearHistoryService(getDatabase()).clear(puuid, backup)
+    } catch (error) {
+      if (previousCollectionMode === undefined) settingsStore.deleteMain("collection-mode")
+      else settingsStore.setMain("collection-mode", previousCollectionMode)
+      throw error
+    }
+    if (settingsStore.getMain("last-puuid") === puuid) settingsStore.deleteMain("last-puuid")
     broadcast(win, "stats:updated", { fetched: 0, inserted: 0 })
 
-    return { deleted }
+    return result
   })
 }
 
 function createDailyBackupIfNeeded(win: BrowserWindow) {
   const today = new Date().toISOString().slice(0, 10)
-  if (store.get("last-daily-backup") === today) return
+  if (settingsStore.getMain("last-daily-backup") === today) return
   getBackupManager().create(getDatabase(), "daily")
-  store.set("last-daily-backup", today)
+  settingsStore.setMain("last-daily-backup", today)
   broadcast(win, "data-trust:updated")
 }
 
@@ -2245,10 +2354,11 @@ async function main() {
   // Constructing electron-store creates config.json, so it must happen only
   // after the previous installation has had a chance to copy that file.
   store = new Store()
-  if (store.get(LAUNCH_AT_LOGIN_STORE) === undefined) {
-    store.set(LAUNCH_AT_LOGIN_STORE, true)
+  settingsStore = new SettingsStore(store)
+  if (settingsStore.getMain("launch-at-login") === undefined) {
+    settingsStore.setMain("launch-at-login", true)
   }
-  configureLoginItem(store.get(LAUNCH_AT_LOGIN_STORE) !== false)
+  configureLoginItem(settingsStore.getMain("launch-at-login") !== false)
 
   // Open and validate persistent data before showing the renderer. If startup
   // cannot continue, a half-initialised window would only emit a wall of "No

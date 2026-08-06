@@ -130,6 +130,24 @@ export class ChallengesRepository {
     return run(rows)
   }
 
+  /** Writes the current challenge projection and its changed history atomically. */
+  saveSnapshot(rows: ChallengeRow[], history: ChallengeHistoryRow[]): number {
+    if (rows.length === 0) return 0
+    const current = this.db.prepare(UPSERT_SQL)
+    const historical = this.db.prepare(
+      `INSERT OR IGNORE INTO challenge_history
+         (challenge_id, puuid, recorded_at, current_value, current_level)
+       VALUES (?, ?, ?, ?, ?)`,
+    )
+    return this.db.transaction(() => {
+      for (const row of rows) current.run(toValues(row))
+      for (const row of history) historical.run(
+        row.challengeId, row.puuid, row.recordedAt, row.currentValue, row.currentLevel,
+      )
+      return rows.length
+    })()
+  }
+
   getAll(filter: ChallengeFilter): ChallengeRow[] {
     const conditions = ["puuid = ?"]
     const params: (string | number)[] = [filter.puuid]

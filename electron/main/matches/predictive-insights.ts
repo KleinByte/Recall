@@ -92,7 +92,7 @@ export function buildPregameRows(observations: InsightObservation[]): PregameRow
     sorted.map((obs) => ({
       gameId: obs.gameId,
       startedAt: obs.playedAt,
-      endedAt: obs.endedAt,
+      durationSecs: obs.durationSecs,
       observation: obs,
     })),
   )

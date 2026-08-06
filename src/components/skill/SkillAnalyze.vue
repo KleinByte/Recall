@@ -10,6 +10,7 @@ import SessionEnduranceChart from "./SessionEnduranceChart.vue"
 import { classifyRviIdentity } from "../../helpers/rvi-identity"
 import type { Champion } from "../../types/lol"
 import type { SkillReportV2 } from "../../types/stats"
+import { groupTimedGames } from "../../helpers/time-contract-core"
 
 const props = defineProps<{ report: SkillReportV2; champions: Champion[] | null }>()
 
@@ -28,14 +29,8 @@ const form = computed(() => {
   return { label: "Holding", detail: `${movement > 0 ? "+" : ""}${movement.toFixed(1)} average vector movement`, tone: "neutral" }
 })
 const sessionCount = computed(() => {
-  const ordered = [...props.report.visuals.history].sort((left, right) => left.playedAt - right.playedAt)
-  let sessions = 0
-  let previousEnd = -Infinity
-  for (const game of ordered) {
-    if (game.playedAt - previousEnd > 90 * 60_000) sessions += 1
-    previousEnd = game.playedAt + game.durationSecs * 1_000
-  }
-  return sessions
+  return groupTimedGames(props.report.visuals.history)
+    .filter((session) => session.kind === "analytical").length
 })
 </script>
 
@@ -103,7 +98,7 @@ const sessionCount = computed(() => {
       >
         <p class="chart-copy">
           Every line is one game's eight Recall Grade signals. Green is a win, red is a loss;
-          hover a line to isolate its shape. These are per-match comparison percentiles, not RVI vector scores.
+          hover a line to isolate its shape. These are lobby-relative Grade component scores, not population percentiles or RVI vector scores.
         </p>
         <MatchSignaturesChart
           :rows="report.visuals.gradeComponents"

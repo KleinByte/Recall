@@ -156,11 +156,11 @@ const shortDate = (timestamp: number) => new Date(timestamp).toLocaleDateString(
         <div>
           <p class="chapter">02 · Grade DNA</p>
           <h2>What your grades are made of</h2>
-          <p>Each cell is a percentile point (PP): 70 means that component ranked above roughly 70% of its comparison group in that match.</p>
+          <p>Each cell is a Grade component score compared with that match's valid lobby. It blends lobby rank and performance magnitude; it is not a population percentile.</p>
         </div>
         <div v-if="strongestComponent" class="callout">
-          <span>Most reliable signal</span>
-          <strong>{{ strongestComponent.label }} · {{ Math.round(strongestComponent.value * 100) }} PP</strong>
+          <span>Highest average component</span>
+          <strong>{{ strongestComponent.label }} · {{ Math.round(strongestComponent.value * 100) }}</strong>
         </div>
       </header>
       <GradeDnaHeatmap :rows="report.visuals.gradeComponents" />

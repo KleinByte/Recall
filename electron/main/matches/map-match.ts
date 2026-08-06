@@ -3,6 +3,8 @@ import { isEligibleMatch } from "./eligibility.js"
 import type { QueueInfo } from "./queues.js"
 import type { LcuGame, MatchRow } from "./types.js"
 
+export const LCU_MATCH_MAPPER_VERSION = 2
+
 const int = (value: number | undefined) => Math.trunc(value ?? 0)
 const bool = (value: boolean | undefined) => (value ? 1 : 0)
 

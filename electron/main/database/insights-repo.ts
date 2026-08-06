@@ -67,7 +67,6 @@ export interface InsightMetrics {
 export interface InsightObservation {
   gameId: number
   playedAt: number
-  endedAt?: number
   mode: TrackedMode
   family: ModeFamily
   queueId: number
@@ -631,7 +630,6 @@ export class InsightsRepository {
       return {
         gameId: m.game_id,
         playedAt: m.played_at,
-        endedAt: m.duration_secs > 0 ? m.played_at + m.duration_secs * 1000 : undefined,
         mode: m.mode,
         family: m.mode_family,
         queueId: m.queue_id,

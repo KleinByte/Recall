@@ -44,12 +44,15 @@ const riotHistory = ref<RiotHistoryBackfillState>()
 const trust = ref<DataTrustReport>()
 const trustBusy = ref(false)
 const launchAtLogin = ref(true)
+const displayTimezone = ref("")
+const resolvedTimezone = ref("UTC")
+const timezoneMessage = ref("")
 
 const riotHistoryMessage = computed(() => {
   const history = riotHistory.value
   if (!history) {
     return props.connected
-      ? "Save a key to import the complete Match-V5 history available for this account."
+      ? "Save a key, then explicitly start the Match-V5 history import for this account."
       : "Connect the League client so Recall can identify the account and regional route."
   }
 
@@ -84,14 +87,41 @@ onMounted(() => {
   })
   void loadTrust()
   events.on("data-trust:updated", () => void loadTrust())
-  void api.getSetting<boolean>("launch-at-login").then((value) => {
+  void api.getLaunchAtLogin().then((value) => {
     launchAtLogin.value = value !== false
+  })
+  void api.getDisplayTimezone().then((value) => {
+    displayTimezone.value = value.override ?? ""
+    resolvedTimezone.value = value.timeZone
+  })
+  events.on("recall:timezone-changed", (value: { timeZone: string; override?: string }) => {
+    displayTimezone.value = value.override ?? ""
+    resolvedTimezone.value = value.timeZone
   })
 })
 
 function setLaunchAtLogin(value: boolean) {
   launchAtLogin.value = value
-  api.setSetting("launch-at-login", value)
+  void api.saveLaunchAtLogin(value)
+}
+
+async function saveTimezone() {
+  timezoneMessage.value = ""
+  try {
+    const result = await api.saveDisplayTimezone(displayTimezone.value.trim())
+    displayTimezone.value = result.override
+    resolvedTimezone.value = result.timeZone
+    timezoneMessage.value = "Display timezone saved."
+  } catch {
+    timezoneMessage.value = "Enter a valid IANA timezone, such as America/Chicago."
+  }
+}
+
+async function useSystemTimezone() {
+  const result = await api.useSystemTimezone()
+  displayTimezone.value = ""
+  resolvedTimezone.value = result.timeZone
+  timezoneMessage.value = "Using the system timezone."
 }
 
 async function loadTrust(check = false) {
@@ -141,8 +171,8 @@ async function saveRiotKey() {
     riotApiKey.value = ""
     riotKeyConfigured.value = true
     riotKeyMessage.value = props.connected
-      ? "API key saved. The full history import is starting in the background."
-      : "API key saved. The import will start when the League client connects."
+      ? "API key saved. Choose Enrich historical details to start an explicit import."
+      : "API key saved. Open and sign in to the League client before starting an import."
   } catch (error) {
     riotKeyMessage.value = (error as Error).message
   }
@@ -209,6 +239,17 @@ async function exportHistory() {
     message.value = result.filePath
       ? `Exported ${result.exported} matches.`
       : "Export cancelled."
+  } finally {
+    busy.value = false
+  }
+}
+
+async function createFullBackup() {
+  busy.value = true
+  message.value = ""
+  try {
+    const result = await api.createFullBackup()
+    message.value = result.created ? "Created a lossless full Recall backup." : "Backup cancelled."
   } finally {
     busy.value = false
   }
@@ -284,6 +325,25 @@ const formatDate = (value?: number) =>
           <span class="muted hint">Opens hidden in the notification area so game recording is ready.</span>
         </span>
       </label>
+
+      <div class="timezone-setting">
+        <UiField label="Display timezone" compact>
+          <input
+            v-model="displayTimezone"
+            class="league-input"
+            placeholder="America/Chicago"
+            @keyup.enter="saveTimezone"
+          />
+        </UiField>
+        <div class="actions">
+          <UiButton type="button" @click="saveTimezone">Save timezone</UiButton>
+          <UiButton type="button" variant="ghost" @click="useSystemTimezone">
+            Use system timezone
+          </UiButton>
+        </div>
+        <span class="muted hint">Current: {{ resolvedTimezone }}</span>
+        <span v-if="timezoneMessage" class="muted hint">{{ timezoneMessage }}</span>
+      </div>
     </Panel>
 
     <Panel title="Application updates">
@@ -413,14 +473,17 @@ const formatDate = (value?: number) =>
           Resync now
         </UiButton>
         <UiButton :disabled="busy" @click="exportHistory">
-          Export JSON
+          Match summary CSV
+        </UiButton>
+        <UiButton :disabled="busy" @click="createFullBackup">
+          Full Recall backup
         </UiButton>
         <UiButton
           variant="danger"
           :disabled="busy"
           @click="clearHistory"
         >
-          Clear history
+          Clear active history (recoverable)
         </UiButton>
       </div>
 
@@ -438,6 +501,10 @@ const formatDate = (value?: number) =>
       </template>
 
       <div v-if="trust" class="trust-grid">
+        <p class="muted note">
+          {{ trust.clientHealth.status === "healthy" ? "Client data healthy" : "Client data needs attention" }}
+          / Match-V5 history {{ trust.optionalHistory.status === "not_configured" ? "not configured" : trust.optionalHistory.status.replaceAll("_", " ") }}
+        </p>
         <Surface as="article" variant="inset" padding="compact" class="trust-card">
           <h3>Local database</h3>
           <dl class="trust-list">

@@ -71,11 +71,11 @@ const events = useApiEvents()
 type Tab = "review" | "sessions" | "bookmarks" | "experiments"
 type MatchTab = "overview" | "stats" | "timeline" | "probability"
 type InsightTab = "rvi" | "performance"
-type TimelineView = "chronology" | "playback"
+type TimelineMapView = "deaths" | "playback"
 const tab = ref<Tab>("review")
 const matchTab = ref<MatchTab>("overview")
 const insightTab = ref<InsightTab>("rvi")
-const timelineView = ref<TimelineView>("chronology")
+const timelineMapView = ref<TimelineMapView>("deaths")
 const review = ref<MatchReview>()
 const gameRvi = ref<PerformanceProfile>()
 const careerRvi = ref<PerformanceProfile>()
@@ -115,12 +115,12 @@ const pageTabs = [
   { value: "experiments", label: "Experiments" },
 ]
 const insightTabs = [
-  { value: "rvi", label: "RVI profile" },
+  { value: "rvi", label: "RVI" },
   { value: "performance", label: "Grade & context" },
 ]
 const matchTabOptions = matchTabs.map((item) => ({ value: item.id, label: item.label }))
-const timelineViewOptions = [
-  { value: "chronology", label: "Chronology" },
+const timelineMapViewOptions = [
+  { value: "deaths", label: "Deaths" },
   { value: "playback", label: "Playback" },
 ]
 
@@ -415,11 +415,39 @@ const timelineCursor = computed(() => {
   }
 })
 
+const timelineScrubbing = ref(false)
+
 function setTimelineCursor(event: PointerEvent) {
   const target = event.currentTarget as HTMLElement
   const rect = target.getBoundingClientRect()
   const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
   timelineCursorTimestamp.value = ratio * timelineDomain.value.maximumTimestamp
+}
+
+function beginTimelineScrub(event: PointerEvent) {
+  timelineScrubbing.value = true
+  const target = event.currentTarget as HTMLElement
+  target.setPointerCapture(event.pointerId)
+  setTimelineCursor(event)
+}
+
+function updateTimelineScrub(event: PointerEvent) {
+  if (timelineScrubbing.value) setTimelineCursor(event)
+}
+
+function endTimelineScrub(event: PointerEvent) {
+  if (!timelineScrubbing.value) return
+  setTimelineCursor(event)
+  timelineScrubbing.value = false
+  const target = event.currentTarget as HTMLElement
+  if (target.hasPointerCapture(event.pointerId)) target.releasePointerCapture(event.pointerId)
+}
+
+function selectTimelineTimestamp(timestamp: number) {
+  timelineCursorTimestamp.value = Math.max(
+    0,
+    Math.min(timelineDomain.value.maximumTimestamp, timestamp),
+  )
 }
 
 function moveTimelineCursor(direction: number) {
@@ -455,7 +483,7 @@ async function load(gameId?: number) {
   error.value = ""
   timelineFilter.value = "all"
   timelineCursorTimestamp.value = 0
-  timelineView.value = "chronology"
+  timelineMapView.value = "deaths"
   matchTab.value = "overview"
   insightTab.value = "rvi"
   augmentSummary.value = {}
@@ -477,7 +505,7 @@ async function load(gameId?: number) {
           modeFamily: family,
           sinceMs: current.match.playedAt - 1,
           untilMs: current.match.playedAt + 1,
-        }, family),
+        }, family, "match"),
         api.getRviProfile({ modeFamily: family }, family),
       ])
       gameRvi.value = singleResult.status === "fulfilled" ? singleResult.value : undefined
@@ -775,6 +803,7 @@ onBeforeUnmount(() => {
             <p>
               The gold shape is this match. The blue comparison is your recorded
               {{ review.match.modeFamily === 'classic' ? 'League Classic' : review.match.modeFamily === 'sr' ? `Summoner's Rift` : 'ARAM' }} profile.
+              Match RVI uses only evidence from this game, without career sample stabilization.
             </p>
             <div class="rvi-score">
               <strong>{{ gameRvi?.score ?? '—' }}</strong>
@@ -973,31 +1002,18 @@ onBeforeUnmount(() => {
 
       <section v-if="matchTab === 'timeline'" class="card match-tab-panel" role="tabpanel">
         <div v-if="review.timeline.status === 'ready' && review.timeline.summary">
-          <Tabs
-            v-model="timelineView"
-            :options="timelineViewOptions"
-            label="Timeline views"
-            variant="compact"
-            class="timeline-view-tabs"
-          />
-          <MatchPlaybackMap
-            v-if="timelineView === 'playback'"
-            class="timeline-playback"
-            :match="review.match"
-            :participants="review.scoreboard"
-            :frames="review.timeline.summary.frames"
-            :events="review.timeline.summary.events"
-            v-model:timestamp="timelineCursorTimestamp"
-          />
-          <div v-else class="timeline-chronology" role="tabpanel">
+          <div class="timeline-chronology">
           <div class="timeline-visuals">
             <div class="gold-chart-column">
               <header class="timeline-card-heading">
                 <div><span class="eyebrow">Economy</span><h3>Team gold advantage</h3></div>
                 <span class="muted">Blue + / Red −</span>
               </header>
-              <div class="gold-chart-wrap" tabindex="0" aria-label="Interactive team gold advantage chart. Use left and right arrow keys to inspect each minute."
-                @pointermove="setTimelineCursor"
+              <div class="gold-chart-wrap" tabindex="0" aria-label="Interactive team gold advantage chart. Click or drag to select playback time; use left and right arrow keys to inspect each minute."
+                @pointerdown="beginTimelineScrub"
+                @pointermove="updateTimelineScrub"
+                @pointerup="endTimelineScrub"
+                @pointercancel="timelineScrubbing = false"
                 @keydown.left.prevent="moveTimelineCursor(-1)" @keydown.right.prevent="moveTimelineCursor(1)">
                 <svg class="gold-chart" viewBox="0 0 100 100" preserveAspectRatio="none"
                   aria-label="Blue versus Red team gold advantage across the match">
@@ -1031,20 +1047,20 @@ onBeforeUnmount(() => {
               <div v-if="timelineEventTracks.length" class="timeline-event-tracks" aria-label="Match events aligned to the gold timeline">
                 <div v-for="track in timelineEventTracks" :key="track.id" class="timeline-event-track" :class="track.id">
                   <strong>{{ track.label }}</strong>
-                  <span
+                  <button
                     v-for="marker in track.markers"
                     :key="marker.event.eventId"
+                    type="button"
                     class="event-track-marker"
                     :class="timelineMarkerClasses(marker.event)"
                     :style="{ left: `${marker.x}%`, top: `${marker.top}px` }"
                     :title="timelineMarkerTitle(marker.event)"
                     :aria-label="timelineMarkerTitle(marker.event)"
-                    role="img"
-                    tabindex="0"
+                    @click="selectTimelineTimestamp(marker.event.timestamp)"
                   >
                     <img v-if="timelineMarkerIcon(marker.event)" :src="timelineMarkerIcon(marker.event)" alt="" />
                     <span v-else>{{ timelineMarkerGlyph(marker.event) }}</span>
-                  </span>
+                  </button>
                 </div>
               </div>
               <div v-if="finalTimelineFrame" class="gold-legend" aria-label="Final team gold totals">
@@ -1056,11 +1072,32 @@ onBeforeUnmount(() => {
                 </span>
               </div>
             </div>
-            <MatchDeathMap
-              :match="review.match"
-              :participants="review.scoreboard"
-              :events="review.timeline.summary.events"
-            />
+            <div class="timeline-map-column">
+              <Tabs
+                v-model="timelineMapView"
+                :options="timelineMapViewOptions"
+                label="Timeline map"
+                variant="compact"
+                class="timeline-map-tabs"
+              />
+              <div class="timeline-map-pane" role="tabpanel">
+                <MatchDeathMap
+                  v-if="timelineMapView === 'deaths'"
+                  :match="review.match"
+                  :participants="review.scoreboard"
+                  :events="review.timeline.summary.events"
+                />
+                <MatchPlaybackMap
+                  v-else
+                  compact
+                  :match="review.match"
+                  :participants="review.scoreboard"
+                  :frames="review.timeline.summary.frames"
+                  :events="review.timeline.summary.events"
+                  v-model:timestamp="timelineCursorTimestamp"
+                />
+              </div>
+            </div>
           </div>
           <div class="timeline-filters">
             <button v-for="filter in timelineFilters"
@@ -1328,19 +1365,18 @@ h2 { margin: 0; }
 textarea { width: 100%; box-sizing: border-box; min-height: 110px; resize: vertical; background: var(--surface-0); color: var(--text-primary); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: var(--space-3); font: 12px var(--font-body); }
 .tag-list, .inline, .experiment-outcome, .session-games { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-2); }.tag { border: 1px solid var(--border-subtle); background: var(--surface-2); color: var(--text-secondary); border-radius: 99px; padding: 4px 9px; }.tag.selected { color: var(--gold-bright); border-color: var(--gold); }
 .inline input { flex: 1; }.experiment-outcome { justify-content: space-between; align-items: center; }.outcome-note { flex-basis: 100%; }
-.timeline-view-tabs { margin-bottom: var(--ui-space-4); }
-.timeline-playback { max-width: 900px; margin-inline: auto; }
 .timeline-chronology { min-width: 0; }
 .timeline-visuals { display: grid; grid-template-columns: minmax(0, 1fr) minmax(310px, 380px); align-items: start; gap: clamp(18px, 2.5vw, 34px); }
+.timeline-map-column { min-width: 0; }.timeline-map-tabs { margin-bottom: 8px; }.timeline-map-pane { min-width: 0; }
 .timeline-card-heading { display: flex; align-items: end; justify-content: space-between; gap: 10px; min-height: 34px; margin-bottom: 8px; }.timeline-card-heading h3 { margin: 1px 0 0; color: var(--gold-bright); font: 16px var(--font-heading); }.timeline-card-heading > span { font-size: 11px; }
-.gold-chart-wrap { position: relative; height: 318px; overflow: hidden; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: linear-gradient(180deg, color-mix(in srgb, var(--surface-2) 82%, #0b2742) 0%, var(--surface-0) 50%, color-mix(in srgb, var(--surface-2) 84%, #35131c) 100%); }
+.gold-chart-wrap { position: relative; height: 318px; overflow: hidden; touch-action: none; user-select: none; cursor: crosshair; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: linear-gradient(180deg, color-mix(in srgb, var(--surface-2) 82%, #0b2742) 0%, var(--surface-0) 50%, color-mix(in srgb, var(--surface-2) 84%, #35131c) 100%); }
 .gold-chart-wrap:focus-visible { outline: 1px solid var(--gold); outline-offset: 2px; }
 .gold-chart { display: block; width: 100%; height: 100%; }.gold-chart line { stroke: var(--border-strong); stroke-width: .35; stroke-dasharray: 2 2; }.gold-chart polyline { fill: none; stroke-width: 2.2; vector-effect: non-scaling-stroke; }.gold-chart .blue-series { stroke: #35b9dd; filter: drop-shadow(0 0 4px rgba(53, 185, 221, .45)); }.gold-chart .red-series { stroke: #e45868; filter: drop-shadow(0 0 4px rgba(228, 88, 104, .38)); }.advantage-fill.blue { fill: rgba(31, 126, 165, .28); }.advantage-fill.red { fill: rgba(172, 34, 59, .34); }
 .timeline-event-tracks { border: 1px solid var(--border-subtle); border-top: 0; background: var(--surface-0); }
 .timeline-event-track { position: relative; height: 43px; overflow: visible; border-bottom: 1px solid var(--border-subtle); background: linear-gradient(90deg, color-mix(in srgb, var(--surface-2) 90%, transparent), transparent 26%); }
 .timeline-event-track:last-child { border-bottom: 0; }.timeline-event-track::after { content: ""; position: absolute; top: 50%; right: 0; left: 0; height: 1px; background: color-mix(in srgb, var(--border-strong) 55%, transparent); }
 .timeline-event-track > strong { position: absolute; z-index: 1; top: 4px; left: 7px; color: var(--text-muted); font-size: 9px; letter-spacing: .7px; text-transform: uppercase; pointer-events: none; }
-.event-track-marker { position: absolute; z-index: 2; display: grid; place-items: center; box-sizing: border-box; width: 22px; height: 22px; transform: translate(-50%, -50%); border: 2px solid var(--surface-0); border-radius: 50%; background: var(--surface-3); color: var(--gold-bright); box-shadow: 0 2px 7px rgba(0, 0, 0, .55); cursor: help; transition: transform .12s ease, z-index .12s ease, filter .12s ease; }
+.event-track-marker { position: absolute; z-index: 2; display: grid; place-items: center; box-sizing: border-box; width: 22px; height: 22px; padding: 0; transform: translate(-50%, -50%); border: 2px solid var(--surface-0); border-radius: 50%; background: var(--surface-3); color: var(--gold-bright); box-shadow: 0 2px 7px rgba(0, 0, 0, .55); cursor: pointer; transition: transform .12s ease, z-index .12s ease, filter .12s ease; }
 .event-track-marker:hover, .event-track-marker:focus-visible { z-index: 8; transform: translate(-50%, -50%) scale(1.38); outline: 1px solid var(--gold); filter: brightness(1.12); }
 .event-track-marker img { display: block; width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }.event-track-marker > span { font: 10px var(--font-heading); line-height: 1; }
 .event-track-marker.kill::after { content: "×"; position: absolute; right: -5px; bottom: -5px; display: grid; place-items: center; width: 12px; height: 12px; border: 1px solid var(--surface-0); border-radius: 50%; background: var(--loss); color: white; font: 10px/1 var(--font-heading); }

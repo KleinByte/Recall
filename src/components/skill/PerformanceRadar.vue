@@ -5,6 +5,7 @@ import BaseEChart from "../charts/BaseEChart.vue"
 import { CHART_COLOURS, CHART_STYLES } from "../../charts/recall-chart-theme"
 import { escapeTooltip } from "../../charts/formatters"
 import type { PerformanceDimensionScore } from "../../types/stats"
+import { completeRecentRadar } from "../../charts/evidence-adapters"
 
 const props = defineProps<{
   dimensions: PerformanceDimensionScore[]
@@ -14,7 +15,8 @@ const props = defineProps<{
 }>()
 
 const option = computed<EChartsCoreOption>(() => {
-  const hasRecent = props.dimensions.some((dimension) => dimension.recentScore !== undefined)
+  const recentValues = completeRecentRadar(props.dimensions)
+  const hasRecent = recentValues !== undefined
   const series: Array<{
     name: string
     value: number[]
@@ -32,7 +34,7 @@ const option = computed<EChartsCoreOption>(() => {
   if (hasRecent) {
     series.push({
       name: props.secondaryLabel ?? "Recent form",
-      value: props.dimensions.map((dimension) => dimension.recentScore ?? dimension.score),
+      value: recentValues!,
       lineStyle: { color: CHART_COLOURS.live, width: 1.5 },
       itemStyle: { color: CHART_COLOURS.live },
       areaStyle: { color: CHART_STYLES.liveArea },
@@ -48,7 +50,7 @@ const option = computed<EChartsCoreOption>(() => {
         return [
           `<strong>${escapeTooltip(item.name ?? "Recall Vector Index")}</strong>`,
           ...props.dimensions.map((dimension, index) =>
-            `${escapeTooltip(dimension.label)}: ${Math.round(item.value?.[index] ?? 0)}`,
+            `${escapeTooltip(dimension.label)}: ${Number.isFinite(item.value?.[index]) ? Math.round(item.value![index]) : "Unavailable"}`,
           ),
         ].join("<br>")
       },
@@ -80,7 +82,7 @@ const option = computed<EChartsCoreOption>(() => {
 <template>
   <BaseEChart
     :option="option"
-    ariaLabel="Recall Vector Index across eight performance vectors."
+    ariaLabel="Recall Vector Index across the displayed performance vectors."
     :height="height ?? '300px'"
     class="performance-radar"
   />

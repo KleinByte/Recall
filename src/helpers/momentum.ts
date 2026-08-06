@@ -1,4 +1,5 @@
 import type { MatchRow } from "../types/stats"
+import { groupTimedGames, MOMENTUM_GAP_MS } from "./time-contract-core"
 
 export interface PerformanceMomentum {
   score: number
@@ -11,7 +12,7 @@ export interface PerformanceMomentum {
   sessionExpiresAt?: number
 }
 
-export const MOMENTUM_SESSION_GAP_MS = 30 * 60 * 1000
+export const MOMENTUM_SESSION_GAP_MS = MOMENTUM_GAP_MS
 
 const clamp = (value: number, minimum: number, maximum: number) =>
   Math.max(minimum, Math.min(maximum, value))
@@ -29,42 +30,22 @@ function currentStreak(matches: MatchRow[]) {
 
 function currentSession(matches: MatchRow[], now: number) {
   if (!matches.length) return { matches: [] as MatchRow[] }
-  const latest = matches[0]
-  const latestPlayedAt = Number(latest.playedAt)
-  const latestDuration = Number(latest.durationSecs)
-  const hasTiming = Number.isFinite(latestPlayedAt) && latestPlayedAt > 0
-  const latestEnd = hasTiming
-    ? latestPlayedAt + (Number.isFinite(latestDuration) ? latestDuration : 0) * 1000
-    : undefined
+  const hasAnyTiming = matches.some((match) =>
+    Number.isSafeInteger(match.playedAt) && Number.isSafeInteger(match.durationSecs))
+  // Test/dev partial rows have no timing; production rows always carry it.
+  if (!hasAnyTiming) return { matches }
 
-  // Partial rows used by callers/tests have no timing. Preserve the historical
-  // behavior for those rows; production match rows always carry playedAt.
-  if (latestEnd !== undefined && now >= latestEnd + MOMENTUM_SESSION_GAP_MS) {
+  const groups = groupTimedGames(matches, MOMENTUM_GAP_MS)
+  const latestGroup = groups.at(-1)
+  if (!latestGroup || latestGroup.kind !== "analytical" || latestGroup.endAt === undefined) {
     return { matches: [] as MatchRow[] }
   }
-
-  const sessionMatches = [latest]
-  for (let index = 1; index < matches.length; index += 1) {
-    const newer = matches[index - 1]
-    const older = matches[index]
-    const newerStart = Number(newer.playedAt)
-    const olderStart = Number(older.playedAt)
-    const olderDuration = Number(older.durationSecs)
-    if (
-      Number.isFinite(newerStart) && newerStart > 0 &&
-      Number.isFinite(olderStart) && olderStart > 0
-    ) {
-      const olderEnd = olderStart + (Number.isFinite(olderDuration) ? olderDuration : 0) * 1000
-      if (newerStart - olderEnd >= MOMENTUM_SESSION_GAP_MS) break
-    }
-    sessionMatches.push(older)
+  if (now >= latestGroup.endAt + MOMENTUM_GAP_MS) {
+    return { matches: [] as MatchRow[] }
   }
-
   return {
-    matches: sessionMatches,
-    sessionExpiresAt: latestEnd === undefined
-      ? undefined
-      : latestEnd + MOMENTUM_SESSION_GAP_MS,
+    matches: [...latestGroup.matches].reverse(),
+    sessionExpiresAt: latestGroup.endAt + MOMENTUM_GAP_MS,
   }
 }
 

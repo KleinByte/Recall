@@ -3,7 +3,9 @@ import {
   isUsableMapPosition,
   playbackCoverage,
   playbackPositionAt,
+  spreadOverlappingMapPoints,
   playbackTrailSamples,
+  playbackWorldMarkers,
 } from "../src/helpers/timeline-playback"
 import type { TimelineEvent, TimelineFrame } from "../src/types/review"
 
@@ -39,6 +41,21 @@ describe("timeline map playback", () => {
     expect(playbackPositionAt(frames, [], 1, 60_000, 11)?.position).toEqual({ x: 1_000, y: 2_000 })
     expect(playbackPositionAt(frames, [], 1, 90_000, 11)?.position).toEqual({ x: 2_000, y: 4_000 })
     expect(playbackPositionAt(frames, [], 1, 90_000, 11)?.exact).toBe(false)
+  })
+
+  it("uses a continuous curved path across adjacent positioned frames", () => {
+    const curved = [
+      frame(0, { 1: { x: 1_000, y: 1_000 } }),
+      frame(60_000, { 1: { x: 3_000, y: 2_000 } }),
+      frame(120_000, { 1: { x: 4_000, y: 6_000 } }),
+      frame(180_000, { 1: { x: 8_000, y: 7_000 } }),
+    ]
+    const position = playbackPositionAt(curved, [], 1, 90_000, 11)?.position
+
+    expect(position?.x).toBeGreaterThan(3_000)
+    expect(position?.x).toBeLessThan(4_000)
+    expect(position?.y).toBeGreaterThan(2_000)
+    expect(position?.y).toBeLessThan(6_000)
   })
 
   it("does not extrapolate or bridge gaps larger than the supported interval", () => {
@@ -89,5 +106,88 @@ describe("timeline map playback", () => {
     ]
     expect(playbackTrailSamples(trailFrames, 1, 120_000, 11, 60_000).map((sample) => sample.timestamp))
       .toEqual([60_000, 120_000])
+  })
+
+  it("starts with the complete Summoner's Rift structure and camp layout", () => {
+    const markers = playbackWorldMarkers([], 0, 11)
+
+    expect(markers.filter((marker) => marker.kind === "tower")).toHaveLength(22)
+    expect(markers.filter((marker) => marker.kind === "inhibitor")).toHaveLength(6)
+    expect(markers.filter((marker) => marker.kind === "nexus")).toHaveLength(2)
+    expect(markers.filter((marker) => marker.kind === "camp")).toHaveLength(14)
+    expect(markers.find((marker) => marker.kind === "dragon")?.state).toBe("dormant")
+    expect(markers.find((marker) => marker.kind === "baron")?.state).toBe("dormant")
+  })
+
+  it("applies a recorded destruction to the nearest canonical tower", () => {
+    const tower: TimelineEvent = {
+      eventId: "tower",
+      timestamp: 10 * 60_000,
+      type: "BUILDING_KILL",
+      category: "objective",
+      teamId: 100,
+      objective: "OUTER_TURRET",
+      laneType: "TOP_LANE",
+      position: { x: 981, y: 10_441 },
+    }
+
+    const before = playbackWorldMarkers([tower], 9 * 60_000, 11)
+      .find((marker) => marker.id === "blue:top:outer")
+    const after = playbackWorldMarkers([tower], 10 * 60_000, 11)
+      .find((marker) => marker.id === "blue:top:outer")
+    expect(before?.state).toBe("alive")
+    expect(after?.state).toBe("destroyed")
+  })
+
+  it("derives Dragon and Baron state without requiring a kill event to show their pits", () => {
+    const dragon: TimelineEvent = {
+      eventId: "dragon",
+      timestamp: 8 * 60_000,
+      type: "ELITE_MONSTER_KILL",
+      category: "objective",
+      teamId: 100,
+      objective: "FIRE_DRAGON",
+      position: { x: 9_860, y: 4_410 },
+    }
+    const baron: TimelineEvent = {
+      eventId: "baron",
+      timestamp: 22 * 60_000,
+      type: "ELITE_MONSTER_KILL",
+      category: "objective",
+      teamId: 200,
+      objective: "BARON_NASHOR",
+      position: { x: 5_000, y: 10_450 },
+    }
+
+    const statesAt = (timestamp: number) => Object.fromEntries(playbackWorldMarkers([dragon, baron], timestamp, 11)
+      .filter((marker) => marker.kind === "dragon" || marker.kind === "baron")
+      .map((marker) => [marker.kind, marker.state]))
+
+    expect(statesAt(6 * 60_000)).toMatchObject({ dragon: "alive", baron: "dormant" })
+    expect(statesAt(9 * 60_000)).toMatchObject({ dragon: "respawning", baron: "dormant" })
+    expect(statesAt(14 * 60_000)).toMatchObject({ dragon: "alive", baron: "dormant" })
+    expect(statesAt(21 * 60_000)).toMatchObject({ dragon: "alive", baron: "alive" })
+    expect(statesAt(23 * 60_000)).toMatchObject({ dragon: "alive", baron: "respawning" })
+  })
+
+  it("spreads overlapping champions deterministically and keeps their source positions", () => {
+    const spread = spreadOverlappingMapPoints([
+      { id: 3, left: 50, top: 50 },
+      { id: 1, left: 50, top: 50 },
+      { id: 2, left: 80, top: 80 },
+    ])
+
+    expect(spread.find((point) => point.id === 2)).toEqual({
+      id: 2,
+      left: 80,
+      top: 80,
+      sourceLeft: 80,
+      sourceTop: 80,
+      overlapping: false,
+    })
+    const clustered = spread.filter((point) => point.id !== 2)
+    expect(clustered.every((point) => point.overlapping)).toBe(true)
+    expect(new Set(clustered.map((point) => `${point.left}:${point.top}`)).size).toBe(2)
+    expect(clustered.every((point) => point.sourceLeft === 50 && point.sourceTop === 50)).toBe(true)
   })
 })

@@ -132,6 +132,15 @@ describe("getSkillReport", () => {
 
     await api.getRviProfile({ modeFamily: "sr" }, "sr")
 
-    expect(invoke).toHaveBeenCalledWith("stats:rvi", { modeFamily: "sr" }, "sr")
+    expect(invoke).toHaveBeenCalledWith("stats:rvi", { modeFamily: "sr" }, "sr", "profile")
+
+    await api.getRviProfile({ sinceMs: 100, untilMs: 101 }, "sr", "match")
+
+    expect(invoke).toHaveBeenLastCalledWith(
+      "stats:rvi",
+      { sinceMs: 100, untilMs: 101 },
+      "sr",
+      "match",
+    )
   })
 })

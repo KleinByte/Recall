@@ -35,7 +35,7 @@ const option = computed<EChartsCoreOption>(() => ({
       const game = games.value[x]
       const component = components.value[y]
       return game && component
-        ? `<strong>${escapeTooltip(component.label)}</strong><br/>${value}th percentile vs ${escapeTooltip(scope)}<br/>${escapeTooltip(game.grade ?? "–")} · ${new Date(game.playedAt).toLocaleDateString()}`
+        ? `<strong>${escapeTooltip(component.label)}</strong><br/>Component score ${value} · compared with ${escapeTooltip(scope)} peers in this valid lobby<br/>${escapeTooltip(game.grade ?? "–")} · ${new Date(game.playedAt).toLocaleDateString()}`
         : ""
     },
   },
@@ -87,7 +87,7 @@ const option = computed<EChartsCoreOption>(() => ({
 <template>
   <BaseEChart
     :option="option"
-    ariaLabel="Grade DNA heatmap showing the percentile of each Recall Grade component in recent matches."
+    ariaLabel="Grade DNA heatmap showing lobby-relative component scores for recent matches."
     height="390px"
   />
 </template>

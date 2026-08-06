@@ -10,6 +10,39 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "2.0.32",
+    releasedAt: "2026-08-05",
+    title: "Cleaner skill and review confidence",
+    summary:
+      "Recorded comparisons are clearer, match review handling is more reliable, and the data flow is more consistent and stable across modes and ingested matches.",
+    sections: [
+      {
+        title: "Skill comparisons are easier to read",
+        items: [
+          "In Recorded comparisons, metric values are now shown without the extra trailing labels, so the stats look cleaner and scan faster.",
+        ],
+      },
+      {
+        title: "Match review and replay experience is more reliable",
+        items: [
+          "Improvements were made across match loading/review flow, timeline handling, and role mapping to reduce inconsistent game summaries and improve review accuracy.",
+        ],
+      },
+      {
+        title: "More consistent analytics",
+        items: [
+          "Updates to grade and insight calculation paths and skill reporting make analytics and charts behave more consistently across modes and match histories.",
+        ],
+      },
+      {
+        title: "Better stability for data ingestion",
+        items: [
+          "Sync and backfill paths now handle match history updates and data corrections more robustly, reducing issues with incomplete or incorrect records over time.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.31",
     releasedAt: "2026-08-04",
     title: "Match playback, evolving form",

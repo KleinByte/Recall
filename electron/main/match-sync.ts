@@ -3,7 +3,8 @@ import type { ChampSelectRepository } from "./database/champ-select-repo.js"
 import type { ParticipantsRepository } from "./database/participants-repo.js"
 import type { LiveGameCaptureRepository } from "./database/live-game-capture-repo.js"
 import type { LcuClient } from "./lcu-client.js"
-import { gradeLobby, type GradeInput } from "./matches/grade.js"
+import { gradeLobbyV2, type GradeInput } from "./matches/grade.js"
+import { gradeLobbyV3 } from "./matches/grade-v3.js"
 import { resolveChampionClass } from "./matches/class-expectations.js"
 import {
   evaluateMatchLabels,
@@ -18,6 +19,13 @@ import {
 import { fetchQueues, type QueueIndex } from "./matches/queues.js"
 import type { LcuGame, MatchRow, ModeFamily } from "./matches/types.js"
 import { resolvePosition } from "./matches/position.js"
+import {
+  MatchSourceRepository,
+  gzipCanonicalJsonV1,
+  type RawPayloadIdentity,
+} from "./database/match-source-repo.js"
+import { LCU_MATCH_MAPPER_VERSION } from "./matches/map-match.js"
+import { PARTICIPANT_DETAIL_VERSION } from "./database/participants-repo.js"
 
 export interface SyncResult {
   fetched: number
@@ -67,6 +75,7 @@ export class MatchSync {
     private readonly participants?: ParticipantsRepository,
     private readonly champSelect?: ChampSelectRepository,
     private readonly liveCaptures?: LiveGameCaptureRepository,
+    private readonly sourceRepository?: MatchSourceRepository,
   ) {}
 
   async syncNow(): Promise<SyncResult> {
@@ -84,21 +93,54 @@ export class MatchSync {
           `?begIndex=0&endIndex=${WINDOW_SIZE - 1}`,
       )
       games = response.games?.games ?? []
+      if (this.sourceRepository) {
+        const capturedAt = Date.now()
+        const sha = gzipCanonicalJsonV1(response).sha256
+        const page = this.sourceRepository.persistRawPayload({
+          ownerPuuid: this.puuid, source: "league_client",
+          sourceMatchId: `page:${capturedAt}:${sha.slice(0, 12)}`,
+          kind: "history_page", body: response,
+          mapperVersion: LCU_MATCH_MAPPER_VERSION, fetchedAt: capturedAt,
+        })
+        this.sourceRepository.setMappingResult(page, "mapped", capturedAt)
+      }
     } catch (error) {
       // A closed or busy client is normal; the next sync will pick these up.
       console.warn(`Match history sync skipped: ${(error as Error).message}`)
       return { fetched: 0, inserted: 0, graded: 0, lobbies: 0 }
     }
 
-    const rows = games
-      .map((game) => mapMatchRow(game, this.puuid, this.queues.get(game.queueId)))
-      .filter(
-        (row): row is MatchRow =>
-          row !== undefined && row.isMatched === 1,
-      )
+    const rows: MatchRow[] = []
+    const rawRows: RawPayloadIdentity[] = []
+    for (const game of games) {
+      const capturedAt = Date.now()
+      const raw = this.sourceRepository?.persistRawPayload({
+        ownerPuuid: this.puuid, source: "league_client",
+        sourceMatchId: String(game.gameId), gameId: game.gameId,
+        kind: "history_summary", body: game,
+        dataVersion: game.gameVersion, mapperVersion: LCU_MATCH_MAPPER_VERSION,
+        fetchedAt: capturedAt,
+      })
+      try {
+        const row = mapMatchRow(game, this.puuid, this.queues.get(game.queueId))
+        if (!row) throw new Error("owner_participant_missing")
+        rows.push(row)
+        if (raw) rawRows.push(raw)
+      } catch (error) {
+        if (raw) this.sourceRepository?.setMappingResult(raw, "unmappable", capturedAt, {
+          gameId: game.gameId,
+          error: error instanceof Error ? error.message.slice(0, 500) : "history_summary_unmappable",
+        })
+      }
+    }
 
     this.liveCaptures?.repairStoredPositions(this.puuid)
     const inserted = this.repository.insertMany(rows)
+    for (const raw of rawRows) {
+      this.sourceRepository?.setMappingResult(raw, "mapped", Date.now(), {
+        gameId: Number(raw.sourceMatchId),
+      })
+    }
     const graded = await this.gradePendingMatches()
     const lobbies = await this.backfillLobbies(rows)
 
@@ -130,8 +172,9 @@ export class MatchSync {
         const detail = await this.client.request<GameDetail>(
           `/lol-match-history/v1/games/${gameId}`,
         )
+        const raw = this.captureLobbyDetail(detail)
         const family = windowRows.find((row) => row.gameId === gameId)?.modeFamily
-        if (this.storeLobby(detail, family)) stored += 1
+        if (this.storeLobby(detail, family, raw)) stored += 1
       } catch (error) {
         console.warn(
           `Could not read the lobby for game ${gameId}: ${(error as Error).message}`,
@@ -143,11 +186,20 @@ export class MatchSync {
     return stored
   }
 
-  private storeLobby(detail: GameDetail, family?: ModeFamily): boolean {
+  private storeLobby(
+    detail: GameDetail,
+    family?: ModeFamily,
+    raw?: RawPayloadIdentity,
+  ): boolean {
     if (!this.participants) return false
 
     const rows = mapParticipants(detail, this.puuid)
-    if (rows.length === 0) return false
+    if (rows.length === 0) {
+      if (raw) this.sourceRepository?.setMappingResult(raw, "unmappable", Date.now(), {
+        gameId: detail.gameId, error: "scoreboard_owner_or_roster_missing",
+      })
+      return false
+    }
 
     this.liveCaptures?.stampPositions(detail.gameId, this.puuid, rows)
     this.champSelect?.stamp(detail.gameId, this.puuid, rows)
@@ -165,11 +217,9 @@ export class MatchSync {
       )
     }
     if ((family === "aram" || family === "sr" || family === "classic") && detail.gameId) {
-      this.participants.setGrades(
-        detail.gameId,
-        this.puuid,
-        gradeLobby(this.gradeInputs(detail), family),
-      )
+      const inputs = this.gradeInputs(detail)
+      this.participants.setGrades(detail.gameId, this.puuid, gradeLobbyV2(inputs, family))
+      this.participants.setGradesV3(detail.gameId, this.puuid, gradeLobbyV3(inputs, family))
     }
     if (detail.gameId) {
       const match = this.repository.getMatch(detail.gameId, this.puuid)
@@ -188,7 +238,20 @@ export class MatchSync {
       }
     }
 
+    if (raw) this.sourceRepository?.setMappingResult(raw, "mapped", Date.now(), {
+      gameId: detail.gameId,
+    })
     return stored
+  }
+
+  private captureLobbyDetail(detail: GameDetail): RawPayloadIdentity | undefined {
+    if (!this.sourceRepository) return undefined
+    return this.sourceRepository.persistRawPayload({
+      ownerPuuid: this.puuid, source: "league_client",
+      sourceMatchId: String(detail.gameId), gameId: detail.gameId,
+      kind: "scoreboard_detail", body: detail,
+      mapperVersion: PARTICIPANT_DETAIL_VERSION, fetchedAt: Date.now(),
+    })
   }
 
   /**
@@ -211,12 +274,13 @@ export class MatchSync {
         const detail = await this.client.request<GameDetail>(
           `/lol-match-history/v1/games/${gameId}`,
         )
+        const raw = this.captureLobbyDetail(detail)
 
         // The lobby is already in hand, so keep it rather than paying for the
         // same request again later.
-        this.storeLobby(detail, modeFamily)
+        this.storeLobby(detail, modeFamily, raw)
 
-        const result = gradeLobby(this.gradeInputs(detail), modeFamily).get(
+        const result = gradeLobbyV2(this.gradeInputs(detail), modeFamily).get(
           identityParticipantId(detail, this.puuid),
         )
         if (!result) continue
@@ -226,6 +290,8 @@ export class MatchSync {
           this.puuid,
           result.grade,
           result.score,
+          result.breakdown.compositePercentile,
+          result.breakdown.algorithmVersion,
         )
         graded += 1
       } catch (error) {
@@ -254,6 +320,7 @@ export class MatchSync {
     const lobby: GradeInput[] = (detail.participants ?? []).map((participant) => ({
       participantId: participant.participantId,
       teamId: participant.teamId,
+      isPlayer: participant.participantId === ownerId,
       kills: number(participant.stats?.kills),
       deaths: number(participant.stats?.deaths),
       assists: number(participant.stats?.assists),

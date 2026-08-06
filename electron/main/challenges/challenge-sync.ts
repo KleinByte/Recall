@@ -52,8 +52,7 @@ export class ChallengeSync {
     const previous = this.repository.getProgressSnapshot(this.puuid)
     const history = this.changedRows(rows, previous, now)
 
-    this.repository.upsertMany(rows)
-    this.repository.recordHistory(history)
+    this.repository.saveSnapshot(rows, history)
 
     return { total: rows.length, changed: history.length }
   }

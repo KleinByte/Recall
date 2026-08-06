@@ -28,17 +28,17 @@ describe("analytics primitives", () => {
 
   it("breaks sessions after more than 90 minutes from game end", () => {
     const games = [
-      { gameId: 1, startedAt: 0, endedAt: 30 * 60_000 },
-      { gameId: 2, startedAt: 100 * 60_000, endedAt: 125 * 60_000 },
-      { gameId: 3, startedAt: 216 * 60_000, endedAt: 240 * 60_000 },
+      { gameId: 1, startedAt: 0, durationSecs: 30 * 60 },
+      { gameId: 2, startedAt: 100 * 60_000, durationSecs: 25 * 60 },
+      { gameId: 3, startedAt: 215 * 60_000, durationSecs: 24 * 60 },
     ]
     expect(sessionize(games).map((game) => game.sessionGame)).toEqual([1, 2, 1])
   })
 
   it("starts a new session around a missing end time", () => {
     const games = [
-      { gameId: 1, startedAt: 0, endedAt: undefined },
-      { gameId: 2, startedAt: 10_000, endedAt: 20_000 },
+      { gameId: 1, startedAt: 0, durationSecs: undefined },
+      { gameId: 2, startedAt: 10_000, durationSecs: 10 },
     ]
     expect(sessionize(games).map((game) => game.sessionGame)).toEqual([1, 1])
   })

@@ -5,27 +5,25 @@ import BaseEChart from "../charts/BaseEChart.vue"
 import { CHART_COLOURS, CHART_STYLES } from "../../charts/recall-chart-theme"
 import { recallGradeFromScore } from "../../shared/recall-grade"
 import type { SkillHistoryPoint } from "../../types/stats"
+import { groupTimedGames } from "../../helpers/time-contract-core"
 
 const props = defineProps<{ history: SkillHistoryPoint[] }>()
 
 const buckets = computed(() => {
-  const ordered = [...props.history].sort((left, right) => left.playedAt - right.playedAt)
   const values = Array.from({ length: 5 }, (_, index) => ({
     label: index === 4 ? "Game 5+" : `Game ${index + 1}`,
     games: 0,
     wins: 0,
     grades: [] as number[],
   }))
-  let sessionGame = 0
-  let previousEnd = -Infinity
-  for (const game of ordered) {
-    if (game.playedAt - previousEnd > 90 * 60_000) sessionGame = 1
-    else sessionGame += 1
-    const bucket = values[Math.min(4, sessionGame - 1)]
-    bucket.games += 1
-    bucket.wins += Number(game.win)
-    if (game.gradeScore !== undefined) bucket.grades.push(game.gradeScore)
-    previousEnd = game.playedAt + game.durationSecs * 1_000
+  for (const session of groupTimedGames(props.history)) {
+    if (session.kind !== "analytical") continue
+    session.matches.forEach((game, index) => {
+      const bucket = values[Math.min(4, index)]
+      bucket.games += 1
+      bucket.wins += Number(game.win)
+      if (game.gradeScore !== undefined) bucket.grades.push(game.gradeScore)
+    })
   }
   return values.filter((bucket) => bucket.games > 0)
 })

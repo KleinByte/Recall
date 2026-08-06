@@ -11,6 +11,8 @@ import type {
   TeamRow,
 } from "../matches/types.js"
 
+export const MATCH_V5_MAPPER_VERSION = 2
+
 interface RiotPerks {
   styles?: {
     style?: number

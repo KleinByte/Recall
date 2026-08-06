@@ -1,4 +1,5 @@
 import type { MatchRow, TrackedMode } from "../matches/types.js"
+import { groupTimedGames } from "../../../src/helpers/time-contract-core.js"
 
 export type SessionBoundaryAction = "split" | "join"
 
@@ -22,37 +23,19 @@ export interface ReviewSession {
   matches: MatchRow[]
 }
 
-const SESSION_GAP_MS = 90 * 60 * 1000
-
 export function buildSessions(
   matches: MatchRow[],
   overrides: ReadonlyMap<number, SessionBoundaryAction> = new Map(),
 ): ReviewSession[] {
-  const ordered = [...matches].sort((a, b) =>
-    a.playedAt - b.playedAt || a.gameId - b.gameId,
-  )
-  const groups: MatchRow[][] = []
-  for (const match of ordered) {
-    const group = groups.at(-1)
-    if (!group) {
-      groups.push([match])
-      continue
-    }
-    const previous = group.at(-1)!
-    const action = overrides.get(match.gameId)
-    const gap = match.playedAt - (
-      previous.playedAt + previous.durationSecs * 1000
-    )
-    if (action === "split" || (action !== "join" && gap > SESSION_GAP_MS)) {
-      groups.push([match])
-    } else {
-      group.push(match)
-    }
-  }
-  return groups.reverse().map(summarizeSession)
+  return groupTimedGames(matches, undefined, overrides)
+    .reverse()
+    .map((group) => summarizeSession(group.matches, group))
 }
 
-function summarizeSession(matches: MatchRow[]): ReviewSession {
+function summarizeSession(
+  matches: MatchRow[],
+  timing?: { kind: "analytical" | "unanalysable"; startAt?: number; endAt?: number; playTimeMs: number },
+): ReviewSession {
   const eligible = matches.filter((match) => match.durationSecs >= 300)
   const graded = eligible.filter((match) => match.gradeScore !== undefined)
   const modes = new Map<TrackedMode, { games: number; wins: number }>()
@@ -85,12 +68,12 @@ function summarizeSession(matches: MatchRow[]): ReviewSession {
   }
   const wins = eligible.reduce((sum, match) => sum + match.win, 0)
   const first = matches[0]
-  const last = matches.at(-1)!
   return {
     id: `${first.gameId}`,
-    startAt: first.playedAt,
-    endAt: last.playedAt + last.durationSecs * 1000,
-    playTimeSecs: matches.reduce((sum, match) => sum + match.durationSecs, 0),
+    startAt: timing?.startAt ?? first.playedAt,
+    endAt: timing?.endAt ?? first.playedAt,
+    playTimeSecs: timing ? timing.playTimeMs / 1000 :
+      matches.reduce((sum, match) => sum + match.durationSecs, 0),
     games: eligible.length,
     wins,
     losses: eligible.length - wins,

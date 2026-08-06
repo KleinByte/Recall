@@ -2,6 +2,8 @@
 export const POSITIONS = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"] as const
 
 export type Position = typeof POSITIONS[number]
+export type NormalizedPosition = Position | "UNKNOWN"
+export const POSITION_RESOLVER_VERSION = 2
 
 const CANONICAL = new Set<string>(POSITIONS)
 
@@ -52,4 +54,42 @@ export function resolvePosition(
   // A legacy duo hint has no positional meaning without a usable lane. This
   // is common in short games where LCU labels most or all players SUPPORT.
   return undefined
+}
+
+export interface PositionFacts {
+  matchV5TeamPosition?: string | null
+  matchV5IndividualPosition?: string | null
+  assignedPosition?: string | null
+  lcuLane?: string | null
+  lcuRole?: string | null
+}
+
+const canonicalPosition = (value?: string | null): Position | undefined =>
+  ASSIGNED_ALIASES[upper(value ?? undefined)]
+
+export function normalizePosition(facts: PositionFacts): NormalizedPosition {
+  const team = canonicalPosition(facts.matchV5TeamPosition)
+  if (team) return team
+  const individual = canonicalPosition(facts.matchV5IndividualPosition)
+  if (individual) return individual
+  const assigned = canonicalPosition(facts.assignedPosition)
+  if (assigned) return assigned
+  return resolvePosition(
+    facts.lcuLane ?? undefined,
+    facts.lcuRole ?? undefined,
+  ) ?? "UNKNOWN"
+}
+
+export function exactOpposingPosition<T>(
+  participants: readonly T[],
+  ownerTeamId: number,
+  ownerPosition: NormalizedPosition,
+  facts: (participant: T) => { teamId?: number; position?: NormalizedPosition },
+): T | undefined {
+  if (ownerPosition === "UNKNOWN") return undefined
+  const candidates = participants.filter((participant) => {
+    const value = facts(participant)
+    return value.teamId !== ownerTeamId && value.position === ownerPosition
+  })
+  return candidates.length === 1 ? candidates[0] : undefined
 }

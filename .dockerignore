@@ -1,0 +1,9 @@
+.git
+.pnpm-store
+node_modules
+dist
+dist-electron
+release
+logs
+tmp
+*.log
