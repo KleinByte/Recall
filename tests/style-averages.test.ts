@@ -7,9 +7,10 @@ import { buildMatchRow, buildMatchSequence } from "./fixtures/matches.js"
 const PUUID = "test-puuid"
 
 let repo: MatchesRepository
+let db: InstanceType<typeof Database>
 
 beforeEach(() => {
-  const db = new Database(":memory:")
+  db = new Database(":memory:")
   applyMigrations(db)
   repo = new MatchesRepository(db)
 })
@@ -184,14 +185,19 @@ describe("getChampionStats", () => {
     ])
     repo.setGrade(1, PUUID, "S", 1.4)
     repo.setGrade(2, PUUID, "B", -0.2)
+    db.prepare(
+      "UPDATE matches SET role_fit_score = CASE game_id WHEN 1 THEN 88 WHEN 2 THEN 52 END WHERE puuid = ?",
+    ).run(PUUID)
 
     const stats = repo.getChampionStats({ puuid: PUUID })
     const akali = stats.find((row) => row.championId === 84)!
     const caitlyn = stats.find((row) => row.championId === 22)!
 
     expect(akali.avgGradeScore).toBeCloseTo(0.6)
+    expect(akali.avgRoleFitScore).toBeCloseTo(70)
     expect(akali.gradedGames).toBe(2)
     expect(caitlyn.avgGradeScore).toBeUndefined()
+    expect(caitlyn.avgRoleFitScore).toBeUndefined()
     expect(caitlyn.gradedGames).toBe(0)
   })
 })

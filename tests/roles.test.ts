@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest"
-import { laneMatchups, positionLabel, resolvePosition } from "../src/helpers/roles"
-import { resolvePosition as resolveMainPosition } from "../electron/main/matches/position.js"
+import {
+  laneMatchups,
+  POSITION_RESOLVER_VERSION,
+  positionForPlayer,
+  positionLabel,
+  resolvePosition,
+} from "../src/helpers/roles"
+import {
+  normalizeTeamPositions,
+  resolvePosition as resolveMainPosition,
+} from "../electron/main/matches/position.js"
 
 describe("resolvePosition", () => {
   it("stays identical in the renderer and main process", () => {
@@ -57,9 +66,65 @@ describe("resolvePosition", () => {
     expect(resolvePosition("TOP", "SOLO", "")).toBe("TOP")
   })
 
+  it("uses a current persisted resolution instead of the corrupt raw lane", () => {
+    expect(positionForPlayer({
+      lane: "JUNGLE",
+      role: "NONE",
+      resolvedPosition: "TOP",
+      positionResolverVersion: POSITION_RESOLVER_VERSION,
+    })).toBe("TOP")
+  })
+
   it("prefers Match-V5's played-position estimate to the queue assignment", () => {
     expect(resolvePosition("TOP", "MIDDLE", "UTILITY")).toBe("MIDDLE")
     expect(resolvePosition("JUNGLE", "JUNGLE", "TOP")).toBe("JUNGLE")
+  })
+})
+
+describe("normalizeTeamPositions", () => {
+  it("uses Smite and the canonical legacy role when LCU marks top as jungle", () => {
+    const resolved = normalizeTeamPositions([
+      {
+        participantId: 1,
+        teamId: 100,
+        legacyLane: "JUNGLE",
+        legacyRole: "TOP",
+        lcuLane: "JUNGLE",
+        lcuRole: "NONE",
+        spell1Id: 4,
+        spell2Id: 12,
+      },
+      {
+        participantId: 2,
+        teamId: 100,
+        legacyLane: "JUNGLE",
+        legacyRole: "JUNGLE",
+        lcuLane: "JUNGLE",
+        lcuRole: "NONE",
+        spell1Id: 11,
+        spell2Id: 4,
+      },
+      { participantId: 3, teamId: 100, legacyRole: "MIDDLE" },
+      { participantId: 4, teamId: 100, legacyRole: "BOTTOM" },
+      { participantId: 5, teamId: 100, legacyRole: "UTILITY" },
+    ])
+
+    expect([...resolved!.values()]).toEqual([
+      "TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY",
+    ])
+  })
+
+  it("uses the one-of-each team shape when a non-Smite player has only bad jungle data", () => {
+    const resolved = normalizeTeamPositions([
+      { participantId: 1, teamId: 100, lcuLane: "JUNGLE", lcuRole: "NONE", spell1Id: 4 },
+      { participantId: 2, teamId: 100, lcuLane: "JUNGLE", lcuRole: "NONE", spell1Id: 11 },
+      { participantId: 3, teamId: 100, lcuLane: "MIDDLE", lcuRole: "SOLO" },
+      { participantId: 4, teamId: 100, lcuLane: "BOTTOM", lcuRole: "CARRY" },
+      { participantId: 5, teamId: 100, lcuLane: "BOTTOM", lcuRole: "SUPPORT" },
+    ])
+
+    expect(resolved?.get(1)).toBe("TOP")
+    expect(resolved?.get(2)).toBe("JUNGLE")
   })
 })
 

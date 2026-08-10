@@ -2,6 +2,11 @@ import type { Database } from "better-sqlite3"
 import type { MatchRow, TrackedMode } from "../matches/types.js"
 import type { GradeBreakdown } from "../review/types.js"
 import { confidenceForGames } from "../review/types.js"
+import {
+  GRADE_FAMILIES,
+  GRADE_V3_ALGORITHM_VERSION,
+  GRADE_V3_RECIPE_DEFINITION_ID,
+} from "../matches/grade-v3-recipe.js"
 
 export type ExperimentStatus = "active" | "paused" | "completed"
 export type ExperimentOutcome = "worked" | "mixed" | "did_not_work" | "unrated"
@@ -87,6 +92,58 @@ function parseModes(value: string): TrackedMode[] {
   }
 }
 
+const finiteInRange = (value: unknown, minimum: number, maximum: number): value is number =>
+  typeof value === "number" && Number.isFinite(value) && value >= minimum && value <= maximum
+
+function parseSelectedGradeV3Breakdown(
+  value: string,
+  recipeId: string,
+  roleFitScore: number,
+): GradeBreakdown["components"] | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value) as unknown
+  } catch {
+    return undefined
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined
+  const breakdown = parsed as Record<string, unknown>
+  if (breakdown.algorithmVersion !== GRADE_V3_ALGORITHM_VERSION ||
+      breakdown.recipeDefinitionId !== GRADE_V3_RECIPE_DEFINITION_ID ||
+      breakdown.recipeId !== recipeId ||
+      !finiteInRange(breakdown.roleFitScore, 0, 100) ||
+      Math.abs(breakdown.roleFitScore - roleFitScore) > 1e-9 ||
+      !Array.isArray(breakdown.components) || breakdown.components.length === 0) {
+    return undefined
+  }
+
+  const knownFamilies = new Set<string>(GRADE_FAMILIES)
+  const seen = new Set<string>()
+  const components: GradeBreakdown["components"] = []
+  for (const raw of breakdown.components) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
+    const component = raw as Record<string, unknown>
+    if (typeof component.key !== "string" || !knownFamilies.has(component.key) ||
+        seen.has(component.key) || typeof component.label !== "string" ||
+        !finiteInRange(component.componentScore, 0, 1) ||
+        !finiteInRange(component.weight, 0, 1) ||
+        !finiteInRange(component.contribution, 0, 1) ||
+        (component.comparisonScope !== "role" && component.comparisonScope !== "lobby")) {
+      return undefined
+    }
+    seen.add(component.key)
+    components.push({
+      key: component.key as GradeBreakdown["components"][number]["key"],
+      label: component.label,
+      percentile: component.componentScore,
+      weight: component.weight,
+      contribution: component.contribution,
+      scope: component.comparisonScope,
+    })
+  }
+  return components
+}
+
 export class ReviewRepository {
   constructor(private readonly db: Database) {}
 
@@ -96,24 +153,73 @@ export class ReviewRepository {
     participantId: number,
   ): GradeBreakdown | undefined {
     const row = this.db.prepare(
-      `SELECT algorithm_version AS algorithmVersion,
-              composite_percentile AS compositePercentile,
-              components_json AS componentsJson
-       FROM match_grade_breakdowns
-       WHERE game_id = ? AND puuid = ? AND participant_id = ?
-       ORDER BY algorithm_version DESC LIMIT 1`,
-    ).get(gameId, puuid, participantId) as
-      | { algorithmVersion: number; compositePercentile: number; componentsJson: string }
+      `SELECT b.algorithm_version AS algorithmVersion,
+              b.recipe_id AS recipeId,
+              r.role_fit_score AS roleFitScore,
+              b.composite_percentile AS lobbyPercentile,
+              b.components_json AS componentsJson
+       FROM match_grade_breakdown_versions b
+       JOIN grade_recipe_selections selected
+         ON selected.algorithm_version = b.algorithm_version
+        AND selected.recipe_id = b.recipe_id
+       JOIN grade_recipes recipe
+         ON recipe.algorithm_version = selected.algorithm_version
+        AND recipe.recipe_id = selected.recipe_id
+       JOIN grade_calibration_snapshots calibration
+         ON calibration.calibration_id = recipe.calibration_id
+       JOIN match_grade_results r
+         ON r.game_id = b.game_id
+        AND r.puuid = b.puuid
+        AND r.participant_id = b.participant_id
+        AND r.algorithm_version = b.algorithm_version
+        AND r.recipe_id = b.recipe_id
+       JOIN match_grade_attempts a
+         ON a.game_id = r.game_id
+        AND a.puuid = r.puuid
+        AND a.algorithm_version = r.algorithm_version
+        AND a.recipe_id = r.recipe_id
+       WHERE b.game_id = ? AND b.puuid = ? AND b.participant_id = ?
+         AND b.algorithm_version = ?
+         AND recipe.calibration_id IS NOT NULL
+         AND recipe.recipe_id NOT LIKE 'legacy:%'
+         AND json_extract(recipe.definition_json, '$.recipeDefinitionId') = ?
+         AND recipe.recipe_id = ? || '@calibration:' || recipe.calibration_id
+         AND a.owner_participant_id = b.participant_id
+         AND a.grade_status = 'ready'
+         AND r.grade_status = 'ready'
+         AND a.role_fit_score IS NOT NULL
+         AND r.role_fit_score IS NOT NULL
+         AND b.role_fit_score IS NOT NULL
+         AND a.role_fit_score = r.role_fit_score
+         AND b.role_fit_score = r.role_fit_score
+       LIMIT 1`,
+    ).get(
+      gameId,
+      puuid,
+      participantId,
+      GRADE_V3_ALGORITHM_VERSION,
+      GRADE_V3_RECIPE_DEFINITION_ID,
+      GRADE_V3_RECIPE_DEFINITION_ID,
+    ) as
+      | { algorithmVersion: number; recipeId: string; roleFitScore: number;
+          lobbyPercentile: number; componentsJson: string }
       | undefined
     if (!row) return undefined
-    try {
-      return {
-        algorithmVersion: row.algorithmVersion,
-        compositePercentile: row.compositePercentile,
-        components: JSON.parse(row.componentsJson),
-      }
-    } catch {
-      return undefined
+    if (!finiteInRange(row.roleFitScore, 0, 100) ||
+        !finiteInRange(row.lobbyPercentile, 0, 1)) return undefined
+    const components = parseSelectedGradeV3Breakdown(
+      row.componentsJson,
+      row.recipeId,
+      row.roleFitScore,
+    )
+    if (!components) return undefined
+    return {
+      algorithmVersion: row.algorithmVersion,
+      recipeId: row.recipeId,
+      roleFitScore: row.roleFitScore,
+      lobbyPercentile: row.lobbyPercentile,
+      compositePercentile: row.roleFitScore / 100,
+      components,
     }
   }
 

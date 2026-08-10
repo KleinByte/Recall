@@ -16,9 +16,13 @@ import { useCoalescedTask } from "../helpers/use-coalesced-task"
 import {
   formatDecimal,
   formatPercent,
-  gradeFromScore,
   modeLabel,
 } from "../helpers/format"
+import {
+  RECALL_ROLE_FIT_THRESHOLDS,
+  recallGradeFromRoleFitScore,
+  type RecallGrade,
+} from "../shared/recall-grade"
 import type { Champion } from "../types/lol"
 import type {
   MatchQuery,
@@ -52,10 +56,13 @@ const RANGES = [
   { label: "7 days", days: 7 },
 ]
 
+const roleFitMinimum = (grade: RecallGrade) =>
+  RECALL_ROLE_FIT_THRESHOLDS.find(([candidate]) => candidate === grade)?.[1]
+
 const GRADES = [
   { label: "Any grade", score: undefined },
-  { label: "A- or better", score: 0.2 },
-  { label: "S- or better", score: 0.95 },
+  { label: "A- or better", score: roleFitMinimum("A-") },
+  { label: "S- or better", score: roleFitMinimum("S-") },
 ]
 
 const SORTS: { value: MatchQuery["sortBy"]; label: string }[] = [
@@ -70,7 +77,7 @@ const selectedModes = ref<TrackedMode[]>([])
 const rangeDays = ref<number | null>(null)
 const result = ref<"win" | "loss" | undefined>(undefined)
 const championId = ref<number | undefined>(undefined)
-const minGradeScore = ref<number | undefined>(undefined)
+const minRoleFitScore = ref<number | undefined>(undefined)
 const excludeRemakes = ref(true)
 const sortBy = ref<MatchQuery["sortBy"]>("played_at")
 const sortDir = ref<"asc" | "desc">("desc")
@@ -98,7 +105,7 @@ const query = computed<MatchQuery>(() => ({
       : Date.now() - rangeDays.value * 86_400_000,
   result: result.value,
   championIds: championId.value ? [championId.value] : undefined,
-  minGradeScore: minGradeScore.value,
+  minRoleFitScore: minRoleFitScore.value,
   minDurationSecs: excludeRemakes.value ? 300 : undefined,
   sortBy: sortBy.value,
   sortDir: sortDir.value,
@@ -183,7 +190,7 @@ const hasFilters = computed(
     rangeDays.value !== null ||
     result.value !== undefined ||
     championId.value !== undefined ||
-    minGradeScore.value !== undefined ||
+    minRoleFitScore.value !== undefined ||
     bookmarked.value ||
     hasNotes.value ||
     tagId.value !== undefined ||
@@ -195,14 +202,14 @@ const clearFilters = () => {
   rangeDays.value = null
   result.value = undefined
   championId.value = undefined
-  minGradeScore.value = undefined
+  minRoleFitScore.value = undefined
   bookmarked.value = false
   hasNotes.value = false
   tagId.value = undefined
   experimentId.value = undefined
 }
 
-const averageGrade = computed(() => gradeFromScore(summary.value?.avgGradeScore))
+const averageGrade = computed(() => recallGradeFromRoleFitScore(summary.value?.avgRoleFitScore))
 </script>
 
 <template>
@@ -264,7 +271,7 @@ const averageGrade = computed(() => gradeFromScore(summary.value?.avgGradeScore)
         </Field>
 
         <Field label="Grade" compact>
-          <select v-model="minGradeScore" class="league-select">
+          <select v-model="minRoleFitScore" class="league-select">
             <option
               v-for="option in GRADES"
               :key="option.label"
@@ -353,7 +360,12 @@ const averageGrade = computed(() => gradeFromScore(summary.value?.avgGradeScore)
         :tone="summary.winRate >= 0.5 ? 'win' : 'loss'"
       />
       <StatTile density="compact" label="KDA" :value="formatDecimal(summary.kda, 2)" />
-      <StatTile density="compact" label="Avg grade" :value="averageGrade ?? '–'" />
+      <StatTile
+        density="compact"
+        label="Avg RoleFit"
+        :value="summary.avgRoleFitScore?.toFixed(1) ?? '–'"
+        :hint="averageGrade ?? 'No grade'"
+      />
     </Surface>
 
     <EmptyState

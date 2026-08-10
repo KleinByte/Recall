@@ -75,6 +75,10 @@ const player = (overrides: Partial<ParticipantRow> & { extendedMetrics?: Record<
     longestTimeLiving: 200,
     firstBlood: 0,
     firstTower: 0,
+    gradeCoreComplete: 1,
+    gradeCoreSource: "legacy_full_detail",
+    gradeCoreMissingFields: [],
+    gradeCoreContractVersion: 1,
     extendedMetrics,
     ...participantOverrides,
   }
@@ -470,6 +474,8 @@ describe("getObservations", () => {
     // Set grades separately
     matches.setGrade(1, PUUID, "A", 0.5)
     matches.setGrade(2, PUUID, "C", -0.3)
+    insights.db.prepare("UPDATE matches SET role_fit_score = 72.5 WHERE game_id = 1 AND puuid = ?")
+      .run(PUUID)
 
     // Complete lobby for game 1
     participants.insertMany([
@@ -511,6 +517,7 @@ describe("getObservations", () => {
       queueId: 420,
       win: true,
       gradeScore: 0.5,
+      roleFitScore: 72.5,
       championId: 84,
       role: "MIDDLE",
       durationSecs: 1800,
@@ -614,6 +621,64 @@ describe("getObservations", () => {
 
     expect(rows[0].metrics.visionPerMinute).toBeUndefined()
     expect(rows[0].metrics.objectiveDamagePerMinute).toBeUndefined()
+  })
+
+  it("keeps observed zero core facts and excludes coerced zeroes from evidence", () => {
+    matches.insertMany([
+      buildMatchRow({
+        gameId: 1,
+        mode: "sr_ranked_solo",
+        modeFamily: "sr",
+        durationSecs: 1_800,
+        visionScore: 0,
+        damageObjectives: 0,
+        timeCcingOthers: 0,
+      }),
+      buildMatchRow({
+        gameId: 2,
+        mode: "sr_ranked_solo",
+        modeFamily: "sr",
+        durationSecs: 1_800,
+        visionScore: 0,
+        damageObjectives: 0,
+        timeCcingOthers: 0,
+      }),
+    ])
+    participants.insertMany([
+      player({
+        gameId: 1,
+        isPlayer: 1,
+        visionScore: 0,
+        damageObjectives: 0,
+        timeCcingOthers: 0,
+      }),
+      player({
+        gameId: 2,
+        isPlayer: 1,
+        visionScore: 0,
+        damageObjectives: 0,
+        timeCcingOthers: 0,
+        gradeCoreComplete: 0,
+        gradeCoreSource: "match_v5",
+        gradeCoreMissingFields: ["vision_score", "damage_objectives", "time_ccing_others"],
+      }),
+    ])
+
+    const [observed, missing] = insights.getObservations({
+      puuid: PUUID,
+      modes: ["sr_ranked_solo"],
+    })
+
+    expect(observed.metrics).toMatchObject({
+      visionPerMinute: 0,
+      objectiveDamagePerMinute: 0,
+      ccPerMinute: 0,
+    })
+    expect(observed.styleAxes).toMatchObject({ objectives: 0, vision: 0 })
+    expect(missing.metrics.visionPerMinute).toBeUndefined()
+    expect(missing.metrics.objectiveDamagePerMinute).toBeUndefined()
+    expect(missing.metrics.ccPerMinute).toBeUndefined()
+    expect(missing.styleAxes).toEqual({})
   })
 
   it("parses extended JSON defensively for heal/shield metrics", () => {
@@ -753,7 +818,7 @@ describe("getFinalItemObservations", () => {
 })
 
 describe("getGradeComponentHistory", () => {
-  it("returns the player's chart-ready grade components in chronological order", () => {
+  it("withholds legacy grade components until a calibrated v3 recipe is selected", () => {
     matches.insertMany([
       buildMatchRow({ gameId: 2, playedAt: 2_000, mode: "aram", modeFamily: "aram" }),
       buildMatchRow({ gameId: 1, playedAt: 1_000, mode: "aram", modeFamily: "aram" }),
@@ -783,8 +848,6 @@ describe("getGradeComponentHistory", () => {
 
     const rows = insights.getGradeComponentHistory({ puuid: PUUID, modes: ["aram"] })
 
-    expect(rows.map((row) => row.gameId)).toEqual([1, 2])
-    expect(rows[0].components[0]).toMatchObject({ key: "combat", percentile: 0.8 })
-    expect(rows[1]).toMatchObject({ grade: "A", gradeScore: 0.2, compositePercentile: 0.7 })
+    expect(rows).toEqual([])
   })
 })

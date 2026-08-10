@@ -1,4 +1,4 @@
-export const TIMELINE_MAPPER_VERSION = 8
+export const TIMELINE_MAPPER_VERSION = 9
 
 export type TimelineEventCategory =
   | "kill"
@@ -148,6 +148,13 @@ function numberOrZero(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0
 }
 
+/** Riot timeline payloads sometimes include participantId: 0 alongside the
+ * real killerId/creatorId. Zero is a sentinel, not an actor identity. */
+function firstPositiveId(...values: unknown[]) {
+  return values.find((value): value is number =>
+    Number.isSafeInteger(value) && Number(value) > 0)
+}
+
 /**
  * The local match-history endpoint can repeat the same event many times in a
  * single frame. Event indexes are therefore not identities; use the event's
@@ -289,8 +296,12 @@ export function mapTimeline(
       // LCU emits large batches of duplicated, synthetic WARD_PLACED events
       // with this sentinel type. Real placements carry their actual ward type.
       if (event.type === "WARD_PLACED" && event.wardType?.toUpperCase() === "UNDEFINED") continue
-      const participantId = event.participantId ?? event.killerId ?? event.creatorId
-      const targetId = event.victimId
+      const participantId = firstPositiveId(
+        event.participantId,
+        event.killerId,
+        event.creatorId,
+      )
+      const targetId = firstPositiveId(event.victimId)
       const objective = event.monsterSubType ?? event.monsterType ??
         event.towerType ?? event.buildingType
       const mappedEvent: Omit<CompactTimelineEvent, "eventId"> = {
@@ -299,7 +310,7 @@ export function mapTimeline(
         category: categoryFor(event.type),
         participantId,
         assistingParticipantIds: event.assistingParticipantIds,
-        teamId: event.teamId ??
+        teamId: firstPositiveId(event.teamId) ??
           (participantId ? participantTeams.get(participantId) : undefined),
         targetId,
         itemId: event.itemId,

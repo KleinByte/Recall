@@ -35,7 +35,7 @@ import ReviewScoreboard from "../components/ReviewScoreboard.vue"
 import MatchDeathMap from "../components/MatchDeathMap.vue"
 import MatchPlaybackMap from "../components/MatchPlaybackMap.vue"
 import WinProbabilityChart from "../components/WinProbabilityChart.vue"
-import PerformanceRadar from "../components/skill/PerformanceRadar.vue"
+import RviPerformanceProfile from "../components/skill/PerformanceProfile.vue"
 import PageHeader from "../components/ui/PageHeader.vue"
 import Tabs from "../components/ui/Tabs.vue"
 import Button from "../components/ui/Button.vue"
@@ -127,9 +127,15 @@ const timelineMapViewOptions = [
 const rviDimensions = computed<PerformanceDimensionScore[]>(() =>
   (gameRvi.value?.dimensions ?? []).map((dimension) => ({
     ...dimension,
-    recentScore: careerRvi.value?.dimensions.find((entry) => entry.key === dimension.key)?.score,
+    recentScore: careerRvi.value?.dimensions.find((entry) => entry.key === dimension.key)?.score ?? undefined,
   })),
 )
+const gameRviPresentation = computed<PerformanceProfile | undefined>(() => gameRvi.value
+  ? { ...gameRvi.value, dimensions: rviDimensions.value }
+  : undefined)
+const hasGameRviEvidence = computed(() =>
+  gameRviPresentation.value?.dimensions.some((dimension) =>
+    dimension.score !== null || dimension.metrics.length > 0) ?? false)
 
 const matchBans = computed(() => (review.value?.teams ?? []).flatMap((team) => {
   try {
@@ -510,7 +516,8 @@ async function load(gameId?: number) {
       ])
       gameRvi.value = singleResult.status === "fulfilled" ? singleResult.value : undefined
       careerRvi.value = careerResult.status === "fulfilled" ? careerResult.value : undefined
-      if (!gameRvi.value?.dimensions.length) insightTab.value = "performance"
+      if (!gameRvi.value?.dimensions.some((dimension) =>
+        dimension.score !== null || dimension.metrics.length > 0)) insightTab.value = "performance"
     }
     const [sessionPage, storedTags, storedExperiments, bookmarkedPage] = await Promise.all([
       api.getReviewSessions(),
@@ -705,13 +712,13 @@ const highlightValue = (highlight: ReviewHighlight) => {
 
 const highlightContext = (highlight: ReviewHighlight) => {
   const component = highlightComponent(highlight)
-  if (component) return `${component.label} · lobby percentile`
+  if (component) return `${component.label} · frozen-reference percentile`
   const metric = highlightBaseline(highlight)
   return metric ? `${metric.label} · versus your prior average` : highlight.title
 }
 
 const highlightMessage = (highlight: ReviewHighlight) => {
-  if (highlight.kind === "strength") return "Your clearest advantage in this lobby."
+  if (highlight.kind === "strength") return "Your clearest archetype-and-position strength."
   if (highlight.kind === "opportunity") return "The clearest place to recover value next game."
   if (highlight.kind === "improvement") return "Meaningfully ahead of your recent baseline."
   return "Below your recent baseline and worth reviewing."
@@ -796,30 +803,15 @@ onBeforeUnmount(() => {
       <section class="insight-shell card" aria-label="Match insights">
         <Tabs v-model="insightTab" :options="insightTabs" label="Match insights" class="insight-tabs" />
 
-        <div v-if="insightTab === 'rvi' && rviDimensions.length" class="rvi-review" role="tabpanel">
-          <div class="rvi-copy">
-            <span class="eyebrow">Recall Vector Index</span>
-            <h2>This game's performance shape</h2>
-            <p>
-              The gold shape is this match. The blue comparison is your recorded
-              {{ review.match.modeFamily === 'classic' ? 'League Classic' : review.match.modeFamily === 'sr' ? `Summoner's Rift` : 'ARAM' }} profile.
-              Match RVI uses only evidence from this game, without career sample stabilization.
-            </p>
-            <div class="rvi-score">
-              <strong>{{ gameRvi?.score ?? '—' }}</strong>
-              <span>match RVI</span>
-            </div>
-          </div>
-          <PerformanceRadar
-            :dimensions="rviDimensions"
-            primary-label="This match"
-            secondary-label="Your mode profile"
-            height="310px"
+        <div v-if="insightTab === 'rvi' && gameRviPresentation && hasGameRviEvidence" class="rvi-review-detail" role="tabpanel">
+          <RviPerformanceProfile
+            :profile="gameRviPresentation"
+            :champions="champions"
           />
         </div>
         <div v-else-if="insightTab === 'rvi'" class="rvi-empty" role="tabpanel">
-          <strong>Match RVI is still building</strong>
-          <span>This game does not contain enough measured vectors for a truthful radar.</span>
+          <strong>Match RVI evidence is unavailable</strong>
+          <span>The selected Recall v3 recipe has no inspectable metric observations for this game.</span>
           <Button size="compact" @click="insightTab = 'performance'">Open grade &amp; context</Button>
         </div>
       </section>
@@ -828,14 +820,14 @@ onBeforeUnmount(() => {
         <section class="card grade-card">
           <div class="section-heading compact-heading">
             <div><span class="eyebrow">Performance model</span><h2 class="section-title">Why this grade</h2></div>
-            <span v-if="review.grade" class="algorithm-label">Lobby-relative · weighted by role</span>
+            <span v-if="review.grade" class="algorithm-label">Frozen local reference · archetype + position</span>
           </div>
           <p v-if="review.grade?.unavailableReason" class="muted">{{ review.grade.unavailableReason }}</p>
           <div v-else-if="review.grade" class="grade-story">
             <div class="grade-orbit" :style="gradeRingStyle">
               <div>
                 <strong>{{ gradePercentile }}</strong>
-                <span>lobby score</span>
+                <span>role-fit score</span>
               </div>
             </div>
             <div class="components">
@@ -844,7 +836,7 @@ onBeforeUnmount(() => {
                   <strong>{{ component.label }}</strong>
                   <span>{{ Math.round(component.weight * 100) }}% influence</span>
                 </div>
-                <div class="track" :title="`${component.label}: ${percent(component.percentile)} ${component.scope} percentile`">
+                <div class="track" :title="`${component.label}: ${percent(component.percentile)} frozen-reference percentile`">
                   <span class="fill" :style="{ width: percent(component.percentile) }" />
                   <i class="median" aria-hidden="true" />
                 </div>
@@ -1281,7 +1273,7 @@ onBeforeUnmount(() => {
           {{ experiment.summary.baselineKda.toFixed(2) }} KDA across
           {{ experiment.summary.baselineGames }} games
           <template v-if="experiment.summary.avgGrade !== undefined">
-            · grade {{ experiment.summary.avgGrade.toFixed(2) }}
+            · compatibility {{ experiment.summary.avgGrade.toFixed(2) }}
             vs {{ experiment.summary.baselineAvgGrade?.toFixed(2) ?? "—" }}
           </template>
           <template v-if="(experiment.games ?? 0) < 5"> · More games needed before describing improvement</template>

@@ -254,6 +254,43 @@ describe("applyMigrations", () => {
     expect(tables).toContain("riot_history_backfill")
   })
 
+  it("creates immutable exact-recipe RVI metric persistence", () => {
+    const db = new Database(":memory:")
+    applyMigrations(db)
+
+    const tables = (db.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table'",
+    ).all() as { name: string }[]).map((row) => row.name)
+    expect(tables).toEqual(expect.arrayContaining([
+      "rvi_recipes",
+      "rvi_recipe_selections",
+      "match_metric_observations",
+    ]))
+
+    const indices = (db.prepare(`
+      SELECT name FROM sqlite_master WHERE type = 'index'
+        AND tbl_name = 'match_metric_observations'
+    `).all() as { name: string }[]).map((row) => row.name)
+    expect(indices).toEqual(expect.arrayContaining([
+      "idx_metric_observations_owner_recipe_history",
+      "idx_metric_observations_match_recipe_detail",
+    ]))
+
+    const observationColumns = (db.pragma(
+      "table_info(match_metric_observations)",
+    ) as { name: string }[]).map((column) => column.name)
+    expect(observationColumns).toEqual(expect.arrayContaining([
+      "raw_evidence_state",
+      "raw_value",
+      "score_evidence_state",
+      "score_value",
+      "comparison_scope",
+      "reference_match_count",
+      "source_quality",
+      "derivation_id",
+    ]))
+  })
+
   it("fills in per-minute rates for games recorded before those columns existed", () => {
     const db = new Database(":memory:")
 

@@ -2,7 +2,18 @@
  * Comparative and conditional skill insights from ordered observations
  */
 
-import type { InsightObservation, FinalItemObservation, GradeComponentObservation, RviTimelineObservation, ChampionPool, BuiltItem, BucketRow, ContributionShare, TimeBucketRow } from "../database/insights-repo.js"
+import type {
+  InsightObservation,
+  FinalItemObservation,
+  GradeComponentObservation,
+  RviTimelineObservation,
+  RviV3ObservationSet,
+  ChampionPool,
+  BuiltItem,
+  BucketRow,
+  ContributionShare,
+  TimeBucketRow,
+} from "../database/insights-repo.js"
 import type { ChampionStatRow, StatsSummary, GradeCount } from "../database/matches-repo.js"
 import type { LobbyComparison } from "../database/participants-repo.js"
 import {
@@ -194,7 +205,7 @@ export function buildBestGamePattern(
 
   return {
     eligible: true,
-    definition: `Strong games are the top 25% of your Recall grades`,
+    definition: `Strong games are the top 25% of your frozen-reference compatibility scores`,
     strongGames: strong.length,
     nonStrongGames: nonStrong.length,
     findings,
@@ -332,7 +343,7 @@ export function buildDurationInsights(
     return {
       key: "duration",
       title: "Game Duration",
-      method: "Duration-based grade comparison",
+      method: "Duration-based compatibility-score comparison",
       eligible: false,
       neededGames: BUCKET_MIN_GRADED,
       findings: [],
@@ -357,7 +368,7 @@ export function buildDurationInsights(
     return {
       key: "duration",
       title: "Game Duration",
-      method: "Duration-based grade comparison",
+      method: "Duration-based compatibility-score comparison",
       eligible: false,
       neededGames: BUCKET_MIN_GRADED * 2,
       findings: [],
@@ -389,7 +400,7 @@ export function buildDurationInsights(
     const includesZero = gradeInterval && gradeInterval.low <= 0 && gradeInterval.high >= 0
     const summary = includesZero || !gradeInterval
       ? `${bucket.label} games show no clear grade association.`
-      : `${bucket.label} games associated with ${gradeDelta > 0 ? "higher" : "lower"} grades.`
+      : `${bucket.label} games associated with ${gradeDelta > 0 ? "higher" : "lower"} compatibility scores.`
 
     findings.push({
       key: bucket.label,
@@ -409,7 +420,7 @@ export function buildDurationInsights(
   return {
     key: "duration",
     title: "Game Duration",
-    method: "Duration-based grade comparison",
+    method: "Duration-based compatibility-score comparison",
     eligible: true,
     neededGames: 0,
     findings,
@@ -653,8 +664,8 @@ function buildConditionFinding(
 
   const summary =
     !hasEnoughGames || includesZero
-      ? `${label}: ${count} games, insufficient data for grade comparison.`
-      : `${label} associated with ${adjustedGradeDelta > 0 ? "higher" : "lower"} grades.`
+      ? `${label}: ${count} games, insufficient data for compatibility-score comparison.`
+      : `${label} associated with ${adjustedGradeDelta > 0 ? "higher" : "lower"} compatibility scores.`
 
   return {
     key: label,
@@ -774,9 +785,9 @@ export function buildChampionFindings(
 
     let summary: string
     if (!includesZero && interval.low > 0) {
-      summary = `Champion ${champ.championId} associated with higher grades.`
+      summary = `Champion ${champ.championId} associated with higher compatibility scores.`
     } else if (!includesZero && interval.high < 0) {
-      summary = `Champion ${champ.championId} associated with lower grades.`
+      summary = `Champion ${champ.championId} associated with lower compatibility scores.`
     } else {
       summary = `No clear grade association for champion ${champ.championId}.`
     }
@@ -941,7 +952,7 @@ export function buildItemFindings(
 
     const summary = includesZero
       ? `No clear grade association for item ${itemId}.`
-      : `Item ${itemId} associated with ${effect > 0 ? "higher" : "lower"} grades.`
+      : `Item ${itemId} associated with ${effect > 0 ? "higher" : "lower"} compatibility scores.`
 
     findings.push({
       key: `item:${itemId}`,
@@ -1021,7 +1032,10 @@ export function buildTrendFindings(
 
     const axisValues: Record<string, number[]> = {}
     for (const key of axisKeys) {
-      axisValues[key] = slice.map((o) => o.styleAxes[key] ?? 0)
+      axisValues[key] = slice.flatMap((observation) => {
+        const value = observation.styleAxes[key]
+        return Number.isFinite(value) ? [value] : []
+      })
     }
 
     windows.push({
@@ -1038,13 +1052,13 @@ export function buildTrendFindings(
     const values: Record<string, number> = {}
     for (const key of axisKeys) {
       const vals = w.axisValues[key]
-      values[key] = vals.reduce((s, v) => s + v, 0) / vals.length
+      if (vals.length) values[key] = vals.reduce((s, v) => s + v, 0) / vals.length
     }
 
     findings.push({
       key: `window:${w.index}`,
       title: `Games ${w.index * TREND_WINDOW_SIZE + 1}\u2013${(w.index + 1) * TREND_WINDOW_SIZE}`,
-      summary: `Average grade: ${avg.toFixed(1)}`,
+      summary: `Average compatibility score: ${avg.toFixed(1)}`,
       evidenceLevel: "descriptive",
       confidence: "insufficient",
       games: w.grades.length,
@@ -1067,12 +1081,12 @@ export function buildTrendFindings(
     const includesZero = interval.low <= 0 && interval.high >= 0
 
     const gradeSummary = includesZero
-      ? "No clear trend in recent grades."
-      : `Recent games associated with ${delta > 0 ? "higher" : "lower"} grades.`
+      ? "No clear trend in recent compatibility scores."
+      : `Recent games associated with ${delta > 0 ? "higher" : "lower"} compatibility scores.`
 
     findings.push({
       key: "trend:grade",
-      title: "Grade Trend",
+      title: "Compatibility-score trend",
       summary: gradeSummary,
       evidenceLevel: "comparative",
       confidence: assessConfidence(latest.length + prior.length, interval, "grade"),
@@ -1087,6 +1101,7 @@ export function buildTrendFindings(
     for (const key of axisKeys) {
       const latestAxis = windows[0].axisValues[key]
       const priorAxis = [...windows[1].axisValues[key], ...windows[2].axisValues[key]]
+      if (latestAxis.length === 0 || priorAxis.length === 0) continue
 
       const axisInterval = bootstrapMeanDifference(latestAxis, priorAxis, `trend:${key}`)
       const latestMean = latestAxis.reduce((s, v) => s + v, 0) / latestAxis.length
@@ -1145,10 +1160,10 @@ export interface SkillReportInput {
   championStats: ChampionStatRow[]
   itemObservations: FinalItemObservation[]
   gradeComponentHistory: GradeComponentObservation[]
-  performanceComponentHistory?: GradeComponentObservation[]
+  /** Exact selected-recipe Grade v3 observations; the only source for RVI. */
+  rvi?: RviV3ObservationSet
+  /** Timeline data remains a separate map diagnostic and never enters RVI. */
   performanceTimelineHistory?: RviTimelineObservation[]
-  /** Live champion catalog roles, keyed by champion id. */
-  championRoles?: ReadonlyMap<number, readonly string[]>
 }
 
 export interface SkillStyleReport {
@@ -1215,17 +1230,23 @@ function buildStyleDrift(
     const games = ordered.slice(start, start + TREND_WINDOW_SIZE)
     windows.push({
       label: `Games ${start + 1}-${start + games.length}`,
-      axes: axes.map((axis) => ({
-        ...axis,
-        value: games.reduce((total, game) => total + (game.styleAxes[axis.key] ?? 0), 0) / games.length,
-      })),
+      axes: axes.flatMap((axis) => {
+        const values = games.flatMap((game) => {
+          const value = game.styleAxes[axis.key]
+          return Number.isFinite(value) ? [value] : []
+        })
+        return values.length ? [{
+          ...axis,
+          value: values.reduce((total, value) => total + value, 0) / values.length,
+        }] : []
+      }),
     })
   }
   return windows
 }
 
-export interface SkillReportV2 {
-  version: 2
+export interface SkillReportV3 {
+  version: 3
   generatedAt: number
   scope: { modes: TrackedMode[]; family: ModeFamily }
   overview: {
@@ -1248,7 +1269,10 @@ export interface SkillReportV2 {
       role?: string
       win: boolean
       grade?: string
+      /** Legacy/internal compatibility normal score. */
       gradeScore?: number
+      /** Authoritative Recall v3 score on a fixed 0-100 scale. */
+      roleFitScore?: number
       durationSecs: number
     }>
     gradeComponents: GradeComponentObservation[]
@@ -1258,7 +1282,10 @@ export interface SkillReportV2 {
       wins: number
       winRate: number
       kda: number
+      /** Legacy/internal compatibility normal score. */
       avgGradeScore?: number
+      /** Average authoritative Recall v3 RoleFit score (0-100). */
+      avgRoleFitScore?: number
       gradedGames: number
     }>
   }
@@ -1273,12 +1300,14 @@ export interface SkillReportV2 {
   }
 }
 
-export function buildSkillReport(input: SkillReportInput): SkillReportV2 {
+/** @deprecated Use SkillReportV3; retained as a source-compatible type alias. */
+export type SkillReportV2 = SkillReportV3
+
+export function buildSkillReport(input: SkillReportInput): SkillReportV3 {
   const {
     modes, family, generatedAt, summary, style, grades, lobby, contribution,
     pool, builds, observations, championStats, itemObservations, gradeComponentHistory,
-    performanceComponentHistory, performanceTimelineHistory, duration, hours, weekdays,
-    championRoles,
+    rvi, performanceTimelineHistory, duration, hours, weekdays,
   } = input
 
   const baseline = summary.avgGradeScore ?? 0
@@ -1297,7 +1326,7 @@ export function buildSkillReport(input: SkillReportInput): SkillReportV2 {
   const conditions: InsightSection = {
     key: "conditions",
     title: "Playing Conditions",
-    method: "Condition-based grade comparison",
+    method: "Condition-based compatibility-score comparison",
     eligible: conds.sections.some((s) => s.eligible),
     neededGames: conds.sections.some((s) => s.eligible) ? 0 : CONDITIONS_MIN_GRADED,
     findings: conds.sections.flatMap((s) => s.findings),
@@ -1310,19 +1339,16 @@ export function buildSkillReport(input: SkillReportInput): SkillReportV2 {
   }
 
   return {
-    version: 2,
+    version: SKILL_REPORT_VERSION,
     generatedAt,
     scope: { modes, family },
     overview: {
       summary,
       style: overviewStyle,
-      performance: buildPerformanceProfile({
-        family,
-        observations,
-        gradeComponentHistory: performanceComponentHistory ?? gradeComponentHistory ?? [],
-        timelineHistory: performanceTimelineHistory,
-        championRoles,
-      }),
+      performance: rvi ? buildPerformanceProfile({
+        recipeId: rvi.recipeId,
+        rviObservations: rvi.observations,
+      }) : undefined,
       deathMap: buildDeathMap(family, performanceTimelineHistory),
       grades,
       lobby,
@@ -1342,6 +1368,7 @@ export function buildSkillReport(input: SkillReportInput): SkillReportV2 {
         win: observation.win,
         grade: observation.grade,
         gradeScore: observation.gradeScore,
+        roleFitScore: observation.roleFitScore,
         durationSecs: observation.durationSecs,
       })),
       gradeComponents: gradeComponentHistory,
@@ -1352,6 +1379,7 @@ export function buildSkillReport(input: SkillReportInput): SkillReportV2 {
         winRate: champion.winRate,
         kda: champion.kda,
         avgGradeScore: champion.avgGradeScore,
+        avgRoleFitScore: champion.avgRoleFitScore,
         gradedGames: champion.gradedGames,
       })),
     },

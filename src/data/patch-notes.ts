@@ -10,6 +10,47 @@ import type { PatchNoteRelease } from "../types/patch-notes"
  */
 export const patchNotes: readonly PatchNoteRelease[] = [
   {
+    version: "3.0.0",
+    releasedAt: "2026-08-09",
+    title: "Recall v3: your performance, fully explained",
+    summary:
+      "Grade and RVI now share one evidence-aware performance system, with eight detailed RVI vectors, a frozen local reference, and an exact reproducible recipe.",
+    sections: [
+      {
+        title: "One performance contract",
+        items: [
+          "Position now defines the comparison context while the champion's gameplay archetype defines measurable responsibilities.",
+          "RoleFit remains the only RVI headline, while Threat, Teamfighting, Positioning & Survival, Control & Utility, Economy, Objectives & Macro, Vision & Setup, and Initiative & Pressure explain its recorded shape.",
+          "Observed zero, unavailable evidence, no opportunity, and mode-specific not-applicable metrics remain distinct throughout scoring.",
+        ],
+      },
+      {
+        title: "The detailed measurements are back",
+        items: [
+          "Expand any vector to inspect its raw statistic, formula, calibrated score, evidence state, coverage, reference scope, and actual influence on Grade.",
+          "Core, secondary, diagnostic, and unavailable measurements stay visibly separate, and a partially measured game keeps its supported vectors instead of losing its entire RVI.",
+          "Additional damage, durability, economy, objective, vision, fight, roam, and pressure measurements are diagnostic in this recipe, so extra context cannot silently change RoleFit.",
+        ],
+      },
+      {
+        title: "Stable, reproducible grades",
+        items: [
+          "Each Recall installation builds its own frozen reference, so a friend who installs the app is graded from their local match history rather than yours.",
+          "Every result records the exact linked Grade and RVI recipes, taxonomy, position resolver, evidence policy, metric registry, and calibration snapshot used to produce it.",
+          "The one-time v3 cutover creates a protected database backup, rebuilds local derived grades and metric observations, and leaves raw matches, timelines, reviews, and settings intact.",
+        ],
+      },
+      {
+        title: "Honest telemetry",
+        items: [
+          "Timeline behavior remains zero-influence diagnostic context, and unmeasurable intent such as peel or engage order is not inferred.",
+          "Missing coordinates, identities, events, or matchup evidence withhold only the affected measurement and leave the raw evidence Recall really has visible.",
+          "URF is no longer mixed into normal Summoner's Rift calibration, and timeline remapping preserves real killer and objective-owner identities.",
+        ],
+      },
+    ],
+  },
+  {
     version: "2.0.32",
     releasedAt: "2026-08-05",
     title: "Cleaner skill and review confidence",
@@ -314,7 +355,7 @@ export const patchNotes: readonly PatchNoteRelease[] = [
       {
         title: "A Champions page with hierarchy",
         items: [
-          "Headline tiles summarize the whole collection: champions played, pool win rate, average grade, and challenges outstanding.",
+          "Headline tiles summarize the whole collection: champions played, pool win rate, average RoleFit, and challenges outstanding.",
           "Filter chips split the roster into played, untouched, and challenge-bearing champions, each showing its own count alongside search.",
           "Rows gained position numbers, larger portraits, mastery level chips, win-rate bars, and confidence pips, while unplayed champions recede so your real pool reads first.",
         ],

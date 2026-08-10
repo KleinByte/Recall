@@ -14,8 +14,12 @@ export interface GradeComponent {
     | "survival"
     | "frontlining"
     | "farming"
+    | "fighting"
+    | "availability"
+    | "resources"
     | "vision"
     | "objectives"
+    | "control"
   label: string
   percentile: number
   weight: number
@@ -25,6 +29,9 @@ export interface GradeComponent {
 
 export interface GradeBreakdown {
   algorithmVersion: number
+  recipeId?: string
+  roleFitScore?: number
+  lobbyPercentile?: number
   compositePercentile: number
   components: GradeComponent[]
   unavailableReason?: string

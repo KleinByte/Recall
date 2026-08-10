@@ -7,6 +7,7 @@ import {
 } from "../electron/main/matches/time-contract.js"
 import {
   DURATION_BUCKETS_SECONDS,
+  MAX_ANALYTIC_MATCH_DURATION_SECS,
   durationBucketFor,
   groupTimedGames,
 } from "../src/helpers/time-contract-core.js"
@@ -163,6 +164,17 @@ describe("eligibility", () => {
     expect(evaluateMatchEligibility({ ...base, eligibleForProgression: false }).reason)
       .toBe("ineligible_for_progression")
     expect(evaluateMatchEligibility(base).analyticsEligible).toBe(true)
+  })
+
+  it("rejects durations beyond the analytic safety bound", () => {
+    expect(evaluateMatchEligibility({
+      ...base,
+      normalizedDurationSeconds: MAX_ANALYTIC_MATCH_DURATION_SECS,
+    }).gradeEligible).toBe(true)
+    expect(evaluateMatchEligibility({
+      ...base,
+      normalizedDurationSeconds: MAX_ANALYTIC_MATCH_DURATION_SECS + 1,
+    })).toMatchObject({ reason: "invalid_duration", gradeEligible: false })
   })
 
   it("distinguishes legacy-compatible absence from current-source absence", () => {

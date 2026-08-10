@@ -74,7 +74,7 @@ const option = computed<EChartsCoreOption>(() => ({
 <template>
   <BaseEChart
     :option="option"
-    ariaLabel="Match signatures. Each line is one game's valid lobby-relative Recall Grade component scores; green lines are wins and red lines are losses."
+    ariaLabel="Match signatures. Each line shows one game's stored Recall Grade component evidence; green lines are wins and red lines are losses."
     height="410px"
   />
 </template>

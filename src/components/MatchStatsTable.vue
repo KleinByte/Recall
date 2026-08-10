@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import { championIconUrl, championNameById, formatCompact } from "../helpers/format"
-import { POSITIONS, resolvePosition } from "../helpers/roles"
+import { POSITIONS, positionForPlayer } from "../helpers/roles"
 import type { Champion } from "../types/lol"
 import type { ParticipantRow } from "../types/stats"
 
@@ -95,8 +95,8 @@ const GROUPS: { label: string; rows: StatRow[] }[] = [
 
 const ordered = computed(() => [...props.participants].sort((left, right) => {
   if (left.teamId !== right.teamId) return left.teamId - right.teamId
-  const leftPosition = resolvePosition(left.lane, left.role, left.assignedPosition)
-  const rightPosition = resolvePosition(right.lane, right.role, right.assignedPosition)
+  const leftPosition = positionForPlayer(left)
+  const rightPosition = positionForPlayer(right)
   const leftIndex = leftPosition ? POSITIONS.indexOf(leftPosition) : 99
   const rightIndex = rightPosition ? POSITIONS.indexOf(rightPosition) : 99
   return leftIndex - rightIndex || left.participantId - right.participantId

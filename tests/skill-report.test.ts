@@ -11,10 +11,11 @@ import {
   buildTrendFindings,
   buildSkillReport,
   buildDeathMap,
-  type SkillReportV2,
 } from "../electron/main/matches/skill-report.js"
 import { computePerGameAxes } from "../electron/main/matches/style.js"
 import type { ModeFamily } from "../electron/main/matches/types.js"
+import { GRADE_FAMILIES } from "../electron/main/matches/grade-v3-recipe.js"
+import { RVI_VECTOR_KEYS } from "../electron/main/matches/rvi-contract.js"
 
 /**
  * Factory for creating test observations
@@ -113,6 +114,7 @@ function observations(
       queueId: family === "sr" ? 420 : family === "aram" ? 450 : 1700,
       win,
       gradeScore,
+      roleFitScore: gradeScore,
       championId: 1,
       role,
       durationSecs,
@@ -153,7 +155,7 @@ describe("Strong game pattern", () => {
   it("defines strong games from the inclusive top quartile", () => {
     const report = buildBestGamePattern(observations(32))
     expect(report.eligible).toBe(true)
-    expect(report.definition).toContain("top 25% of your Recall grades")
+    expect(report.definition).toContain("top 25% of your frozen-reference compatibility scores")
     expect(report.strongGames).toBeGreaterThanOrEqual(8)
   })
 
@@ -426,6 +428,7 @@ function champStats(
       kda: 3,
       avgDamageToChampions: 15000,
       avgGradeScore: 50 + i * 3,
+      avgRoleFitScore: 50 + i * 3,
       gradedGames: gradedPerChamp,
     })
   }
@@ -446,6 +449,7 @@ function champObservations(count: number, championIds: number[]): InsightObserva
       queueId: 420,
       win: i % 2 === 0,
       gradeScore: champId === 100 ? 70 : champId === 101 ? 30 : 50,
+      roleFitScore: champId === 100 ? 70 : champId === 101 ? 30 : 50,
       championId: champId,
       role: "MIDDLE",
       durationSecs: 1800,
@@ -772,6 +776,18 @@ describe("Trend findings", () => {
     const section = buildTrendFindings(obs, "sr")
     expect(section.findings.filter((f) => f.key.startsWith("window:")).length).toBe(5)
   })
+
+  it("does not turn unavailable style axes into zero-valued trend evidence", () => {
+    const obs = observations(30)
+    for (const game of obs.slice(-10)) game.styleAxes = {}
+
+    const section = buildTrendFindings(obs, "sr")
+    const latestWindow = section.findings.find((finding) => finding.key === "window:0")
+
+    expect(latestWindow?.values).not.toHaveProperty("aggression")
+    expect(section.findings.find((finding) => finding.key === "trend:aggression"))
+      .toBeUndefined()
+  })
 })
 
 // --- Report composition ---
@@ -833,7 +849,7 @@ describe("Death map", () => {
   })
 })
 
-describe("SkillReportV2", () => {
+describe("SkillReportV3", () => {
   const baseInput = () => ({
     modes: ["sr_ranked_solo" as const, "sr_ranked_flex" as const],
     family: "sr" as const,
@@ -844,6 +860,7 @@ describe("SkillReportV2", () => {
       avgDamageToChampions: 15000, avgDamageTaken: 12000, avgGold: 12000,
       avgDurationSecs: 1800, pentaKills: 0, currentStreak: 0,
       longestWinStreak: 3, avgGradeScore: 50, gradedGames: 50,
+      avgRoleFitScore: 50,
     },
     style: {
       career: {
@@ -877,9 +894,9 @@ describe("SkillReportV2", () => {
     itemObservations: itemObservations(50),
   })
 
-  it("has exact top-level shape with version 2", () => {
+  it("has exact top-level shape with version 3", () => {
     const report = buildSkillReport(baseInput())
-    expect(report.version).toBe(2)
+    expect(report.version).toBe(3)
     expect(report.generatedAt).toBe(1700000000000)
     expect(report.scope).toEqual({
       modes: ["sr_ranked_solo", "sr_ranked_flex"],
@@ -894,6 +911,85 @@ describe("SkillReportV2", () => {
     const b = buildSkillReport({ ...baseInput(), generatedAt: 222 })
     expect(a.generatedAt).toBe(111)
     expect(b.generatedAt).toBe(222)
+  })
+
+  it("builds report RVI only from the selected Grade v3 recipe observations", () => {
+    const recipeId = "recall.grade.v3.test@calibration:test"
+    const familyPercentiles = Object.fromEntries(
+      RVI_VECTOR_KEYS.map((family, index) => [family, 90 - index * 10]),
+    )
+    const familyResponsibilityWeights = Object.fromEntries(
+      RVI_VECTOR_KEYS.map((family) => [
+        family,
+        family === "protection" ? 0 : 1 / GRADE_FAMILIES.length,
+      ]),
+    )
+    const report = buildSkillReport({
+      ...baseInput(),
+      rvi: {
+        algorithmVersion: 3,
+        recipeId,
+        calibrationId: "calibration:test",
+        familyKeys: GRADE_FAMILIES,
+        observations: [
+          {
+            matchId: 1,
+            recipeId,
+            playedAt: 1_000,
+            roleFitScore: 20,
+            familyPercentiles,
+            familyResponsibilityWeights,
+            championId: 84,
+            position: "MIDDLE",
+            primaryArchetype: "assassin",
+          },
+          {
+            matchId: 2,
+            recipeId,
+            playedAt: 2_000,
+            roleFitScore: 80,
+            familyPercentiles,
+            familyResponsibilityWeights,
+            championId: 222,
+            position: "BOTTOM",
+            primaryArchetype: "marksman",
+          },
+        ],
+      },
+      // This remains a legacy visualization payload, not an RVI input.
+      gradeComponentHistory: [{
+        gameId: 99,
+        playedAt: 99_000,
+        grade: "S+",
+        gradeScore: 4,
+        compositePercentile: 1,
+        components: [],
+      }],
+    })
+
+    expect(report.overview.performance).toMatchObject({
+      algorithmVersion: 3,
+      recipeId,
+      score: 50,
+      measuredGames: 2,
+      scoringContext: "profile",
+      weighting: { kind: "equal" },
+      headline: { source: "role_fit", score: 50 },
+      scopes: {
+        overall: { score: 50, games: 2 },
+        positions: [
+          { position: "MIDDLE", score: 20 },
+          { position: "BOTTOM", score: 80 },
+        ],
+        primaryArchetypes: [
+          { primaryArchetype: "assassin", score: 20 },
+          { primaryArchetype: "marksman", score: 80 },
+        ],
+      },
+    })
+    expect(report.overview.performance?.dimensions.map((dimension) => dimension.key))
+      .toEqual(RVI_VECTOR_KEYS)
+    expect(report.visuals.gradeComponents).toHaveLength(1)
   })
 
   it("overview builds have no win rate", () => {
@@ -938,6 +1034,16 @@ describe("SkillReportV2", () => {
       duration: [{ label: "Under 25 min", games: 12, wins: 7, winRate: 7 / 12 }],
       hours: [{ label: "18-21", games: 8, wins: 5, winRate: 5 / 8 }],
     })
+  })
+
+  it("leaves unavailable drift axes blank instead of averaging them as zero", () => {
+    const input = baseInput()
+    input.observations.slice(0, 10).forEach((game) => { game.styleAxes = {} })
+
+    const report = buildSkillReport(input)
+
+    expect(report.overview.style?.drift[0].axes).toEqual([])
+    expect(report.overview.style?.drift[1].axes.length).toBeGreaterThan(0)
   })
 
   it("is renderer-serializable (structured clone compatible)", () => {

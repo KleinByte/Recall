@@ -39,6 +39,8 @@ function participant(
     neutralMinionsKilled: 10,
     visionScore: 20,
     damageDealtToObjectives: 2_000,
+    damageDealtToTurrets: 0,
+    timeCCingOthers: 0,
     teamPosition: "MIDDLE",
     ...overrides,
   }
@@ -95,6 +97,9 @@ describe("mapRiotMatch", () => {
       perkPrimaryStyle: 8100,
       perkSubStyle: 8300,
       perks: [8112, 8126, 8345, 0, 0, 0],
+      gradeCoreComplete: 1,
+      gradeCoreSource: "match_v5",
+      gradeCoreMissingFields: [],
       runeSelections: expect.arrayContaining([
         expect.objectContaining({ runeId: 8112, var1: 2840, var2: 12 }),
       ]),
@@ -105,6 +110,44 @@ describe("mapRiotMatch", () => {
       towerKills: 2,
     })
     expect(result.gradeInputs).toHaveLength(10)
+  })
+
+  it("flags absent or malformed core fields before numeric fallback coercion", () => {
+    const dto = match()
+    dto.info.participants[0] = participant(1, {
+      kills: undefined,
+      visionScore: Number.NaN,
+    })
+
+    const row = mapRiotMatch(dto, PUUID)!.participants[0]
+
+    expect(row.kills).toBe(0)
+    expect(row.visionScore).toBe(0)
+    expect(row.gradeCoreComplete).toBe(0)
+    expect(row.gradeCoreSource).toBe("match_v5")
+    expect(row.gradeCoreMissingFields).toEqual(["kills", "vision_score"])
+  })
+
+  it("keeps an explicit all-zero core line eligible for completeness", () => {
+    const dto = match()
+    dto.info.participants[0] = participant(1, {
+      kills: 0,
+      deaths: 0,
+      assists: 0,
+      goldEarned: 0,
+      totalDamageDealtToChampions: 0,
+      totalMinionsKilled: 0,
+      neutralMinionsKilled: 0,
+      damageDealtToObjectives: 0,
+      damageDealtToTurrets: 0,
+      timeCCingOthers: 0,
+      visionScore: 0,
+    })
+
+    const row = mapRiotMatch(dto, PUUID)!.participants[0]
+
+    expect(row.gradeCoreComplete).toBe(1)
+    expect(row.gradeCoreMissingFields).toEqual([])
   })
 
   it("captures Match-V5 augments and schema drift across the whole lobby", () => {
@@ -154,6 +197,23 @@ describe("mapRiotMatch", () => {
     expect(result.match.durationSecs).toBe(1_200)
     expect(result.match.mode).toBe("other")
     expect(result.match.modeFamily).toBe("other")
+  })
+
+  it("marks inconsistent duration sources instead of trusting a bad rate denominator", () => {
+    const start = 1_700_000_000_000
+    const verified = mapRiotMatch(match({
+      gameStartTimestamp: start,
+      gameEndTimestamp: start + 1_200_000,
+      gameDuration: 1_200,
+    }), PUUID)!
+    const inconsistent = mapRiotMatch(match({
+      gameStartTimestamp: start,
+      gameEndTimestamp: start + 600_000,
+      gameDuration: 1_200,
+    }), PUUID)!
+
+    expect(verified.match.durationQuality).toBe("verified")
+    expect(inconsistent.match.durationQuality).toBe("inconsistent")
   })
 
   it("rejects payloads that do not contain the requested player", () => {

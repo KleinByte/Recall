@@ -61,6 +61,7 @@ import { LcuClient } from "./lcu-client.js"
 import { LcuDiscovery, type LcuCredentials } from "./lcu-discovery.js"
 import { LcuEvents as LcuEventStream } from "./lcu-events.js"
 import { MatchSync } from "./match-sync.js"
+import { RecallV3Service } from "./matches/recall-v3-service.js"
 import { syncUntilRecorded } from "./post-game-sync.js"
 import { buildStyleProfile } from "./matches/style.js"
 import type {
@@ -82,6 +83,7 @@ import { normalizeRiotApiKey } from "./riot/api-client.js"
 import { BackupManager } from "./database/backup-manager.js"
 import { DataTrustService } from "./database/data-trust.js"
 import { ClearHistoryService } from "./database/clear-history-service.js"
+import { DatabaseWriteCoordinator } from "./database-write-coordinator.js"
 import { ExportService } from "./database/export-service.js"
 import {
   ReviewRepository,
@@ -245,21 +247,22 @@ let backupManager: BackupManager | undefined
 let dataTrustService: DataTrustService | undefined
 let timelineService: LcuTimelineService | undefined
 let reviewService: ReviewService | undefined
+let recallV3: RecallV3Service | undefined
 let startupRestoreError: string | undefined
 let riotBackfillAbort: AbortController | undefined
 let riotBackfillTask: Promise<void> | undefined
 let riotBackfillRevision = 0
-const databaseTasks = new Set<Promise<unknown>>()
+const databaseWrites = new DatabaseWriteCoordinator()
 let shutdownPrepared = false
 let shutdownPreparing: Promise<void> | undefined
 
 function trackDatabaseTask<T>(task: Promise<T>): Promise<T> {
-  databaseTasks.add(task)
-  void task.then(
-    () => databaseTasks.delete(task),
-    () => databaseTasks.delete(task),
-  )
-  return task
+  return databaseWrites.track(task)
+}
+
+function collectionDisabled(): boolean {
+  return databaseWrites.maintenanceActive ||
+    settingsStore.getMain("collection-mode") === "disabled_after_clear"
 }
 
 function getDatabase() {
@@ -436,6 +439,45 @@ function getBackupManager() {
   return backupManager
 }
 
+function getRecallV3() {
+  if (!recallV3) recallV3 = new RecallV3Service(getDatabase())
+  return recallV3
+}
+
+function ensureRecallV3Frozen(win?: BrowserWindow) {
+  const service = getRecallV3()
+  const status = service.calibrationStatus()
+  if (collectionDisabled()) return status
+  const needsDirectCutover = service.needsDirectCutover()
+  const hasRecoverableRawReferenceData = status.state === "calibrating" &&
+    status.supportedScopes.length === 0 && service.hasRecoverableRawReferenceData()
+  if (!needsDirectCutover &&
+      (status.state === "frozen" ||
+       (status.supportedScopes.length === 0 && !hasRecoverableRawReferenceData))) {
+    return status
+  }
+  const backup = getBackupManager().create(getDatabase(), "pre-repair")
+  const result = service.ensureFrozenReference({
+    path: backup.fileName,
+    sha256: backup.sha256,
+  })
+  if ("processed" in result) {
+    console.log(
+      `Recall v3 rebuilt ${result.processed} matches (${result.ready} ready, ${result.nonready} withheld)`,
+    )
+    if (win) {
+      broadcast(win, "stats:updated", { inserted: 0, regraded: result.processed })
+      broadcast(win, "recall-v3:updated", getRecallV3().calibrationStatus())
+      broadcast(win, "data-trust:updated")
+    }
+  } else if (needsDirectCutover && win) {
+    broadcast(win, "stats:updated", { inserted: 0, regraded: 0 })
+    broadcast(win, "recall-v3:updated", result)
+    broadcast(win, "data-trust:updated")
+  }
+  return result
+}
+
 function getDataTrustService() {
   if (!dataTrustService) {
     dataTrustService = new DataTrustService(
@@ -519,6 +561,7 @@ function getTimelineService(win: BrowserWindow) {
         const detail = getParticipants().getMatchDetail(gameId, puuid)
         const player = detail.participants.find((entry) => entry.isPlayer === 1)
         if (!player) return
+        getRecallV3().refreshMetricObservations(gameId, puuid)
         const labels = prioritizePerformanceLabels([
           ...evaluateMatchLabels({
             match,
@@ -577,32 +620,10 @@ function getReviewService(win: BrowserWindow) {
       getParticipants(),
       getReviewRepository(),
       getTimelineService(win),
+      getRecallV3(),
     )
   }
   return reviewService
-}
-
-/** Refreshes grades stored by an older algorithm across the whole history. */
-async function regradeOutdatedGrades(win: BrowserWindow) {
-  const service = getReviewService(win)
-  let total = 0
-  for (;;) {
-    let regraded = 0
-    try {
-      regraded = service.regradeOutdated()
-    } catch (error) {
-      console.warn(`Could not refresh outdated grades: ${(error as Error).message}`)
-      break
-    }
-    total += regraded
-    if (regraded === 0) break
-    // Yield between batches so grading thousands of games cannot starve IPC.
-    await new Promise((resolve) => setTimeout(resolve, 50))
-  }
-  if (total > 0) {
-    console.log(`Regraded ${total} matches with the current grade algorithm`)
-    broadcast(win, "stats:updated", { inserted: 0, regraded: total })
-  }
 }
 
 async function createWindow(startHidden = false) {
@@ -702,6 +723,7 @@ function createTray(win: BrowserWindow) {
 }
 
 async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
+  if (collectionDisabled()) return
   const client = new LcuClient(credentials)
 
   let summoner: Summoner
@@ -711,6 +733,10 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
     summoner = await client.request<Summoner>(
       "/lol-summoner/v1/current-summoner",
     )
+    if (collectionDisabled()) {
+      client.close()
+      return
+    }
   } catch (error) {
     // The client is running but not ready — still signing in, or busy during a
     // game. Discovery will not fire again because the lockfile has not changed,
@@ -718,10 +744,12 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
     console.warn(`Could not read current summoner: ${(error as Error).message}`)
     client.close()
 
-    connectRetry = setTimeout(
-      () => void startSession(win, credentials),
-      SESSION_RETRY_DELAY_MS,
-    )
+    if (!collectionDisabled()) {
+      connectRetry = setTimeout(
+        () => void startSession(win, credentials),
+        SESSION_RETRY_DELAY_MS,
+      )
+    }
     return
   }
 
@@ -737,6 +765,11 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
     console.warn(`Could not determine Riot API route: ${(error as Error).message}`)
   }
 
+  if (collectionDisabled()) {
+    client.close()
+    return
+  }
+
   const sync = new MatchSync(
     client,
     getRepository(),
@@ -745,6 +778,7 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
     getChampSelect(),
     getLiveGameCaptures(),
     new MatchSourceRepository(getDatabase()),
+    getRecallV3(),
   )
   const challengeSync = new ChallengeSync(
     client,
@@ -942,12 +976,12 @@ async function initialiseLiveSession(win: BrowserWindow) {
 let catchingGame = false
 
 async function catchFinishedGame(win: BrowserWindow) {
-  if (catchingGame || !session) return
+  if (collectionDisabled() || catchingGame || !session) return
   catchingGame = true
 
   try {
     await syncUntilRecorded(async () => {
-      if (!session) return { inserted: 0 }
+      if (collectionDisabled() || !session) return { inserted: 0 }
 
       const result = await session.sync.syncNow()
       if (result.inserted > 0) await afterSync(win, result)
@@ -960,7 +994,7 @@ async function catchFinishedGame(win: BrowserWindow) {
 }
 
 async function performFullSync(win: BrowserWindow) {
-  if (!session) return
+  if (collectionDisabled() || !session) return
 
   const result = await session.sync.syncNow()
   await afterSync(win, result)
@@ -970,6 +1004,7 @@ async function performFullSync(win: BrowserWindow) {
 const refreshAll = createSingleFlightRefresh(performFullSync)
 
 async function runSync(win: BrowserWindow) {
+  if (collectionDisabled()) return
   return trackDatabaseTask(refreshAll(win))
 }
 
@@ -983,6 +1018,7 @@ async function startRiotHistoryBackfill(
   win: BrowserWindow,
   restart: boolean,
 ) {
+  if (collectionDisabled()) return
   const revision = ++riotBackfillRevision
   riotBackfillAbort?.abort()
   const previous = riotBackfillTask
@@ -1005,7 +1041,7 @@ async function startRiotHistoryBackfill(
   )
 
   const queues = await fetchQueues(active.client)
-  if (revision !== riotBackfillRevision || session !== active) return
+  if (collectionDisabled() || revision !== riotBackfillRevision || session !== active) return
 
   const controller = new AbortController()
   riotBackfillAbort = controller
@@ -1022,6 +1058,8 @@ async function startRiotHistoryBackfill(
     getRiotBackfills(),
     {
       champSelect: getChampSelect(),
+      recallV3: getRecallV3(),
+      sourceRepository: new MatchSourceRepository(getDatabase()),
       matchPuuid,
       onProgress: (state) => {
         if (revision !== riotBackfillRevision) return
@@ -1092,6 +1130,7 @@ async function startRiotHistoryBackfill(
 
   try {
     await task
+    ensureRecallV3Frozen(win)
   } finally {
     if (revision === riotBackfillRevision) {
       riotBackfillAbort = undefined
@@ -1105,7 +1144,9 @@ async function afterSync(
   win: BrowserWindow,
   result: { inserted: number },
 ) {
-  if (!session) return
+  if (collectionDisabled() || !session) return
+
+  ensureRecallV3Frozen(win)
 
   if (result.inserted > 0) {
     broadcast(win, "stats:updated", result)
@@ -1130,7 +1171,9 @@ async function afterSync(
     seen: result.inserted,
     written: result.inserted,
   })
-  getTimelineService(win).queueRecentMatches(session.summoner.puuid)
+  const timelineTask = getTimelineService(win)
+    .queueRecentMatches(session.summoner.puuid)
+  if (timelineTask) void trackDatabaseTask(timelineTask)
 
   // Challenges are synced after matches so a challenge failure can never cost
   // us a recorded game.
@@ -1228,6 +1271,13 @@ function connectToLcu(win: BrowserWindow) {
   lcuDiscovery = discovery
 
   discovery.on("connect", (credentials: LcuCredentials) => {
+    // A new lockfile connection after maintenance is the explicit reconnect
+    // described by the clear-history confirmation. The session that performed
+    // the clear is stopped first and can never resume collection on its own.
+    if (!databaseWrites.maintenanceActive &&
+        settingsStore.getMain("collection-mode") === "disabled_after_clear") {
+      settingsStore.setMain("collection-mode", "enabled")
+    }
     stopSession(win)
     void startSession(win, credentials)
   })
@@ -1283,11 +1333,6 @@ function readPinned(): number[] {
 
 function storedChampionCatalog(): ChampionCatalogEntry[] {
   return mergeChampionCatalog(settingsStore.getMain("champion-catalog"))
-}
-
-/** Champion class tags from the durable catalog, for class-aware RVI scaling. */
-function storedChampionRoles(): ReadonlyMap<number, readonly string[]> {
-  return new Map(storedChampionCatalog().map((champion) => [champion.id, champion.roles]))
 }
 
 function rememberChampionCatalog(fetched: unknown): ChampionCatalogEntry[] {
@@ -1559,6 +1604,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
               deaths: match.deaths,
               assists: match.assists,
               gradeScore: match.gradeScore,
+              roleFitScore: match.roleFitScore,
             })),
           }
         }),
@@ -1576,12 +1622,14 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
   )
   ipcMain.handle(
     "timeline:request",
-    (_event, rawGameId: unknown, manualRetry: unknown) =>
-      getTimelineService(win).request(
+    (_event, rawGameId: unknown, manualRetry: unknown) => {
+      if (collectionDisabled()) throw new Error("History collection is disabled")
+      return trackDatabaseTask(getTimelineService(win).request(
         integer(rawGameId, "Game id"),
         withPuuid().puuid,
         manualRetry === true,
-      ),
+      ))
+    },
   )
 
   ipcMain.handle("annotations:get", (_event, rawGameId: unknown) =>
@@ -1603,7 +1651,9 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
         bookmarked: input.bookmarked === true,
         tagIds: input.tagIds.map((tagId) => integer(tagId, "Tag id")).slice(0, 20),
       })
-      if (saved.bookmarked) void getTimelineService(win).request(gameId, puuid)
+      if (saved.bookmarked && !collectionDisabled()) {
+        void trackDatabaseTask(getTimelineService(win).request(gameId, puuid))
+      }
       broadcast(win, "review:updated", gameId)
       return saved
     },
@@ -1876,30 +1926,80 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     const scoped = withPuuid(filter)
     const repo = getRepository()
 
-    // Champions are judged against how the player performs generally, so a
-    // thin sample lands near their own average rather than at an extreme.
+    // Compatibility scores still feed the legacy/internal signal model, but
+    // the visible ordering is the unshrunk authoritative RoleFit average.
     const baseline = repo.getSummary(scoped).avgGradeScore ?? 0
     const signals = splitChampionSignals(repo.getChampionStats(scoped), baseline)
-    const ranked = signals.main
+    const byRoleFit = (left: typeof signals.main[number], right: typeof signals.main[number]) =>
+      (right.roleFitScore ?? -Infinity) - (left.roleFitScore ?? -Infinity) ||
+      right.gradedGames - left.gradedGames || left.championId - right.championId
+    const ranked = [...signals.main].sort(byRoleFit)
+    const earlySignals = [...signals.earlySignals].sort(byRoleFit)
 
-    return { ranked, earlySignals: signals.earlySignals, ...pickBestAndWorst(ranked, 3) }
+    return { ranked, earlySignals, ...pickBestAndWorst(ranked, 3) }
   })
 
   ipcMain.handle(
     "stats:rvi",
-    (_event, filter: Partial<StatsFilter>, family: ModeFamily, scoringContext?: PerformanceScoringContext) => {
+    (_event, filter: Partial<StatsFilter>, _family: ModeFamily, scoringContext?: PerformanceScoringContext) => {
       const scoped = withPuuid(filter)
       const insightsRepo = getInsights()
+      // RVI is a career profile for the selected frozen recipe. At this hobby-
+      // project scale, silently truncating it to a recent window is both
+      // unnecessary and misleading.
+      const rvi = insightsRepo.getRviV3Observations(scoped)
+      if (!rvi) return undefined
       return buildPerformanceProfile({
-        family,
-        observations: insightsRepo.getObservations(scoped),
-        gradeComponentHistory: insightsRepo.getGradeComponentHistory(scoped, 240),
-        timelineHistory: insightsRepo.getRviTimelineHistory(scoped, 240),
-        championRoles: storedChampionRoles(),
+        recipeId: rvi.recipeId,
+        rviObservations: rvi.observations,
         scoringContext,
       })
     },
   )
+
+  ipcMain.handle("recall-v3:status", () => getRecallV3().calibrationStatus())
+
+  ipcMain.handle("recall-v3:recalibrate", async () => {
+    if (collectionDisabled()) throw new Error("History collection is disabled")
+    const confirmation = await dialog.showMessageBox(win, {
+      type: "warning",
+      title: "Recalibrate Recall v3?",
+      message: "Build a new frozen Grade and RVI reference from the complete matches stored on this computer?",
+      detail: "Recall will create a verified backup, replace every derived v3 grade, and keep raw matches, timelines, reviews, and settings unchanged.",
+      buttons: ["Recalibrate", "Cancel"],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    })
+    if (confirmation.response !== 0) return { canceled: true }
+
+    const finishMaintenance = databaseWrites.beginMaintenance("recall-v3-recalibration")
+    try {
+      riotBackfillRevision += 1
+      riotBackfillAbort?.abort()
+      riotBackfillAbort = undefined
+      const activeBackfill = riotBackfillTask
+      if (activeBackfill) await activeBackfill.catch(() => undefined)
+      riotBackfillTask = undefined
+      await databaseWrites.drain()
+
+      const backup = getBackupManager().create(getDatabase(), "pre-repair")
+      const result = getRecallV3().recalibrate({
+        path: backup.fileName,
+        sha256: backup.sha256,
+      }, (progress) => {
+        if (progress.processed === progress.total || progress.processed % 25 === 0) {
+          broadcast(win, "recall-v3:progress", progress)
+        }
+      })
+      broadcast(win, "stats:updated", { inserted: 0, regraded: result.processed })
+      broadcast(win, "recall-v3:updated", getRecallV3().calibrationStatus())
+      broadcast(win, "data-trust:updated")
+      return result
+    } finally {
+      finishMaintenance()
+    }
+  })
 
   ipcMain.handle(
     "stats:skill-report",
@@ -1938,9 +2038,8 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
         championStats: repo.getChampionStats(scoped),
         itemObservations: insightsRepo.getFinalItemObservations(scoped),
         gradeComponentHistory: insightsRepo.getGradeComponentHistory(scoped),
-        performanceComponentHistory: insightsRepo.getGradeComponentHistory(scoped, 240),
+        rvi: insightsRepo.getRviV3Observations(scoped),
         performanceTimelineHistory: insightsRepo.getRviTimelineHistory(scoped, 240),
-        championRoles: storedChampionRoles(),
       })
     },
   )
@@ -2136,12 +2235,9 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     return runSync(win)
   })
 
-  ipcMain.handle("stats:sync", async () => {
-    if (!session) return { fetched: 0, inserted: 0 }
-
-    const result = await session.sync.syncNow()
-    broadcast(win, "stats:updated", result)
-    return result
+  ipcMain.handle("stats:sync", () => {
+    if (!session || collectionDisabled()) return { fetched: 0, inserted: 0 }
+    return runSync(win)
   })
 
   ipcMain.handle("stats:export", async () => {
@@ -2157,7 +2253,9 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
 
     const matches = getRepository().getAllMatches(puuid)
     const columns = ["gameId", "playedAt", "mode", "championId", "win", "kills",
-      "deaths", "assists", "durationSecs", "grade", "gradeScore"] as const
+      "deaths", "assists", "durationSecs", "grade", "gradeScore", "roleFitScore",
+      "gradeAlgorithmVersion", "gradeRecipeId", "gradeStatus", "gradeEvidenceCoverage",
+      "gradeReferenceSampleCount"] as const
     const csvCell = (value: unknown) => {
       const text = value === undefined || value === null ? "" : String(value)
       return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text
@@ -2225,27 +2323,38 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
 
     if (response !== 1) return { deleted: 0 }
 
-    riotBackfillRevision += 1
-    riotBackfillAbort?.abort()
-    riotBackfillAbort = undefined
-    const activeBackfill = riotBackfillTask
-    if (activeBackfill) await activeBackfill.catch(() => undefined)
-    riotBackfillTask = undefined
-    const backup = getBackupManager().create(getDatabase(), "pre-clear")
     const previousCollectionMode = settingsStore.getMain("collection-mode")
-    settingsStore.setMain("collection-mode", "disabled_after_clear")
-    let result: { deleted: number; recoveryPoint: string }
+    const finishMaintenance = databaseWrites.beginMaintenance("clear-history")
     try {
-      result = new ClearHistoryService(getDatabase()).clear(puuid, backup)
+      settingsStore.setMain("collection-mode", "disabled_after_clear")
+      // Stop every producer before taking the recovery point. In particular,
+      // a late post-game sync or timeline request must not repopulate this
+      // account after the clear transaction commits.
+      riotBackfillRevision += 1
+      riotBackfillAbort?.abort()
+      riotBackfillAbort = undefined
+      const activeBackfill = riotBackfillTask
+      stopSession(win)
+      if (activeBackfill) await activeBackfill.catch(() => undefined)
+      await databaseWrites.drain()
+      riotBackfillTask = undefined
+
+      const backup = getBackupManager().create(getDatabase(), "pre-clear")
+      const result = new ClearHistoryService(getDatabase()).clear(puuid, backup)
+      if (settingsStore.getMain("last-puuid") === puuid) {
+        settingsStore.deleteMain("last-puuid")
+      }
+      broadcast(win, "stats:updated", { fetched: 0, inserted: 0 })
+      broadcast(win, "recall-v3:updated", getRecallV3().calibrationStatus())
+      broadcast(win, "data-trust:updated")
+      return result
     } catch (error) {
       if (previousCollectionMode === undefined) settingsStore.deleteMain("collection-mode")
       else settingsStore.setMain("collection-mode", previousCollectionMode)
       throw error
+    } finally {
+      finishMaintenance()
     }
-    if (settingsStore.getMain("last-puuid") === puuid) settingsStore.deleteMain("last-puuid")
-    broadcast(win, "stats:updated", { fetched: 0, inserted: 0 })
-
-    return result
   })
 }
 
@@ -2304,7 +2413,7 @@ async function prepareShutdown(
   // Aborted API requests still need one turn to record their durable paused
   // cursor. Local match/challenge syncs are also allowed to finish before the
   // database is checkpointed or closed.
-  await Promise.allSettled([...databaseTasks])
+  await databaseWrites.drain()
   riotBackfillTask = undefined
 
   try {
@@ -2365,6 +2474,7 @@ async function main() {
   // handler registered" errors because IPC registration happens afterwards.
   try {
     getRepository()
+    ensureRecallV3Frozen()
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     console.error(`Could not initialise Recall's database: ${message}`)
@@ -2389,10 +2499,6 @@ async function main() {
 
   registerIpc(win, updater)
   void updater.start()
-
-  // A grading algorithm update rolls out to the entire stored history in the
-  // background, one batch at a time so startup stays responsive.
-  void regradeOutdatedGrades(win)
 
   // A second launch reveals the running copy rather than starting another.
   app.on("second-instance", () => reveal(win))

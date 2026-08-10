@@ -44,6 +44,51 @@ describe("MatchesRepository", () => {
     expect(repo.countMatches(PUUID)).toBe(4)
   })
 
+  it("lets authoritative Match-V5 duration validation replace an LCU summary", () => {
+    repo.insertMany([buildMatchRow({
+      gameId: 9,
+      durationSecs: 1_200,
+      durationQuality: "source_reported",
+    })])
+
+    repo.insertMany([buildMatchRow({
+      gameId: 9,
+      durationSecs: 600,
+      durationQuality: "inconsistent",
+      riotMatchId: "NA1_9",
+    })])
+
+    expect(repo.getMatch(9, PUUID)).toMatchObject({
+      durationSecs: 600,
+      durationQuality: "inconsistent",
+      riotMatchId: "NA1_9",
+    })
+  })
+
+  it("reconciles independent LCU summary and scoreboard durations before grading", () => {
+    repo.insertMany([
+      buildMatchRow({ gameId: 10, durationSecs: 1_200, durationQuality: "source_reported" }),
+      buildMatchRow({ gameId: 11, durationSecs: 1_200, durationQuality: "source_reported" }),
+      buildMatchRow({ gameId: 12, durationSecs: 0, durationQuality: "invalid" }),
+      buildMatchRow({ gameId: 13, durationSecs: 1_200, durationQuality: "source_reported" }),
+    ])
+
+    expect(repo.reconcileLcuDetailDuration(10, PUUID, 1_201)).toBe("verified")
+    expect(repo.reconcileLcuDetailDuration(11, PUUID, 1_300)).toBe("inconsistent")
+    expect(repo.reconcileLcuDetailDuration(12, PUUID, 900)).toBe("source_reported")
+    expect(repo.reconcileLcuDetailDuration(13, PUUID, 43_201)).toBe("invalid")
+    expect(repo.getMatch(10, PUUID)).toMatchObject({
+      durationSecs: 1_200,
+      durationQuality: "verified",
+    })
+    expect(repo.getMatch(11, PUUID)?.durationQuality).toBe("inconsistent")
+    expect(repo.getMatch(12, PUUID)).toMatchObject({
+      durationSecs: 900,
+      durationQuality: "source_reported",
+    })
+    expect(repo.getMatch(13, PUUID)?.durationQuality).toBe("invalid")
+  })
+
   it("keeps the same game separately for different accounts", () => {
     repo.insertMany([
       buildMatchRow({ gameId: 1, puuid: "account-a" }),

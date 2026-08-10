@@ -65,6 +65,11 @@ export const SOURCE_FIELD_REGISTRY_V1: readonly SourceFieldDefinition[] = [
   ...countFields.map((name) => field(`participant.${name}`, "participant.kda", "nonnegative_count")),
   ...damageFields.map((name) => field(`participant.${name}`, "participant.damage", "nonnegative_amount")),
   ...["gold_earned", "gold_spent"].map((name) => field(`participant.${name}`, "participant.economy", "nonnegative_amount")),
+  ...["time_ccing_others", "total_heals_on_teammates", "total_damage_shielded_on_teammates",
+    "total_time_spent_dead"]
+    .map((name) => field(`participant.${name}`, "participant.sustain_cc", "nonnegative_amount")),
+  ...["damage_objectives", "damage_turrets"]
+    .map((name) => field(`participant.${name}`, "participant.objectives", "nonnegative_amount")),
   ...["total_minions_killed", "neutral_minions"].map((name) => field(`participant.${name}`, "participant.farm", "nonnegative_count")),
   field("participant.vision_score", "participant.vision_score", "nonnegative_count"),
   ...["wards_placed", "wards_killed", "control_wards_purchased", "detector_wards_placed"]

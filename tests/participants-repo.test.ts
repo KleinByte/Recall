@@ -138,7 +138,10 @@ describe("ParticipantsRepository", () => {
       }),
     ])
     const setGrade = db.prepare(
-      "UPDATE match_participants SET grade_score = ? WHERE game_id = ? AND puuid = ?",
+      `UPDATE match_participants
+       SET grade = 'B', grade_score = ?, grade_algorithm_version = 2,
+           grade_status = 'ready', grade_composite_percentile = .5
+       WHERE game_id = ? AND puuid = ?`,
     )
     setGrade.run(1.2, 1, PUUID)
     setGrade.run(-0.6, 2, PUUID)
@@ -183,6 +186,57 @@ describe("ParticipantsRepository", () => {
 
     expect(repo.countGamesWithLobby(PUUID)).toBe(1)
     expect(repo.getMatchDetail(1, PUUID).participants).toHaveLength(10)
+  })
+
+  it("does not let a partial retry erase a complete core payload", () => {
+    repo.insertMany([participant({
+      kills: 5,
+      gradeCoreComplete: 1,
+      gradeCoreSource: "match_v5",
+      gradeCoreMissingFields: [],
+      gradeCoreContractVersion: 1,
+    })])
+
+    repo.insertMany([participant({
+      kills: 0,
+      gradeCoreComplete: 0,
+      gradeCoreSource: "league_client",
+      gradeCoreMissingFields: ["kills"],
+      gradeCoreContractVersion: 1,
+    })])
+
+    expect(repo.getMatchDetail(1, PUUID).participants[0]).toMatchObject({
+      kills: 5,
+      gradeCoreComplete: 1,
+      gradeCoreSource: "match_v5",
+      gradeCoreMissingFields: [],
+      gradeCoreContractVersion: 1,
+    })
+  })
+
+  it("lets a complete retry replace an incomplete fallback with explicit zero", () => {
+    repo.insertMany([participant({
+      gameId: 2,
+      kills: 99,
+      gradeCoreComplete: 0,
+      gradeCoreSource: "league_client",
+      gradeCoreMissingFields: ["kills"],
+    })])
+
+    repo.insertMany([participant({
+      gameId: 2,
+      kills: 0,
+      gradeCoreComplete: 1,
+      gradeCoreSource: "match_v5",
+      gradeCoreMissingFields: [],
+    })])
+
+    expect(repo.getMatchDetail(2, PUUID).participants[0]).toMatchObject({
+      kills: 0,
+      gradeCoreComplete: 1,
+      gradeCoreSource: "match_v5",
+      gradeCoreMissingFields: [],
+    })
   })
 
   it("stores the participant PUUID needed for mastery lookups without account IDs", () => {

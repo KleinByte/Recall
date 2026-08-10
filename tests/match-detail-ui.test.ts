@@ -129,13 +129,13 @@ describe("team totals", () => {
 })
 
 describe("lobbyStandings", () => {
-  const graded = (participantId: number, gradeScore: number) => ({
+  const graded = (participantId: number, roleFitScore: number) => ({
     ...participant(participantId, participantId <= 5 ? 100 : 200),
-    gradeScore,
+    roleFitScore,
   })
 
   it("places the best graded player first and the worst last", () => {
-    const rows = [graded(1, -0.4), graded(2, 1.8), graded(6, 0.5)]
+    const rows = [graded(1, 30), graded(2, 90), graded(6, 60)]
 
     const standings = lobbyStandings(rows)
 
@@ -145,13 +145,13 @@ describe("lobbyStandings", () => {
   })
 
   it("breaks ties without giving two players the same place", () => {
-    const standings = lobbyStandings([graded(6, 0.5), graded(1, 0.5)])
+    const standings = lobbyStandings([graded(6, 60), graded(1, 60)])
 
     expect([...standings.values()].map((entry) => entry.place)).toEqual([1, 2])
   })
 
   it("stays empty when any player in the lobby is ungraded", () => {
-    const rows = [graded(1, 1.2), participant(2, 100)]
+    const rows = [graded(1, 85), participant(2, 100)]
 
     expect(lobbyStandings(rows).size).toBe(0)
   })

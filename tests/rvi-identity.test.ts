@@ -11,77 +11,134 @@ const dimension = (key: string, score: number): PerformanceDimensionScore => ({
   recentScore: score,
   delta: 0,
   games: 40,
+  eligibleGames: 40,
+  coverage: 1,
+  effectiveGames: 40,
   confidence: "established",
+  responsibilityWeight: 1,
+  headlineEligible: true,
   metrics: [],
 })
 
-const profile = (scores: Record<string, number>, measuredGames = 40): PerformanceProfile => ({
-  algorithmVersion: 1,
-  score: Object.values(scores).reduce((sum, score) => sum + score, 0) / Object.keys(scores).length,
-  games: measuredGames,
-  recentGames: Math.min(20, measuredGames),
-  measuredGames,
-  coverage: 1,
-  confidence: measuredGames >= 30 ? "established" : measuredGames >= 10 ? "provisional" : "learning",
-  comparison: "test",
-  dimensions: Object.entries(scores).map(([key, score]) => dimension(key, score)),
-})
+const profile = (scores: Record<string, number>, measuredGames = 40): PerformanceProfile => {
+  const score = Object.values(scores).reduce((sum, value) => sum + value, 0) /
+    Object.keys(scores).length
+  const confidence = measuredGames >= 30
+    ? "established" as const
+    : measuredGames >= 10 ? "provisional" as const : "learning" as const
+  const coverage = {
+    eligibleGames: measuredGames,
+    observedGames: measuredGames,
+    gameRatio: 1,
+    eligibleWeight: measuredGames,
+    observedWeight: measuredGames,
+    weightRatio: 1,
+  }
+  const headline = {
+    source: "role_fit" as const,
+    score,
+    nEff: measuredGames,
+    confidence,
+    coverage,
+    confidenceInterval95: {
+      method: "deterministic_match_bootstrap_percentile" as const,
+      confidenceLevel: 0.95 as const,
+      lower: score,
+      upper: score,
+      replicates: 2_000,
+      seed: 1,
+      observedGames: measuredGames,
+    },
+  }
+  return {
+    algorithmVersion: 3,
+    recipeId: "test-recipe",
+    scoringContext: "profile",
+    weighting: { kind: "equal" },
+    score,
+    headline,
+    scopes: {
+      overall: {
+        kind: "overall",
+        key: "overall",
+        score,
+        headline,
+        games: measuredGames,
+        measuredGames,
+        coverage: 1,
+        confidence,
+      },
+      positions: [],
+      primaryArchetypes: [],
+      championPositions: [],
+    },
+    games: measuredGames,
+    recentGames: Math.min(20, measuredGames),
+    measuredGames,
+    coverage: 1,
+    confidence,
+    comparison: "test",
+    dimensions: Object.entries(scores).map(([key, value]) => dimension(key, value)),
+  }
+}
 
 describe("RVI identity", () => {
   it("waits for a measured RVI sample", () => {
-    expect(classifyRviIdentity(profile({ fighting: 80, initiative: 74 }, 4)).label)
+    expect(classifyRviIdentity(profile({ threat: 80, control_utility: 74 }, 4)).label)
       .toBe("Developing Identity")
   })
 
   it("turns the RVI shape into a recognizable playstyle", () => {
     const result = classifyRviIdentity(profile({
-      fighting: 78,
-      initiative: 72,
-      farming: 57,
-      survivability: 54,
-      objectives: 52,
-      vision: 49,
-      consistency: 55,
-      versatility: 53,
+      teamfighting: 78,
+      control_utility: 72,
+      economy: 57,
+      positioning_survival: 54,
+      objectives_macro: 52,
+      vision_setup: 49,
     }))
 
     expect(result.label).toBe("Playmaker")
-    expect(result.vectors).toEqual(["fighting", "initiative"])
-    expect(result.description).toContain("create openings")
+    expect(result.vectors).toEqual(["teamfighting", "control_utility"])
+    expect(result.description).toContain("teamfight involvement")
   })
 
   it("uses a single vector when it clearly dominates", () => {
-    expect(classifyRviIdentity(profile({ fighting: 82, farming: 60, vision: 48 })).label)
-      .toBe("Brawler")
+    expect(classifyRviIdentity(profile({ threat: 82, economy: 60, vision_setup: 48 })).label)
+      .toBe("Damage Dealer")
   })
 
   it("recognizes an even RVI shape", () => {
-    expect(classifyRviIdentity(profile({ fighting: 62, farming: 60, vision: 58, objectives: 59 })).label)
+    expect(classifyRviIdentity(profile({
+      threat: 62,
+      teamfighting: 61,
+      positioning_survival: 60,
+      control_utility: 59,
+      economy: 58,
+      objectives_macro: 57,
+    })).label)
       .toBe("All-Rounder")
   })
 
   it("uses macro-oriented archetypes instead of category summaries", () => {
     expect(classifyRviIdentity(profile({
-      objectives: 78,
-      farming: 73,
-      vision: 55,
-      consistency: 54,
-      fighting: 52,
-      initiative: 51,
-      survivability: 50,
-      versatility: 49,
+      objectives_macro: 78,
+      economy: 73,
+      vision_setup: 55,
+      threat: 52,
+      control_utility: 51,
+      positioning_survival: 50,
     })).label).toBe("Macro Player")
   })
 
-  it("preserves mode-specific teamfight identities", () => {
+  it("uses availability and control for the vanguard identity", () => {
     expect(classifyRviIdentity(profile({
-      fightControl: 79,
-      teamPresence: 74,
-      fighting: 56,
-      sustain: 54,
-      survivability: 52,
-      consistency: 51,
-      versatility: 50,
-    })).label).toBe("Teamfight Conductor")
+      control_utility: 79,
+      positioning_survival: 74,
+      threat: 56,
+      objectives_macro: 54,
+      economy: 52,
+      vision_setup: 51,
+    })).label).toBe("Vanguard")
   })
 })

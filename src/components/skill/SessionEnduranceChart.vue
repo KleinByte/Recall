@@ -3,7 +3,6 @@ import type { EChartsCoreOption } from "echarts/core"
 import { computed } from "vue"
 import BaseEChart from "../charts/BaseEChart.vue"
 import { CHART_COLOURS, CHART_STYLES } from "../../charts/recall-chart-theme"
-import { recallGradeFromScore } from "../../shared/recall-grade"
 import type { SkillHistoryPoint } from "../../types/stats"
 import { groupTimedGames } from "../../helpers/time-contract-core"
 
@@ -22,7 +21,7 @@ const buckets = computed(() => {
       const bucket = values[Math.min(4, index)]
       bucket.games += 1
       bucket.wins += Number(game.win)
-      if (game.gradeScore !== undefined) bucket.grades.push(game.gradeScore)
+      if (Number.isFinite(game.roleFitScore)) bucket.grades.push(game.roleFitScore!)
     })
   }
   return values.filter((bucket) => bucket.games > 0)
@@ -31,11 +30,11 @@ const buckets = computed(() => {
 const option = computed<EChartsCoreOption>(() => ({
   grid: { top: 28, right: 48, bottom: 34, left: 46 },
   tooltip: { trigger: "axis" },
-  legend: { top: 0, data: ["Win rate", "Recall score"] },
+  legend: { top: 0, data: ["Win rate", "RoleFit"] },
   xAxis: { type: "category", data: buckets.value.map((bucket) => bucket.label), axisTick: { show: false } },
   yAxis: [
     { type: "value", min: 0, max: 100, axisLabel: { formatter: "{value}%" }, splitLine: { lineStyle: { color: CHART_STYLES.gridSoft } } },
-    { type: "value", axisLabel: { formatter: (value: number) => recallGradeFromScore(value) ?? "–" }, splitLine: { show: false } },
+    { type: "value", min: 0, max: 100, axisLabel: { formatter: "{value}" }, splitLine: { show: false } },
   ],
   series: [
     {
@@ -48,7 +47,7 @@ const option = computed<EChartsCoreOption>(() => ({
       barMaxWidth: 30,
     },
     {
-      name: "Recall score",
+      name: "RoleFit",
       type: "line",
       yAxisIndex: 1,
       connectNulls: false,
@@ -67,7 +66,7 @@ const option = computed<EChartsCoreOption>(() => ({
 <template>
   <BaseEChart
     :option="option"
-    ariaLabel="Session endurance chart comparing win rate and average Recall score by game number within a session."
+    ariaLabel="Session endurance chart comparing win rate and average RoleFit on a zero-to-one-hundred scale by game number within a session."
     height="300px"
   />
 </template>

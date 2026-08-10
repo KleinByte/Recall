@@ -21,12 +21,12 @@ const props = defineProps<{
 }>()
 
 /**
- * Grades are standard deviations from your own baseline, so the trend is drawn
- * against a fixed window rather than auto-scaled. A flat run stays flat instead
- * of being stretched into drama by a rounding-sized difference.
+ * RoleFit is the authoritative frozen-reference percentile, so the trend uses
+ * its fixed 0-100 scale rather than auto-scaling. A flat run stays flat instead
+ * of being stretched by a rounding-sized difference.
  */
-const SCORE_FLOOR = -1.8
-const SCORE_CEILING = 1.8
+const SCORE_FLOOR = 0
+const SCORE_CEILING = 100
 const VIEW_WIDTH = 100
 const VIEW_HEIGHT = 34
 const VIEW_PAD = 3
@@ -45,7 +45,7 @@ const points = computed(() => {
     const x = count === 1
       ? VIEW_WIDTH / 2
       : ((index + 0.5) / count) * VIEW_WIDTH
-    const score = match.gradeScore
+    const score = match.roleFitScore
     if (score === undefined) return { match, index, x, y: undefined }
 
     const clamped = Math.min(SCORE_CEILING, Math.max(SCORE_FLOOR, score))

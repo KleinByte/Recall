@@ -19,7 +19,7 @@ export interface LobbyStanding {
 }
 
 /**
- * Places every player in the lobby by Recall grade score, where 1 is the MVP
+ * Places every player in the lobby by authoritative Recall v3 RoleFit, where 1 is the MVP
  * and the last place is the worst game of the ten. An ungraded lobby has no
  * standings at all rather than a partial order that would flatter whoever
  * happens to be graded.
@@ -29,10 +29,10 @@ export function lobbyStandings(
 ): Map<number, LobbyStanding> {
   const standings = new Map<number, LobbyStanding>()
   if (participants.length < 2) return standings
-  if (participants.some((row) => typeof row.gradeScore !== "number")) return standings
+  if (participants.some((row) => typeof row.roleFitScore !== "number")) return standings
 
   const ordered = [...participants].sort((left, right) =>
-    (right.gradeScore ?? 0) - (left.gradeScore ?? 0)
+    (right.roleFitScore ?? 0) - (left.roleFitScore ?? 0)
     || left.participantId - right.participantId,
   )
 

@@ -19,7 +19,7 @@ const option = computed<EChartsCoreOption>(() => {
   const hasRecent = recentValues !== undefined
   const series: Array<{
     name: string
-    value: number[]
+    value: Array<number | null>
     lineStyle: { color: string; width: number }
     itemStyle: { color: string }
     areaStyle: { color: string }
@@ -46,12 +46,13 @@ const option = computed<EChartsCoreOption>(() => {
       trigger: "item",
       confine: true,
       formatter: (raw: unknown) => {
-        const item = raw as { name?: string; value?: number[] }
+        const item = raw as { name?: string; value?: Array<number | null> }
         return [
           `<strong>${escapeTooltip(item.name ?? "Recall Vector Index")}</strong>`,
-          ...props.dimensions.map((dimension, index) =>
-            `${escapeTooltip(dimension.label)}: ${Number.isFinite(item.value?.[index]) ? Math.round(item.value![index]) : "Unavailable"}`,
-          ),
+          ...props.dimensions.map((dimension, index) => {
+            const value = item.value?.[index]
+            return `${escapeTooltip(dimension.label)}: ${Number.isFinite(value) ? Math.round(value as number) : "Unavailable"}`
+          }),
         ].join("<br>")
       },
     },

@@ -18,6 +18,7 @@ import {
   LEAGUE_CLASSIC_QUEUE_IDS,
   PERSONAL_RECORD_RIFT_QUEUE_IDS,
 } from "../matches/eligibility.js"
+import { MAX_ANALYTIC_MATCH_DURATION_SECS } from "../../../src/helpers/time-contract-core.js"
 
 export interface StatsFilter {
   puuid: string
@@ -48,8 +49,10 @@ export interface StatsSummary {
   pentaKills: number
   currentStreak: number
   longestWinStreak: number
-  /** Average grade z-score across graded games, or undefined if none. */
+  /** Average frozen-reference grade normal score, or undefined if none. */
   avgGradeScore?: number
+  /** Average authoritative Recall v3 RoleFit score (0-100), or undefined if none. */
+  avgRoleFitScore?: number
   gradedGames: number
 }
 
@@ -63,8 +66,10 @@ export interface ChampionStatRow {
   avgAssists: number
   kda: number
   avgDamageToChampions: number
-  /** Average grade z-score across this champion's graded games. */
+  /** Average frozen-reference grade normal score for this champion. */
   avgGradeScore?: number
+  /** Average authoritative Recall v3 RoleFit score (0-100) for this champion. */
+  avgRoleFitScore?: number
   gradedGames: number
 }
 
@@ -85,7 +90,10 @@ export interface MatchQuery extends StatsFilter {
   modes?: TrackedMode[]
   rankedOnly?: boolean
   result?: "win" | "loss"
+  /** Legacy/internal compatibility-score filter. */
   minGradeScore?: number
+  /** Authoritative Recall v3 RoleFit filter (0-100). */
+  minRoleFitScore?: number
   minDurationSecs?: number
   sortBy?: "played_at" | "kda" | "damage" | "grade" | "duration"
   sortDir?: "asc" | "desc"
@@ -102,6 +110,18 @@ export interface MatchPage {
   pageSize: number
 }
 
+function assertLegacyGradeWriterAvailable(db: Database): void {
+  const table = db.prepare(`
+    SELECT 1 FROM sqlite_master
+    WHERE type = 'table' AND name = 'grade_recipe_selections'
+  `).get()
+  if (!table) return
+  const selected = db.prepare(
+    "SELECT 1 FROM grade_recipe_selections WHERE algorithm_version = 3 LIMIT 1",
+  ).get()
+  if (selected) throw new Error("legacy_grade_writer_disabled_after_v3_cutover")
+}
+
 
 const COLUMNS = [
   "game_id",
@@ -113,6 +133,14 @@ const COLUMNS = [
   "played_at",
   "duration_secs",
   "game_version",
+  "map_id",
+  "game_type",
+  "game_end_timestamp",
+  "end_of_game_result",
+  "owner_eligible_for_progression",
+  "duration_quality",
+  "resolved_position",
+  "position_resolver_version",
   "champion_id",
   "win",
   "kills",
@@ -155,9 +183,9 @@ const COLUMNS = [
   "riot_match_id",
 ] as const
 
-const INSERT_SQL = `
-  INSERT OR IGNORE INTO matches (${COLUMNS.join(", ")})
-  VALUES (${COLUMNS.map(() => "?").join(", ")})
+const insertSql = (columns: readonly string[]) => `
+  INSERT OR IGNORE INTO matches (${columns.join(", ")})
+  VALUES (${columns.map(() => "?").join(", ")})
 `
 
 function toValues(row: MatchRow) {
@@ -171,6 +199,14 @@ function toValues(row: MatchRow) {
     row.playedAt,
     row.durationSecs,
     row.gameVersion,
+    row.mapId ?? null,
+    row.gameType ?? null,
+    row.gameEndTimestamp ?? null,
+    row.endOfGameResult ?? null,
+    row.ownerEligibleForProgression ?? null,
+    row.durationQuality ?? null,
+    row.resolvedPosition ?? null,
+    row.positionResolverVersion ?? null,
     row.championId,
     row.win,
     row.kills,
@@ -216,9 +252,50 @@ function toValues(row: MatchRow) {
 
 export class MatchesRepository {
   private readonly insertStatement: Statement
+  private readonly insertColumnIndexes: number[]
+  private readonly enrichStatement?: Statement
 
   constructor(private readonly db: Database) {
-    this.insertStatement = db.prepare(INSERT_SQL)
+    // Migration tests intentionally construct the repository against an
+    // historical schema, insert representative rows, then resume migrations.
+    // Prepare against the columns actually present so newly-added source facts
+    // do not make those upgrade paths impossible to exercise.
+    const available = new Set((db.pragma("table_info(matches)") as { name: string }[])
+      .map((column) => column.name))
+    this.insertColumnIndexes = COLUMNS.flatMap((column, index) =>
+      available.has(column) ? [index] : [])
+    const insertColumns = this.insertColumnIndexes.map((index) => COLUMNS[index])
+    this.insertStatement = db.prepare(insertSql(insertColumns))
+    const enrichmentColumns = [
+      "map_id", "game_type", "game_end_timestamp", "end_of_game_result",
+      "owner_eligible_for_progression", "duration_secs", "duration_quality", "resolved_position",
+      "position_resolver_version", "queue_name", "riot_match_id",
+    ]
+    if (!enrichmentColumns.every((column) => available.has(column))) return
+    this.enrichStatement = db.prepare(`
+      UPDATE matches SET
+        map_id = COALESCE(?, map_id),
+        game_type = COALESCE(?, game_type),
+        game_end_timestamp = COALESCE(?, game_end_timestamp),
+        end_of_game_result = COALESCE(?, end_of_game_result),
+        owner_eligible_for_progression = COALESCE(?, owner_eligible_for_progression),
+        duration_secs = CASE
+          WHEN ? IS NOT NULL THEN ?
+          ELSE duration_secs END,
+        duration_quality = CASE
+          WHEN ? IS NOT NULL THEN COALESCE(?, duration_quality)
+          WHEN ? = 'verified' OR duration_quality IS NULL THEN COALESCE(?, duration_quality)
+          ELSE duration_quality END,
+        resolved_position = CASE
+          WHEN ? IS NOT NULL AND ? <> 'UNKNOWN' THEN ?
+          ELSE resolved_position END,
+        position_resolver_version = CASE
+          WHEN ? IS NOT NULL AND ? <> 'UNKNOWN' THEN COALESCE(?, position_resolver_version)
+          ELSE position_resolver_version END,
+        queue_name = COALESCE(?, queue_name),
+        riot_match_id = COALESCE(?, riot_match_id)
+      WHERE game_id = ? AND puuid = ?
+    `)
   }
 
   /**
@@ -236,7 +313,33 @@ export class MatchesRepository {
     const insertAll = this.db.transaction((batch: MatchRow[]) => {
       let inserted = 0
       for (const row of batch) {
-        inserted += this.insertStatement.run(toValues(row)).changes
+        const values = toValues(row)
+        inserted += this.insertStatement.run(
+          this.insertColumnIndexes.map((index) => values[index]),
+        ).changes
+        this.enrichStatement?.run(
+          row.mapId ?? null,
+          row.gameType ?? null,
+          row.gameEndTimestamp ?? null,
+          row.endOfGameResult ?? null,
+          row.ownerEligibleForProgression ?? null,
+          row.riotMatchId ?? null,
+          row.durationSecs,
+          row.riotMatchId ?? null,
+          row.durationQuality ?? null,
+          row.durationQuality ?? null,
+          row.durationQuality ?? null,
+          row.resolvedPosition ?? null,
+          row.resolvedPosition ?? null,
+          row.resolvedPosition ?? null,
+          row.resolvedPosition ?? null,
+          row.resolvedPosition ?? null,
+          row.positionResolverVersion ?? null,
+          row.queueName ?? null,
+          row.riotMatchId ?? null,
+          row.gameId,
+          row.puuid,
+        )
       }
       return inserted
     })
@@ -257,6 +360,56 @@ export class MatchesRepository {
       .prepare("SELECT * FROM matches WHERE game_id = ? AND puuid = ?")
       .get(gameId, puuid) as Record<string, never> | undefined
     return row ? toMatchRow(row) : undefined
+  }
+
+  /**
+   * Reconciles the LCU history summary duration with its independently fetched
+   * full-scoreboard duration before any per-minute observations are graded.
+   * A conflict is retained as evidence and fails grade eligibility; a valid
+   * detail may repair an invalid/missing summary, but never hides a conflict
+   * between two valid source values.
+   */
+  reconcileLcuDetailDuration(
+    gameId: number,
+    puuid: string,
+    rawDetailDuration: unknown,
+  ): MatchRow["durationQuality"] | undefined {
+    const detailDuration = typeof rawDetailDuration === "number" &&
+        Number.isFinite(rawDetailDuration)
+      ? Math.trunc(rawDetailDuration)
+      : null
+    const detailValid = detailDuration !== null &&
+      Number.isSafeInteger(detailDuration) && detailDuration > 0 &&
+      detailDuration <= MAX_ANALYTIC_MATCH_DURATION_SECS
+
+    const reconcile = this.db.transaction(() => {
+      const row = this.db.prepare(`
+        SELECT duration_secs AS durationSecs
+        FROM matches WHERE game_id = ? AND puuid = ?
+      `).get(gameId, puuid) as { durationSecs: number } | undefined
+      if (!row) return undefined
+
+      const summaryValid = Number.isSafeInteger(row.durationSecs) &&
+        row.durationSecs > 0 && row.durationSecs <= MAX_ANALYTIC_MATCH_DURATION_SECS
+      let quality: NonNullable<MatchRow["durationQuality"]>
+      let duration = row.durationSecs
+      if (!detailValid) {
+        quality = "invalid"
+      } else if (!summaryValid) {
+        duration = detailDuration
+        quality = "source_reported"
+      } else if (Math.abs(row.durationSecs - detailDuration) > 2) {
+        quality = "inconsistent"
+      } else {
+        quality = "verified"
+      }
+      this.db.prepare(`
+        UPDATE matches SET duration_secs = ?, duration_quality = ?
+        WHERE game_id = ? AND puuid = ?
+      `).run(duration, quality, gameId, puuid)
+      return quality
+    })
+    return reconcile()
   }
 
   setRiotMatchId(gameId: number, puuid: string, riotMatchId: string) {
@@ -387,17 +540,17 @@ export class MatchesRepository {
   hasCompleteMatch(gameId: number, puuid: string): boolean {
     const row = this.db
       .prepare(
-        `SELECT mode_family AS modeFamily, grade
+        `SELECT riot_match_id AS riotMatchId
          FROM matches WHERE game_id = ? AND puuid = ? LIMIT 1`,
       )
       .get(gameId, puuid) as
-      | { modeFamily: ModeFamily; grade: string | null }
+      | { riotMatchId: string | null }
       | undefined
 
-    return (
-      row !== undefined &&
-      (row.modeFamily === "other" || row.grade !== null)
-    )
+    // A grade is a derived product, not evidence that Match-V5 source facts
+    // were captured. The durable Riot match identity is installed by the
+    // Match-V5 mapper; an LCU-only lobby has none and is enriched once.
+    return row?.riotMatchId != null
   }
 
   getOldestPlayedAt(puuid: string): number | undefined {
@@ -417,6 +570,7 @@ export class MatchesRepository {
     compositePercentile = 0.5,
     algorithmVersion = 2,
   ) {
+    assertLegacyGradeWriterAvailable(this.db)
     this.db
       .prepare(
         `UPDATE matches
@@ -521,6 +675,7 @@ export class MatchesRepository {
            COALESCE(AVG(duration_secs), 0)       AS avgDurationSecs,
            COALESCE(SUM(penta_kills), 0)         AS pentaKills,
            AVG(grade_score)                      AS avgGradeScore,
+           AVG(role_fit_score)                   AS avgRoleFitScore,
            COUNT(grade)                          AS gradedGames
          FROM matches ${clause}`,
       )
@@ -549,6 +704,7 @@ export class MatchesRepository {
       avgDurationSecs: totals.avgDurationSecs,
       pentaKills: totals.pentaKills,
       avgGradeScore: totals.avgGradeScore ?? undefined,
+      avgRoleFitScore: totals.avgRoleFitScore ?? undefined,
       gradedGames: totals.gradedGames,
       currentStreak: computeCurrentStreak(results.map((row) => row.win === 1)),
       longestWinStreak: computeLongestWinStreak(
@@ -574,6 +730,7 @@ export class MatchesRepository {
            COALESCE(AVG(assists), 0) AS avgAssists,
            COALESCE(AVG(damage_to_champions), 0) AS avgDamageToChampions,
            AVG(grade_score)                      AS avgGradeScore,
+           AVG(role_fit_score)                   AS avgRoleFitScore,
            COUNT(grade)                          AS gradedGames
          FROM matches ${clause}
          GROUP BY champion_id
@@ -592,6 +749,7 @@ export class MatchesRepository {
       kda: computeKda(row.totalKills, row.totalDeaths, row.totalAssists),
       avgDamageToChampions: row.avgDamageToChampions,
       avgGradeScore: row.avgGradeScore ?? undefined,
+      avgRoleFitScore: row.avgRoleFitScore ?? undefined,
       gradedGames: row.gradedGames,
     }))
   }
@@ -962,7 +1120,7 @@ const SORT_COLUMNS: Record<string, string> = {
   played_at: "played_at",
   kda: "(kills + assists) * 1.0 / MAX(1, deaths)",
   damage: "damage_to_champions",
-  grade: "grade_score",
+  grade: "role_fit_score",
   duration: "duration_secs",
 }
 
@@ -976,10 +1134,10 @@ const SORT_COLUMNS: Record<string, string> = {
 const LOBBY_PLACE_SQL = `
   COALESCE((
     SELECT CASE
-      WHEN COUNT(*) < 2 OR SUM(lobby.grade_score IS NULL) > 0 THEN 0
+      WHEN COUNT(*) < 2 OR SUM(lobby.role_fit_score IS NULL) > 0 THEN 0
       ELSE SUM(
-        lobby.grade_score > me.grade_score
-        OR (lobby.grade_score = me.grade_score
+        lobby.role_fit_score > me.role_fit_score
+        OR (lobby.role_fit_score = me.role_fit_score
             AND lobby.participant_id < me.participant_id)
       ) + 1
     END
@@ -1018,6 +1176,11 @@ function buildQuery(query: MatchQuery) {
   if (query.minGradeScore !== undefined) {
     conditions.push("grade_score >= ?")
     params.push(query.minGradeScore)
+  }
+
+  if (query.minRoleFitScore !== undefined) {
+    conditions.push("role_fit_score >= ?")
+    params.push(query.minRoleFitScore)
   }
 
   if (query.minDurationSecs !== undefined) {
@@ -1225,6 +1388,14 @@ function toMatchRow(row: Record<string, never>): MatchRow {
     playedAt: row.played_at,
     durationSecs: row.duration_secs,
     gameVersion: row.game_version,
+    mapId: row.map_id ?? undefined,
+    gameType: row.game_type ?? undefined,
+    gameEndTimestamp: row.game_end_timestamp ?? undefined,
+    endOfGameResult: row.end_of_game_result ?? undefined,
+    ownerEligibleForProgression: row.owner_eligible_for_progression ?? undefined,
+    durationQuality: row.duration_quality ?? undefined,
+    resolvedPosition: row.resolved_position ?? undefined,
+    positionResolverVersion: row.position_resolver_version ?? undefined,
     championId: row.champion_id,
     win: row.win,
     kills: row.kills,
@@ -1250,6 +1421,12 @@ function toMatchRow(row: Record<string, never>): MatchRow {
     endedInEarlySurrender: row.ended_in_early_surrender,
     grade: row.grade ?? undefined,
     gradeScore: row.grade_score ?? undefined,
+    gradeAlgorithmVersion: row.grade_algorithm_version ?? undefined,
+    roleFitScore: row.role_fit_score ?? undefined,
+    gradeRecipeId: row.grade_recipe_id ?? undefined,
+    gradeStatus: row.grade_status ?? undefined,
+    gradeEvidenceCoverage: row.grade_evidence_coverage ?? undefined,
+    gradeReferenceSampleCount: row.grade_reference_sample_count ?? undefined,
     modeFamily: row.mode_family,
     isRanked: row.is_ranked,
     lane: row.lane ?? undefined,

@@ -28,8 +28,8 @@ export const RELEASE_G_DEFAULTS: Readonly<DataIntegrityFlagsV1> = Object.freeze(
   retentionV2: "report_only",
 })
 
-/** Release A starts from safe shadow defaults. Later release gates change this one export. */
-export const RELEASE_DEFAULTS = SAFE_SHADOW_DEFAULTS
+/** Recall v3 is a direct cutover; the former shadow profile is retained only for old fixtures. */
+export const RELEASE_DEFAULTS = RELEASE_G_DEFAULTS
 
 export type DataIntegrityFlagOverridesV1 = Partial<DataIntegrityFlagsV1>
 

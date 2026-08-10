@@ -24,9 +24,9 @@ import {
   formatPercent,
   formatRelativeDate,
   formatStreak,
-  gradeFromScore,
   modeLabel,
 } from "../helpers/format"
+import { recallGradeFromRoleFitScore } from "../shared/recall-grade"
 import type { Champion } from "../types/lol"
 import type {
   CategoryProgress,
@@ -181,7 +181,7 @@ onMounted(() => {
 })
 
 const hasGames = computed(() => (summary.value?.games ?? 0) > 0)
-const averageGrade = computed(() => gradeFromScore(summary.value?.avgGradeScore))
+const averageGrade = computed(() => recallGradeFromRoleFitScore(summary.value?.avgRoleFitScore))
 const momentum = computed(() => performanceMomentum(
   momentumMatches.value,
   momentumClock.value,
@@ -255,9 +255,9 @@ const archiveTelemetry = computed<TelemetryReading[]>(() => [
   },
   { label: "KDA", value: formatDecimal(summary.value!.kda, 2) },
   {
-    label: "Avg grade",
-    value: averageGrade.value ?? "–",
-    hint: `${summary.value!.gradedGames} graded`,
+    label: "Avg RoleFit",
+    value: summary.value!.avgRoleFitScore?.toFixed(1) ?? "–",
+    hint: `${averageGrade.value ?? "No grade"} · ${summary.value!.gradedGames} graded`,
   },
 ])
 
@@ -430,7 +430,7 @@ const championName = (id: number) => championNameById(props.champions, id)
             class="dashboard-panel champions-panel"
           >
             <p class="muted champion-intro">
-              Your strongest Recall grades among champions with at least five graded games.
+              Your highest average RoleFit among champions with at least five graded games.
             </p>
             <ol class="champion-list">
               <li v-for="(row, index) in ranking.best" :key="row.championId">
@@ -469,7 +469,7 @@ const championName = (id: number) => championNameById(props.champions, id)
                     </span>
                   </span>
                   <span class="champion-grade">
-                    <GradeBadge :grade="gradeFromScore(row.adjustedGrade)" size="lg" />
+                    <GradeBadge :grade="recallGradeFromRoleFitScore(row.roleFitScore)" size="lg" />
                   </span>
                 </button>
               </li>

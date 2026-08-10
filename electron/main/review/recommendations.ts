@@ -13,6 +13,7 @@ export interface RecommendationGame {
   deaths: number
   assists: number
   gradeScore?: number
+  roleFitScore?: number
   durationSecs?: number
 }
 
@@ -32,7 +33,10 @@ export interface ChampionRecommendation {
   wins: number
   losses: number
   adjustedWinRate: number
+  /** Legacy/internal compatibility normal score. */
   averageGrade?: number
+  /** Visible authoritative Recall v3 average (0-100). */
+  averageRoleFit?: number
   kda: number
   confidence: ReturnType<typeof confidenceForGames>
   recentDirection: "up" | "down" | "stable" | "unknown"
@@ -220,6 +224,11 @@ export function recommendChampions(
         ? games.filter((game) => game.gradeScore !== undefined)
           .reduce((sum, game) => sum + (game.gradeScore ?? 0), 0) /
           games.filter((game) => game.gradeScore !== undefined).length
+        : undefined,
+      averageRoleFit: games.some((game) => game.roleFitScore !== undefined)
+        ? games.filter((game) => game.roleFitScore !== undefined)
+          .reduce((sum, game) => sum + (game.roleFitScore ?? 0), 0) /
+          games.filter((game) => game.roleFitScore !== undefined).length
         : undefined,
       kda: deaths ? (kills + assists) / deaths : kills + assists,
       confidence: confidenceForGames(games.length),

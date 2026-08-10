@@ -2,9 +2,7 @@ import type { Database } from "better-sqlite3"
 import type { MatchesRepository } from "../database/matches-repo.js"
 import type { ParticipantsRepository } from "../database/participants-repo.js"
 import type { ReviewRepository } from "../database/review-repo.js"
-import { gradeLobbyV2, GRADE_ALGORITHM_VERSION, type GradeInput } from "../matches/grade.js"
-import { gradeLobbyV3 } from "../matches/grade-v3.js"
-import { resolveChampionClass } from "../matches/class-expectations.js"
+import type { RecallV3Service } from "../matches/recall-v3-service.js"
 import { recordScopeForMatch } from "../matches/records.js"
 import type { MatchRow } from "../matches/types.js"
 import type { LcuTimelineService } from "../lcu-timeline-service.js"
@@ -18,6 +16,7 @@ export class ReviewService {
     private readonly participants: ParticipantsRepository,
     private readonly reviews: ReviewRepository,
     private readonly timelines: LcuTimelineService,
+    private readonly recallV3?: RecallV3Service,
   ) {}
 
   overview(puuid: string) {
@@ -50,21 +49,9 @@ export class ReviewService {
     let grade = owner
       ? this.reviews.getGradeBreakdown(gameId, puuid, owner.participantId)
       : undefined
-    // Grades from an older recipe are recomputed from the stored lobby, so
-    // reviewing a match always shows the current algorithm.
-    const outdated = grade !== undefined &&
-      grade.algorithmVersion < GRADE_ALGORITHM_VERSION
-    if ((!grade || outdated) && owner && detail.participants.length >= 10) {
+    if (!grade && owner && this.recallV3) {
       this.regrade(match, puuid)
       grade = this.reviews.getGradeBreakdown(gameId, puuid, owner.participantId)
-    }
-    if (!grade && match.grade) {
-      grade = {
-        algorithmVersion: GRADE_ALGORITHM_VERSION,
-        compositePercentile: 0,
-        components: [],
-        unavailableReason: "Breakdown unavailable for this match.",
-      }
     }
     const baseline = this.baseline(match, puuid)
     return {
@@ -90,10 +77,8 @@ export class ReviewService {
    * until a pass regrades nothing.
    */
   regradeOutdated(limit = 200): number {
-    const candidates = this.matches.getOutdatedGradeMatches(
-      GRADE_ALGORITHM_VERSION,
-      limit,
-    )
+    if (!this.recallV3) return 0
+    const candidates = this.matches.getOutdatedGradeMatches(3, limit)
     let regraded = 0
     for (const candidate of candidates) {
       const match = this.matches.getMatch(candidate.gameId, candidate.puuid)
@@ -104,42 +89,7 @@ export class ReviewService {
 
   /** Regrades one match from its stored lobby with the current algorithm. */
   private regrade(match: MatchRow, puuid: string): boolean {
-    const detail = this.participants.getMatchDetail(match.gameId, puuid)
-    if (detail.participants.length < 10) return false
-    const duration = Math.max(1, match.durationSecs / 60)
-    const inputs: GradeInput[] = detail.participants.map((participant) => ({
-      participantId: participant.participantId,
-      teamId: participant.teamId,
-      isPlayer: participant.isPlayer === 1,
-      kills: participant.kills,
-      deaths: participant.deaths,
-      assists: participant.assists,
-      damageToChampions: participant.damageToChampions,
-      damageTaken: participant.damageTaken,
-      goldEarned: participant.goldEarned,
-      csPerMin: (participant.totalMinionsKilled + participant.neutralMinions) / duration,
-      visionScore: participant.visionScore,
-      damageObjectives: participant.damageObjectives,
-      damageMitigated: participant.damageSelfMitigated,
-      championClass: resolveChampionClass(participant.championId),
-      role: participant.role,
-    }))
-    const results = gradeLobbyV2(inputs, match.modeFamily)
-    if (results.size === 0) return false
-    this.participants.setGrades(match.gameId, puuid, results)
-    this.participants.setGradesV3(
-      match.gameId, puuid, gradeLobbyV3(inputs, match.modeFamily),
-    )
-    const owner = detail.participants.find((participant) => participant.isPlayer === 1)
-    const ownerGrade = owner ? results.get(owner.participantId) : undefined
-    if (ownerGrade) {
-      this.matches.setGrade(
-        match.gameId, puuid, ownerGrade.grade, ownerGrade.score,
-        ownerGrade.breakdown.compositePercentile,
-        ownerGrade.breakdown.algorithmVersion,
-      )
-    }
-    return true
+    return this.recallV3?.gradeStoredMatch(match.gameId, puuid) === "ready"
   }
 
   sessions(puuid: string, page: number, pageSize = 20) {
@@ -181,7 +131,7 @@ export class ReviewService {
     if (selected.rows.length === 0) return undefined
     const minute = (row: MatchRow) => Math.max(1, row.durationSecs / 60)
     const metrics = [
-      metric("grade", "Grade score", match.gradeScore, selected.rows, (row) => row.gradeScore, "higher"),
+      metric("grade", "Compatibility score", match.gradeScore, selected.rows, (row) => row.gradeScore, "higher"),
       metric("kda", "KDA", (match.kills + match.assists) / Math.max(1, match.deaths), selected.rows, (row) => (row.kills + row.assists) / Math.max(1, row.deaths), "higher"),
       metric("damage", "Damage / min", match.damageToChampions / minute(match), selected.rows, (row) => row.damageToChampions / minute(row), "higher"),
       metric("deaths", "Deaths", match.deaths, selected.rows, (row) => row.deaths, "lower"),
@@ -249,7 +199,7 @@ function highlights(
   const strength = weighted.find((component) => component.percentile >= .6)
   if (strength) result.push({
     kind: "strength", title: "Strength",
-    detail: `${strength.label} ranked at the ${Math.round(strength.percentile * 100)}th lobby percentile.`,
+    detail: `${strength.label} reached the ${Math.round(strength.percentile * 100)}th frozen-reference percentile.`,
     metricKey: strength.key,
   })
   const opportunity = [...weighted]
@@ -257,7 +207,7 @@ function highlights(
     .find((component) => component.percentile <= .4)
   if (opportunity) result.push({
     kind: "opportunity", title: "Opportunity",
-    detail: `${opportunity.label} ranked at the ${Math.round(opportunity.percentile * 100)}th lobby percentile.`,
+    detail: `${opportunity.label} reached the ${Math.round(opportunity.percentile * 100)}th frozen-reference percentile.`,
     metricKey: opportunity.key,
   })
   const personal = [...(baseline?.metrics ?? [])]

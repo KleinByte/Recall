@@ -18,7 +18,7 @@ import {
   formatPercent,
 } from "../helpers/format"
 import { itemIconUrl, summonerSpellIconUrl } from "../helpers/ddragon"
-import { positionIconUrl, positionLabel, resolvePosition } from "../helpers/roles"
+import { positionForPlayer, positionIconUrl, positionLabel } from "../helpers/roles"
 import {
   formatMilestone,
   formatStat,
@@ -51,7 +51,7 @@ const placeOf = (row: ParticipantRow) =>
   standings.value.get(row.participantId)?.place ?? 0
 
 const positionOf = (row: ParticipantRow) =>
-  resolvePosition(row.lane, row.role, row.assignedPosition)
+  positionForPlayer(row)
 
 const placeTitle = (row: ParticipantRow) => {
   const standing = standings.value.get(row.participantId)

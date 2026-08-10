@@ -16,13 +16,13 @@ import {
   formatDecimal,
   formatPercent,
   GRADE_ORDER,
-  gradeFromScore,
 } from "../../helpers/format"
-import type { LobbyMetric, ModeFamily, RankedHistory, SkillReportV2 } from "../../types/stats"
+import { recallGradeFromRoleFitScore } from "../../shared/recall-grade"
+import type { LobbyMetric, ModeFamily, RankedHistory, SkillReportV3 } from "../../types/stats"
 import type { Champion } from "../../types/lol"
 
 const props = defineProps<{
-  overview: SkillReportV2["overview"]
+  overview: SkillReportV3["overview"]
   family: ModeFamily
   champions: Champion[] | null
   ranked: RankedHistory[]
@@ -30,7 +30,7 @@ const props = defineProps<{
 
 const summary = computed(() => props.overview.summary)
 const detail = computed(() => props.overview.style?.career.detail)
-const averageGrade = computed(() => gradeFromScore(summary.value.avgGradeScore))
+const averageGrade = computed(() => recallGradeFromRoleFitScore(summary.value.avgRoleFitScore))
 const SHOW_RANKED_HISTORY = false
 
 type TelemetryReading = {
@@ -52,9 +52,11 @@ const resultTelemetry = computed<TelemetryReading[]>(() => [
     tone: summary.value.winRate >= 0.5 ? "win" : "loss",
   },
   {
-    label: "Avg grade",
-    value: averageGrade.value ?? "–",
-    hint: `${summary.value.gradedGames} graded`,
+    label: "Avg RoleFit",
+    value: summary.value.avgRoleFitScore === undefined
+      ? "–"
+      : summary.value.avgRoleFitScore.toFixed(1),
+    hint: `${averageGrade.value ?? "No grade"} · ${summary.value.gradedGames} graded`,
   },
   { label: "KDA", value: formatDecimal(summary.value.kda, 2) },
 ])
@@ -121,6 +123,7 @@ const rviIdentity = computed(() => props.overview.performance
       v-if="overview.performance"
       :profile="overview.performance"
       :identity="rviIdentity"
+      :champions="champions"
     />
 
     <Panel
@@ -226,7 +229,7 @@ const rviIdentity = computed(() => props.overview.performance
         <p class="muted footnote">Final inventory frequency; purchase order is unavailable.</p>
       </Panel>
 
-      <Panel v-if="gradeBars.length" :title="`Recall grades · average ${averageGrade ?? '–'}`">
+      <Panel v-if="gradeBars.length" :title="`Recall grades · average RoleFit ${summary.avgRoleFitScore?.toFixed(1) ?? '–'} (${averageGrade ?? '–'})`">
         <div class="grades">
           <div v-for="bar in gradeBars" :key="bar.grade" class="grade-row">
             <GradeBadge :grade="bar.grade" />

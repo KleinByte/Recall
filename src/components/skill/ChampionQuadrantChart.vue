@@ -15,13 +15,13 @@ const props = defineProps<{
 }>()
 
 const rows = computed(() => props.champions.filter((champion) =>
-  champion.gradedGames > 0 && champion.avgGradeScore !== undefined,
+  champion.gradedGames > 0 && champion.avgRoleFitScore !== undefined,
 ))
 const experienceCutoff = computed(() => {
   const games = rows.value.map((row) => row.games).sort((left, right) => left - right)
   return games[Math.floor(games.length / 2)] ?? 1
 })
-const performanceCutoff = computed(() => props.baseline ?? 0)
+const performanceCutoff = computed(() => props.baseline ?? 50)
 
 function quadrant(games: number, score: number) {
   if (games >= experienceCutoff.value && score >= performanceCutoff.value) return "Main"
@@ -35,7 +35,7 @@ const option = computed<EChartsCoreOption>(() => ({
   tooltip: {
     formatter: (raw: unknown) => {
       const values = (raw as { value?: Array<number | string> }).value ?? []
-      return `<strong>${escapeTooltip(values[5])}</strong><br/>${escapeTooltip(values[6])}<br/>${values[0]} games · ${Number(values[1]).toFixed(2)} Recall score<br/>${Math.round(Number(values[3]) * 100)}% win rate · ${Number(values[4]).toFixed(2)} KDA`
+      return `<strong>${escapeTooltip(values[5])}</strong><br/>${escapeTooltip(values[6])}<br/>${values[0]} games · ${Number(values[1]).toFixed(1)} average RoleFit<br/>${Math.round(Number(values[3]) * 100)}% win rate · ${Number(values[4]).toFixed(2)} KDA`
     },
   },
   xAxis: {
@@ -48,19 +48,21 @@ const option = computed<EChartsCoreOption>(() => ({
   },
   yAxis: {
     type: "value",
-    name: "Recall score",
+    name: "RoleFit",
+    min: 0,
+    max: 100,
     splitLine: { lineStyle: { color: CHART_STYLES.gridSoft } },
   },
   series: [{
     type: "scatter",
     data: rows.value.map((champion) => [
       champion.games,
-      champion.avgGradeScore!,
+      champion.avgRoleFitScore!,
       champion.championId,
       champion.winRate,
       champion.kda,
       championNameById(props.catalog, champion.championId),
-      quadrant(champion.games, champion.avgGradeScore!),
+      quadrant(champion.games, champion.avgRoleFitScore!),
     ]),
     symbolSize: (value: unknown) => Math.min(38, 10 + Math.sqrt(Number((value as unknown[])[0]) || 1) * 3),
     itemStyle: { color: CHART_COLOURS.live, opacity: .66, borderColor: CHART_COLOURS.text, borderWidth: 1 },
@@ -78,7 +80,7 @@ const option = computed<EChartsCoreOption>(() => ({
 <template>
   <BaseEChart
     :option="option"
-    ariaLabel="Champion efficiency quadrant. Experience is on the horizontal axis and average Recall score is on the vertical axis."
+    ariaLabel="Champion efficiency quadrant. Experience is on the horizontal axis and average RoleFit on a zero-to-one-hundred scale is on the vertical axis."
     height="330px"
   />
 </template>

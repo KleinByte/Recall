@@ -110,7 +110,7 @@ describe("toPlainPayload", () => {
 
 describe("getSkillReport", () => {
   it("invokes the stats:skill-report IPC endpoint with plain payload", async () => {
-    const invoke = vi.fn().mockResolvedValue({ version: 2 })
+    const invoke = vi.fn().mockResolvedValue({ version: 3 })
     vi.stubGlobal("window", { ipcRenderer: { invoke } })
 
     const reactiveModes = ref(["sr_ranked_solo", "sr_ranked_flex"])

@@ -109,6 +109,7 @@ function richContext(): RecordContext {
       mode: "mayhem",
       modeFamily: "aram",
       gradeScore: 2.4,
+      roleFitScore: 88.9,
       kills: 18,
       assists: 22,
       damageToChampions: 48_000,
@@ -163,6 +164,10 @@ describe("expanded personal records", () => {
     ]))
     expect(keys).not.toContain("lobby_place")
     expect(keys).not.toContain("kill_participation")
+    expect(records.find((record) => record.key === "grade")).toMatchObject({
+      label: "Highest RoleFit",
+      value: 88.9,
+    })
     expect(records.find((record) => record.key === "biggest_comeback")?.value).toBe(2_500)
     expect(records.find((record) => record.key === "fastest_penta")?.value).toBe(15)
   })

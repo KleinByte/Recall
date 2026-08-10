@@ -1,5 +1,5 @@
 import Database from "better-sqlite3-node"
-import { beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { applyMigrations } from "../electron/main/database/migrations.js"
 import { MatchesRepository } from "../electron/main/database/matches-repo.js"
 import { ParticipantsRepository } from "../electron/main/database/participants-repo.js"
@@ -125,7 +125,7 @@ function buildFarmLobby(gameId: number) {
 
   return {
     gameId,
-    gameDuration: 1800,
+    gameDuration: 1200,
     participantIdentities: participants.map((participant) => ({
       participantId: participant.participantId,
       player: { puuid: participant.participantId === 1 ? PUUID : "other" },
@@ -228,25 +228,37 @@ describe("MatchSync", () => {
     })
   })
 
-  it("grades stored matches from the full lobby", async () => {
+  it("delegates every newly stored full lobby to Recall v3", async () => {
     const client = new FakeClient([1, 2].map((id) => aramGame(id)))
-    const sync = new MatchSync(client as never, repo, PUUID)
+    const gradeStoredMatch = vi.fn(() => "ready" as const)
+    const sync = new MatchSync(
+      client as never, repo, PUUID, participants,
+      undefined, undefined, undefined, { gradeStoredMatch } as never,
+    )
 
     const result = await sync.syncNow()
 
     expect(result.graded).toBe(2)
-    const stored = repo.getRecentMatches({ puuid: PUUID }, 5)
-    expect(stored[0].grade).toBe("S+")
+    expect(gradeStoredMatch.mock.calls).toEqual([
+      [1, PUUID],
+      [2, PUUID],
+    ])
+    expect(participants.countGamesWithLobby(PUUID)).toBe(2)
   })
 
   it("does not regrade matches that already have a grade", async () => {
     const client = new FakeClient([1].map((id) => aramGame(id)))
-    const sync = new MatchSync(client as never, repo, PUUID)
+    const gradeStoredMatch = vi.fn(() => "ready" as const)
+    const sync = new MatchSync(
+      client as never, repo, PUUID, participants,
+      undefined, undefined, undefined, { gradeStoredMatch } as never,
+    )
 
     await sync.syncNow()
     const second = await sync.syncNow()
 
     expect(second.graded).toBe(0)
+    expect(gradeStoredMatch).toHaveBeenCalledOnce()
   })
 
   it("still records matches when grading fails", async () => {
@@ -261,7 +273,7 @@ describe("MatchSync", () => {
     expect(repo.countMatches(PUUID)).toBe(2)
   })
 
-  it("does not store or grade bot games", async () => {
+  it("retains bot summaries as raw history but does not fetch or grade their lobby", async () => {
     const bot = riftGame(1)
     bot.queueId = 890
     const client = new FakeClient([bot])
@@ -269,33 +281,57 @@ describe("MatchSync", () => {
 
     const result = await sync.syncNow()
 
-    expect(result).toMatchObject({ fetched: 1, inserted: 0, graded: 0, lobbies: 0 })
-    expect(repo.countMatches(PUUID)).toBe(0)
+    expect(result).toMatchObject({ fetched: 1, inserted: 1, graded: 0, lobbies: 0 })
+    expect(repo.countMatches(PUUID)).toBe(1)
     expect(participants.countGamesWithLobby(PUUID)).toBe(0)
   })
 
-  it("grades a Rift game on the statistics that mode rewards", async () => {
+  it("delegates a complete Rift lobby to the v3 coordinator", async () => {
     const client = new FakeClient([riftGame(1)])
     client.buildDetail = buildFarmLobby
-    const sync = new MatchSync(client as never, repo, PUUID)
+    const gradeStoredMatch = vi.fn(() => "ready" as const)
+    const sync = new MatchSync(
+      client as never, repo, PUUID, participants,
+      undefined, undefined, undefined, { gradeStoredMatch } as never,
+    )
 
-    await sync.syncNow()
+    const result = await sync.syncNow()
 
-    // The player out-farmed the lobby four to one, which only counts on the
-    // Rift. Grading it as ARAM would ignore that entirely.
-    const stored = repo.getRecentMatches({ puuid: PUUID }, 1)
-    expect(stored[0].gradeScore).toBeGreaterThan(0)
+    expect(result.graded).toBe(1)
+    expect(gradeStoredMatch).toHaveBeenCalledWith(1, PUUID)
   })
 
-  it("ignores farming when grading ARAM", async () => {
-    const client = new FakeClient([aramGame(1)])
-    client.buildDetail = buildFarmLobby
-    const sync = new MatchSync(client as never, repo, PUUID)
+  it("records an LCU duration conflict before handing the lobby to v3", async () => {
+    const client = new FakeClient([riftGame(1)])
+    client.buildDetail = (gameId) => ({ ...buildFarmLobby(gameId), gameDuration: 1_300 })
+    const gradeStoredMatch = vi.fn(() => {
+      expect(repo.getMatch(1, PUUID)?.durationQuality).toBe("inconsistent")
+      return "invalid_duration" as const
+    })
+    const sync = new MatchSync(
+      client as never, repo, PUUID, participants,
+      undefined, undefined, undefined, { gradeStoredMatch } as never,
+    )
 
     await sync.syncNow()
 
-    const stored = repo.getRecentMatches({ puuid: PUUID }, 1)
-    expect(stored[0].gradeScore).toBeCloseTo(0)
+    expect(gradeStoredMatch).toHaveBeenCalledWith(1, PUUID)
+    expect(repo.getMatch(1, PUUID)?.durationQuality).toBe("inconsistent")
+  })
+
+  it("delegates a complete ARAM lobby to the same v3 coordinator", async () => {
+    const client = new FakeClient([aramGame(1)])
+    client.buildDetail = buildFarmLobby
+    const gradeStoredMatch = vi.fn(() => "ready" as const)
+    const sync = new MatchSync(
+      client as never, repo, PUUID, participants,
+      undefined, undefined, undefined, { gradeStoredMatch } as never,
+    )
+
+    const result = await sync.syncNow()
+
+    expect(result.graded).toBe(1)
+    expect(gradeStoredMatch).toHaveBeenCalledWith(1, PUUID)
   })
 
   it("keeps the lobby it already fetched for grading", async () => {

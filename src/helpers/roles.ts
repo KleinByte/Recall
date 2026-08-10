@@ -1,10 +1,11 @@
 import {
+  POSITION_RESOLVER_VERSION,
   POSITIONS,
   resolvePosition,
   type Position,
 } from "./position-core"
 
-export { POSITIONS, resolvePosition, type Position } from "./position-core"
+export { POSITION_RESOLVER_VERSION, POSITIONS, resolvePosition, type Position } from "./position-core"
 
 export interface PositionInfo {
   label: string
@@ -40,7 +41,16 @@ interface Positioned {
   lane?: string
   role?: string
   assignedPosition?: string
+  resolvedPosition?: string
+  positionResolverVersion?: number
 }
+
+/** Uses the persisted resolver result only when it was produced by this build. */
+export const positionForPlayer = (player: Positioned) =>
+  player.positionResolverVersion === POSITION_RESOLVER_VERSION
+    ? resolvePosition(undefined, player.resolvedPosition) ??
+      resolvePosition(player.lane, player.role, player.assignedPosition)
+    : resolvePosition(player.lane, player.role, player.assignedPosition)
 
 /**
  * Pairs each player against the enemy who played their position when Riot gave
@@ -56,9 +66,7 @@ export function laneMatchups<T extends Positioned>(
 ): Matchup<T>[] {
   const take = (players: T[]) => {
     const claimed = new Map<Position, T>()
-    const found = players.map((player) =>
-      resolvePosition(player.lane, player.role, player.assignedPosition),
-    )
+    const found = players.map(positionForPlayer)
     const listed = found.map((position) =>
       position !== undefined && found.indexOf(position) === found.lastIndexOf(position)
         ? position

@@ -88,6 +88,20 @@ describe("champion recommendations", () => {
       .toBe(50)
   })
 
+  it("carries average RoleFit for display without changing recommendation scoring", () => {
+    const [only] = recommendChampions([{
+      championId: 1,
+      championName: "Only",
+      games: [
+        { ...game(1, true, 1, 1), roleFitScore: 80 },
+        { ...game(1, false, 2, -1), roleFitScore: 60 },
+      ],
+    }], "best_overall", 100)
+
+    expect(only.averageGrade).toBe(0)
+    expect(only.averageRoleFit).toBe(70)
+  })
+
   it("sorts deterministic ties by champion name", () => {
     const ranked = recommendChampions([
       { championId: 2, championName: "Zed", games: [] },
@@ -146,6 +160,56 @@ describe("timeline mapping", () => {
       "ITEM_TRANSFORMED",
     ])
     expect(timeline.events.every((event) => event.category === "item")).toBe(true)
+  })
+
+  it("uses killer and creator identities when Riot emits zero participant ids", () => {
+    const timeline = mapTimeline([{
+      timestamp: 60_000,
+      events: [
+        {
+          type: "CHAMPION_KILL",
+          timestamp: 61_000,
+          participantId: 0,
+          killerId: 2,
+          victimId: 7,
+        },
+        {
+          type: "ELITE_MONSTER_KILL",
+          timestamp: 62_000,
+          participantId: 0,
+          killerId: 3,
+          teamId: 0,
+          monsterType: "BARON_NASHOR",
+        },
+        {
+          type: "WARD_PLACED",
+          timestamp: 63_000,
+          participantId: 0,
+          creatorId: 4,
+          wardType: "YELLOW_TRINKET",
+        },
+      ],
+    }], 1, new Map([[2, 100], [3, 100], [4, 100], [7, 200]]))
+
+    expect(timeline.events).toEqual([
+      expect.objectContaining({
+        type: "CHAMPION_KILL",
+        participantId: 2,
+        targetId: 7,
+        teamId: 100,
+      }),
+      expect.objectContaining({
+        type: "ELITE_MONSTER_KILL",
+        participantId: 3,
+        teamId: 100,
+        objective: "BARON_NASHOR",
+      }),
+      expect.objectContaining({
+        type: "WARD_PLACED",
+        participantId: 4,
+        teamId: 100,
+      }),
+    ])
   })
 
   it("deduplicates repeated LCU events and drops synthetic undefined ward placements", () => {

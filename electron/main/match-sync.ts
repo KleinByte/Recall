@@ -3,9 +3,7 @@ import type { ChampSelectRepository } from "./database/champ-select-repo.js"
 import type { ParticipantsRepository } from "./database/participants-repo.js"
 import type { LiveGameCaptureRepository } from "./database/live-game-capture-repo.js"
 import type { LcuClient } from "./lcu-client.js"
-import { gradeLobbyV2, type GradeInput } from "./matches/grade.js"
-import { gradeLobbyV3 } from "./matches/grade-v3.js"
-import { resolveChampionClass } from "./matches/class-expectations.js"
+import type { RecallV3Service } from "./matches/recall-v3-service.js"
 import {
   evaluateMatchLabels,
   prioritizePerformanceLabels,
@@ -18,7 +16,6 @@ import {
 } from "./matches/map-participants.js"
 import { fetchQueues, type QueueIndex } from "./matches/queues.js"
 import type { LcuGame, MatchRow, ModeFamily } from "./matches/types.js"
-import { resolvePosition } from "./matches/position.js"
 import {
   MatchSourceRepository,
   gzipCanonicalJsonV1,
@@ -45,9 +42,6 @@ interface MatchHistoryResponse {
  */
 const WINDOW_SIZE = 20
 
-/** Grading costs one request per game, so it is capped per sync. */
-const MAX_GRADES_PER_SYNC = 20
-
 /**
  * So does fetching a lobby for a game recorded before lobbies were kept.
  *
@@ -67,6 +61,7 @@ const MAX_LOBBY_BACKFILL_PER_SYNC = 20
  */
 export class MatchSync {
   private queues: QueueIndex = new Map()
+  private gradedThisSync = 0
 
   constructor(
     private readonly client: LcuClient,
@@ -76,9 +71,11 @@ export class MatchSync {
     private readonly champSelect?: ChampSelectRepository,
     private readonly liveCaptures?: LiveGameCaptureRepository,
     private readonly sourceRepository?: MatchSourceRepository,
+    private readonly recallV3?: RecallV3Service,
   ) {}
 
   async syncNow(): Promise<SyncResult> {
+    this.gradedThisSync = 0
     let games: LcuGame[]
 
     // The client is the authority on what each queue is. Read once per sync so
@@ -141,10 +138,9 @@ export class MatchSync {
         gameId: Number(raw.sourceMatchId),
       })
     }
-    const graded = await this.gradePendingMatches()
     const lobbies = await this.backfillLobbies(rows)
 
-    return { fetched: games.length, inserted, graded, lobbies }
+    return { fetched: games.length, inserted, graded: this.gradedThisSync, lobbies }
   }
 
   /**
@@ -216,10 +212,16 @@ export class MatchSync {
         teams.length,
       )
     }
-    if ((family === "aram" || family === "sr" || family === "classic") && detail.gameId) {
-      const inputs = this.gradeInputs(detail)
-      this.participants.setGrades(detail.gameId, this.puuid, gradeLobbyV2(inputs, family))
-      this.participants.setGradesV3(detail.gameId, this.puuid, gradeLobbyV3(inputs, family))
+    if (detail.gameId) {
+      this.repository.reconcileLcuDetailDuration(
+        detail.gameId,
+        this.puuid,
+        detail.gameDuration,
+      )
+    }
+    if (detail.gameId && this.recallV3) {
+      const status = this.recallV3.gradeStoredMatch(detail.gameId, this.puuid)
+      if (status === "ready") this.gradedThisSync += 1
     }
     if (detail.gameId) {
       const match = this.repository.getMatch(detail.gameId, this.puuid)
@@ -254,105 +256,4 @@ export class MatchSync {
     })
   }
 
-  /**
-   * Assigns grades to stored matches that do not have one yet.
-   *
-   * Grading is separate from recording because it needs the full lobby, which
-   * is an extra request per game. Keeping it separate means a grading failure
-   * never costs us the match itself.
-   */
-  private async gradePendingMatches(): Promise<number> {
-    const pending = this.repository.getUngradedMatches(
-      this.puuid,
-      MAX_GRADES_PER_SYNC,
-    )
-
-    let graded = 0
-
-    for (const { gameId, modeFamily } of pending) {
-      try {
-        const detail = await this.client.request<GameDetail>(
-          `/lol-match-history/v1/games/${gameId}`,
-        )
-        const raw = this.captureLobbyDetail(detail)
-
-        // The lobby is already in hand, so keep it rather than paying for the
-        // same request again later.
-        this.storeLobby(detail, modeFamily, raw)
-
-        const result = gradeLobbyV2(this.gradeInputs(detail), modeFamily).get(
-          identityParticipantId(detail, this.puuid),
-        )
-        if (!result) continue
-
-        this.repository.setGrade(
-          gameId,
-          this.puuid,
-          result.grade,
-          result.score,
-          result.breakdown.compositePercentile,
-          result.breakdown.algorithmVersion,
-        )
-        graded += 1
-      } catch (error) {
-        // Games that have aged out of the client's history can never be
-        // graded; stop rather than retrying the whole batch every sync.
-        console.warn(
-          `Could not grade game ${gameId}: ${(error as Error).message}`,
-        )
-        break
-      }
-    }
-
-    return graded
-  }
-
-  private gradeInputs(detail: GameDetail): GradeInput[] {
-    const minutes = Math.max(1, (detail.gameDuration ?? 0) / 60)
-    const ownerId = identityParticipantId(detail, this.puuid)
-    const ownTeam = detail.participants?.find(
-      (participant) => participant.participantId === ownerId,
-    )?.teamId
-    const assigned = detail.gameId && this.champSelect
-      ? this.champSelect.positionsFor(detail.gameId, this.puuid)
-      : new Map<number, string>()
-
-    const lobby: GradeInput[] = (detail.participants ?? []).map((participant) => ({
-      participantId: participant.participantId,
-      teamId: participant.teamId,
-      isPlayer: participant.participantId === ownerId,
-      kills: number(participant.stats?.kills),
-      deaths: number(participant.stats?.deaths),
-      assists: number(participant.stats?.assists),
-      damageToChampions: number(participant.stats?.totalDamageDealtToChampions),
-      damageTaken: number(participant.stats?.totalDamageTaken),
-      goldEarned: number(participant.stats?.goldEarned),
-      csPerMin:
-        (number(participant.stats?.totalMinionsKilled) +
-          number(participant.stats?.neutralMinionsKilled)) /
-        minutes,
-      visionScore: number(participant.stats?.visionScore),
-      damageObjectives: number(participant.stats?.damageDealtToObjectives),
-      damageMitigated: number(participant.stats?.damageSelfMitigated),
-      championClass: resolveChampionClass(participant.championId),
-      role: resolvePosition(
-        participant.timeline?.lane,
-        participant.timeline?.role,
-        participant.teamId === ownTeam && participant.championId !== undefined
-          ? assigned.get(participant.championId)
-          : undefined,
-      ),
-    }))
-
-    return lobby
-  }
 }
-
-function identityParticipantId(detail: GameDetail, puuid: string): number {
-  return detail.participantIdentities?.find(
-    (entry) => entry.player?.puuid === puuid,
-  )?.participantId ?? -1
-}
-
-const number = (value: number | boolean | undefined) =>
-  typeof value === "number" ? value : 0

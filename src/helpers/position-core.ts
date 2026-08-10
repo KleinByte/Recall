@@ -3,7 +3,8 @@ export const POSITIONS = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"] as con
 
 export type Position = typeof POSITIONS[number]
 export type NormalizedPosition = Position | "UNKNOWN"
-export const POSITION_RESOLVER_VERSION = 2
+export const POSITION_RESOLVER_VERSION = 3
+export const SUMMONER_SMITE_ID = 11
 
 const CANONICAL = new Set<string>(POSITIONS)
 
@@ -62,6 +63,10 @@ export interface PositionFacts {
   assignedPosition?: string | null
   lcuLane?: string | null
   lcuRole?: string | null
+  legacyLane?: string | null
+  legacyRole?: string | null
+  spell1Id?: number | null
+  spell2Id?: number | null
 }
 
 const canonicalPosition = (value?: string | null): Position | undefined =>
@@ -74,6 +79,20 @@ export function normalizePosition(facts: PositionFacts): NormalizedPosition {
   if (individual) return individual
   const assigned = canonicalPosition(facts.assignedPosition)
   if (assigned) return assigned
+  const legacyRole = canonicalPosition(facts.legacyRole)
+  if (legacyRole) return legacyRole
+  const lcuRole = canonicalPosition(facts.lcuRole)
+  if (lcuRole) return lcuRole
+  if (facts.spell1Id === SUMMONER_SMITE_ID || facts.spell2Id === SUMMONER_SMITE_ID) {
+    return "JUNGLE"
+  }
+  const legacy = resolvePosition(
+    facts.legacyLane ?? undefined,
+    facts.legacyRole ?? undefined,
+  )
+  if (legacy) return legacy
+  if ((facts.spell1Id || facts.spell2Id) &&
+      upper(facts.lcuLane ?? undefined) === "JUNGLE") return "UNKNOWN"
   return resolvePosition(
     facts.lcuLane ?? undefined,
     facts.lcuRole ?? undefined,

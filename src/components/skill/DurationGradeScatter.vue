@@ -5,18 +5,17 @@ import BaseEChart from "../charts/BaseEChart.vue"
 import { escapeTooltip } from "../../charts/formatters"
 import { CHART_COLOURS, CHART_STYLES } from "../../charts/recall-chart-theme"
 import { championNameById } from "../../helpers/format"
-import { recallGradeFromScore } from "../../shared/recall-grade"
 import type { SkillHistoryPoint } from "../../types/stats"
 
 const props = defineProps<{ history: SkillHistoryPoint[] }>()
-const graded = computed(() => props.history.filter((game) => game.gradeScore !== undefined))
+const graded = computed(() => props.history.filter((game) => Number.isFinite(game.roleFitScore)))
 
 const trend = computed(() => {
   const groups = new Map<number, number[]>()
   for (const game of graded.value) {
     const minute = Math.floor(game.durationSecs / 300) * 5 + 2.5
     const scores = groups.get(minute) ?? []
-    scores.push(game.gradeScore!)
+    scores.push(game.roleFitScore!)
     groups.set(minute, scores)
   }
   return [...groups.entries()]
@@ -31,16 +30,18 @@ const option = computed<EChartsCoreOption>(() => ({
     trigger: "item",
     formatter: (raw: unknown) => {
       const item = raw as { seriesName: string; dataIndex: number; value: number[] }
-      if (item.seriesName === "5-minute average") return `<strong>${item.value[0]} minutes</strong><br/>Average ${recallGradeFromScore(item.value[1])} (${item.value[1].toFixed(2)})`
+      if (item.seriesName === "5-minute average") return `<strong>${item.value[0]} minutes</strong><br/>Average RoleFit ${item.value[1].toFixed(1)}`
       const game = graded.value[item.dataIndex]
-      return game ? `<strong>${escapeTooltip(championNameById(null, game.championId))}</strong><br/>${(game.durationSecs / 60).toFixed(1)} minutes · ${escapeTooltip(game.grade ?? "–")}<br/>${game.win ? "Win" : "Loss"}` : ""
+      return game ? `<strong>${escapeTooltip(championNameById(null, game.championId))}</strong><br/>${(game.durationSecs / 60).toFixed(1)} minutes · ${escapeTooltip(game.grade ?? "–")} · RoleFit ${game.roleFitScore?.toFixed(1)}<br/>${game.win ? "Win" : "Loss"}` : ""
     },
   },
   xAxis: { type: "value", name: "Minutes", min: 0 },
   yAxis: {
     type: "value",
-    name: "Recall Grade",
-    axisLabel: { formatter: (value: number) => recallGradeFromScore(value) ?? "D" },
+    name: "RoleFit",
+    min: 0,
+    max: 100,
+    axisLabel: { formatter: "{value}" },
     splitLine: { lineStyle: { color: CHART_STYLES.gridSoft } },
   },
   series: [
@@ -49,7 +50,7 @@ const option = computed<EChartsCoreOption>(() => ({
       type: "scatter",
       symbolSize: 8,
       data: graded.value.map((game) => ({
-        value: [game.durationSecs / 60, game.gradeScore],
+        value: [game.durationSecs / 60, game.roleFitScore],
         itemStyle: { color: game.win ? CHART_COLOURS.positive : CHART_COLOURS.negative, opacity: 0.65 },
       })),
     },
@@ -69,7 +70,7 @@ const option = computed<EChartsCoreOption>(() => ({
 <template>
   <BaseEChart
     :option="option"
-    ariaLabel="Recall Grade by match duration. Green points are wins, red points are losses, and the line averages five-minute bands."
+    ariaLabel="RoleFit by match duration on a zero-to-one-hundred scale. Green points are wins, red points are losses, and the line averages five-minute bands."
     height="310px"
   />
 </template>

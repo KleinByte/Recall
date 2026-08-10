@@ -25,8 +25,10 @@ import type {
   PersonalRecord,
   ProfileSummary,
   RankedHistory,
+  RecallV3CalibrationStatus,
+  RecallV3RebuildResult,
   RiotHistoryBackfillState,
-  SkillReportV2,
+  SkillReportV3,
   StatsFilter,
   StatsMeta,
   StatsSummary,
@@ -326,7 +328,7 @@ export const api = {
   getSkillReport(
     filter: Partial<StatsFilter>,
     family: ModeFamily,
-  ): Promise<SkillReportV2> {
+  ): Promise<SkillReportV3> {
     return invoke("stats:skill-report", filter, family)
   },
 
@@ -336,6 +338,14 @@ export const api = {
     scoringContext: PerformanceScoringContext = "profile",
   ): Promise<PerformanceProfile | undefined> {
     return invoke("stats:rvi", filter, family, scoringContext)
+  },
+
+  getRecallV3Status(): Promise<RecallV3CalibrationStatus> {
+    return invoke("recall-v3:status")
+  },
+
+  recalibrateRecallV3(): Promise<RecallV3RebuildResult> {
+    return invoke("recall-v3:recalibrate")
   },
 
   getDrift(

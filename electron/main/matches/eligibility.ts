@@ -1,5 +1,6 @@
 import type { LcuGame } from "./types.js"
 import type { QueueInfo } from "./queues.js"
+import { MAX_ANALYTIC_MATCH_DURATION_SECS } from "../../../src/helpers/time-contract-core.js"
 
 export type MatchEligibilityReason =
   | "eligible"
@@ -71,6 +72,7 @@ export function isCompleteGradeLobby(
 export function evaluateMatchEligibility(input: MatchEligibilityInput): MatchEligibilityResult {
   const durationValid = input.normalizedDurationSeconds !== null &&
     Number.isSafeInteger(input.normalizedDurationSeconds) && input.normalizedDurationSeconds > 0 &&
+    input.normalizedDurationSeconds <= MAX_ANALYTIC_MATCH_DURATION_SECS &&
     input.durationQuality !== "invalid" && input.durationQuality !== "inconsistent"
   const supported = input.family === "sr" || input.family === "aram" || input.family === "classic"
   const knownUnsupported = input.contextComplete && input.registeredCapability && input.family === "other"

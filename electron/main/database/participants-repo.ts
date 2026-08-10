@@ -6,7 +6,13 @@ import type {
   TrackedMode,
 } from "../matches/types.js"
 import type { GradeResult } from "../matches/grade.js"
-import type { GradeLobbyV3Outcome } from "../matches/grade-v3.js"
+import {
+  GRADE_CORE_FACT_CONTRACT_VERSION,
+  GRADE_CORE_FIELDS,
+  isGradeCoreField,
+  isGradeCoreSource,
+  type GradeCoreField,
+} from "../matches/grade-core-facts.js"
 import { createHash } from "node:crypto"
 import { canonicalJson } from "./match-source-repo.js"
 
@@ -48,7 +54,10 @@ export interface OwnerAugmentSummary {
   games: number
   firstPlayedAt: number
   lastPlayedAt: number
+  /** Legacy/internal compatibility normal score. */
   averageGrade?: number
+  /** Visible authoritative Recall v3 average (0-100). */
+  averageRoleFit?: number
   kda: number
   damagePerMinute: number
   champions: { championId: number; games: number }[]
@@ -59,6 +68,18 @@ export interface AugmentCatalogEntry {
   name: string
   rarity?: string
   iconPath?: string
+}
+
+function assertLegacyGradeWriterAvailable(db: Database): void {
+  const table = db.prepare(`
+    SELECT 1 FROM sqlite_master
+    WHERE type = 'table' AND name = 'grade_recipe_selections'
+  `).get()
+  if (!table) return
+  const selected = db.prepare(
+    "SELECT 1 FROM grade_recipe_selections WHERE algorithm_version = 3 LIMIT 1",
+  ).get()
+  if (selected) throw new Error("legacy_grade_writer_disabled_after_v3_cutover")
 }
 
 const COLUMNS = [
@@ -127,10 +148,29 @@ const COLUMNS = [
   "lane",
   "role",
   "assigned_position",
+  "eligible_for_progression",
+  "time_played_secs",
+  "control_wards_purchased",
+  "detector_wards_placed",
+  "total_heals_on_teammates",
+  "total_damage_shielded_on_teammates",
+  "damage_dealt_to_buildings",
+  "lcu_lane",
+  "lcu_role",
+  "match_v5_team_position",
+  "match_v5_individual_position",
+  "resolved_position",
+  "position_resolver_version",
   "detail_version",
   "extended_metrics_json",
   "rune_selections_json",
+  "grade_core_complete",
+  "grade_core_source",
+  "grade_core_missing_fields_json",
+  "grade_core_contract_version",
 ] as const
+
+type ParticipantColumn = typeof COLUMNS[number]
 
 const TEAM_COLUMNS = [
   "game_id",
@@ -158,7 +198,7 @@ const TEAM_COLUMNS = [
  * games still inside the client's window will be read again to fill them in.
  */
 export const LEGACY_LOBBY_DETAIL_VERSION = 6
-export const PARTICIPANT_DETAIL_VERSION = 7
+export const PARTICIPANT_DETAIL_VERSION = 8
 export const LOBBY_DETAIL_VERSION = PARTICIPANT_DETAIL_VERSION
 export const CAPTURE_MANIFEST_VERSION = 2
 export const PARTICIPANT_CAPTURE_VERSION = CAPTURE_MANIFEST_VERSION
@@ -168,13 +208,67 @@ export const PARTICIPANT_CAPTURE_VERSION = CAPTURE_MANIFEST_VERSION
  * schema is filled in properly the next time the game is read.
  */
 const PARTICIPANT_KEY_COLUMNS = new Set(["game_id", "puuid", "participant_id"])
-const INSERT_SQL = `
-  INSERT INTO match_participants (${COLUMNS.join(", ")})
-  VALUES (${COLUMNS.map(() => "?").join(", ")})
-  ON CONFLICT(game_id, puuid, participant_id) DO UPDATE SET
-    ${COLUMNS.filter((column) => !PARTICIPANT_KEY_COLUMNS.has(column))
-      .map((column) => `${column} = excluded.${column}`).join(",\n    ")}
-`
+const PRESERVE_WHEN_ABSENT_COLUMNS = new Set([
+  "participant_puuid", "summoner_name", "assigned_position",
+  "eligible_for_progression", "time_played_secs", "control_wards_purchased",
+  "detector_wards_placed", "total_heals_on_teammates",
+  "total_damage_shielded_on_teammates", "damage_dealt_to_buildings",
+  "lcu_lane", "lcu_role", "match_v5_team_position",
+  "match_v5_individual_position", "resolved_position", "position_resolver_version",
+])
+
+const GRADE_CORE_VALUE_COLUMNS = new Set<ParticipantColumn>([
+  "team_id",
+  "champion_id",
+  "kills",
+  "deaths",
+  "assists",
+  "gold_earned",
+  "damage_to_champions",
+  "total_minions_killed",
+  "neutral_minions",
+  "damage_objectives",
+  "damage_turrets",
+  "time_ccing_others",
+  "vision_score",
+])
+
+const GRADE_CORE_METADATA_COLUMNS = new Set<ParticipantColumn>([
+  "grade_core_complete",
+  "grade_core_source",
+  "grade_core_missing_fields_json",
+  "grade_core_contract_version",
+])
+
+function participantInsertSql(columns: readonly ParticipantColumn[]): string {
+  const protectsCompleteCore = columns.includes("grade_core_complete")
+  const assignments = columns
+    .filter((column) => !PARTICIPANT_KEY_COLUMNS.has(column))
+    .map((column) => {
+      if (protectsCompleteCore &&
+          (GRADE_CORE_VALUE_COLUMNS.has(column) ||
+           GRADE_CORE_METADATA_COLUMNS.has(column))) {
+        // A retry from a partial payload must not erase source facts previously
+        // established by a complete payload. Complete retries still replace
+        // complete rows, and a complete retry repairs an incomplete row.
+        return `${column} = CASE
+          WHEN excluded.grade_core_complete = 1
+            OR match_participants.grade_core_complete = 0
+          THEN excluded.${column}
+          ELSE match_participants.${column}
+        END`
+      }
+      return PRESERVE_WHEN_ABSENT_COLUMNS.has(column)
+        ? `${column} = COALESCE(excluded.${column}, match_participants.${column})`
+        : `${column} = excluded.${column}`
+    })
+  return `
+    INSERT INTO match_participants (${columns.join(", ")})
+    VALUES (${columns.map(() => "?").join(", ")})
+    ON CONFLICT(game_id, puuid, participant_id) DO UPDATE SET
+      ${assignments.join(",\n      ")}
+  `
+}
 
 const INSERT_TEAM_SQL = `
   INSERT OR IGNORE INTO match_teams (${TEAM_COLUMNS.join(", ")})
@@ -211,8 +305,14 @@ const METRICS: { key: string; label: string; expression: string; roleScoped?: bo
   { key: "objectives", label: "Objective damage", expression: "damage_objectives" },
 ]
 
-function toValues(row: ParticipantRow) {
-  return [
+function toValues(
+  row: ParticipantRow,
+  columns: readonly ParticipantColumn[] = COLUMNS,
+) {
+  const gradeCoreComplete = row.gradeCoreComplete ?? 0
+  const gradeCoreMissingFields = row.gradeCoreMissingFields ??
+    (gradeCoreComplete === 1 ? [] : [...GRADE_CORE_FIELDS])
+  const values = [
     row.gameId,
     row.participantPuuid ?? null,
     row.puuid,
@@ -267,10 +367,31 @@ function toValues(row: ParticipantRow) {
     row.lane ?? null,
     row.role ?? null,
     row.assignedPosition ?? null,
+    row.eligibleForProgression ?? null,
+    row.timePlayedSecs ?? null,
+    row.controlWardsPurchased ?? null,
+    row.detectorWardsPlaced ?? null,
+    row.totalHealsOnTeammates ?? null,
+    row.totalDamageShieldedOnTeammates ?? null,
+    row.damageDealtToBuildings ?? null,
+    row.lcuLane ?? null,
+    row.lcuRole ?? null,
+    row.matchV5TeamPosition ?? null,
+    row.matchV5IndividualPosition ?? null,
+    row.resolvedPosition ?? null,
+    row.positionResolverVersion ?? null,
     LOBBY_DETAIL_VERSION,
     JSON.stringify(row.extendedMetrics ?? {}),
     JSON.stringify(row.runeSelections ?? []),
+    gradeCoreComplete,
+    row.gradeCoreSource ?? "legacy_unknown",
+    JSON.stringify(gradeCoreMissingFields),
+    row.gradeCoreContractVersion ?? GRADE_CORE_FACT_CONTRACT_VERSION,
   ]
+  const valueByColumn = new Map<ParticipantColumn, unknown>(
+    COLUMNS.map((column, index) => [column, values[index]]),
+  )
+  return columns.map((column) => valueByColumn.get(column))
 }
 
 function toTeamValues(row: TeamRow) {
@@ -306,6 +427,15 @@ function toParticipantRow(row: Record<string, never>): ParticipantRow {
     runeSelections = JSON.parse(row.rune_selections_json ?? "[]")
   } catch {
     runeSelections = []
+  }
+  let gradeCoreMissingFields: GradeCoreField[] = [...GRADE_CORE_FIELDS]
+  try {
+    const parsed = JSON.parse(row.grade_core_missing_fields_json ?? "null") as unknown
+    if (Array.isArray(parsed) && parsed.every(isGradeCoreField)) {
+      gradeCoreMissingFields = parsed
+    }
+  } catch {
+    gradeCoreMissingFields = [...GRADE_CORE_FIELDS]
   }
   return {
     gameId: row.game_id,
@@ -370,9 +500,36 @@ function toParticipantRow(row: Record<string, never>): ParticipantRow {
     firstTower: row.first_tower,
     grade: row.grade ?? undefined,
     gradeScore: row.grade_score ?? undefined,
+    gradeAlgorithmVersion: row.grade_algorithm_version ?? undefined,
+    roleFitScore: row.role_fit_score ?? undefined,
+    gradeRecipeId: row.grade_recipe_id ?? undefined,
+    gradeStatus: row.grade_status ?? undefined,
+    gradeEvidenceCoverage: row.grade_evidence_coverage ?? undefined,
+    gradeReferenceSampleCount: row.grade_reference_sample_count ?? undefined,
+    gradeCoreComplete: row.grade_core_complete === 1 ? 1 : 0,
+    gradeCoreSource: isGradeCoreSource(row.grade_core_source)
+      ? row.grade_core_source
+      : "legacy_unknown",
+    gradeCoreMissingFields,
+    gradeCoreContractVersion:
+      row.grade_core_contract_version ?? GRADE_CORE_FACT_CONTRACT_VERSION,
     lane: row.lane ?? undefined,
     role: row.role ?? undefined,
     assignedPosition: row.assigned_position ?? undefined,
+    eligibleForProgression: row.eligible_for_progression ?? undefined,
+    timePlayedSecs: row.time_played_secs ?? undefined,
+    controlWardsPurchased: row.control_wards_purchased ?? undefined,
+    detectorWardsPlaced: row.detector_wards_placed ?? undefined,
+    totalHealsOnTeammates: row.total_heals_on_teammates ?? undefined,
+    totalDamageShieldedOnTeammates:
+      row.total_damage_shielded_on_teammates ?? undefined,
+    damageDealtToBuildings: row.damage_dealt_to_buildings ?? undefined,
+    lcuLane: row.lcu_lane ?? undefined,
+    lcuRole: row.lcu_role ?? undefined,
+    matchV5TeamPosition: row.match_v5_team_position ?? undefined,
+    matchV5IndividualPosition: row.match_v5_individual_position ?? undefined,
+    resolvedPosition: row.resolved_position ?? undefined,
+    positionResolverVersion: row.position_resolver_version ?? undefined,
     extendedMetrics,
   }
 }
@@ -380,9 +537,15 @@ function toParticipantRow(row: Record<string, never>): ParticipantRow {
 export class ParticipantsRepository {
   private readonly insertStatement: Statement
   private readonly insertTeamStatement: Statement
+  private readonly participantColumns: ParticipantColumn[]
 
   constructor(private readonly db: Database) {
-    this.insertStatement = db.prepare(INSERT_SQL)
+    const availableColumns = new Set(
+      (db.prepare("PRAGMA table_info(match_participants)").all() as { name: string }[])
+        .map((column) => column.name),
+    )
+    this.participantColumns = COLUMNS.filter((column) => availableColumns.has(column))
+    this.insertStatement = db.prepare(participantInsertSql(this.participantColumns))
     this.insertTeamStatement = db.prepare(INSERT_TEAM_SQL)
   }
 
@@ -415,7 +578,9 @@ export class ParticipantsRepository {
     const insertAll = this.db.transaction((batch: ParticipantRow[]) => {
       let inserted = 0
       for (const row of batch) {
-        inserted += this.insertStatement.run(toValues(row)).changes
+        inserted += this.insertStatement.run(
+          toValues(row, this.participantColumns),
+        ).changes
         this.saveAugments(row)
       }
       return inserted
@@ -526,6 +691,7 @@ export class ParticipantsRepository {
 
   setGrades(gameId: number, puuid: string, grades: Map<number, GradeResult>) {
     if (grades.size === 0) return
+    assertLegacyGradeWriterAvailable(this.db)
     const update = this.db.prepare(
       `UPDATE match_participants
        SET grade = ?, grade_score = ?, grade_algorithm_version = ?,
@@ -617,62 +783,6 @@ export class ParticipantsRepository {
       }
     })
     save()
-  }
-
-  /** Persists Grade v3 shadow rows without touching the v2 compatibility cache. */
-  setGradesV3(gameId: number, puuid: string, outcome: GradeLobbyV3Outcome) {
-    const attemptedAt = Date.now()
-    const owner = this.db.prepare(`
-      SELECT participant_id AS participantId FROM match_participants
-      WHERE game_id = ? AND puuid = ? AND is_player = 1
-    `).get(gameId, puuid) as { participantId: number } | undefined
-    const fingerprint = createHash("sha256").update(canonicalJson({
-      algorithmVersion: 3,
-      status: outcome.status,
-      results: [...outcome.results].sort(([left], [right]) => left - right),
-      reason: outcome.reason ?? null,
-    })).digest("hex")
-    this.db.transaction(() => {
-      this.db.prepare(`
-        INSERT INTO match_grade_attempts
-          (game_id, puuid, algorithm_version, owner_participant_id,
-           grade_status, input_fingerprint, attempted_at)
-        VALUES (?, ?, 3, ?, ?, ?, ?)
-        ON CONFLICT(game_id, puuid, algorithm_version) DO UPDATE SET
-          owner_participant_id = excluded.owner_participant_id,
-          grade_status = excluded.grade_status,
-          input_fingerprint = excluded.input_fingerprint,
-          attempted_at = excluded.attempted_at
-      `).run(gameId, puuid, owner?.participantId ?? null, outcome.status,
-        fingerprint, attemptedAt)
-      this.db.prepare(`DELETE FROM match_grade_results
-        WHERE game_id = ? AND puuid = ? AND algorithm_version = 3`)
-        .run(gameId, puuid)
-      if (outcome.status !== "ready") return
-      if (!owner) throw new Error("grade_v3_owner_missing")
-      const resultStatement = this.db.prepare(`
-        INSERT INTO match_grade_results
-          (game_id, puuid, participant_id, algorithm_version, grade,
-           grade_score, composite_percentile, grade_status, created_at)
-        VALUES (?, ?, ?, 3, ?, ?, ?, 'ready', ?)
-      `)
-      const breakdownStatement = this.db.prepare(`
-        INSERT INTO match_grade_breakdown_versions
-          (game_id, puuid, participant_id, algorithm_version,
-           composite_percentile, components_json, created_at)
-        VALUES (?, ?, ?, 3, ?, ?, ?)
-      `)
-      for (const [participantId, result] of outcome.results) {
-        resultStatement.run(gameId, puuid, participantId, result.grade,
-          result.gradeScore, result.compositePercentile, attemptedAt)
-        breakdownStatement.run(gameId, puuid, participantId,
-          result.compositePercentile,
-          canonicalJson({
-            components: result.breakdown.components,
-            omittedComponents: result.breakdown.omittedComponents,
-          }), attemptedAt)
-      }
-    })()
   }
 
   /** The full scoreboard for one game, ordered as it appears in the client. */
@@ -769,6 +879,7 @@ export class ParticipantsRepository {
               MIN(m.played_at) AS firstPlayedAt,
               MAX(m.played_at) AS lastPlayedAt,
               AVG(p.grade_score) AS averageGrade,
+              AVG(p.role_fit_score) AS averageRoleFit,
               SUM(p.kills + p.assists) * 1.0 / MAX(1, SUM(p.deaths)) AS kda,
               AVG(p.damage_to_champions * 60.0 / MAX(1, m.duration_secs))
                 AS damagePerMinute
@@ -782,6 +893,7 @@ export class ParticipantsRepository {
        ORDER BY games DESC, a.augment_id`,
     ).all(...params) as Array<Omit<OwnerAugmentSummary, "champions"> & {
       averageGrade: number | null
+      averageRoleFit: number | null
     }>
     const championRows = this.db.prepare(
       `SELECT a.augment_id AS augmentId, p.champion_id AS championId,
@@ -802,6 +914,7 @@ export class ParticipantsRepository {
     return rows.map((row) => ({
       ...row,
       averageGrade: row.averageGrade ?? undefined,
+      averageRoleFit: row.averageRoleFit ?? undefined,
       champions: championRows
         .filter((entry) => entry.augmentId === row.augmentId)
         .map(({ championId, games }) => ({ championId, games })),

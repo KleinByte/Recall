@@ -37,6 +37,7 @@ type TimelineStatus = "pending" | "loading" | "ready" | "unavailable" | "error"
  */
 export class LcuTimelineService {
   private readonly drainingAccounts = new Set<string>()
+  private readonly drainingTasks = new Map<string, Promise<void>>()
 
   constructor(
     private readonly db: Database,
@@ -196,11 +197,13 @@ export class LcuTimelineService {
   }
 
   /** Captures the complete local timeline window before games age out. */
-  queueRecentMatches(puuid: string, limit = 20) {
+  queueRecentMatches(puuid: string, limit = 20): Promise<void> | undefined {
+    const active = this.drainingTasks.get(puuid)
+    if (active) return active
     if (!this.client() || this.drainingAccounts.has(puuid)) return
     this.drainingAccounts.add(puuid)
 
-    void (async () => {
+    const task = Promise.resolve().then(async () => {
       try {
         const rows = this.db.prepare(
           `SELECT m.game_id AS gameId
@@ -228,8 +231,11 @@ export class LcuTimelineService {
         }
       } finally {
         this.drainingAccounts.delete(puuid)
+        this.drainingTasks.delete(puuid)
       }
-    })()
+    })
+    this.drainingTasks.set(puuid, task)
+    return task
   }
 
   /** Reprocesses durable raw LCU data when mapping logic gains richer fields. */

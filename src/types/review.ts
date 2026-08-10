@@ -119,8 +119,12 @@ export type GradeComponentKey =
   | "survival"
   | "frontlining"
   | "farming"
+  | "fighting"
+  | "availability"
+  | "resources"
   | "vision"
   | "objectives"
+  | "control"
 
 export interface GradeComponent {
   key: GradeComponentKey
@@ -133,6 +137,9 @@ export interface GradeComponent {
 
 export interface GradeBreakdown {
   algorithmVersion: number
+  recipeId?: string
+  roleFitScore?: number
+  lobbyPercentile?: number
   compositePercentile: number
   components: GradeComponent[]
   unavailableReason?: string
@@ -205,7 +212,10 @@ export interface OwnerAugmentSummary {
   games: number
   firstPlayedAt: number
   lastPlayedAt: number
+  /** Legacy/internal compatibility normal score. */
   averageGrade?: number
+  /** Visible authoritative Recall v3 average (0-100). */
+  averageRoleFit?: number
   kda: number
   damagePerMinute: number
   champions: { championId: number; games: number }[]
@@ -256,7 +266,10 @@ export interface ChampionChoice {
   wins: number
   losses: number
   adjustedWinRate: number
+  /** Legacy/internal compatibility normal score. */
   averageGrade?: number
+  /** Visible authoritative Recall v3 average (0-100). */
+  averageRoleFit?: number
   kda: number
   confidence: Confidence
   recentDirection: "up" | "down" | "stable" | "unknown"

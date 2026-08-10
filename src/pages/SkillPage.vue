@@ -19,7 +19,7 @@ import {
   type SkillScopeId,
 } from "../helpers/skill-scopes"
 import type { Champion } from "../types/lol"
-import type { RankedHistory, SkillReportV2, StatsFilter } from "../types/stats"
+import type { RankedHistory, SkillReportV3, StatsFilter } from "../types/stats"
 
 const SkillInsights = defineAsyncComponent(() => import("../components/skill/SkillInsights.vue"))
 const SkillAnalyze = defineAsyncComponent(() => import("../components/skill/SkillAnalyze.vue"))
@@ -57,7 +57,7 @@ const tabOptions = [
 const counts = ref<Record<SkillScopeId, number>>(
   Object.fromEntries(SKILL_SCOPES.map((scope) => [scope.id, 0])) as Record<SkillScopeId, number>,
 )
-const report = ref<SkillReportV2 | null>(null)
+const report = ref<SkillReportV3 | null>(null)
 const ranked = ref<RankedHistory[]>([])
 const loading = ref(true)
 const failed = ref(false)

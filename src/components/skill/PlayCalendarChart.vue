@@ -5,7 +5,6 @@ import BaseEChart from "../charts/BaseEChart.vue"
 import { registerInsightCharts } from "../../charts/register-insights"
 import { escapeTooltip } from "../../charts/formatters"
 import { CHART_COLOURS, CHART_SCORE_RAMP, CHART_STYLES } from "../../charts/recall-chart-theme"
-import { recallGradeFromScore } from "../../shared/recall-grade"
 import type { SkillHistoryPoint } from "../../types/stats"
 import { calendarDays } from "../../charts/evidence-adapters"
 
@@ -15,7 +14,7 @@ const props = defineProps<{ history: SkillHistoryPoint[] }>()
 
 const days = computed(() => {
   return calendarDays(props.history).map((day) => [
-    day.date, day.gradeScore, day.games, day.wins,
+    day.date, day.roleFitScore, day.games, day.wins,
   ] as [string, number | null, number, number])
 })
 
@@ -28,21 +27,21 @@ const option = computed<EChartsCoreOption>(() => ({
   tooltip: {
     formatter: (raw: unknown) => {
       const [date, score, games, wins] = (raw as { data: [string, number | null, number, number] }).data
-      const grade = score === null
+      const roleFit = score === null
         ? "No graded games"
-        : `Average ${escapeTooltip(recallGradeFromScore(score) ?? "ungraded")} (${score.toFixed(2)})`
-      return `<strong>${escapeTooltip(new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { dateStyle: "medium" }))}</strong><br/>${games} game${games === 1 ? "" : "s"} · ${wins}W<br/>${grade}`
+        : `Average RoleFit ${score.toFixed(1)}`
+      return `<strong>${escapeTooltip(new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { dateStyle: "medium" }))}</strong><br/>${games} game${games === 1 ? "" : "s"} · ${wins}W<br/>${roleFit}`
     },
   },
   visualMap: {
-    min: -1.5,
-    max: 1.5,
+    min: 0,
+    max: 100,
     dimension: 1,
     calculable: false,
     orient: "horizontal",
     left: "center",
     bottom: 0,
-    text: ["Stronger grade", "Weaker grade"],
+    text: ["Higher RoleFit", "Lower RoleFit"],
     inRange: {
       color: [CHART_SCORE_RAMP[0], CHART_SCORE_RAMP[2], CHART_SCORE_RAMP[3], CHART_SCORE_RAMP[4]],
     },
@@ -67,7 +66,7 @@ const option = computed<EChartsCoreOption>(() => ({
 <template>
   <BaseEChart
     :option="option"
-    ariaLabel="Play calendar colored by average Recall Grade for each recorded day."
+    ariaLabel="Play calendar colored by average RoleFit on a zero-to-one-hundred scale for each recorded day."
     height="230px"
   />
 </template>

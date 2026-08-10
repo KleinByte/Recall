@@ -4,7 +4,6 @@ import { computed, ref, watch } from "vue"
 import BaseEChart from "../charts/BaseEChart.vue"
 import { CHART_COLOURS, CHART_STYLES } from "../../charts/recall-chart-theme"
 import { championNameById } from "../../helpers/format"
-import { recallGradeFromScore } from "../../shared/recall-grade"
 import type { Champion } from "../../types/lol"
 import type { SkillHistoryPoint } from "../../types/stats"
 
@@ -13,7 +12,7 @@ const props = defineProps<{ history: SkillHistoryPoint[]; catalog: Champion[] | 
 const options = computed(() => {
   const counts = new Map<number, number>()
   for (const game of props.history) {
-    if (game.gradeScore !== undefined) counts.set(game.championId, (counts.get(game.championId) ?? 0) + 1)
+    if (Number.isFinite(game.roleFitScore)) counts.set(game.championId, (counts.get(game.championId) ?? 0) + 1)
   }
   return [...counts]
     .filter(([, games]) => games >= 3)
@@ -27,12 +26,12 @@ watch(options, (next) => {
 }, { immediate: true })
 
 const games = computed(() => props.history
-  .filter((game) => game.championId === selectedId.value && game.gradeScore !== undefined)
+  .filter((game) => game.championId === selectedId.value && Number.isFinite(game.roleFitScore))
   .sort((left, right) => left.playedAt - right.playedAt))
 
 const moving = computed(() => games.value.map((game, index) => {
   const window = games.value.slice(Math.max(0, index - 4), index + 1)
-  return [index + 1, window.reduce((sum, entry) => sum + entry.gradeScore!, 0) / window.length, game.win]
+  return [index + 1, window.reduce((sum, entry) => sum + entry.roleFitScore!, 0) / window.length, game.win]
 }))
 
 const option = computed<EChartsCoreOption>(() => ({
@@ -41,7 +40,10 @@ const option = computed<EChartsCoreOption>(() => ({
   xAxis: { type: "value", min: 1, name: "Game on champion", nameLocation: "middle", nameGap: 28 },
   yAxis: {
     type: "value",
-    axisLabel: { formatter: (value: number) => recallGradeFromScore(value) ?? "–" },
+    name: "RoleFit",
+    min: 0,
+    max: 100,
+    axisLabel: { formatter: "{value}" },
     splitLine: { lineStyle: { color: CHART_STYLES.gridSoft } },
   },
   series: [
@@ -49,7 +51,7 @@ const option = computed<EChartsCoreOption>(() => ({
       name: "Game",
       type: "scatter",
       data: games.value.map((game, index) => ({
-        value: [index + 1, game.gradeScore],
+        value: [index + 1, game.roleFitScore],
         itemStyle: { color: game.win ? CHART_STYLES.positiveFill : CHART_STYLES.negativeFill },
       })),
       symbolSize: 6,
@@ -79,7 +81,7 @@ const option = computed<EChartsCoreOption>(() => ({
     <BaseEChart
       v-if="games.length"
       :option="option"
-      ariaLabel="Champion learning curve showing each graded match and a five-game moving Recall score."
+      ariaLabel="Champion learning curve showing each graded match and a five-game moving RoleFit score on a zero-to-one-hundred scale."
       height="310px"
     />
     <p v-else class="muted empty">At least three graded games on one champion are needed.</p>

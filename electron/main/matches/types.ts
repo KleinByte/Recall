@@ -1,9 +1,15 @@
+import type {
+  GradeCoreField,
+  GradeCoreSource,
+} from "./grade-core-facts.js"
+
 export type TrackedMode =
   | "sr_ranked_solo"
   | "sr_ranked_flex"
   | "sr_normal"
   | "sr_quickplay"
   | "sr_swiftplay"
+  | "urf"
   | "aram"
   | "mayhem"
   | "league_classic"
@@ -83,10 +89,38 @@ export interface ParticipantRow {
   firstTower: number
   grade?: string
   gradeScore?: number
+  gradeAlgorithmVersion?: number
+  roleFitScore?: number
+  gradeRecipeId?: string
+  gradeStatus?: string
+  gradeEvidenceCoverage?: number
+  gradeReferenceSampleCount?: number
+  /** Whether every v3 core fact was observed before numeric fallback coercion. */
+  gradeCoreComplete?: 0 | 1
+  /** Payload family that established completeness (or the legacy policy). */
+  gradeCoreSource?: GradeCoreSource
+  /** Stable source-field names that were absent or malformed. */
+  gradeCoreMissingFields?: GradeCoreField[]
+  /** Version of the completeness contract used by the mapper. */
+  gradeCoreContractVersion?: number
   lane?: string
   role?: string
   /** The position champion select assigned, kept apart from Riot's post-game guess. */
   assignedPosition?: string
+  /** Source-specific facts retained separately so zero never means absent. */
+  eligibleForProgression?: number
+  timePlayedSecs?: number
+  controlWardsPurchased?: number
+  detectorWardsPlaced?: number
+  totalHealsOnTeammates?: number
+  totalDamageShieldedOnTeammates?: number
+  damageDealtToBuildings?: number
+  lcuLane?: string
+  lcuRole?: string
+  matchV5TeamPosition?: string
+  matchV5IndividualPosition?: string
+  resolvedPosition?: string
+  positionResolverVersion?: number
   augments?: AugmentSelection[]
   extendedMetrics?: Record<string, number | boolean | string>
   /** Latest mastery snapshot Recall could read for this player/champion. */
@@ -188,6 +222,8 @@ export interface LcuTimeline {
 
 export interface LcuParticipant {
   championId: number
+  spell1Id?: number
+  spell2Id?: number
   stats: LcuParticipantStats
   timeline?: LcuTimeline
 }
@@ -222,6 +258,14 @@ export interface MatchRow {
   playedAt: number
   durationSecs: number
   gameVersion: string
+  mapId?: number
+  gameType?: string
+  gameEndTimestamp?: number
+  endOfGameResult?: string
+  ownerEligibleForProgression?: number
+  durationQuality?: "verified" | "source_reported" | "legacy" | "inconsistent" | "invalid"
+  resolvedPosition?: string
+  positionResolverVersion?: number
   championId: number
   win: number
   kills: number
@@ -247,6 +291,12 @@ export interface MatchRow {
   endedInEarlySurrender: number
   grade?: string
   gradeScore?: number
+  gradeAlgorithmVersion?: number
+  roleFitScore?: number
+  gradeRecipeId?: string
+  gradeStatus?: string
+  gradeEvidenceCoverage?: number
+  gradeReferenceSampleCount?: number
   modeFamily: ModeFamily
   isRanked: number
   lane?: string

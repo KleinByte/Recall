@@ -6,7 +6,7 @@ import type {
 
 export interface CalendarDay {
   date: string
-  gradeScore: number | null
+  roleFitScore: number | null
   games: number
   wins: number
 }
@@ -23,12 +23,12 @@ export function calendarDays(history: readonly SkillHistoryPoint[]): CalendarDay
     const day = grouped.get(key) ?? { games: 0, wins: 0, scores: [] }
     day.games += 1
     day.wins += Number(game.win)
-    if (Number.isFinite(game.gradeScore)) day.scores.push(game.gradeScore as number)
+    if (Number.isFinite(game.roleFitScore)) day.scores.push(game.roleFitScore as number)
     grouped.set(key, day)
   }
   return [...grouped].map(([date, day]) => ({
     date,
-    gradeScore: day.scores.length
+    roleFitScore: day.scores.length
       ? day.scores.reduce((sum, score) => sum + score, 0) / day.scores.length
       : null,
     games: day.games,
@@ -38,12 +38,12 @@ export function calendarDays(history: readonly SkillHistoryPoint[]): CalendarDay
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const
 
-export function weekdayGradeGroups(history: readonly SkillHistoryPoint[]) {
+export function weekdayRoleFitGroups(history: readonly SkillHistoryPoint[]) {
   return WEEKDAYS.flatMap((label, index) => {
     const values = history
       .filter((game) => ((new Date(game.playedAt).getDay() + 6) % 7) === index &&
-        Number.isFinite(game.gradeScore))
-      .map((game) => game.gradeScore as number)
+        Number.isFinite(game.roleFitScore))
+      .map((game) => game.roleFitScore as number)
     return values.length ? [{ label, values }] : []
   })
 }
@@ -62,9 +62,10 @@ export function commonSignatureAxes(rows: readonly ComponentRow[]) {
 
 export function completeRecentRadar(
   dimensions: readonly { key: string; recentScore?: number }[],
-): number[] | undefined {
-  const values = dimensions.map((dimension) => dimension.recentScore)
-  return values.every(Number.isFinite) ? values as number[] : undefined
+): Array<number | null> | undefined {
+  const values = dimensions.map((dimension) =>
+    Number.isFinite(dimension.recentScore) ? dimension.recentScore as number : null)
+  return values.filter((value) => value !== null).length >= 3 ? values : undefined
 }
 
 export function driftSeries(

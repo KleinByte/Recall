@@ -51,6 +51,19 @@ export function classifyMatch(
     }
   }
 
+  // URF uses Summoner's Rift geometry, but its accelerated economy and combat
+  // rules are not comparable with standard Rift. Keep it as a distinct,
+  // currently unsupported calibration family instead of silently assigning
+  // normal-Rift grades (queue 900 is the historical ARURF queue).
+  if (game.queueId === 900 || /URF/i.test(gameMode) || /URF/i.test(queueName ?? "")) {
+    return {
+      mode: "urf",
+      family: "other",
+      isRanked: false,
+      queueName,
+    }
+  }
+
   if (mapId === RIFT_MAP_ID) {
     // An unrecognised queue on the Rift is still a Rift game. Riot adds queues
     // regularly, and dropping them would silently lose history.

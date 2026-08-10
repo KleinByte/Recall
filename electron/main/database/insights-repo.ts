@@ -5,6 +5,37 @@ import { computePerGameAxes } from "../matches/style.js"
 import type { ModeFamily, TrackedMode } from "../matches/types.js"
 import type { GradeComponent } from "../review/types.js"
 import type { CompactTimeline } from "../riot/timeline-mapper.js"
+import {
+  GRADE_FAMILIES,
+  GRADE_METRICS,
+  GRADE_V3_ALGORITHM_VERSION,
+  GRADE_V3_RECIPE_DEFINITION_ID,
+} from "../matches/grade-v3-recipe.js"
+import {
+  PRIMARY_ARCHETYPES,
+  type PrimaryArchetype,
+} from "../matches/grade-v3-taxonomy.js"
+import {
+  MetricObservationsRepository,
+  type OwnerMetricObservationV3,
+} from "./metric-observations-repo.js"
+import {
+  RVI_DIAGNOSTIC_VECTOR_KEYS,
+  RVI_VECTOR_KEYS,
+  type RviMatchObservation,
+  type RviMetricObservation,
+  type RviVectorKey,
+} from "../matches/rvi-contract.js"
+import type { Evidence, EvidenceState } from "../../../src/shared/measurement.js"
+import {
+  metricDefinitionV3,
+  rviMetricPolicyV3,
+} from "../matches/metric-registry-v3.js"
+import { RVI_V3_RECIPE_DEFINITION_ID } from "../matches/rvi-v3-recipe.js"
+import {
+  GRADE_CORE_FACT_CONTRACT_VERSION,
+  isGradeCoreSource,
+} from "../matches/grade-core-facts.js"
 
 export interface BucketRow {
   label: string
@@ -58,7 +89,7 @@ export interface InsightMetrics {
   csPerMinute: number
   visionPerMinute?: number
   objectiveDamagePerMinute?: number
-  ccPerMinute: number
+  ccPerMinute?: number
   killParticipation?: number
   teamDamageShare?: number
   allyHealShieldPerMinute?: number
@@ -67,12 +98,16 @@ export interface InsightMetrics {
 export interface InsightObservation {
   gameId: number
   playedAt: number
+  endedAt?: number
   mode: TrackedMode
   family: ModeFamily
   queueId: number
   win: boolean
   grade?: string
+  /** Legacy/internal compatibility normal score. */
   gradeScore?: number
+  /** Authoritative Recall v3 score on a fixed 0-100 scale. */
+  roleFitScore?: number
   championId: number
   role?: string
   durationSecs: number
@@ -88,6 +123,19 @@ export interface GradeComponentObservation {
   gradeScore?: number
   compositePercentile: number
   components: GradeComponent[]
+}
+
+/**
+ * Authoritative RVI input for the one Grade v3 recipe selected by this install.
+ * Recipe identity travels with the rows so callers never need to infer it from
+ * an algorithm version or from whichever breakdown happens to be newest.
+ */
+export interface RviV3ObservationSet {
+  algorithmVersion: typeof GRADE_V3_ALGORITHM_VERSION
+  recipeId: string
+  calibrationId: string
+  familyKeys: readonly RviVectorKey[]
+  observations: RviMatchObservation[]
 }
 
 export interface FinalItemObservation {
@@ -223,6 +271,364 @@ function lobbyScope(filter: StatsFilter) {
 }
 
 const rate = (wins: number, games: number) => (games === 0 ? 0 : wins / games)
+
+const finiteInRange = (value: unknown, minimum: number, maximum: number): value is number =>
+  typeof value === "number" && Number.isFinite(value) && value >= minimum && value <= maximum
+
+interface SelectedGradeV3Recipe {
+  recipeId: string
+  calibrationId: string
+}
+
+function selectedGradeV3Recipe(db: Database): SelectedGradeV3Recipe | undefined {
+  return db.prepare(
+    `SELECT r.recipe_id AS recipeId, r.calibration_id AS calibrationId
+     FROM grade_recipe_selections s
+     JOIN grade_recipes r
+       ON r.algorithm_version = s.algorithm_version
+      AND r.recipe_id = s.recipe_id
+     WHERE s.algorithm_version = ?
+       AND r.calibration_id IS NOT NULL
+       AND r.recipe_id NOT LIKE 'legacy:%'
+       AND json_extract(r.definition_json, '$.recipeDefinitionId') = ?
+       AND r.recipe_id = ? || '@calibration:' || r.calibration_id`,
+  ).get(
+    GRADE_V3_ALGORITHM_VERSION,
+    GRADE_V3_RECIPE_DEFINITION_ID,
+    GRADE_V3_RECIPE_DEFINITION_ID,
+  ) as SelectedGradeV3Recipe | undefined
+}
+
+interface ParsedGradeV3Breakdown {
+  components: GradeComponent[]
+  primaryArchetype: PrimaryArchetype
+  metrics: ParsedGradeMetric[]
+}
+
+interface ParsedGradeMetric {
+  key: string
+  percentile: number | null
+  evidenceState: EvidenceState | "missing"
+  evidenceReason?: string
+  sourceEvidenceState: EvidenceState | "missing"
+  sourceEvidenceReason?: string
+  gradeWeight: number
+  responsibilityTier: "CORE" | "SECONDARY" | "DIAGNOSTIC" | "N/A"
+  comparisonScope?: "role" | "lobby"
+  referenceMatchCount?: number
+}
+
+const PRIMARY_ARCHETYPE_KEYS = new Set<string>(PRIMARY_ARCHETYPES)
+const GRADE_EVIDENCE_STATES = new Set([
+  "observed",
+  "unavailable",
+  "no_opportunity",
+  "invalid",
+  "not_applicable",
+  "unknown",
+  "missing",
+])
+
+const GRADE_METRIC_KEYS = new Set<string>(GRADE_METRICS)
+
+function parsedResponsibilityTier(value: unknown): ParsedGradeMetric["responsibilityTier"] {
+  return value === 2 ? "CORE" : value === 1 ? "SECONDARY" : "DIAGNOSTIC"
+}
+
+/**
+ * Stored Grade v3 component scores are calibrated 0-1 family percentiles.
+ * RVI's public observation contract uses 0-100. Missing diagnostic families
+ * remain null; they are coverage gaps and must not silently become zero.
+ */
+function parseGradeV3Breakdown(
+  value: string,
+  recipeId: string,
+  roleFitScore: number,
+): ParsedGradeV3Breakdown | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value) as unknown
+  } catch {
+    return undefined
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined
+  const breakdown = parsed as Record<string, unknown>
+  if (breakdown.algorithmVersion !== GRADE_V3_ALGORITHM_VERSION ||
+      breakdown.recipeDefinitionId !== GRADE_V3_RECIPE_DEFINITION_ID ||
+      breakdown.recipeId !== recipeId ||
+      typeof breakdown.primaryArchetype !== "string" ||
+      !PRIMARY_ARCHETYPE_KEYS.has(breakdown.primaryArchetype) ||
+      !finiteInRange(breakdown.roleFitScore, 0, 100) ||
+      Math.abs(breakdown.roleFitScore - roleFitScore) > 1e-9 ||
+      !Array.isArray(breakdown.components) || breakdown.components.length === 0) return undefined
+
+  const seen = new Set<string>()
+  const seenMetrics = new Set<string>()
+  const knownFamilies = new Set<string>(GRADE_FAMILIES)
+  const components: GradeComponent[] = []
+  const metrics: ParsedGradeMetric[] = []
+  for (const value of breakdown.components) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+    const component = value as Record<string, unknown>
+    const percentile = component.componentScore ?? component.rankPercentile
+    if (typeof component.key !== "string" || !knownFamilies.has(component.key) ||
+        seen.has(component.key) || typeof component.label !== "string" ||
+        !finiteInRange(percentile, 0, 1) || !finiteInRange(component.weight, 0, 1) ||
+        !finiteInRange(component.contribution, 0, 1) ||
+        (component.comparisonScope !== undefined &&
+          component.comparisonScope !== "lobby" && component.comparisonScope !== "role")) {
+      return undefined
+    }
+    seen.add(component.key)
+    components.push({
+      key: component.key as GradeComponent["key"],
+      label: component.label,
+      percentile,
+      weight: component.weight,
+      contribution: component.contribution,
+      scope: component.comparisonScope === "lobby" ? "lobby" : "role",
+    })
+    if (component.signals !== undefined && !Array.isArray(component.signals)) return undefined
+    for (const signalValue of component.signals ?? []) {
+      if (!signalValue || typeof signalValue !== "object" || Array.isArray(signalValue)) {
+        return undefined
+      }
+      const signal = signalValue as Record<string, unknown>
+      if (typeof signal.key !== "string" || !GRADE_METRIC_KEYS.has(signal.key) ||
+          seenMetrics.has(signal.key) || !finiteInRange(signal.percentile, 0, 1) ||
+          !finiteInRange(signal.weight, 0, 1) || signal.evidenceState !== "observed" ||
+          typeof signal.sourceEvidenceState !== "string" ||
+          !GRADE_EVIDENCE_STATES.has(signal.sourceEvidenceState) ||
+          (signal.sourceEvidenceReason !== undefined &&
+            typeof signal.sourceEvidenceReason !== "string")) return undefined
+      seenMetrics.add(signal.key)
+      metrics.push({
+        key: signal.key,
+        percentile: signal.percentile,
+        evidenceState: "observed",
+        sourceEvidenceState: signal.sourceEvidenceState as EvidenceState | "missing",
+        sourceEvidenceReason: signal.sourceEvidenceReason as string | undefined,
+        gradeWeight: component.weight * signal.weight,
+        responsibilityTier: parsedResponsibilityTier(component.responsibilityTier),
+        comparisonScope: component.comparisonScope === "lobby" ? "lobby" : "role",
+        referenceMatchCount: Number.isSafeInteger(component.peerCount) &&
+          (component.peerCount as number) >= 0 ? component.peerCount as number : undefined,
+      })
+    }
+  }
+
+  if (breakdown.diagnosticMetrics !== undefined && !Array.isArray(breakdown.diagnosticMetrics)) {
+    return undefined
+  }
+  for (const diagnosticValue of breakdown.diagnosticMetrics ?? []) {
+    if (!diagnosticValue || typeof diagnosticValue !== "object" ||
+        Array.isArray(diagnosticValue)) return undefined
+    const diagnostic = diagnosticValue as Record<string, unknown>
+    if (typeof diagnostic.key !== "string" || !GRADE_METRIC_KEYS.has(diagnostic.key) ||
+        seenMetrics.has(diagnostic.key) || typeof diagnostic.evidenceState !== "string" ||
+        !GRADE_EVIDENCE_STATES.has(diagnostic.evidenceState) ||
+        (diagnostic.sourceEvidenceState !== undefined &&
+          (typeof diagnostic.sourceEvidenceState !== "string" ||
+            !GRADE_EVIDENCE_STATES.has(diagnostic.sourceEvidenceState))) ||
+        (diagnostic.sourceEvidenceReason !== undefined &&
+          typeof diagnostic.sourceEvidenceReason !== "string")) return undefined
+    const evidenceState = diagnostic.evidenceState as EvidenceState | "missing"
+    if (evidenceState === "observed" && !finiteInRange(diagnostic.percentile, 0, 1)) {
+      return undefined
+    }
+    if (evidenceState !== "observed" && diagnostic.percentile !== undefined) return undefined
+    seenMetrics.add(diagnostic.key)
+    metrics.push({
+      key: diagnostic.key,
+      percentile: evidenceState === "observed" ? diagnostic.percentile as number : null,
+      evidenceState,
+      evidenceReason: typeof diagnostic.calibrationReason === "string"
+        ? diagnostic.calibrationReason
+        : undefined,
+      sourceEvidenceState: (diagnostic.sourceEvidenceState ?? evidenceState) as
+        EvidenceState | "missing",
+      sourceEvidenceReason: diagnostic.sourceEvidenceReason as string | undefined,
+      gradeWeight: 0,
+      responsibilityTier: "DIAGNOSTIC",
+    })
+  }
+  return {
+    components,
+    primaryArchetype: breakdown.primaryArchetype as PrimaryArchetype,
+    metrics,
+  }
+}
+
+function unobservedEvidence(
+  state: Exclude<EvidenceState, "observed"> | "missing",
+  reason?: string,
+): Evidence<number> {
+  return state === "missing"
+    ? { state: "unavailable", reason: reason ?? "legacy_missing_evidence", source: "legacy" }
+    : reason ? { state, reason } : { state }
+}
+
+function scoreEvidenceFromParsed(metric: ParsedGradeMetric): Evidence<number> {
+  if (metric.evidenceState === "observed") {
+    return metric.percentile === null
+      ? { state: "invalid", reason: "observed_percentile_missing" }
+      : { state: "observed", value: metric.percentile * 100, source: "derived" }
+  }
+  return unobservedEvidence(metric.evidenceState, metric.evidenceReason)
+}
+
+function rawEvidenceFromParsed(metric: ParsedGradeMetric): Evidence<number> {
+  if (metric.sourceEvidenceState === "observed") {
+    return {
+      state: "unavailable",
+      reason: "raw_value_not_retained_in_grade_breakdown",
+      source: "legacy",
+    }
+  }
+  return unobservedEvidence(metric.sourceEvidenceState, metric.sourceEvidenceReason)
+}
+
+function scaledStoredScore(evidence: Evidence<number>): Evidence<number> {
+  return evidence.state === "observed"
+    ? { ...evidence, value: evidence.value * 100 }
+    : evidence
+}
+
+function metricTier(
+  key: string,
+  rawEvidence: Evidence<number>,
+  scoreEvidence: Evidence<number>,
+  parsed: ParsedGradeMetric | undefined,
+  policyTier: RviMetricObservation["tier"],
+): RviMetricObservation["tier"] {
+  if (rawEvidence.state === "not_applicable" || scoreEvidence.state === "not_applicable") {
+    return "N/A"
+  }
+  if (parsed) return parsed.responsibilityTier
+  return GRADE_METRIC_KEYS.has(key) ? "N/A" : policyTier
+}
+
+function rviMetricFromStored(
+  metric: OwnerMetricObservationV3,
+  parsedByKey: ReadonlyMap<string, ParsedGradeMetric>,
+): RviMetricObservation | undefined {
+  const definition = metricDefinitionV3(metric.metricKey)
+  const policy = rviMetricPolicyV3(metric.metricKey)
+  if (!definition || !policy) return undefined
+  const parsed = parsedByKey.get(metric.metricKey)
+  const scoreEvidence = scaledStoredScore(metric.scoreEvidence)
+  const tier = metricTier(
+    metric.metricKey,
+    metric.rawEvidence,
+    scoreEvidence,
+    parsed,
+    policy.tier,
+  )
+  return {
+    key: metric.metricKey,
+    vector: policy.vector,
+    label: definition.label,
+    description: definition.description,
+    formula: definition.formula,
+    unit: metric.unit || definition.unit,
+    tier,
+    vectorWeight: tier === "N/A" ? 0 : policy.vectorWeight,
+    gradeWeight: tier === "N/A" ? 0 : parsed?.gradeWeight ?? 0,
+    rawEvidence: metric.rawEvidence,
+    scoreEvidence,
+    comparisonScope: metric.comparisonScope,
+    referenceMatchCount: metric.referenceMatchCount,
+    sourceQuality: metric.sourceQuality,
+  }
+}
+
+function rviMetricFromBreakdown(metric: ParsedGradeMetric): RviMetricObservation | undefined {
+  const definition = metricDefinitionV3(metric.key)
+  const policy = rviMetricPolicyV3(metric.key)
+  if (!definition || !policy) return undefined
+  const rawEvidence = rawEvidenceFromParsed(metric)
+  const scoreEvidence = scoreEvidenceFromParsed(metric)
+  const tier = metricTier(metric.key, rawEvidence, scoreEvidence, metric, policy.tier)
+  return {
+    key: metric.key,
+    vector: policy.vector,
+    label: definition.label,
+    description: definition.description,
+    formula: definition.formula,
+    unit: definition.unit,
+    tier,
+    vectorWeight: tier === "N/A" ? 0 : policy.vectorWeight,
+    gradeWeight: tier === "N/A" ? 0 : metric.gradeWeight,
+    rawEvidence,
+    scoreEvidence,
+    comparisonScope: metric.comparisonScope,
+    referenceMatchCount: metric.referenceMatchCount,
+    sourceQuality: "legacy",
+  }
+}
+
+function rviMetricsForMatch(
+  breakdown: ParsedGradeV3Breakdown,
+  stored: readonly OwnerMetricObservationV3[],
+): RviMetricObservation[] {
+  const parsedByKey = new Map(breakdown.metrics.map((metric) => [metric.key, metric]))
+  const merged = new Map<string, RviMetricObservation>()
+  for (const metric of breakdown.metrics) {
+    const fallback = rviMetricFromBreakdown(metric)
+    if (fallback) merged.set(fallback.key, fallback)
+  }
+  for (const metric of stored) {
+    const exact = rviMetricFromStored(metric, parsedByKey)
+    if (exact) merged.set(exact.key, exact)
+  }
+  return [...merged.values()].sort((left, right) => left.key.localeCompare(right.key))
+}
+
+function rviVectorMapsForMatch(metrics: readonly RviMetricObservation[]): {
+  familyPercentiles: Record<RviVectorKey, number | null>
+  familyResponsibilityWeights: Record<RviVectorKey, number | null>
+} {
+  const familyPercentiles = Object.fromEntries(
+    RVI_VECTOR_KEYS.map((key) => [key, null]),
+  ) as Record<RviVectorKey, number | null>
+  const familyResponsibilityWeights = Object.fromEntries(
+    RVI_VECTOR_KEYS.map((key) => [key, null]),
+  ) as Record<RviVectorKey, number | null>
+
+  for (const vector of RVI_VECTOR_KEYS) {
+    const applicable = metrics.filter((metric) =>
+      metric.vector === vector && metric.tier !== "N/A")
+    if (applicable.length === 0) continue
+
+    familyResponsibilityWeights[vector] = applicable.reduce(
+      (sum, metric) => sum + metric.gradeWeight,
+      0,
+    )
+
+    const weighted = applicable.filter((metric) => metric.vectorWeight > 0)
+    const scored = weighted.filter((metric) =>
+      metric.tier === "CORE" || metric.tier === "SECONDARY")
+    // A diagnostic can describe a scored vector, but it can never move it.
+    // Initiative is intentionally diagnostic-only, so it uses its retained
+    // diagnostic observations when no scored responsibility exists.
+    const candidates = scored.length > 0
+      ? scored
+      : RVI_DIAGNOSTIC_VECTOR_KEYS.includes(vector) ? weighted : []
+    if (candidates.length === 0 ||
+        candidates.some((metric) => metric.scoreEvidence.state !== "observed")) continue
+
+    const denominator = candidates.reduce((sum, metric) => sum + metric.vectorWeight, 0)
+    if (denominator === 0) continue
+    familyPercentiles[vector] = candidates.reduce(
+      (sum, metric) => sum +
+        (metric.scoreEvidence.state === "observed" ? metric.scoreEvidence.value : 0) *
+        metric.vectorWeight,
+      0,
+    ) / denominator
+  }
+
+  return { familyPercentiles, familyResponsibilityWeights }
+}
 
 /**
  * Questions about a player's record that need more than a running total.
@@ -510,7 +916,7 @@ export class InsightsRepository {
     const matchRows = this.db
       .prepare(
         `SELECT game_id, played_at, mode, mode_family, queue_id, win,
-                grade, grade_score, champion_id, role, duration_secs,
+                grade, grade_score, role_fit_score, champion_id, role, duration_secs,
                 kills, deaths, assists,
                 damage_to_champions, damage_taken, damage_self_mitigated,
                 total_heal, gold_earned,
@@ -528,6 +934,7 @@ export class InsightsRepository {
       win: number
       grade: string | null
       grade_score: number | null
+      role_fit_score: number | null
       champion_id: number
       role: string | null
       duration_secs: number
@@ -571,6 +978,10 @@ export class InsightsRepository {
                 SUM(p.damage_to_champions) AS team_damage,
                 COUNT(*) AS participant_count,
                 MAX(CASE WHEN p.is_player = 1 THEN p.extended_metrics_json ELSE NULL END) AS player_extended_json,
+                MAX(CASE WHEN p.is_player = 1 THEN p.grade_core_complete ELSE NULL END) AS player_grade_core_complete,
+                MAX(CASE WHEN p.is_player = 1 THEN p.grade_core_source ELSE NULL END) AS player_grade_core_source,
+                MAX(CASE WHEN p.is_player = 1 THEN p.grade_core_missing_fields_json ELSE NULL END) AS player_grade_core_missing_fields_json,
+                MAX(CASE WHEN p.is_player = 1 THEN p.grade_core_contract_version ELSE NULL END) AS player_grade_core_contract_version,
                 gs.total_participants,
                 gs.team_count
          FROM match_participants p
@@ -591,6 +1002,10 @@ export class InsightsRepository {
       team_damage: number
       participant_count: number
       player_extended_json: string | null
+      player_grade_core_complete: number | null
+      player_grade_core_source: string | null
+      player_grade_core_missing_fields_json: string | null
+      player_grade_core_contract_version: number | null
       total_participants: number
       team_count: number
     }[]
@@ -601,6 +1016,18 @@ export class InsightsRepository {
       const lobby = lobbyMap.get(m.game_id)
       const completeLobby = !!lobby && lobby.total_participants >= 10 && lobby.team_count >= 2
       const durationMins = Math.max(1, m.duration_secs) / 60
+
+      let gradeCoreMissingFields: unknown = null
+      try {
+        gradeCoreMissingFields = JSON.parse(lobby?.player_grade_core_missing_fields_json ?? "null")
+      } catch {
+        // Malformed metadata is unavailable evidence, never an observed zero.
+      }
+      const gradeCoreSource = lobby?.player_grade_core_source
+      const coreFactsObserved = lobby?.player_grade_core_complete === 1 &&
+        lobby.player_grade_core_contract_version === GRADE_CORE_FACT_CONTRACT_VERSION &&
+        isGradeCoreSource(gradeCoreSource) && gradeCoreSource !== "legacy_unknown" &&
+        Array.isArray(gradeCoreMissingFields) && gradeCoreMissingFields.length === 0
 
       let extendedMetrics: Record<string, number | boolean | string> = {}
       if (lobby?.player_extended_json) {
@@ -630,12 +1057,16 @@ export class InsightsRepository {
       return {
         gameId: m.game_id,
         playedAt: m.played_at,
+        endedAt: m.duration_secs > 0
+          ? m.played_at + m.duration_secs * 1_000
+          : undefined,
         mode: m.mode,
         family: m.mode_family,
         queueId: m.queue_id,
         win: m.win === 1,
         grade: m.grade ?? undefined,
         gradeScore: m.grade_score ?? undefined,
+        roleFitScore: m.role_fit_score ?? undefined,
         championId: m.champion_id,
         role: m.role ?? undefined,
         durationSecs: m.duration_secs,
@@ -647,10 +1078,11 @@ export class InsightsRepository {
           damageTakenPerMinute: m.damage_taken / durationMins,
           goldPerMinute: m.gold_earned / durationMins,
           csPerMinute: csPerMin,
-          visionPerMinute: m.vision_score > 0 ? m.vision_score / durationMins : undefined,
-          objectiveDamagePerMinute:
-            m.damage_objectives > 0 ? m.damage_objectives / durationMins : undefined,
-          ccPerMinute: m.time_ccing_others / durationMins,
+          visionPerMinute: coreFactsObserved ? m.vision_score / durationMins : undefined,
+          objectiveDamagePerMinute: coreFactsObserved
+            ? m.damage_objectives / durationMins
+            : undefined,
+          ccPerMinute: coreFactsObserved ? m.time_ccing_others / durationMins : undefined,
           killParticipation:
             completeLobby && lobby.team_kills > 0
               ? (lobby.player_kills + lobby.player_assists) / lobby.team_kills
@@ -660,7 +1092,7 @@ export class InsightsRepository {
           allyHealShieldPerMinute:
             completeLobby ? allyHealShieldPerMinute : undefined,
         },
-        styleAxes: computePerGameAxes({
+        styleAxes: coreFactsObserved ? computePerGameAxes({
           kills: m.kills,
           assists: m.assists,
           damageToChampions: m.damage_to_champions,
@@ -671,7 +1103,7 @@ export class InsightsRepository {
           csPerMin,
           visionPerMin: m.vision_score / durationMins,
           ccPerMin: m.time_ccing_others / durationMins,
-        }, m.mode_family as ModeFamily),
+        }, m.mode_family as ModeFamily) : {},
       }
     })
   }
@@ -726,10 +1158,50 @@ export class InsightsRepository {
     }).reverse()
   }
 
-  /** Latest grade algorithm breakdown for the player's most recent graded games. */
-  getGradeComponentHistory(filter: StatsFilter, limit = 60): GradeComponentObservation[] {
-    const conditions = ["m.puuid = ?", "m.is_matched = 1", "p.is_player = 1"]
-    const params: (string | number)[] = [filter.puuid]
+  /**
+   * Grade v3 rows eligible to feed RVI v3.
+   *
+   * This deliberately does not use the denormalized match grade cache or the
+   * compatibility breakdown table. A row is eligible only when the selected
+   * non-legacy recipe, its ready owner attempt, result, and immutable versioned
+  * breakdown all agree on the exact recipe identity.
+  */
+  getRviV3Observations(filter: StatsFilter, limit?: number): RviV3ObservationSet | undefined {
+    const selected = selectedGradeV3Recipe(this.db)
+    if (!selected) return undefined
+    const metricRepository = new MetricObservationsRepository(this.db)
+    const selectedRvi = metricRepository.getSelectedRecipe(GRADE_V3_ALGORITHM_VERSION)
+    if (selectedRvi && (selectedRvi.gradeRecipeId !== selected.recipeId ||
+        selectedRvi.calibrationId !== selected.calibrationId)) return undefined
+    if (selectedRvi && (!selectedRvi.definition || typeof selectedRvi.definition !== "object" ||
+        Array.isArray(selectedRvi.definition) ||
+        (selectedRvi.definition as Record<string, unknown>).recipeDefinitionId !==
+          RVI_V3_RECIPE_DEFINITION_ID)) return undefined
+    const rviRecipeId = selectedRvi?.recipeId ?? selected.recipeId
+
+    const conditions = [
+      "m.puuid = ?",
+      "m.is_matched = 1",
+      "p.is_player = 1",
+      "a.owner_participant_id = p.participant_id",
+      "a.algorithm_version = ?",
+      "a.recipe_id = ?",
+      "a.grade_status = 'ready'",
+      "a.role_fit_score = r.role_fit_score",
+      "r.algorithm_version = a.algorithm_version",
+      "r.recipe_id = a.recipe_id",
+      "r.grade_status = 'ready'",
+      "r.role_fit_score IS NOT NULL",
+      "b.algorithm_version = r.algorithm_version",
+      "b.recipe_id = r.recipe_id",
+      "b.role_fit_score IS NOT NULL",
+      "b.role_fit_score = r.role_fit_score",
+    ]
+    const params: (string | number)[] = [
+      filter.puuid,
+      GRADE_V3_ALGORITHM_VERSION,
+      selected.recipeId,
+    ]
 
     if (filter.mode) {
       conditions.push("m.mode = ?")
@@ -738,78 +1210,225 @@ export class InsightsRepository {
       conditions.push(`m.mode IN (${filter.modes.map(() => "?").join(", ")})`)
       params.push(...filter.modes)
     }
-
     if (filter.modeFamily) {
       conditions.push("m.mode_family = ?")
       params.push(filter.modeFamily)
     }
-
     if (filter.sinceMs !== undefined) {
       conditions.push("m.played_at >= ?")
       params.push(filter.sinceMs)
     }
-
     if (filter.untilMs !== undefined) {
       conditions.push("m.played_at <= ?")
       params.push(filter.untilMs)
     }
-
     if (filter.championIds?.length) {
-      conditions.push(`m.champion_id IN (${filter.championIds.map(() => "?").join(", ")})`)
+      conditions.push(`p.champion_id IN (${filter.championIds.map(() => "?").join(", ")})`)
       params.push(...filter.championIds)
     }
-
     if (filter.roles?.length) {
-      conditions.push(`${normalizedRole("m")} IN (${filter.roles.map(() => "?").join(", ")})`)
-      params.push(...filter.roles)
+      conditions.push(`UPPER(COALESCE(p.resolved_position, '')) IN (${filter.roles
+        .map(() => "?").join(", ")})`)
+      params.push(...filter.roles.map((role) => role.toUpperCase()))
     }
+    const rowLimit = Number.isFinite(limit) ? Math.max(1, Math.trunc(limit!)) : undefined
+    const limitSql = rowLimit === undefined ? "" : " LIMIT ?"
+    const queryParams = rowLimit === undefined ? params : [...params, rowLimit]
 
     const rows = this.db.prepare(
-      `SELECT game_id, played_at, grade, grade_score, composite_percentile, components_json
-       FROM (
-         SELECT m.game_id, m.played_at, m.grade, m.grade_score,
-                g.composite_percentile, g.components_json,
-                ROW_NUMBER() OVER (
-                  PARTITION BY m.game_id
-                  ORDER BY g.algorithm_version DESC
-                ) AS version_rank
-         FROM matches m
-         JOIN match_participants p
-           ON p.game_id = m.game_id AND p.puuid = m.puuid
-         JOIN match_grade_breakdowns g
-           ON g.game_id = p.game_id
-          AND g.puuid = p.puuid
-          AND g.participant_id = p.participant_id
-         WHERE ${conditions.join(" AND ")}
-       )
-       WHERE version_rank = 1
-       ORDER BY played_at DESC, game_id DESC
-       LIMIT ?`,
-    ).all(...params, Math.max(1, limit)) as Array<{
-      game_id: number
-      played_at: number
-      grade: string | null
-      grade_score: number | null
-      composite_percentile: number
-      components_json: string
+      `SELECT m.game_id AS gameId, m.played_at AS playedAt,
+              p.participant_id AS participantId,
+              p.champion_id AS championId,
+              p.resolved_position AS resolvedPosition,
+              r.role_fit_score AS roleFitScore,
+              b.components_json AS breakdownJson
+       FROM matches m
+       JOIN match_participants p
+         ON p.game_id = m.game_id AND p.puuid = m.puuid
+       JOIN match_grade_attempts a
+         ON a.game_id = p.game_id AND a.puuid = p.puuid
+       JOIN match_grade_results r
+         ON r.game_id = p.game_id
+        AND r.puuid = p.puuid
+        AND r.participant_id = p.participant_id
+       JOIN match_grade_breakdown_versions b
+         ON b.game_id = r.game_id
+        AND b.puuid = r.puuid
+        AND b.participant_id = r.participant_id
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY m.played_at DESC, m.game_id DESC${limitSql}`,
+    ).all(...queryParams) as Array<{
+      gameId: number
+      playedAt: number
+      participantId: number
+      championId: number | null
+      resolvedPosition: string | null
+      roleFitScore: number
+      breakdownJson: string
     }>
 
-    return rows.reverse().flatMap((row) => {
-      try {
-        const components = JSON.parse(row.components_json)
-        if (!Array.isArray(components)) return []
-        return [{
-          gameId: row.game_id,
-          playedAt: row.played_at,
-          grade: row.grade ?? undefined,
-          gradeScore: row.grade_score ?? undefined,
-          compositePercentile: row.composite_percentile,
-          components: components as GradeComponent[],
-        }]
-      } catch {
+    const storedMetricsByMatch = new Map<string, OwnerMetricObservationV3[]>()
+    if (selectedRvi) {
+      for (const metric of metricRepository.getOwnerHistory(
+        filter.puuid,
+        GRADE_V3_ALGORITHM_VERSION,
+        selectedRvi.recipeId,
+      )) {
+        const key = `${metric.gameId}:${metric.participantId}`
+        const group = storedMetricsByMatch.get(key) ?? []
+        group.push(metric)
+        storedMetricsByMatch.set(key, group)
+      }
+    }
+
+    const observations = rows.flatMap((row): RviMatchObservation[] => {
+      if (!finiteInRange(row.roleFitScore, 0, 100) ||
+          !Number.isFinite(row.playedAt) ||
+          (row.championId !== null && (!Number.isSafeInteger(row.championId) || row.championId <= 0))) {
         return []
       }
-    })
+      const breakdown = parseGradeV3Breakdown(
+        row.breakdownJson,
+        selected.recipeId,
+        row.roleFitScore,
+      )
+      if (!breakdown) return []
+      const metrics = rviMetricsForMatch(
+        breakdown,
+        storedMetricsByMatch.get(`${row.gameId}:${row.participantId}`) ?? [],
+      )
+      const vectorMaps = rviVectorMapsForMatch(metrics)
+      return [{
+        matchId: row.gameId,
+        recipeId: rviRecipeId,
+        playedAt: row.playedAt,
+        roleFitScore: row.roleFitScore,
+        ...vectorMaps,
+        metrics,
+        championId: row.championId,
+        position: row.resolvedPosition,
+        primaryArchetype: breakdown.primaryArchetype,
+      }]
+    }).reverse()
+
+    return {
+      algorithmVersion: GRADE_V3_ALGORITHM_VERSION,
+      recipeId: rviRecipeId,
+      calibrationId: selected.calibrationId,
+      familyKeys: [...RVI_VECTOR_KEYS],
+      observations,
+    }
+  }
+
+  /** Chart-ready grade families for the exact selected Grade v3 recipe. */
+  getGradeComponentHistory(filter: StatsFilter, limit = 60): GradeComponentObservation[] {
+    const selected = selectedGradeV3Recipe(this.db)
+    return selected
+      ? this.getGradeV3ComponentHistory(filter, limit, selected.recipeId)
+      : []
+  }
+
+  private getGradeV3ComponentHistory(
+    filter: StatsFilter,
+    limit: number,
+    recipeId: string,
+  ): GradeComponentObservation[] {
+    const conditions = [
+      "m.puuid = ?",
+      "m.is_matched = 1",
+      "p.is_player = 1",
+      "a.owner_participant_id = p.participant_id",
+      "a.algorithm_version = ?",
+      "a.recipe_id = ?",
+      "a.grade_status = 'ready'",
+      "a.role_fit_score = r.role_fit_score",
+      "r.algorithm_version = a.algorithm_version",
+      "r.recipe_id = a.recipe_id",
+      "r.grade_status = 'ready'",
+      "r.role_fit_score IS NOT NULL",
+      "b.algorithm_version = r.algorithm_version",
+      "b.recipe_id = r.recipe_id",
+      "b.role_fit_score = r.role_fit_score",
+    ]
+    const params: (string | number)[] = [
+      filter.puuid,
+      GRADE_V3_ALGORITHM_VERSION,
+      recipeId,
+    ]
+
+    if (filter.mode) {
+      conditions.push("m.mode = ?")
+      params.push(filter.mode)
+    } else if (filter.modes?.length) {
+      conditions.push(`m.mode IN (${filter.modes.map(() => "?").join(", ")})`)
+      params.push(...filter.modes)
+    }
+    if (filter.modeFamily) {
+      conditions.push("m.mode_family = ?")
+      params.push(filter.modeFamily)
+    }
+    if (filter.sinceMs !== undefined) {
+      conditions.push("m.played_at >= ?")
+      params.push(filter.sinceMs)
+    }
+    if (filter.untilMs !== undefined) {
+      conditions.push("m.played_at <= ?")
+      params.push(filter.untilMs)
+    }
+    if (filter.championIds?.length) {
+      conditions.push(`p.champion_id IN (${filter.championIds.map(() => "?").join(", ")})`)
+      params.push(...filter.championIds)
+    }
+    if (filter.roles?.length) {
+      conditions.push(`UPPER(COALESCE(p.resolved_position, '')) IN (${filter.roles
+        .map(() => "?").join(", ")})`)
+      params.push(...filter.roles.map((role) => role.toUpperCase()))
+    }
+
+    const rowLimit = Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : 60
+    const rows = this.db.prepare(
+      `SELECT m.game_id AS gameId, m.played_at AS playedAt,
+              r.grade, r.grade_score AS gradeScore,
+              r.role_fit_score AS roleFitScore,
+              b.components_json AS breakdownJson
+       FROM matches m
+       JOIN match_participants p
+         ON p.game_id = m.game_id AND p.puuid = m.puuid
+       JOIN match_grade_attempts a
+         ON a.game_id = p.game_id AND a.puuid = p.puuid
+       JOIN match_grade_results r
+         ON r.game_id = p.game_id
+        AND r.puuid = p.puuid
+        AND r.participant_id = p.participant_id
+       JOIN match_grade_breakdown_versions b
+         ON b.game_id = r.game_id
+        AND b.puuid = r.puuid
+        AND b.participant_id = r.participant_id
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY m.played_at DESC, m.game_id DESC
+       LIMIT ?`,
+    ).all(...params, rowLimit) as Array<{
+      gameId: number
+      playedAt: number
+      grade: string
+      gradeScore: number
+      roleFitScore: number
+      breakdownJson: string
+    }>
+
+    return rows.flatMap((row): GradeComponentObservation[] => {
+      if (!finiteInRange(row.roleFitScore, 0, 100) || !Number.isFinite(row.gradeScore)) return []
+      const breakdown = parseGradeV3Breakdown(row.breakdownJson, recipeId, row.roleFitScore)
+      if (!breakdown) return []
+      return [{
+        gameId: row.gameId,
+        playedAt: row.playedAt,
+        grade: row.grade,
+        gradeScore: row.gradeScore,
+        compositePercentile: row.roleFitScore / 100,
+        components: breakdown.components,
+      }]
+    }).reverse()
   }
 
   /**

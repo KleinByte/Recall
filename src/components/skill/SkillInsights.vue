@@ -11,12 +11,13 @@ import OutcomeTrendChart from "./OutcomeTrendChart.vue"
 import PlayCalendarChart from "./PlayCalendarChart.vue"
 import WeekdayGradeBoxplot from "./WeekdayGradeBoxplot.vue"
 import { findingLabel } from "../../helpers/insight-findings"
-import { formatPercent, gradeFromScore } from "../../helpers/format"
-import type { InsightFinding as InsightFindingType, InsightSection, SkillReportV2 } from "../../types/stats"
+import { formatPercent } from "../../helpers/format"
+import { recallGradeFromRoleFitScore } from "../../shared/recall-grade"
+import type { InsightFinding as InsightFindingType, InsightSection, SkillReportV3 } from "../../types/stats"
 import type { Champion } from "../../types/lol"
 
 const props = defineProps<{
-  report: SkillReportV2
+  report: SkillReportV3
   timezoneLabel: string
   champions: Champion[] | null
 }>()
@@ -24,12 +25,12 @@ const props = defineProps<{
 const summary = computed(() => props.report.overview.summary)
 const history = computed(() => [...props.report.visuals.history]
   .sort((left, right) => left.playedAt - right.playedAt))
-const gradedHistory = computed(() => history.value.filter((game) => game.gradeScore !== undefined))
-const averageGrade = computed(() => gradeFromScore(summary.value.avgGradeScore))
+const gradedHistory = computed(() => history.value.filter((game) => Number.isFinite(game.roleFitScore)))
+const averageGrade = computed(() => recallGradeFromRoleFitScore(summary.value.avgRoleFitScore))
 const gradedCoverage = computed(() => summary.value.games ? summary.value.gradedGames / summary.value.games : 0)
 
 const recentShift = computed(() => {
-  const values = gradedHistory.value.map((game) => game.gradeScore!).slice(-20)
+  const values = gradedHistory.value.map((game) => game.roleFitScore!).slice(-20)
   if (values.length < 10) return undefined
   const split = Math.floor(values.length / 2)
   const earlier = values.slice(0, split)
@@ -39,12 +40,12 @@ const recentShift = computed(() => {
 })
 
 const consistency = computed(() => {
-  const values = gradedHistory.value.map((game) => game.gradeScore!).slice(-30)
+  const values = gradedHistory.value.map((game) => game.roleFitScore!).slice(-30)
   if (values.length < 5) return undefined
   const mean = values.reduce((sum, value) => sum + value, 0) / values.length
   const deviation = Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length)
-  if (deviation < 0.65) return "Steady"
-  if (deviation < 1.05) return "Variable"
+  if (deviation < 10) return "Steady"
+  if (deviation < 18) return "Variable"
   return "Volatile"
 })
 
@@ -92,7 +93,7 @@ const predictiveEntries = computed(() => props.report.insights.predictive.signal
 
 const allFindings = (section: InsightSection): InsightFindingType[] => section.findings
 const currentGames = (section: InsightSection) => Math.max(0, ...section.findings.map((finding) => finding.eligibleGames))
-const signed = (value: number) => `${value > 0 ? "+" : ""}${value.toFixed(2)}`
+const signed = (value: number) => `${value > 0 ? "+" : ""}${value.toFixed(1)} pts`
 const shortDate = (timestamp: number) => new Date(timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "2-digit" })
 </script>
 
@@ -107,16 +108,17 @@ const shortDate = (timestamp: number) => new Date(timestamp).toLocaleDateString(
       </div>
       <div class="identity-copy">
         <p class="eyebrow">Your performance fingerprint</p>
-        <h2 id="recall-grade-title">One grade. Eight signals. Every match in context.</h2>
+        <h2 id="recall-grade-title">One grade. Six responsibilities. Every match in context.</h2>
         <p>
-          Recall Grade compares your combat, teamwork, economy, survival, and mode-specific work
-          with the players who shared that match. Zero is the lobby average; movement matters more
-          than any single game.
+          Recall Grade measures fighting, availability, resources, objectives, vision, and control
+          against the frozen local reference for that position and champion archetype. Movement
+          across matches matters more than any single result.
         </p>
       </div>
       <dl class="identity-stats">
         <div><dt>Graded</dt><dd>{{ summary.gradedGames }} / {{ summary.games }}</dd></div>
         <div><dt>Coverage</dt><dd>{{ formatPercent(gradedCoverage) }}</dd></div>
+        <div><dt>Average RoleFit</dt><dd>{{ summary.avgRoleFitScore === undefined ? "–" : `${summary.avgRoleFitScore.toFixed(1)} / 100` }}</dd></div>
         <div><dt>Recent form</dt><dd :class="recentShift && recentShift > 0 ? 'positive' : recentShift && recentShift < 0 ? 'negative' : ''">{{ recentShift === undefined ? "Learning" : signed(recentShift) }}</dd></div>
         <div><dt>Consistency</dt><dd>{{ consistency ?? "Learning" }}</dd></div>
       </dl>
@@ -127,7 +129,7 @@ const shortDate = (timestamp: number) => new Date(timestamp).toLocaleDateString(
         <div>
           <p class="chapter">01 · Form</p>
           <h2>Your Grade Journey</h2>
-          <p>Follow the shape of your performance, not just the latest result. Wins and losses color each match; the score controls the grade.</p>
+          <p>Follow the shape of your performance, not just the latest result. Wins and losses color each match; RoleFit controls the grade.</p>
         </div>
         <span class="sample">{{ gradedHistory.length }} graded games</span>
       </header>
@@ -136,12 +138,12 @@ const shortDate = (timestamp: number) => new Date(timestamp).toLocaleDateString(
         <summary>Show match-by-match data</summary>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Date</th><th>Grade</th><th>Score</th><th>Result</th><th>Duration</th></tr></thead>
+            <thead><tr><th>Date</th><th>Grade</th><th>RoleFit</th><th>Result</th><th>Duration</th></tr></thead>
             <tbody>
               <tr v-for="game in [...gradedHistory].reverse()" :key="game.gameId">
                 <td>{{ shortDate(game.playedAt) }}</td>
-                <td>{{ game.grade ?? gradeFromScore(game.gradeScore) }}</td>
-                <td class="numeric">{{ game.gradeScore?.toFixed(2) }}</td>
+                <td>{{ game.grade ?? "–" }}</td>
+                <td class="numeric">{{ game.roleFitScore?.toFixed(1) }}</td>
                 <td :class="game.win ? 'positive' : 'negative'">{{ game.win ? "Win" : "Loss" }}</td>
                 <td class="numeric">{{ Math.round(game.durationSecs / 60) }}m</td>
               </tr>
@@ -156,7 +158,11 @@ const shortDate = (timestamp: number) => new Date(timestamp).toLocaleDateString(
         <div>
           <p class="chapter">02 · Grade DNA</p>
           <h2>What your grades are made of</h2>
-          <p>Each cell is a Grade component score compared with that match's valid lobby. It blends lobby rank and performance magnitude; it is not a population percentile.</p>
+          <p>
+            Each cell is a stored Grade family percentile from the frozen reference used for that
+            match. Missing families remain blank; these cells explain the grade and do not rebuild
+            the RVI headline.
+          </p>
         </div>
         <div v-if="strongestComponent" class="callout">
           <span>Highest average component</span>
@@ -170,7 +176,7 @@ const shortDate = (timestamp: number) => new Date(timestamp).toLocaleDateString(
           <div v-for="component in componentAverages" :key="component.key">
             <span>{{ component.label }}</span>
             <strong>{{ Math.round(component.value * 100) }} PP</strong>
-            <small>{{ component.games }} games · compared with {{ component.scope }}</small>
+            <small>{{ component.games }} games · {{ component.scope }} comparison scope</small>
           </div>
         </div>
         <p v-if="growthComponent" class="detail-note">
@@ -191,7 +197,7 @@ const shortDate = (timestamp: number) => new Date(timestamp).toLocaleDateString(
       <PlayCalendarChart :history="history" />
       <div class="split-chart">
         <div>
-          <h3>Weekday grade range</h3>
+          <h3>Weekday RoleFit range</h3>
           <p class="chart-note">Wider boxes mean less predictable performance. Hover for the median and sample.</p>
           <WeekdayGradeBoxplot :history="history" />
         </div>
@@ -227,7 +233,7 @@ const shortDate = (timestamp: number) => new Date(timestamp).toLocaleDateString(
         <div>
           <p class="chapter">05 · Champion pool</p>
           <h2>Where your games—and grades—live</h2>
-          <p>Tile size is games played. Color tracks average Recall Grade, exposing both dependable comfort picks and thin-sample surprises.</p>
+          <p>Tile size is games played. Color tracks average RoleFit, exposing both dependable comfort picks and thin-sample surprises.</p>
         </div>
         <span class="sample">{{ report.visuals.champions.length }} champions</span>
       </header>
@@ -246,7 +252,7 @@ const shortDate = (timestamp: number) => new Date(timestamp).toLocaleDateString(
         <div>
           <p class="chapter">06 · Evidence</p>
           <h2>What repeats in your strongest games</h2>
-          <p>Only clearer, medium-or-high-confidence grade associations lead this section. They describe your history; they do not prove cause.</p>
+          <p>Only clearer, medium-or-high-confidence compatibility-score associations lead this section. This normal score is retained for statistical comparisons; it is not RoleFit points, and the associations do not prove cause.</p>
         </div>
       </header>
       <EffectChart v-if="evidenceEntries.length" :entries="evidenceEntries" unit="grade" />

@@ -8,7 +8,7 @@ export function formatPercentagePoints(value: number, digits = 1) {
 }
 
 export function formatGradeShift(value: number, digits = 2) {
-  return `${value > 0 ? "+" : ""}${value.toFixed(digits)} Recall score`
+  return `${value > 0 ? "+" : ""}${value.toFixed(digits)} compatibility score`
 }
 
 export function formatSigned(value: number, digits = 1) {

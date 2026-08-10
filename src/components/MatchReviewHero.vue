@@ -6,7 +6,7 @@ import GradeBadge from "./GradeBadge.vue"
 import TelemetryGrid from "./ui/TelemetryGrid.vue"
 import { labelIcon } from "../helpers/label-icons"
 import { lobbyStandings } from "../helpers/match-detail"
-import { positionIconUrl, positionLabel, resolvePosition } from "../helpers/roles"
+import { positionForPlayer, positionIconUrl, positionLabel } from "../helpers/roles"
 import {
   championIconUrl,
   championNameById,
@@ -33,7 +33,7 @@ const standing = computed(() => owner.value
   ? standings.value.get(owner.value.participantId)
   : undefined)
 const role = computed(() => owner.value
-  ? resolvePosition(owner.value.lane, owner.value.role, owner.value.assignedPosition)
+  ? positionForPlayer(owner.value)
   : undefined)
 const kda = computed(() => props.review.match.deaths === 0
   ? props.review.match.kills + props.review.match.assists

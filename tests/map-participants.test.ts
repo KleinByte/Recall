@@ -110,6 +110,9 @@ describe("mapParticipants", () => {
 
     expect(rows).toHaveLength(10)
     expect(rows[0].gameId).toBe(7)
+    expect(rows.every((row) => row.gradeCoreComplete === 1)).toBe(true)
+    expect(rows[0].gradeCoreSource).toBe("league_client")
+    expect(rows[0].gradeCoreMissingFields).toEqual([])
   })
 
   it("marks which row is the local player", () => {
@@ -214,6 +217,34 @@ describe("mapParticipants", () => {
     expect(row.kills).toBe(0)
     expect(row.win).toBe(0)
     expect(row.items).toEqual([0, 0, 0, 0, 0, 0, 0])
+    expect(row.gradeCoreComplete).toBe(0)
+    expect(row.gradeCoreSource).toBe("league_client")
+    expect(row.gradeCoreMissingFields).toContain("kills")
+    expect(row.gradeCoreMissingFields).toContain("vision_score")
+    expect(row.gradeCoreMissingFields).not.toContain("participant_id")
+  })
+
+  it("treats explicit zero core statistics as complete source facts", () => {
+    const payload = detail()
+    Object.assign(payload.participants[0].stats, {
+      kills: 0,
+      deaths: 0,
+      assists: 0,
+      goldEarned: 0,
+      totalDamageDealtToChampions: 0,
+      totalMinionsKilled: 0,
+      neutralMinionsKilled: 0,
+      damageDealtToObjectives: 0,
+      damageDealtToTurrets: 0,
+      timeCCingOthers: 0,
+      visionScore: 0,
+    })
+
+    const row = mapParticipants(payload, PUUID)[0]
+
+    expect(row.kills).toBe(0)
+    expect(row.gradeCoreComplete).toBe(1)
+    expect(row.gradeCoreMissingFields).toEqual([])
   })
 })
 

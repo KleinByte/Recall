@@ -68,8 +68,8 @@ function labelFor(score: number, streak: number): PerformanceMomentum["label"] {
 
 /**
  * How much a loss should hurt, judged by how the game was actually played.
- * gradeScore is standard deviations from the lobby mean, so an S-grade loss
- * (~+1.2) barely moves the dial while a D-grade loss (~-1.5) craters it.
+ * gradeScore is a frozen-reference normal score, so an S-grade loss (~+1.2)
+ * barely moves the dial while a D-grade loss (~-1.5) craters it.
  */
 function lossSeverity(gradeScore: number | undefined | null): number {
   if (typeof gradeScore !== "number" || !Number.isFinite(gradeScore)) return 1

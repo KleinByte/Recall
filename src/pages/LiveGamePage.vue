@@ -12,8 +12,8 @@ import {
   formatDecimal,
   formatDuration,
   formatPercent,
-  gradeFromScore,
 } from "../helpers/format"
+import { recallGradeFromRoleFitScore } from "../shared/recall-grade"
 import {
   itemIconUrl,
   loadGameAssets,
@@ -436,7 +436,7 @@ function eventLabel(name: string) {
         <div v-if="rankedAvailable.length" class="choice-table" role="table" aria-label="Available champion comparison">
           <div class="choice-row choice-head" role="row">
             <span>Champion</span>
-            <span>Recall score</span>
+            <span>Choice score</span>
             <span>Personal record</span>
             <span>Evidence</span>
             <span>Why consider it</span>
@@ -466,7 +466,7 @@ function eventLabel(name: string) {
             <div v-if="stat(id)" class="record-cell">
               <strong>{{ stat(id)!.wins }}–{{ stat(id)!.losses }}</strong>
               <span>{{ formatPercent(stat(id)!.adjustedWinRate) }} smoothed</span>
-              <span>{{ formatDecimal(stat(id)!.kda, 2) }} KDA · {{ gradeFromScore(stat(id)!.averageGrade) ?? "—" }} avg</span>
+              <span>{{ formatDecimal(stat(id)!.kda, 2) }} KDA · {{ stat(id)!.averageRoleFit?.toFixed(1) ?? "—" }} avg RoleFit</span>
             </div>
             <div v-else class="record-cell muted">No games in this mode</div>
             <div class="confidence-cell">
@@ -516,7 +516,7 @@ function eventLabel(name: string) {
             <div v-if="stat(localChampionId)" class="selected-stats">
               <div><strong>{{ stat(localChampionId)!.wins }}–{{ stat(localChampionId)!.losses }}</strong><span>Record</span></div>
               <div><strong>{{ formatDecimal(stat(localChampionId)!.kda, 2) }}</strong><span>KDA</span></div>
-              <div><strong>{{ gradeFromScore(stat(localChampionId)!.averageGrade) ?? "—" }}</strong><span>Average grade</span></div>
+              <div><strong>{{ stat(localChampionId)!.averageRoleFit?.toFixed(1) ?? "—" }}</strong><span>Avg RoleFit · {{ recallGradeFromRoleFitScore(stat(localChampionId)!.averageRoleFit) ?? "—" }}</span></div>
               <div><strong>{{ stat(localChampionId)!.confidence }}</strong><span>Confidence</span></div>
             </div>
             <div v-if="modifierChips.length" class="modifier-list">

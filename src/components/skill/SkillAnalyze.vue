@@ -9,10 +9,10 @@ import PerformanceFormChart from "./PerformanceFormChart.vue"
 import SessionEnduranceChart from "./SessionEnduranceChart.vue"
 import { classifyRviIdentity } from "../../helpers/rvi-identity"
 import type { Champion } from "../../types/lol"
-import type { SkillReportV2 } from "../../types/stats"
+import type { SkillReportV3 } from "../../types/stats"
 import { groupTimedGames } from "../../helpers/time-contract-core"
 
-const props = defineProps<{ report: SkillReportV2; champions: Champion[] | null }>()
+const props = defineProps<{ report: SkillReportV3; champions: Champion[] | null }>()
 
 const profile = computed(() => props.report.overview.performance)
 const identity = computed(() => profile.value ? classifyRviIdentity(profile.value) : undefined)
@@ -41,8 +41,9 @@ const sessionCount = computed(() => {
         <p class="eyebrow">Recall analysis lab</p>
         <h2>Patterns you can act on.</h2>
         <p>
-          These views use only games inside the filters above. RVI form comes from the measured
-          vector model; match signatures and champion charts use Recall Grade evidence.
+          These views use only games inside the filters above. RVI form comes from stored Grade v3
+          RoleFit and family percentiles; match signatures use stored family evidence while
+          champion charts use average RoleFit.
         </p>
       </div>
       <dl class="hero-stats">
@@ -76,7 +77,10 @@ const sessionCount = computed(() => {
         :meta="`Recent ${profile.recentGames} vs recorded profile`"
         class="analysis-panel"
       >
-        <p class="chart-copy">Which RVI vectors are moving, with sample stabilization already applied.</p>
+        <p class="chart-copy">
+          Which calibrated RVI families are moving. Missing games remain coverage, not zero,
+          and no small-sample shrink is applied.
+        </p>
         <PerformanceFormChart :profile="profile" />
       </Panel>
 
@@ -97,8 +101,9 @@ const sessionCount = computed(() => {
         class="analysis-panel wide"
       >
         <p class="chart-copy">
-          Every line is one game's eight Recall Grade signals. Green is a win, red is a loss;
-          hover a line to isolate its shape. These are lobby-relative Grade component scores, not population percentiles or RVI vector scores.
+          Every line is one game's available Recall Grade family evidence. Green is a win, red is
+          a loss; hover a line to isolate its shape. These breakdown values are separate from the
+          RVI headline and its sample diagnostics.
         </p>
         <MatchSignaturesChart
           :rows="report.visuals.gradeComponents"
@@ -116,7 +121,7 @@ const sessionCount = computed(() => {
         <ChampionQuadrantChart
           :champions="report.visuals.champions"
           :catalog="champions"
-          :baseline="report.overview.summary.avgGradeScore"
+          :baseline="report.overview.summary.avgRoleFitScore"
         />
       </Panel>
 

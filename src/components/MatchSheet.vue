@@ -11,7 +11,7 @@ import StatTile from "./ui/StatTile.vue"
 import { api } from "../helpers/api"
 import { labelIcon } from "../helpers/label-icons"
 import { lobbyStandings } from "../helpers/match-detail"
-import { positionIconUrl, positionLabel, resolvePosition } from "../helpers/roles"
+import { positionForPlayer, positionIconUrl, positionLabel } from "../helpers/roles"
 import { closeMatch } from "../helpers/navigation"
 import {
   championIconUrl,
@@ -131,7 +131,7 @@ const kda = computed(() =>
 // Lane-based modes assign positions; ARAM and Arena would report noise.
 const position = computed(() =>
   props.match.modeFamily === "sr" || props.match.modeFamily === "classic"
-    ? resolvePosition(props.match.lane, props.match.role, props.match.assignedPosition)
+    ? positionForPlayer(props.match)
     : undefined,
 )
 

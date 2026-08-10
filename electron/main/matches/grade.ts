@@ -213,7 +213,7 @@ function componentValues(
   const vision = roleScored(player, lobby, (entry) => entry.visionScore ?? 0)
   const objectives = scored(lobby.map(objectiveShareOf), objectiveShareOf(player))
 
-  const values: Array<[GradeComponent["key"], string, number, GradeComponent["scope"]]> = [
+  const values: Array<[keyof Weights, string, number, GradeComponent["scope"]]> = [
     ["combat", "Combat", combat, "lobby"],
     ["participation", "Participation", participation, "team"],
     ["economy", "Economy", economy.score, economy.scope],

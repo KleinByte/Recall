@@ -4,10 +4,37 @@ export type TrackedMode =
   | "sr_normal"
   | "sr_quickplay"
   | "sr_swiftplay"
+  | "urf"
   | "aram"
   | "mayhem"
   | "league_classic"
   | "other"
+
+export interface RecallV3CalibrationStatus {
+  state: "calibrating" | "frozen"
+  requiredMatches: number
+  eligibleMatches: number
+  largestScopeMatches: number
+  scopeMatchCounts: Record<string, number>
+  supportedScopes: string[]
+  supportedModes: string[]
+  recipeId?: string
+  calibrationId?: string
+  frozenAt?: number
+  referenceMatches?: number
+}
+
+export interface RecallV3RebuildResult {
+  canceled?: boolean
+  recipeId?: string
+  calibrationId?: string
+  runId?: number
+  total?: number
+  processed?: number
+  ready?: number
+  nonready?: number
+  errors?: number
+}
 
 export type ModeFamily = "sr" | "aram" | "classic" | "other"
 
@@ -27,7 +54,10 @@ export interface MatchQuery extends StatsFilter {
   modes?: TrackedMode[]
   rankedOnly?: boolean
   result?: "win" | "loss"
+  /** Legacy/internal compatibility-score filter. */
   minGradeScore?: number
+  /** Authoritative Recall v3 RoleFit filter (0-100). */
+  minRoleFitScore?: number
   minDurationSecs?: number
   sortBy?: "played_at" | "kda" | "damage" | "grade" | "duration"
   sortDir?: "asc" | "desc"
@@ -144,6 +174,7 @@ export interface StatsSummary {
   currentStreak: number
   longestWinStreak: number
   avgGradeScore?: number
+  avgRoleFitScore?: number
   gradedGames: number
 }
 
@@ -163,6 +194,7 @@ export interface ChampionStatRow {
   kda: number
   avgDamageToChampions: number
   avgGradeScore?: number
+  avgRoleFitScore?: number
   gradedGames: number
 }
 
@@ -282,10 +314,18 @@ export interface ParticipantRow {
   firstTower: number
   grade?: string
   gradeScore?: number
+  gradeAlgorithmVersion?: number
+  roleFitScore?: number
+  gradeRecipeId?: string
+  gradeStatus?: string
+  gradeEvidenceCoverage?: number
+  gradeReferenceSampleCount?: number
   lane?: string
   role?: string
   /** The position champion select assigned, kept apart from Riot's post-game guess. */
   assignedPosition?: string
+  resolvedPosition?: string
+  positionResolverVersion?: number
   augments?: AugmentSelection[]
   extendedMetrics?: Record<string, number | boolean | string>
   mastery?: ChampionMasterySnapshot
@@ -369,6 +409,8 @@ export interface RankedChampion {
   kda: number
   rawGrade?: number
   adjustedGrade: number
+  /** Visible authoritative Recall v3 average; never reliability-shrunk. */
+  roleFitScore?: number
   confidence: Confidence
 }
 
@@ -498,6 +540,14 @@ export interface MatchRow {
   playedAt: number
   durationSecs: number
   gameVersion: string
+  mapId?: number
+  gameType?: string
+  gameEndTimestamp?: number
+  endOfGameResult?: string
+  ownerEligibleForProgression?: number
+  durationQuality?: "verified" | "source_reported" | "legacy" | "inconsistent" | "invalid"
+  resolvedPosition?: string
+  positionResolverVersion?: number
   championId: number
   win: number
   kills: number
@@ -523,6 +573,12 @@ export interface MatchRow {
   endedInEarlySurrender: number
   grade?: string
   gradeScore?: number
+  gradeAlgorithmVersion?: number
+  roleFitScore?: number
+  gradeRecipeId?: string
+  gradeStatus?: string
+  gradeEvidenceCoverage?: number
+  gradeReferenceSampleCount?: number
   modeFamily: ModeFamily
   isRanked: number
   lane?: string
@@ -557,7 +613,8 @@ export interface MatchRow {
     timelineEligible: boolean
     reason: "eligible" | "unmatched" | "bot_or_tutorial" | "unsupported_mode" |
       "short_game" | "invalid_duration" | "incomplete_lobby" | "missing_core_metric" |
-      "missing_source_fact" | "terminated" | "ineligible_for_progression" | "legacy_unknown"
+      "missing_source_fact" | "terminated" | "ineligible_for_progression" | "legacy_unknown" |
+      "calibrating" | "position_unresolved"
     normalizedDurationSeconds: number | null
     durationQuality: "verified" | "source_reported" | "legacy" | "inconsistent" | "invalid"
     sourceFactsComplete: boolean
@@ -648,12 +705,27 @@ export interface SkillHistoryPoint {
   role?: string
   win: boolean
   grade?: string
+  /** Legacy/internal compatibility normal score. */
   gradeScore?: number
+  /** Authoritative Recall v3 score on a fixed 0-100 scale. */
+  roleFitScore?: number
   durationSecs: number
 }
 
 export interface SkillGradeComponent {
-  key: "combat" | "participation" | "economy" | "survival" | "frontlining" | "farming" | "vision" | "objectives"
+  key:
+    | "combat"
+    | "participation"
+    | "economy"
+    | "survival"
+    | "frontlining"
+    | "farming"
+    | "fighting"
+    | "availability"
+    | "resources"
+    | "vision"
+    | "objectives"
+    | "control"
   label: string
   percentile: number
   weight: number
@@ -676,7 +748,10 @@ export interface SkillChampionPoint {
   wins: number
   winRate: number
   kda: number
+  /** Legacy/internal compatibility normal score. */
   avgGradeScore?: number
+  /** Average authoritative Recall v3 RoleFit score (0-100). */
+  avgRoleFitScore?: number
   gradedGames: number
 }
 
@@ -686,11 +761,24 @@ export type PerformanceScoringContext = "profile" | "match"
 export interface PerformanceMetricScore {
   key: string
   label: string
-  score: number
+  score: number | null
+  rawValue: number | null
+  unit: string
+  tier: "CORE" | "SECONDARY" | "DIAGNOSTIC" | "N/A"
   weight: number
+  influence: number
   games: number
+  eligibleGames: number
+  coverage: number | null
+  effectiveGames: number
+  evidenceState: "observed" | "unavailable" | "no_opportunity" | "invalid" |
+    "not_applicable" | "unknown" | "missing"
+  evidenceReason?: string
   description: string
+  formula: string
   comparison: string
+  comparisonScope?: string
+  referenceMatchCount?: number
 }
 
 export interface PerformanceDimensionScore {
@@ -698,17 +786,140 @@ export interface PerformanceDimensionScore {
   label: string
   shortLabel: string
   description: string
-  score: number
+  score: number | null
   recentScore?: number
   delta?: number
   games: number
-  confidence: PerformanceConfidence
+  eligibleGames: number
+  coverage: number | null
+  effectiveGames: number
+  confidence: PerformanceConfidence | null
+  responsibilityWeight: number
+  headlineEligible: boolean
   metrics: PerformanceMetricScore[]
+}
+
+export interface RviCoverage {
+  eligibleGames: number
+  observedGames: number
+  gameRatio: number | null
+  eligibleWeight: number
+  observedWeight: number
+  weightRatio: number | null
+}
+
+export interface RviScoreAggregate {
+  score: number | null
+  nEff: number
+  confidence: PerformanceConfidence | null
+  coverage: RviCoverage
+}
+
+export interface RviBootstrapConfidenceInterval {
+  method: "deterministic_match_bootstrap_percentile"
+  confidenceLevel: 0.95
+  lower: number | null
+  upper: number | null
+  replicates: number
+  seed: number | null
+  observedGames: number
+}
+
+export interface RviHeadlineAggregate extends RviScoreAggregate {
+  source: "role_fit"
+  confidenceInterval95: RviBootstrapConfidenceInterval
+}
+
+export type PerformancePosition = "TOP" | "JUNGLE" | "MIDDLE" | "BOTTOM" | "UTILITY"
+export type PerformancePrimaryArchetype =
+  | "assassin"
+  | "artillery"
+  | "battlemage"
+  | "burst_mage"
+  | "catcher"
+  | "diver"
+  | "enchanter"
+  | "juggernaut"
+  | "marksman"
+  | "skirmisher"
+  | "vanguard"
+  | "warden"
+  | "specialist"
+
+export type PerformanceScopeKind =
+  | "overall"
+  | "position"
+  | "primary_archetype"
+  | "champion_position"
+
+export interface PerformanceScopeSummary {
+  kind: PerformanceScopeKind
+  key: string
+  score: number
+  headline: RviHeadlineAggregate
+  games: number
+  measuredGames: number
+  coverage: number
+  confidence: PerformanceConfidence
+  position?: PerformancePosition
+  primaryArchetype?: PerformancePrimaryArchetype
+  championId?: number
+}
+
+export interface PerformanceProfileScopes {
+  overall: PerformanceScopeSummary
+  positions: PerformanceScopeSummary[]
+  primaryArchetypes: PerformanceScopeSummary[]
+  championPositions: PerformanceScopeSummary[]
+}
+
+export type RviResolvedWeighting =
+  | { kind: "equal" }
+  | { kind: "half_life"; halfLifeMs: number; referenceTime: number | null }
+
+export interface RviConsistencySummary {
+  median: number | null
+  q1: number | null
+  scaledMad: number | null
+  nEff: number
+  confidence: PerformanceConfidence | null
+  coverage: RviCoverage
+}
+
+export interface RviVersatilityCategory {
+  key: string
+  weight: number
+  share: number
+}
+
+export interface RviHillVersatility {
+  effectiveCount: number | null
+  entropy: number | null
+  nEff: number
+  confidence: PerformanceConfidence | null
+  coverage: RviCoverage
+  categories: RviVersatilityCategory[]
+}
+
+export interface PerformanceProfileAuxiliary {
+  excludedFromHeadline: true
+  consistency: RviConsistencySummary
+  versatility: {
+    champions: RviHillVersatility
+    positions: RviHillVersatility
+  }
 }
 
 export interface PerformanceProfile {
   algorithmVersion: number
+  recipeId: string
+  scoringContext: PerformanceScoringContext
+  weighting: RviResolvedWeighting
   score: number
+  headline: RviHeadlineAggregate
+  recentHeadline?: RviHeadlineAggregate
+  scopes: PerformanceProfileScopes
+  auxiliary?: PerformanceProfileAuxiliary
   games: number
   recentGames: number
   measuredGames: number
@@ -734,8 +945,8 @@ export interface SkillDeathMap {
   deaths: SkillDeathPoint[]
 }
 
-export interface SkillReportV2 {
-  version: 2
+export interface SkillReportV3 {
+  version: 3
   generatedAt: number
   scope: { modes: TrackedMode[]; family: ModeFamily }
   overview: {
@@ -770,3 +981,6 @@ export interface SkillReportV2 {
     items: InsightSection
   }
 }
+
+/** @deprecated Use SkillReportV3; retained for existing renderer imports. */
+export type SkillReportV2 = SkillReportV3

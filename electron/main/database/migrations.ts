@@ -1239,6 +1239,644 @@ export const migrations: Migration[] = [
       );
     `,
   },
+  {
+    // Recall v3 grades are identified by an immutable recipe, not only by the
+    // product-facing algorithm version. The derived tables deliberately keep
+    // their existing algorithm-version primary keys: one recipe can occupy an
+    // algorithm version at a time, and a recipe change must purge those
+    // derived rows before the new recipe is selected. Raw payloads, normalized
+    // match facts, participants, teams, and timelines are not part of that
+    // purge boundary.
+    version: 25,
+    up: `
+      CREATE TABLE grade_calibration_snapshots (
+        calibration_id TEXT PRIMARY KEY,
+        calibration_hash TEXT NOT NULL UNIQUE CHECK (length(calibration_hash) = 64),
+        reference_population_json TEXT NOT NULL CHECK (json_valid(reference_population_json)),
+        sample_count INTEGER NOT NULL CHECK (sample_count >= 0),
+        snapshot_json TEXT NOT NULL CHECK (json_valid(snapshot_json)),
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE grade_recipes (
+        recipe_id TEXT PRIMARY KEY,
+        algorithm_version INTEGER NOT NULL CHECK (algorithm_version > 0),
+        recipe_hash TEXT NOT NULL UNIQUE CHECK (length(recipe_hash) = 64),
+        calibration_id TEXT,
+        definition_json TEXT NOT NULL CHECK (json_valid(definition_json)),
+        created_at INTEGER NOT NULL,
+        UNIQUE (algorithm_version, recipe_id),
+        FOREIGN KEY (calibration_id) REFERENCES grade_calibration_snapshots (calibration_id)
+      );
+
+      -- These markers make pre-v25 rows recognizable without ever allowing a
+      -- legacy artifact to satisfy an exact current-recipe lookup by accident.
+      INSERT INTO grade_recipes
+        (recipe_id, algorithm_version, recipe_hash, definition_json, created_at)
+      VALUES
+        ('legacy:v1', 1, '182abf3067a993ee785e44bb914d68058d68b373b214110a2f2fa38853bcabd5',
+         '{"kind":"legacy_unknown","algorithmVersion":1}', 0),
+        ('legacy:v2', 2, 'deccdec500ed67bd2ad2976cd637263894a06c2986146b69c537adebbd301d40',
+         '{"kind":"legacy_unknown","algorithmVersion":2}', 0),
+        ('legacy:v3', 3, '3a443103ec44004dc51748fe036bed7afdae5b257d61bb2f272cc6878bb98faf',
+         '{"kind":"legacy_shadow","algorithmVersion":3}', 0);
+
+      -- Immutable means metadata cannot be rewritten in place. Deletion is a
+      -- separate lifecycle operation and remains available once selections,
+      -- derived artifacts, and recipe foreign keys have been removed.
+      CREATE TRIGGER grade_calibration_snapshots_immutable_update
+      BEFORE UPDATE ON grade_calibration_snapshots
+      BEGIN SELECT RAISE(ABORT, 'grade_calibration_snapshot_is_immutable'); END;
+
+      CREATE TRIGGER grade_recipes_immutable_update
+      BEFORE UPDATE ON grade_recipes
+      BEGIN SELECT RAISE(ABORT, 'grade_recipe_is_immutable'); END;
+
+      -- The original attempt status enum is a table CHECK, so adding explicit
+      -- cold-start states requires a derived-table rebuild. Stage and restore
+      -- only grade artifacts; source and match evidence tables are untouched.
+      CREATE TABLE match_grade_attempts_v25_stage AS
+        SELECT * FROM match_grade_attempts;
+      CREATE TABLE match_grade_results_v25_stage AS
+        SELECT * FROM match_grade_results;
+      CREATE TABLE match_grade_breakdowns_v25_stage AS
+        SELECT * FROM match_grade_breakdown_versions;
+
+      DROP TABLE match_grade_breakdown_versions;
+      DROP TABLE match_grade_results;
+      DROP TABLE match_grade_attempts;
+
+      CREATE TABLE match_grade_attempts (
+        game_id INTEGER NOT NULL, puuid TEXT NOT NULL,
+        algorithm_version INTEGER NOT NULL, owner_participant_id INTEGER,
+        grade_status TEXT NOT NULL CHECK (grade_status IN (
+          'ready','unsupported_mode','short_game','invalid_duration','incomplete_lobby',
+          'missing_core_metric','missing_source_fact','terminated',
+          'ineligible_for_progression','unmatched','bot_or_tutorial','legacy_unknown',
+          'calibrating','position_unresolved')),
+        input_fingerprint TEXT NOT NULL CHECK (length(input_fingerprint) = 64),
+        attempted_at INTEGER NOT NULL,
+        recipe_id TEXT REFERENCES grade_recipes (recipe_id),
+        role_fit_score REAL CHECK (role_fit_score IS NULL OR role_fit_score BETWEEN 0 AND 100),
+        evidence_coverage REAL CHECK (evidence_coverage IS NULL OR evidence_coverage BETWEEN 0 AND 1),
+        reference_sample_count INTEGER
+          CHECK (reference_sample_count IS NULL OR reference_sample_count >= 0),
+        reference_metadata_json TEXT
+          CHECK (reference_metadata_json IS NULL OR json_valid(reference_metadata_json)),
+        status_reason TEXT,
+        CHECK (grade_status <> 'ready' OR owner_participant_id IS NOT NULL),
+        PRIMARY KEY (game_id, puuid, algorithm_version),
+        FOREIGN KEY (game_id, puuid) REFERENCES matches (game_id, puuid) ON DELETE CASCADE,
+        FOREIGN KEY (game_id, puuid, owner_participant_id)
+          REFERENCES match_participants (game_id, puuid, participant_id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE match_grade_results (
+        game_id INTEGER NOT NULL, puuid TEXT NOT NULL, participant_id INTEGER NOT NULL,
+        algorithm_version INTEGER NOT NULL,
+        grade TEXT NOT NULL CHECK (grade IN (
+          'S+','S','S-','A+','A','A-','B+','B','B-','C+','C','C-','D')),
+        grade_score REAL NOT NULL CHECK (grade_score BETWEEN -4 AND 4),
+        composite_percentile REAL NOT NULL CHECK (composite_percentile BETWEEN 0 AND 1),
+        grade_status TEXT NOT NULL CHECK (grade_status = 'ready'),
+        created_at INTEGER NOT NULL,
+        recipe_id TEXT REFERENCES grade_recipes (recipe_id),
+        role_fit_score REAL CHECK (role_fit_score IS NULL OR role_fit_score BETWEEN 0 AND 100),
+        evidence_coverage REAL CHECK (evidence_coverage IS NULL OR evidence_coverage BETWEEN 0 AND 1),
+        reference_sample_count INTEGER
+          CHECK (reference_sample_count IS NULL OR reference_sample_count >= 0),
+        reference_metadata_json TEXT
+          CHECK (reference_metadata_json IS NULL OR json_valid(reference_metadata_json)),
+        PRIMARY KEY (game_id, puuid, participant_id, algorithm_version),
+        FOREIGN KEY (game_id, puuid, algorithm_version)
+          REFERENCES match_grade_attempts (game_id, puuid, algorithm_version) ON DELETE CASCADE,
+        FOREIGN KEY (game_id, puuid, participant_id)
+          REFERENCES match_participants (game_id, puuid, participant_id) ON DELETE CASCADE
+      );
+      CREATE INDEX idx_grade_results_owner_version
+        ON match_grade_results (puuid, algorithm_version, game_id);
+
+      CREATE TABLE match_grade_breakdown_versions (
+        game_id INTEGER NOT NULL, puuid TEXT NOT NULL, participant_id INTEGER NOT NULL,
+        algorithm_version INTEGER NOT NULL,
+        composite_percentile REAL NOT NULL CHECK (composite_percentile BETWEEN 0 AND 1),
+        components_json TEXT NOT NULL CHECK (json_valid(components_json)),
+        created_at INTEGER NOT NULL,
+        recipe_id TEXT REFERENCES grade_recipes (recipe_id),
+        role_fit_score REAL CHECK (role_fit_score IS NULL OR role_fit_score BETWEEN 0 AND 100),
+        evidence_coverage REAL CHECK (evidence_coverage IS NULL OR evidence_coverage BETWEEN 0 AND 1),
+        reference_sample_count INTEGER
+          CHECK (reference_sample_count IS NULL OR reference_sample_count >= 0),
+        reference_metadata_json TEXT
+          CHECK (reference_metadata_json IS NULL OR json_valid(reference_metadata_json)),
+        PRIMARY KEY (game_id, puuid, participant_id, algorithm_version),
+        FOREIGN KEY (game_id, puuid, participant_id, algorithm_version)
+          REFERENCES match_grade_results (game_id, puuid, participant_id, algorithm_version)
+          ON DELETE CASCADE
+      );
+
+      INSERT INTO match_grade_attempts
+        (game_id, puuid, algorithm_version, owner_participant_id, grade_status,
+         input_fingerprint, attempted_at, recipe_id, reference_metadata_json)
+      SELECT game_id, puuid, algorithm_version, owner_participant_id, grade_status,
+             input_fingerprint, attempted_at, 'legacy:v' || algorithm_version,
+             '{"kind":"legacy_unknown"}'
+      FROM match_grade_attempts_v25_stage;
+      INSERT INTO match_grade_results
+        (game_id, puuid, participant_id, algorithm_version, grade, grade_score,
+         composite_percentile, grade_status, created_at, recipe_id,
+         reference_metadata_json)
+      SELECT game_id, puuid, participant_id, algorithm_version, grade, grade_score,
+             composite_percentile, grade_status, created_at,
+             'legacy:v' || algorithm_version, '{"kind":"legacy_unknown"}'
+      FROM match_grade_results_v25_stage;
+      INSERT INTO match_grade_breakdown_versions
+        (game_id, puuid, participant_id, algorithm_version,
+         composite_percentile, components_json, created_at, recipe_id,
+         reference_metadata_json)
+      SELECT game_id, puuid, participant_id, algorithm_version,
+             composite_percentile, components_json, created_at,
+             'legacy:v' || algorithm_version, '{"kind":"legacy_unknown"}'
+      FROM match_grade_breakdowns_v25_stage;
+
+      DROP TABLE match_grade_breakdowns_v25_stage;
+      DROP TABLE match_grade_results_v25_stage;
+      DROP TABLE match_grade_attempts_v25_stage;
+
+      ALTER TABLE match_grade_breakdowns ADD COLUMN recipe_id TEXT
+        REFERENCES grade_recipes (recipe_id);
+      ALTER TABLE match_grade_breakdowns ADD COLUMN role_fit_score REAL
+        CHECK (role_fit_score IS NULL OR role_fit_score BETWEEN 0 AND 100);
+      ALTER TABLE match_grade_breakdowns ADD COLUMN evidence_coverage REAL
+        CHECK (evidence_coverage IS NULL OR evidence_coverage BETWEEN 0 AND 1);
+      ALTER TABLE match_grade_breakdowns ADD COLUMN reference_sample_count INTEGER
+        CHECK (reference_sample_count IS NULL OR reference_sample_count >= 0);
+      ALTER TABLE match_grade_breakdowns ADD COLUMN reference_metadata_json TEXT
+        CHECK (reference_metadata_json IS NULL OR json_valid(reference_metadata_json));
+
+      ALTER TABLE matches ADD COLUMN grade_recipe_id TEXT
+        REFERENCES grade_recipes (recipe_id);
+      ALTER TABLE matches ADD COLUMN role_fit_score REAL
+        CHECK (role_fit_score IS NULL OR role_fit_score BETWEEN 0 AND 100);
+      ALTER TABLE matches ADD COLUMN grade_evidence_coverage REAL
+        CHECK (grade_evidence_coverage IS NULL OR grade_evidence_coverage BETWEEN 0 AND 1);
+      ALTER TABLE matches ADD COLUMN grade_reference_sample_count INTEGER
+        CHECK (grade_reference_sample_count IS NULL OR grade_reference_sample_count >= 0);
+      ALTER TABLE matches ADD COLUMN grade_reference_metadata_json TEXT
+        CHECK (grade_reference_metadata_json IS NULL OR json_valid(grade_reference_metadata_json));
+
+      ALTER TABLE match_participants ADD COLUMN grade_recipe_id TEXT
+        REFERENCES grade_recipes (recipe_id);
+      ALTER TABLE match_participants ADD COLUMN role_fit_score REAL
+        CHECK (role_fit_score IS NULL OR role_fit_score BETWEEN 0 AND 100);
+      ALTER TABLE match_participants ADD COLUMN grade_evidence_coverage REAL
+        CHECK (grade_evidence_coverage IS NULL OR grade_evidence_coverage BETWEEN 0 AND 1);
+      ALTER TABLE match_participants ADD COLUMN grade_reference_sample_count INTEGER
+        CHECK (grade_reference_sample_count IS NULL OR grade_reference_sample_count >= 0);
+      ALTER TABLE match_participants ADD COLUMN grade_reference_metadata_json TEXT
+        CHECK (grade_reference_metadata_json IS NULL OR json_valid(grade_reference_metadata_json));
+
+      -- Source fact completeness is separate from the normalized numeric
+      -- columns. Older mappers converted an absent number to zero, so the
+      -- stored value alone cannot prove that Riot actually reported the fact.
+      ALTER TABLE match_participants ADD COLUMN grade_core_complete INTEGER NOT NULL DEFAULT 0
+        CHECK (grade_core_complete IN (0, 1));
+      ALTER TABLE match_participants ADD COLUMN grade_core_source TEXT NOT NULL
+        DEFAULT 'legacy_unknown'
+        CHECK (grade_core_source IN (
+          'league_client','match_v5','legacy_full_detail','legacy_unknown'
+        ));
+      ALTER TABLE match_participants ADD COLUMN grade_core_missing_fields_json TEXT NOT NULL
+        DEFAULT '["participant_id","team_id","champion_id","kills","deaths","assists","gold_earned","damage_to_champions","total_minions_killed","neutral_minions","damage_objectives","damage_turrets","time_ccing_others","vision_score"]'
+        CHECK (json_valid(grade_core_missing_fields_json)
+          AND json_type(grade_core_missing_fields_json) = 'array');
+      ALTER TABLE match_participants ADD COLUMN grade_core_contract_version INTEGER NOT NULL
+        DEFAULT 1 CHECK (grade_core_contract_version > 0);
+
+      -- Do not infer source presence from old normalized columns. Before v25,
+      -- mappers converted an absent numeric field to zero, so even a complete
+      -- v7 lobby cannot prove whether a zero was reported. The v3 coordinator
+      -- promotes a legacy row only after re-reading a checksummed raw full-
+      -- scoreboard payload and verifying every core value against storage.
+
+      UPDATE match_grade_attempts
+      SET recipe_id = 'legacy:v' || algorithm_version,
+          reference_metadata_json = '{"kind":"legacy_unknown"}'
+      WHERE algorithm_version IN (1, 2, 3);
+      UPDATE match_grade_results
+      SET recipe_id = 'legacy:v' || algorithm_version,
+          reference_metadata_json = '{"kind":"legacy_unknown"}'
+      WHERE algorithm_version IN (1, 2, 3);
+      UPDATE match_grade_breakdown_versions
+      SET recipe_id = 'legacy:v' || algorithm_version,
+          reference_metadata_json = '{"kind":"legacy_unknown"}'
+      WHERE algorithm_version IN (1, 2, 3);
+      UPDATE match_grade_breakdowns
+      SET recipe_id = 'legacy:v' || algorithm_version,
+          reference_metadata_json = '{"kind":"legacy_unknown"}'
+      WHERE algorithm_version IN (1, 2, 3);
+      UPDATE matches
+      SET grade_recipe_id = 'legacy:v' || grade_algorithm_version,
+          grade_reference_metadata_json = '{"kind":"legacy_unknown"}'
+      WHERE grade_algorithm_version IN (1, 2, 3);
+      UPDATE match_participants
+      SET grade_recipe_id = 'legacy:v' || grade_algorithm_version,
+          grade_reference_metadata_json = '{"kind":"legacy_unknown"}'
+      WHERE grade_algorithm_version IN (1, 2, 3);
+
+      DROP TRIGGER matches_grade_pair_insert;
+      DROP TRIGGER matches_grade_pair_update;
+      DROP TRIGGER match_participants_grade_pair_insert;
+      DROP TRIGGER match_participants_grade_pair_update;
+
+      CREATE TRIGGER matches_grade_pair_insert
+      BEFORE INSERT ON matches
+      WHEN ((NEW.grade IS NULL) <> (NEW.grade_score IS NULL))
+        OR (NEW.grade IS NOT NULL AND
+          (NEW.grade_algorithm_version IS NULL OR COALESCE(NEW.grade_status, '') <> 'ready'
+           OR NEW.grade_composite_percentile IS NULL))
+        OR (NEW.grade IS NULL AND
+          (NEW.grade_composite_percentile IS NOT NULL OR NEW.grade_status = 'ready'
+           OR (NEW.grade_status IS NOT NULL AND NEW.grade_status NOT IN (
+             'unsupported_mode','short_game','invalid_duration','incomplete_lobby',
+             'missing_core_metric','missing_source_fact','terminated',
+             'ineligible_for_progression','unmatched','bot_or_tutorial','legacy_unknown',
+             'calibrating','position_unresolved'))))
+      BEGIN SELECT RAISE(ABORT, 'invalid complete grade cache state'); END;
+
+      CREATE TRIGGER matches_grade_pair_update
+      BEFORE UPDATE OF grade, grade_score, grade_algorithm_version,
+                       grade_status, grade_composite_percentile ON matches
+      WHEN ((NEW.grade IS NULL) <> (NEW.grade_score IS NULL))
+        OR (NEW.grade IS NOT NULL AND
+          (NEW.grade_algorithm_version IS NULL OR COALESCE(NEW.grade_status, '') <> 'ready'
+           OR NEW.grade_composite_percentile IS NULL))
+        OR (NEW.grade IS NULL AND
+          (NEW.grade_composite_percentile IS NOT NULL OR NEW.grade_status = 'ready'
+           OR (NEW.grade_status IS NOT NULL AND NEW.grade_status NOT IN (
+             'unsupported_mode','short_game','invalid_duration','incomplete_lobby',
+             'missing_core_metric','missing_source_fact','terminated',
+             'ineligible_for_progression','unmatched','bot_or_tutorial','legacy_unknown',
+             'calibrating','position_unresolved'))))
+      BEGIN SELECT RAISE(ABORT, 'invalid complete grade cache state'); END;
+
+      CREATE TRIGGER match_participants_grade_pair_insert
+      BEFORE INSERT ON match_participants
+      WHEN ((NEW.grade IS NULL) <> (NEW.grade_score IS NULL))
+        OR (NEW.grade IS NOT NULL AND
+          (NEW.grade_algorithm_version IS NULL OR COALESCE(NEW.grade_status, '') <> 'ready'
+           OR NEW.grade_composite_percentile IS NULL))
+        OR (NEW.grade IS NULL AND
+          (NEW.grade_composite_percentile IS NOT NULL OR NEW.grade_status = 'ready'
+           OR (NEW.grade_status IS NOT NULL AND NEW.grade_status NOT IN (
+             'unsupported_mode','short_game','invalid_duration','incomplete_lobby',
+             'missing_core_metric','missing_source_fact','terminated',
+             'ineligible_for_progression','unmatched','bot_or_tutorial','legacy_unknown',
+             'calibrating','position_unresolved'))))
+      BEGIN SELECT RAISE(ABORT, 'invalid complete grade cache state'); END;
+
+      CREATE TRIGGER match_participants_grade_pair_update
+      BEFORE UPDATE OF grade, grade_score, grade_algorithm_version,
+                       grade_status, grade_composite_percentile ON match_participants
+      WHEN ((NEW.grade IS NULL) <> (NEW.grade_score IS NULL))
+        OR (NEW.grade IS NOT NULL AND
+          (NEW.grade_algorithm_version IS NULL OR COALESCE(NEW.grade_status, '') <> 'ready'
+           OR NEW.grade_composite_percentile IS NULL))
+        OR (NEW.grade IS NULL AND
+          (NEW.grade_composite_percentile IS NOT NULL OR NEW.grade_status = 'ready'
+           OR (NEW.grade_status IS NOT NULL AND NEW.grade_status NOT IN (
+             'unsupported_mode','short_game','invalid_duration','incomplete_lobby',
+             'missing_core_metric','missing_source_fact','terminated',
+             'ineligible_for_progression','unmatched','bot_or_tutorial','legacy_unknown',
+             'calibrating','position_unresolved'))))
+      BEGIN SELECT RAISE(ABORT, 'invalid complete grade cache state'); END;
+
+      CREATE INDEX idx_grade_attempts_exact_recipe
+        ON match_grade_attempts (puuid, algorithm_version, recipe_id, game_id);
+      CREATE INDEX idx_grade_results_exact_recipe
+        ON match_grade_results (puuid, algorithm_version, recipe_id, game_id);
+      CREATE INDEX idx_grade_breakdowns_exact_recipe
+        ON match_grade_breakdown_versions (puuid, algorithm_version, recipe_id, game_id);
+
+      CREATE TABLE grade_recipe_selections (
+        algorithm_version INTEGER PRIMARY KEY,
+        recipe_id TEXT NOT NULL,
+        selected_at INTEGER NOT NULL,
+        FOREIGN KEY (algorithm_version, recipe_id)
+          REFERENCES grade_recipes (algorithm_version, recipe_id)
+      );
+
+      -- Artifact keys remain algorithm-version keyed. Refuse to switch recipes
+      -- until every derived row/cache for that version has been purged.
+      CREATE TRIGGER grade_recipe_selection_insert_requires_purge
+      BEFORE INSERT ON grade_recipe_selections
+      WHEN EXISTS (SELECT 1 FROM match_grade_attempts
+                   WHERE algorithm_version = NEW.algorithm_version
+                     AND COALESCE(recipe_id, '') <> NEW.recipe_id)
+        OR EXISTS (SELECT 1 FROM match_grade_results
+                   WHERE algorithm_version = NEW.algorithm_version
+                     AND COALESCE(recipe_id, '') <> NEW.recipe_id)
+        OR EXISTS (SELECT 1 FROM match_grade_breakdown_versions
+                   WHERE algorithm_version = NEW.algorithm_version
+                     AND COALESCE(recipe_id, '') <> NEW.recipe_id)
+        OR EXISTS (SELECT 1 FROM match_grade_breakdowns
+                   WHERE algorithm_version = NEW.algorithm_version
+                     AND COALESCE(recipe_id, '') <> NEW.recipe_id)
+        OR EXISTS (SELECT 1 FROM matches
+                   WHERE grade_algorithm_version = NEW.algorithm_version
+                     AND COALESCE(grade_recipe_id, '') <> NEW.recipe_id)
+        OR EXISTS (SELECT 1 FROM match_participants
+                   WHERE grade_algorithm_version = NEW.algorithm_version
+                     AND COALESCE(grade_recipe_id, '') <> NEW.recipe_id)
+      BEGIN SELECT RAISE(ABORT, 'grade_recipe_purge_required'); END;
+
+      CREATE TRIGGER grade_recipe_selection_update_requires_purge
+      BEFORE UPDATE OF recipe_id ON grade_recipe_selections
+      WHEN OLD.recipe_id <> NEW.recipe_id AND (
+        EXISTS (SELECT 1 FROM match_grade_attempts
+                WHERE algorithm_version = NEW.algorithm_version)
+        OR EXISTS (SELECT 1 FROM match_grade_results
+                   WHERE algorithm_version = NEW.algorithm_version)
+        OR EXISTS (SELECT 1 FROM match_grade_breakdown_versions
+                   WHERE algorithm_version = NEW.algorithm_version)
+        OR EXISTS (SELECT 1 FROM match_grade_breakdowns
+                   WHERE algorithm_version = NEW.algorithm_version)
+        OR EXISTS (SELECT 1 FROM matches
+                   WHERE grade_algorithm_version = NEW.algorithm_version)
+        OR EXISTS (SELECT 1 FROM match_participants
+                   WHERE grade_algorithm_version = NEW.algorithm_version)
+      )
+      BEGIN SELECT RAISE(ABORT, 'grade_recipe_purge_required'); END;
+
+      CREATE TRIGGER grade_attempt_selected_recipe_insert
+      BEFORE INSERT ON match_grade_attempts
+      WHEN EXISTS (
+        SELECT 1 FROM grade_recipe_selections s
+        WHERE s.algorithm_version = NEW.algorithm_version
+          AND s.recipe_id <> COALESCE(NEW.recipe_id, '')
+      )
+      BEGIN SELECT RAISE(ABORT, 'grade_attempt_recipe_is_not_selected'); END;
+
+      CREATE TRIGGER grade_attempt_selected_recipe_update
+      BEFORE UPDATE OF algorithm_version, recipe_id ON match_grade_attempts
+      WHEN EXISTS (
+        SELECT 1 FROM grade_recipe_selections s
+        WHERE s.algorithm_version = NEW.algorithm_version
+          AND s.recipe_id <> COALESCE(NEW.recipe_id, '')
+      )
+      BEGIN SELECT RAISE(ABORT, 'grade_attempt_recipe_is_not_selected'); END;
+
+      CREATE TRIGGER grade_result_attempt_recipe_insert
+      BEFORE INSERT ON match_grade_results
+      WHEN NOT EXISTS (
+        SELECT 1 FROM match_grade_attempts a
+        WHERE a.game_id = NEW.game_id AND a.puuid = NEW.puuid
+          AND a.algorithm_version = NEW.algorithm_version
+          AND COALESCE(a.recipe_id, '') = COALESCE(NEW.recipe_id, '')
+      )
+      BEGIN SELECT RAISE(ABORT, 'grade_result_recipe_mismatch'); END;
+
+      CREATE TRIGGER grade_result_attempt_recipe_update
+      BEFORE UPDATE OF game_id, puuid, algorithm_version, recipe_id ON match_grade_results
+      WHEN NOT EXISTS (
+        SELECT 1 FROM match_grade_attempts a
+        WHERE a.game_id = NEW.game_id AND a.puuid = NEW.puuid
+          AND a.algorithm_version = NEW.algorithm_version
+          AND COALESCE(a.recipe_id, '') = COALESCE(NEW.recipe_id, '')
+      )
+      BEGIN SELECT RAISE(ABORT, 'grade_result_recipe_mismatch'); END;
+
+      CREATE TRIGGER grade_breakdown_result_recipe_insert
+      BEFORE INSERT ON match_grade_breakdown_versions
+      WHEN NOT EXISTS (
+        SELECT 1 FROM match_grade_results r
+        WHERE r.game_id = NEW.game_id AND r.puuid = NEW.puuid
+          AND r.participant_id = NEW.participant_id
+          AND r.algorithm_version = NEW.algorithm_version
+          AND COALESCE(r.recipe_id, '') = COALESCE(NEW.recipe_id, '')
+      )
+      BEGIN SELECT RAISE(ABORT, 'grade_breakdown_recipe_mismatch'); END;
+
+      CREATE TRIGGER grade_breakdown_result_recipe_update
+      BEFORE UPDATE OF game_id, puuid, participant_id, algorithm_version, recipe_id
+      ON match_grade_breakdown_versions
+      WHEN NOT EXISTS (
+        SELECT 1 FROM match_grade_results r
+        WHERE r.game_id = NEW.game_id AND r.puuid = NEW.puuid
+          AND r.participant_id = NEW.participant_id
+          AND r.algorithm_version = NEW.algorithm_version
+          AND COALESCE(r.recipe_id, '') = COALESCE(NEW.recipe_id, '')
+      )
+      BEGIN SELECT RAISE(ABORT, 'grade_breakdown_recipe_mismatch'); END;
+
+      CREATE TABLE grade_rebuild_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        puuid TEXT NOT NULL,
+        algorithm_version INTEGER NOT NULL,
+        recipe_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN (
+          'pending','running','complete','complete_with_errors','cancelled','error')),
+        stage TEXT NOT NULL CHECK (stage IN (
+          'preflight','purge','recompute','verify','complete')),
+        total_matches INTEGER NOT NULL DEFAULT 0 CHECK (total_matches >= 0),
+        processed_matches INTEGER NOT NULL DEFAULT 0 CHECK (processed_matches >= 0),
+        ready_matches INTEGER NOT NULL DEFAULT 0 CHECK (ready_matches >= 0),
+        nonready_matches INTEGER NOT NULL DEFAULT 0 CHECK (nonready_matches >= 0),
+        error_matches INTEGER NOT NULL DEFAULT 0 CHECK (error_matches >= 0),
+        last_game_id INTEGER,
+        backup_path TEXT NOT NULL,
+        backup_sha256 TEXT NOT NULL CHECK (length(backup_sha256) = 64),
+        last_error TEXT,
+        started_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        completed_at INTEGER,
+        CHECK (processed_matches <= total_matches),
+        CHECK (ready_matches + nonready_matches + error_matches <= processed_matches),
+        CHECK ((status IN ('complete','complete_with_errors','cancelled','error'))
+          = (completed_at IS NOT NULL)),
+        FOREIGN KEY (algorithm_version, recipe_id)
+          REFERENCES grade_recipes (algorithm_version, recipe_id)
+      );
+      CREATE INDEX idx_grade_rebuild_runs_owner
+        ON grade_rebuild_runs (puuid, updated_at DESC);
+
+      -- Queue 900 is URF, not a standard Rift cohort. Correct stored rows
+      -- before any v3 calibration/rebuild selects candidates.
+      UPDATE matches
+      SET mode = 'urf', mode_family = 'other', is_ranked = 0
+      WHERE queue_id = 900 OR UPPER(game_mode) LIKE '%URF%';
+    `,
+  },
+  {
+    // Detailed RVI measurements are durable derived evidence. Keep their
+    // recipe identity separate from the product-facing version and from the
+    // Grade recipe: both aggregates share a calibration snapshot, but each
+    // has its own immutable mapping and policy definition.
+    version: 26,
+    up: `
+      CREATE TABLE rvi_recipes (
+        recipe_id TEXT PRIMARY KEY CHECK (length(trim(recipe_id)) > 0),
+        algorithm_version INTEGER NOT NULL CHECK (algorithm_version > 0),
+        recipe_hash TEXT NOT NULL UNIQUE CHECK (length(recipe_hash) = 64),
+        grade_recipe_id TEXT NOT NULL REFERENCES grade_recipes (recipe_id),
+        calibration_id TEXT NOT NULL
+          REFERENCES grade_calibration_snapshots (calibration_id),
+        definition_json TEXT NOT NULL
+          CHECK (json_valid(definition_json)
+            AND json_type(definition_json) = 'object'),
+        created_at INTEGER NOT NULL CHECK (created_at >= 0),
+        UNIQUE (algorithm_version, recipe_id)
+      );
+
+      CREATE TRIGGER rvi_recipes_grade_calibration_insert
+      BEFORE INSERT ON rvi_recipes
+      WHEN NOT EXISTS (
+        SELECT 1 FROM grade_recipes grade_recipe
+        WHERE grade_recipe.recipe_id = NEW.grade_recipe_id
+          AND grade_recipe.algorithm_version = NEW.algorithm_version
+          AND grade_recipe.calibration_id = NEW.calibration_id
+      )
+      BEGIN SELECT RAISE(ABORT, 'rvi_grade_recipe_calibration_mismatch'); END;
+
+      CREATE TRIGGER rvi_recipes_immutable_update
+      BEFORE UPDATE ON rvi_recipes
+      BEGIN SELECT RAISE(ABORT, 'rvi_recipe_is_immutable'); END;
+
+      CREATE TABLE rvi_recipe_selections (
+        algorithm_version INTEGER PRIMARY KEY CHECK (algorithm_version > 0),
+        recipe_id TEXT NOT NULL,
+        selected_at INTEGER NOT NULL CHECK (selected_at >= 0),
+        FOREIGN KEY (algorithm_version, recipe_id)
+          REFERENCES rvi_recipes (algorithm_version, recipe_id)
+      );
+
+      CREATE TABLE match_metric_observations (
+        game_id INTEGER NOT NULL,
+        puuid TEXT NOT NULL,
+        participant_id INTEGER NOT NULL CHECK (participant_id > 0),
+        algorithm_version INTEGER NOT NULL CHECK (algorithm_version > 0),
+        recipe_id TEXT NOT NULL,
+        calibration_id TEXT NOT NULL
+          REFERENCES grade_calibration_snapshots (calibration_id),
+        metric_key TEXT NOT NULL CHECK (length(trim(metric_key)) > 0),
+        raw_evidence_state TEXT NOT NULL CHECK (raw_evidence_state IN (
+          'observed','unavailable','no_opportunity','not_applicable','invalid','unknown')),
+        raw_evidence_reason TEXT,
+        raw_value REAL,
+        score_evidence_state TEXT NOT NULL CHECK (score_evidence_state IN (
+          'observed','unavailable','no_opportunity','not_applicable','invalid','unknown')),
+        score_evidence_reason TEXT,
+        score_value REAL,
+        numerator REAL,
+        denominator REAL CHECK (denominator IS NULL OR denominator >= 0),
+        opportunity_count INTEGER
+          CHECK (opportunity_count IS NULL OR opportunity_count >= 0),
+        unit TEXT NOT NULL CHECK (length(trim(unit)) > 0),
+        comparison_scope TEXT CHECK (comparison_scope IS NULL OR comparison_scope IN (
+          'mode','position','archetype')),
+        reference_match_count INTEGER
+          CHECK (reference_match_count IS NULL OR reference_match_count >= 0),
+        source TEXT NOT NULL CHECK (source IN (
+          'scoreboard','extended','timeline','derived')),
+        source_quality TEXT NOT NULL CHECK (source_quality IN (
+          'verified','retained','derived','legacy')),
+        derivation_id TEXT NOT NULL CHECK (length(trim(derivation_id)) > 0),
+        derived_at INTEGER NOT NULL CHECK (derived_at >= 0),
+        PRIMARY KEY (
+          game_id, puuid, participant_id, algorithm_version, recipe_id, metric_key
+        ),
+        FOREIGN KEY (game_id, puuid, participant_id)
+          REFERENCES match_participants (game_id, puuid, participant_id)
+          ON DELETE CASCADE,
+        FOREIGN KEY (algorithm_version, recipe_id)
+          REFERENCES rvi_recipes (algorithm_version, recipe_id),
+        CHECK ((raw_evidence_state = 'observed') = (raw_value IS NOT NULL)),
+        CHECK ((score_evidence_state = 'observed') = (score_value IS NOT NULL)),
+        CHECK (score_value IS NULL OR score_value BETWEEN 0 AND 1),
+        CHECK (score_evidence_state <> 'observed' OR raw_evidence_state = 'observed')
+      );
+
+      CREATE INDEX idx_metric_observations_owner_recipe_history
+        ON match_metric_observations
+          (puuid, algorithm_version, recipe_id, participant_id, game_id, metric_key);
+      CREATE INDEX idx_metric_observations_match_recipe_detail
+        ON match_metric_observations
+          (game_id, puuid, algorithm_version, recipe_id, participant_id, metric_key);
+
+      CREATE TRIGGER rvi_selection_insert_requires_purge
+      BEFORE INSERT ON rvi_recipe_selections
+      WHEN EXISTS (
+        SELECT 1 FROM match_metric_observations observation
+        WHERE observation.algorithm_version = NEW.algorithm_version
+          AND observation.recipe_id <> NEW.recipe_id
+      )
+      BEGIN SELECT RAISE(ABORT, 'rvi_recipe_purge_required'); END;
+
+      CREATE TRIGGER rvi_selection_update_requires_purge
+      BEFORE UPDATE OF algorithm_version, recipe_id ON rvi_recipe_selections
+      WHEN (OLD.algorithm_version <> NEW.algorithm_version
+            OR OLD.recipe_id <> NEW.recipe_id)
+        AND (
+          EXISTS (
+            SELECT 1 FROM match_metric_observations observation
+            WHERE observation.algorithm_version = OLD.algorithm_version
+          )
+          OR EXISTS (
+            SELECT 1 FROM match_metric_observations observation
+            WHERE observation.algorithm_version = NEW.algorithm_version
+              AND observation.recipe_id <> NEW.recipe_id
+          )
+        )
+      BEGIN SELECT RAISE(ABORT, 'rvi_recipe_purge_required'); END;
+
+      CREATE TRIGGER rvi_selection_delete_requires_purge
+      BEFORE DELETE ON rvi_recipe_selections
+      WHEN EXISTS (
+        SELECT 1 FROM match_metric_observations observation
+        WHERE observation.algorithm_version = OLD.algorithm_version
+      )
+      BEGIN SELECT RAISE(ABORT, 'rvi_recipe_purge_required'); END;
+
+      CREATE TRIGGER metric_observation_selected_recipe_insert
+      BEFORE INSERT ON match_metric_observations
+      WHEN NOT EXISTS (
+        SELECT 1 FROM rvi_recipe_selections selection
+        WHERE selection.algorithm_version = NEW.algorithm_version
+          AND selection.recipe_id = NEW.recipe_id
+      )
+      BEGIN SELECT RAISE(ABORT, 'metric_observation_recipe_is_not_selected'); END;
+
+      CREATE TRIGGER metric_observation_selected_recipe_update
+      BEFORE UPDATE OF algorithm_version, recipe_id ON match_metric_observations
+      WHEN NOT EXISTS (
+        SELECT 1 FROM rvi_recipe_selections selection
+        WHERE selection.algorithm_version = NEW.algorithm_version
+          AND selection.recipe_id = NEW.recipe_id
+      )
+      BEGIN SELECT RAISE(ABORT, 'metric_observation_recipe_is_not_selected'); END;
+
+      CREATE TRIGGER metric_observation_calibration_insert
+      BEFORE INSERT ON match_metric_observations
+      WHEN NOT EXISTS (
+        SELECT 1 FROM rvi_recipes recipe
+        WHERE recipe.algorithm_version = NEW.algorithm_version
+          AND recipe.recipe_id = NEW.recipe_id
+          AND recipe.calibration_id = NEW.calibration_id
+      )
+      BEGIN SELECT RAISE(ABORT, 'metric_observation_calibration_mismatch'); END;
+
+      CREATE TRIGGER metric_observation_calibration_update
+      BEFORE UPDATE OF algorithm_version, recipe_id, calibration_id
+      ON match_metric_observations
+      WHEN NOT EXISTS (
+        SELECT 1 FROM rvi_recipes recipe
+        WHERE recipe.algorithm_version = NEW.algorithm_version
+          AND recipe.recipe_id = NEW.recipe_id
+          AND recipe.calibration_id = NEW.calibration_id
+      )
+      BEGIN SELECT RAISE(ABORT, 'metric_observation_calibration_mismatch'); END;
+    `,
+  },
 ]
 
 export const latestSchemaVersion = migrations.at(-1)?.version ?? 0

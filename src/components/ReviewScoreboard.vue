@@ -12,7 +12,7 @@ import RunePage from "./RunePage.vue"
 import { championIconUrl, championNameById, formatCompact } from "../helpers/format"
 import { itemIconUrl, summonerSpellIconUrl } from "../helpers/ddragon"
 import { lobbyStandings, teamTotals } from "../helpers/match-detail"
-import { POSITIONS, positionIconUrl, positionLabel, resolvePosition } from "../helpers/roles"
+import { POSITIONS, positionForPlayer, positionIconUrl, positionLabel } from "../helpers/roles"
 import { aramPoroIconUrl, type GameAssetCatalog } from "../helpers/game-assets"
 import type { Champion } from "../types/lol"
 import type { MatchRow, ParticipantRow, TeamRow } from "../types/stats"
@@ -31,8 +31,8 @@ const highestDamage = computed(() => Math.max(1, ...props.participants.map((row)
 const players = (teamId: number) => props.participants
   .filter((row) => row.teamId === teamId)
   .sort((left, right) => {
-    const leftPosition = resolvePosition(left.lane, left.role, left.assignedPosition)
-    const rightPosition = resolvePosition(right.lane, right.role, right.assignedPosition)
+    const leftPosition = positionForPlayer(left)
+    const rightPosition = positionForPlayer(right)
     const leftIndex = leftPosition ? POSITIONS.indexOf(leftPosition) : 99
     const rightIndex = rightPosition ? POSITIONS.indexOf(rightPosition) : 99
     return leftIndex - rightIndex || left.participantId - right.participantId
@@ -51,7 +51,7 @@ const bans = (teamId: number) => {
 }
 
 const role = (row: ParticipantRow) =>
-  resolvePosition(row.lane, row.role, row.assignedPosition)
+  positionForPlayer(row)
 
 const displayName = (row: ParticipantRow) =>
   row.summonerName || championNameById(props.champions, row.championId)

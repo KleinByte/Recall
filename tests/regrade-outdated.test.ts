@@ -1,11 +1,10 @@
 import Database from "better-sqlite3-node"
-import { beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { applyMigrations } from "../electron/main/database/migrations.js"
 import { MatchesRepository } from "../electron/main/database/matches-repo.js"
 import { ParticipantsRepository } from "../electron/main/database/participants-repo.js"
 import { ReviewRepository } from "../electron/main/database/review-repo.js"
 import { ReviewService } from "../electron/main/review/review-service.js"
-import { GRADE_ALGORITHM_VERSION } from "../electron/main/matches/grade.js"
 import type { LcuTimelineService } from "../electron/main/lcu-timeline-service.js"
 import type { ParticipantRow } from "../electron/main/matches/types.js"
 import { buildMatchRow } from "./fixtures/matches.js"
@@ -17,6 +16,7 @@ let matches: MatchesRepository
 let participants: ParticipantsRepository
 let reviews: ReviewRepository
 let service: ReviewService
+let gradeStoredMatch: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
   db = new Database(":memory:")
@@ -24,12 +24,20 @@ beforeEach(() => {
   matches = new MatchesRepository(db)
   participants = new ParticipantsRepository(db)
   reviews = new ReviewRepository(db)
+  gradeStoredMatch = vi.fn((gameId: number, puuid: string) => {
+    db.prepare(`
+      UPDATE match_grade_breakdowns SET algorithm_version = 3
+      WHERE game_id = ? AND puuid = ?
+    `).run(gameId, puuid)
+    return "ready"
+  })
   service = new ReviewService(
     db,
     matches,
     participants,
     reviews,
     { get: () => undefined } as unknown as LcuTimelineService,
+    { gradeStoredMatch } as never,
   )
 })
 
@@ -104,7 +112,7 @@ const staleGrade = (gameId: number) => {
     score: 0,
     percentile: 0.5,
     breakdown: {
-      algorithmVersion: GRADE_ALGORITHM_VERSION - 1,
+      algorithmVersion: 2,
       compositePercentile: 0.5,
       components: [],
     },
@@ -113,6 +121,17 @@ const staleGrade = (gameId: number) => {
 }
 
 describe("regradeOutdated", () => {
+  it("does not fabricate v3 review context from a cached legacy grade", () => {
+    matches.insertMany([buildMatchRow({ gameId: 1 })])
+    participants.insertMany(lobby(1))
+    staleGrade(1)
+
+    const review = service.match(1, PUUID)
+
+    expect(review.match.grade).toBe("B")
+    expect(review.grade).toBeUndefined()
+  })
+
   it("regrades stored lobbies whose grade came from an older algorithm", () => {
     matches.insertMany([buildMatchRow({ gameId: 1 })])
     participants.insertMany(lobby(1))
@@ -120,9 +139,7 @@ describe("regradeOutdated", () => {
 
     expect(service.regradeOutdated()).toBe(1)
 
-    const breakdown = reviews.getGradeBreakdown(1, PUUID, 1)
-    expect(breakdown?.algorithmVersion).toBe(GRADE_ALGORITHM_VERSION)
-    expect(breakdown?.components.length).toBeGreaterThan(0)
+    expect(gradeStoredMatch).toHaveBeenCalledWith(1, PUUID)
   })
 
   it("reports nothing left once every grade is current", () => {
@@ -133,6 +150,7 @@ describe("regradeOutdated", () => {
     service.regradeOutdated()
 
     expect(service.regradeOutdated()).toBe(0)
+    expect(gradeStoredMatch).toHaveBeenCalledOnce()
   })
 
   it("skips matches without a stored ten-player lobby", () => {
@@ -141,6 +159,7 @@ describe("regradeOutdated", () => {
     staleGrade(1)
 
     expect(service.regradeOutdated()).toBe(0)
+    expect(gradeStoredMatch).not.toHaveBeenCalled()
   })
 
   it("leaves matches already on the current version alone", () => {

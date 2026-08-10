@@ -1,7 +1,12 @@
 import type { GradeInput } from "../matches/grade.js"
 import { resolveChampionClass } from "../matches/class-expectations.js"
-import { resolvePosition } from "../matches/position.js"
+import {
+  normalizePosition,
+  POSITION_RESOLVER_VERSION,
+  resolvePosition,
+} from "../matches/position.js"
 import { mapMatchRow } from "../matches/map-match.js"
+import { assessGradeCoreFacts } from "../matches/grade-core-facts.js"
 import type { QueueInfo } from "../matches/queues.js"
 import type {
   LcuGame,
@@ -11,7 +16,7 @@ import type {
   TeamRow,
 } from "../matches/types.js"
 
-export const MATCH_V5_MAPPER_VERSION = 2
+export const MATCH_V5_MAPPER_VERSION = 3
 
 interface RiotPerks {
   styles?: {
@@ -103,6 +108,10 @@ export interface RiotMatchParticipant {
   role?: string
   teamPosition?: string
   individualPosition?: string
+  eligibleForProgression?: boolean
+  timePlayed?: number
+  detectorWardsPlaced?: number
+  damageDealtToBuildings?: number
 }
 
 interface RiotObjective {
@@ -117,6 +126,7 @@ export interface RiotMatchDto {
     gameCreation?: number
     gameStartTimestamp?: number
     gameEndTimestamp?: number
+    endOfGameResult?: string
     gameDuration?: number
     gameMode?: string
     gameType?: string
@@ -151,6 +161,8 @@ export interface MappedRiotMatch {
 
 const int = (value: number | undefined) =>
   Number.isFinite(value) ? Math.trunc(value!) : 0
+const optionalInt = (value: unknown) =>
+  typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : undefined
 const bool = (value: boolean | undefined) => (value ? 1 : 0)
 
 const KNOWN_PARTICIPANT_FIELDS = new Set([
@@ -173,7 +185,8 @@ const KNOWN_PARTICIPANT_FIELDS = new Set([
   "totalTimeSpentDead", "totalTimeCCDealt", "turretTakedowns",
   "inhibitorTakedowns", "objectivesStolen", "objectivesStolenAssists",
   "summonerLevel", "championTransform", "placement", "subteamPlacement",
-  "playerSubteamId", "challenges",
+  "playerSubteamId", "challenges", "eligibleForProgression", "timePlayed",
+  "detectorWardsPlaced", "damageDealtToBuildings",
 ])
 
 function extendedMetrics(participant: RiotMatchParticipant) {
@@ -208,6 +221,26 @@ function durationSeconds(info: NonNullable<RiotMatchDto["info"]>) {
 
   const elapsed = int(info.gameEndTimestamp) - int(info.gameStartTimestamp)
   return elapsed > 0 ? Math.round(elapsed / 1_000) : 0
+}
+
+function durationQuality(
+  info: NonNullable<RiotMatchDto["info"]>,
+  durationSecs: number,
+): NonNullable<MatchRow["durationQuality"]> {
+  if (!Number.isSafeInteger(durationSecs) || durationSecs <= 0) return "invalid"
+  if (typeof info.gameStartTimestamp !== "number" ||
+      typeof info.gameEndTimestamp !== "number") return "source_reported"
+  const elapsedSecs = Math.round(
+    (info.gameEndTimestamp - info.gameStartTimestamp) / 1_000,
+  )
+  if (!Number.isSafeInteger(elapsedSecs) || elapsedSecs <= 0) return "invalid"
+  // Timestamp rounding and Riot's duration counter can differ slightly. A
+  // larger disagreement means cross-match rate metrics do not have a trusted
+  // denominator and must be withheld rather than silently normalized.
+  const toleranceSecs = Math.max(10, Math.round(elapsedSecs * .02))
+  return Math.abs(durationSecs - elapsedSecs) <= toleranceSecs
+    ? "verified"
+    : "inconsistent"
 }
 
 function laneFor(participant: RiotMatchParticipant) {
@@ -309,6 +342,20 @@ export function mapRiotMatch(
     typeof dto.metadata?.matchId === "string" && dto.metadata.matchId.length > 0
       ? dto.metadata.matchId
       : undefined
+  match.gameEndTimestamp = optionalInt(info.gameEndTimestamp)
+  match.endOfGameResult = info.endOfGameResult
+  match.ownerEligibleForProgression = mine.eligibleForProgression === undefined
+    ? undefined : bool(mine.eligibleForProgression)
+  match.durationQuality = durationQuality(info, duration)
+  match.resolvedPosition = normalizePosition({
+    matchV5TeamPosition: mine.teamPosition,
+    matchV5IndividualPosition: mine.individualPosition,
+    lcuLane: mine.lane,
+    lcuRole: mine.role,
+    spell1Id: mine.summoner1Id,
+    spell2Id: mine.summoner2Id,
+  })
+  match.positionResolverVersion = POSITION_RESOLVER_VERSION
 
   const participants = info.participants.map((participant, index) => {
     const styles = participant.perks?.styles ?? []
@@ -330,6 +377,22 @@ export function mapRiotMatch(
         participant.perks?.statPerks?.defense,
       ].map((runeId, index) => ({ runeId: int(runeId), slot: 6 + index, var1: 0, var2: 0, var3: 0, kind: "modern" as const })),
     ].filter((selection) => selection.runeId > 0)
+    const gradeCoreFacts = assessGradeCoreFacts("match_v5", {
+      participant_id: participant.participantId,
+      team_id: participant.teamId,
+      champion_id: participant.championId,
+      kills: participant.kills,
+      deaths: participant.deaths,
+      assists: participant.assists,
+      gold_earned: participant.goldEarned,
+      damage_to_champions: participant.totalDamageDealtToChampions,
+      total_minions_killed: participant.totalMinionsKilled,
+      neutral_minions: participant.neutralMinionsKilled,
+      damage_objectives: participant.damageDealtToObjectives,
+      damage_turrets: participant.damageDealtToTurrets,
+      time_ccing_others: participant.timeCCingOthers,
+      vision_score: participant.visionScore,
+    })
 
     return {
       gameId: info.gameId!,
@@ -338,6 +401,7 @@ export function mapRiotMatch(
       participantId: int(participant.participantId) || index + 1,
       teamId: int(participant.teamId),
       isPlayer: participant.puuid === participantPuuid ? 1 : 0,
+      ...gradeCoreFacts,
       championId: int(participant.championId),
       win: bool(participant.win),
       summonerName: displayName(participant),
@@ -396,6 +460,26 @@ export function mapRiotMatch(
       firstTower: bool(participant.firstTowerKill),
       lane: laneFor(participant),
       role: positionFor(participant),
+      eligibleForProgression: participant.eligibleForProgression === undefined
+        ? undefined : bool(participant.eligibleForProgression),
+      timePlayedSecs: optionalInt(participant.timePlayed),
+      controlWardsPurchased: optionalInt(participant.visionWardsBoughtInGame),
+      detectorWardsPlaced: optionalInt(participant.detectorWardsPlaced),
+      totalHealsOnTeammates: optionalInt(participant.totalHealsOnTeammates),
+      totalDamageShieldedOnTeammates:
+        optionalInt(participant.totalDamageShieldedOnTeammates),
+      damageDealtToBuildings: optionalInt(participant.damageDealtToBuildings),
+      matchV5TeamPosition: participant.teamPosition,
+      matchV5IndividualPosition: participant.individualPosition,
+      resolvedPosition: normalizePosition({
+        matchV5TeamPosition: participant.teamPosition,
+        matchV5IndividualPosition: participant.individualPosition,
+        lcuLane: participant.lane,
+        lcuRole: participant.role,
+        spell1Id: participant.summoner1Id,
+        spell2Id: participant.summoner2Id,
+      }),
+      positionResolverVersion: POSITION_RESOLVER_VERSION,
       augments: [
         participant.playerAugment1,
         participant.playerAugment2,

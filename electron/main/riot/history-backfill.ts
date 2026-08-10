@@ -2,16 +2,22 @@ import type { MatchesRepository } from "../database/matches-repo.js"
 import type { ParticipantsRepository } from "../database/participants-repo.js"
 import type { ChampSelectRepository } from "../database/champ-select-repo.js"
 import {
+  MatchSourceRepository,
+  type RawPayloadIdentity,
+} from "../database/match-source-repo.js"
+import {
   RiotBackfillRepository,
   type RiotBackfillState,
 } from "../database/riot-backfill-repo.js"
-import { gradeLobbyV2 } from "../matches/grade.js"
-import { gradeLobbyV3 } from "../matches/grade-v3.js"
 import { evaluateMatchLabels } from "../matches/labels.js"
+import type { RecallV3Service } from "../matches/recall-v3-service.js"
 import type { QueueIndex } from "../matches/queues.js"
 import { RiotApiClient, RiotApiError } from "./api-client.js"
-import { mapRiotMatch, type RiotMatchDto } from "./match-mapper.js"
-import { resolvePosition } from "../matches/position.js"
+import {
+  mapRiotMatch,
+  MATCH_V5_MAPPER_VERSION,
+  type RiotMatchDto,
+} from "./match-mapper.js"
 
 const PAGE_SIZE = 100
 
@@ -24,6 +30,8 @@ interface BackfillOptions {
   matchPuuid?: string
   onProgress?: (state: RiotBackfillState) => void
   champSelect?: ChampSelectRepository
+  recallV3?: RecallV3Service
+  sourceRepository?: MatchSourceRepository
 }
 
 const gameIdFromMatchId = (matchId: string) => {
@@ -43,6 +51,8 @@ export class RiotHistoryBackfill {
   private readonly matchPuuid: string
   private readonly onProgress: (state: RiotBackfillState) => void
   private readonly champSelect?: ChampSelectRepository
+  private readonly recallV3?: RecallV3Service
+  private readonly sourceRepository?: MatchSourceRepository
 
   constructor(
     private readonly apiKey: string,
@@ -60,6 +70,8 @@ export class RiotHistoryBackfill {
     this.matchPuuid = options.matchPuuid ?? puuid
     this.onProgress = options.onProgress ?? (() => undefined)
     this.champSelect = options.champSelect
+    this.recallV3 = options.recallV3
+    this.sourceRepository = options.sourceRepository
   }
 
   async run(restart: boolean, signal?: AbortSignal) {
@@ -137,6 +149,7 @@ export class RiotHistoryBackfill {
           }
 
           let dto: RiotMatchDto
+          let raw: RawPayloadIdentity | undefined
           try {
             dto = await this.api.get<RiotMatchDto>(
               `/lol/match/v5/matches/${encodeURIComponent(matchId)}`,
@@ -144,6 +157,16 @@ export class RiotHistoryBackfill {
               signal,
             )
             downloaded += 1
+            raw = this.sourceRepository?.persistRawPayload({
+              ownerPuuid: this.puuid,
+              source: "match_v5",
+              sourceMatchId: matchId,
+              gameId: knownGameId,
+              kind: "match_detail",
+              body: dto,
+              mapperVersion: MATCH_V5_MAPPER_VERSION,
+              fetchedAt: Date.now(),
+            })
           } catch (error) {
             // A deleted/remade record can remain in the ID list. It has no
             // useful detail to retry, so record it and continue.
@@ -166,6 +189,9 @@ export class RiotHistoryBackfill {
             matchPuuid,
           )
           if (!mapped) {
+            if (raw) this.sourceRepository?.setMappingResult(raw, "unmappable", Date.now(), {
+              error: "match_v5_detail_unmappable",
+            })
             skipped += 1
             state = this.advanceOne(state, {
               downloaded,
@@ -176,6 +202,9 @@ export class RiotHistoryBackfill {
           }
 
           if (mapped.match.isMatched !== 1) {
+            if (raw) this.sourceRepository?.setMappingResult(raw, "mapped", Date.now(), {
+              gameId: mapped.match.gameId,
+            })
             skipped += 1
             state = this.advanceOne(state, {
               downloaded,
@@ -212,50 +241,10 @@ export class RiotHistoryBackfill {
             }) : [],
           )
 
-          if (
-            mapped.match.isMatched === 1 &&
-            (mapped.match.modeFamily === "aram" ||
-              mapped.match.modeFamily === "sr" ||
-              mapped.match.modeFamily === "classic")
-          ) {
-            const positionByParticipant = new Map(
-              mapped.participants.map((participant) => [
-                participant.participantId,
-                resolvePosition(
-                  participant.lane,
-                  participant.role,
-                  participant.assignedPosition,
-                ),
-              ]),
-            )
-            const gradeInputs = mapped.gradeInputs.map((input) => ({
-                ...input,
-                isPlayer: owner?.participantId === input.participantId,
-                role: positionByParticipant.get(input.participantId),
-              }))
-            const grades = gradeLobbyV2(gradeInputs, mapped.match.modeFamily)
-            this.participants.setGrades(
-              mapped.match.gameId,
-              this.puuid,
-              grades,
-            )
-            this.participants.setGradesV3(
-              mapped.match.gameId,
-              this.puuid,
-              gradeLobbyV3(gradeInputs, mapped.match.modeFamily),
-            )
-            const grade = owner && grades.get(owner.participantId)
-            if (grade) {
-              this.matches.setGrade(
-                mapped.match.gameId,
-                this.puuid,
-                grade.grade,
-                grade.score,
-                grade.breakdown.compositePercentile,
-                grade.breakdown.algorithmVersion,
-              )
-            }
-          }
+          this.recallV3?.gradeStoredMatch(mapped.match.gameId, this.puuid)
+          if (raw) this.sourceRepository?.setMappingResult(raw, "mapped", Date.now(), {
+            gameId: mapped.match.gameId,
+          })
 
           state = this.advanceOne(state, {
             downloaded,

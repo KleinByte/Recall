@@ -1,160 +1,822 @@
-import type { Evidence } from "../../../src/shared/measurement.js"
+import type { Evidence, EvidenceState } from "../../../src/shared/measurement.js"
+import {
+  canonicalChampionId,
+  PRIMARY_ARCHETYPES,
+  type PrimaryArchetype,
+} from "./grade-v3-taxonomy.js"
+import { POSITIONS } from "./position.js"
+import {
+  RVI_CAPABILITY_VECTORS_V3,
+  type RviCapabilityVectorV3,
+} from "./metric-registry-v3.js"
 
 export const RVI_ALGORITHM_VERSION = 3
-export const RVI_HEADLINE_COVERAGE_GATE = .80
-export const RVI_STABILIZATION_GAMES = 12
+export const RVI_SCORE_MIN = 0
+export const RVI_SCORE_MAX = 100
+export const RVI_MAD_NORMAL_SCALE = 1.4826
+export const RVI_BOOTSTRAP_REPLICATES = 2_000
+export const RVI_VECTOR_KEYS = RVI_CAPABILITY_VECTORS_V3
+export type RviVectorKey = RviCapabilityVectorV3
 
-export const RVI_RAW_SCALES = {
-  damageShare: .35,
-  kdaPace: 5,
-  ccPace: 12,
-  goldPace: { sr: 550, classic: 550, aram: 650 },
-  csPace: { sr: 10, classic: 10, aram: 5 },
-  objectivePace: 350,
-  visionPace: 2,
-  killParticipation: .75,
-  allySupport: 300,
-} as const
+export const RVI_DIAGNOSTIC_VECTOR_KEYS: readonly RviVectorKey[] =
+  Object.freeze(["initiative_pressure"])
 
-export const RVI_CLASS_SCALE = {
-  damageShare: { assassin: .9, fighter: .85, tank: .65, support: .55 },
-  kdaPace: { fighter: .9, tank: .8 },
-  deathRate: { fighter: 1.1, tank: 1.2 },
-  goldPace: { tank: .9, support: .7 },
-  csPace: { tank: .85, support: .4 },
-  objectivePace: { marksman: 1.15, assassin: .9, mage: .8, tank: .75, support: .5 },
-  visionPace: { support: 1.25, mage: .85, marksman: .75, assassin: .75 },
-  ccPace: { tank: 1.15, fighter: .75, mage: .65, assassin: .45, marksman: .35 },
-  allySupport: { support: 1, tank: .5, mage: .5, fighter: .4, assassin: .4, marksman: .4 },
-} as const
+export type RviMetricTier = "CORE" | "SECONDARY" | "DIAGNOSTIC" | "N/A"
+export type RviMetricEvidenceState = EvidenceState | "missing"
+export type RviMetricComparisonScope = "mode" | "position" | "archetype" | "role" | "lobby"
 
-export const RVI_DIMENSION_WEIGHTS = {
-  rift: {
-    Fighting: { combat: .24, participation: .14, damageShare: .14, kdaPace: .12,
-      duels: .12, skirmishes: .12, teamfights: .08, picks: .04 },
-    Survivability: { survival: .38, frontlining: .18, deathRate: .16, durability: .12,
-      deathRisk: .08, pickSafety: .08, soloSafety: .08, teamfightSafety: .08, gankSafety: .10 },
-    Objectives: { objectives: .48, objectivePace: .22, objectiveFocus: .14,
-      objectiveParticipation: .10, structures: .06, dragons: .08, barons: .08,
-      heralds: .08, objectiveSecure: .06, objectiveVision: .06, baronConversion: .06 },
-    Farming: { economy: .30, farming: .28, goldPace: .16, csPace: .14,
-      laneLead: .12, earlyFarm: .10, midFarm: .08, lateFarm: .06 },
-    Vision: { vision: .60, visionPace: .20, visionPlacement: .10, visionDenial: .10 },
-    Initiative: { participation: .25, combat: .20, aggression: .12, earlyActivity: .16,
-      forwardKills: .12, fightFrequency: .15, earlyRoams: .12,
-      soloPressure: .08, laneSnowball: .09 },
-  },
-  aram: {
-    Fighting: { combat: .34, participation: .22, damageShare: .18, kdaPace: .12, teamfights: .14 },
-    Survivability: { survival: .46, frontlining: .22, deathRate: .18, durability: .14 },
-    Resources: { economy: .55, goldPace: .25, csPace: .20 },
-    "Team Presence": { participation: .42, frontlining: .18, killParticipation: .20, allySupport: .20 },
-    Sustain: { sustain: .55, allySupport: .25, survival: .20 },
-    "Fight Control": { teamfighting: .50, ccPace: .25, participation: .25 },
-  },
-} as const
-
-export type RviFamily = "sr" | "classic" | "aram"
-
-export const clamp01 = (value: number) => Math.max(0, Math.min(1, value))
-
-export function scaleRviMetric(
-  value: number,
-  base: number,
-  classMultiplier = 1,
-): number {
-  return clamp01(value / (base * classMultiplier))
-}
-
-export interface RviMetricAggregate {
-  state: "observed" | "unavailable" | "invalid" | "unknown" |
-    "not_applicable" | "no_opportunity"
-  mean: number | null
-  observedGames: number
-  applicableEligibleGames: number
-  metricCoverage: number | null
-}
-
-export function aggregateRviMetric(values: readonly Evidence<number>[]): RviMetricAggregate {
-  const applicable = values.filter((value) =>
-    value.state !== "not_applicable" && value.state !== "no_opportunity")
-  const observed = applicable.filter((value): value is Evidence<number> & { state: "observed"; value: number } =>
-    value.state === "observed" && Number.isFinite(value.value))
-  if (applicable.length === 0) {
-    const state = values.some((value) => value.state === "no_opportunity")
-      ? "no_opportunity" : "not_applicable"
-    return { state, mean: null, observedGames: 0, applicableEligibleGames: 0, metricCoverage: null }
-  }
-  const fallback = applicable.find((value) => value.state !== "observed")?.state
-  return {
-    state: observed.length ? "observed" : fallback === "invalid" ? "invalid" :
-      fallback === "unknown" ? "unknown" : "unavailable",
-    mean: observed.length
-      ? observed.reduce((sum, value) => sum + value.value, 0) / observed.length
-      : null,
-    observedGames: observed.length,
-    applicableEligibleGames: applicable.length,
-    metricCoverage: observed.length / applicable.length,
-  }
-}
-
-export interface RviDimensionMetric extends RviMetricAggregate {
+/**
+ * One metric retained for RVI inspection. Score evidence is expressed on the
+ * public 0-100 scale. Raw evidence remains separate so a calibrated value can
+ * never be mistaken for the player's literal match statistic.
+ */
+export interface RviMetricObservation {
   key: string
-  baseWeight: number
+  vector: RviVectorKey
+  label: string
+  description: string
+  formula: string
+  unit: string
+  tier: RviMetricTier
+  /** Fixed weight inside this capability vector; diagnostics use zero. */
+  vectorWeight: number
+  /** Exact influence on the stored Grade role-fit composite; diagnostics use zero. */
+  gradeWeight: number
+  rawEvidence: Evidence<number>
+  scoreEvidence: Evidence<number>
+  comparisonScope?: RviMetricComparisonScope
+  referenceMatchCount?: number
+  sourceQuality?: "verified" | "retained" | "derived" | "legacy"
 }
 
-export interface RviDimensionAggregate {
-  dimensionCoverage: number
-  availableWeight: number
-  dimensionRaw: number | null
-  nEff: number | null
-  displayScore: number | null
-  confidence: "learning" | "provisional" | "established" | null
+const RVI_POSITION_KEYS = new Set<string>(POSITIONS)
+const RVI_PRIMARY_ARCHETYPE_KEYS = new Set<string>(PRIMARY_ARCHETYPES)
+
+export type RviConfidence = "learning" | "provisional" | "established"
+
+export interface RviConfidenceThresholds {
+  provisionalGames: number
+  establishedGames: number
 }
 
-export function aggregateRviDimension(metrics: readonly RviDimensionMetric[]): RviDimensionAggregate {
-  const coverageMetrics = metrics.filter((metric) => metric.metricCoverage !== null)
-  const coverageWeight = coverageMetrics.reduce((sum, metric) => sum + metric.baseWeight, 0)
-  const dimensionCoverage = coverageWeight === 0 ? 0 : coverageMetrics.reduce(
-    (sum, metric) => sum + metric.baseWeight * metric.metricCoverage!, 0) / coverageWeight
-  const effective = metrics.map((metric) => ({
-    ...metric,
-    effectiveWeight: metric.mean === null || metric.metricCoverage === null
-      ? 0 : metric.baseWeight * metric.metricCoverage,
-  }))
-  const availableWeight = effective.reduce((sum, metric) => sum + metric.effectiveWeight, 0)
-  if (availableWeight === 0) {
-    return { dimensionCoverage, availableWeight, dimensionRaw: null, nEff: null,
-      displayScore: null, confidence: null }
+export const RVI_DEFAULT_CONFIDENCE_THRESHOLDS: Readonly<RviConfidenceThresholds> =
+  Object.freeze({ provisionalGames: 10, establishedGames: 30 })
+
+export type RviMatchId = string | number
+
+/**
+ * One authoritative Grade v3 observation. Scores are already calibrated
+ * percentiles; this contract never rebuilds them from raw telemetry.
+ */
+export interface RviMatchObservation {
+  matchId: RviMatchId
+  recipeId: string
+  playedAt: number
+  roleFitScore: number | null
+  /** Per-match capability scores on 0-100. Kept under the legacy field name for DTO compatibility. */
+  familyPercentiles: Readonly<Record<string, number | null | undefined>>
+  /** Exact normalized Grade v3 responsibility carried by each capability vector. */
+  familyResponsibilityWeights: Readonly<Record<string, number | null | undefined>>
+  /** Individual observations that explain the capability scores. */
+  metrics?: readonly RviMetricObservation[]
+  championId?: number | null
+  position?: string | null
+  /** Stored Grade v3 responsibility archetype; never inferred by RVI. */
+  primaryArchetype?: PrimaryArchetype | null
+}
+
+export type RviWeighting =
+  | { kind: "equal" }
+  | { kind: "half_life"; halfLifeMs: number; referenceTime?: number }
+
+export type RviResolvedWeighting =
+  | { kind: "equal" }
+  | { kind: "half_life"; halfLifeMs: number; referenceTime: number | null }
+
+export interface RviCoverage {
+  eligibleGames: number
+  observedGames: number
+  gameRatio: number | null
+  eligibleWeight: number
+  observedWeight: number
+  weightRatio: number | null
+}
+
+export interface RviScoreAggregate {
+  score: number | null
+  nEff: number
+  confidence: RviConfidence | null
+  coverage: RviCoverage
+}
+
+export interface RviBootstrapConfidenceInterval {
+  method: "deterministic_match_bootstrap_percentile"
+  confidenceLevel: .95
+  lower: number | null
+  upper: number | null
+  replicates: number
+  seed: number | null
+  observedGames: number
+}
+
+export interface RviHeadlineAggregate extends RviScoreAggregate {
+  source: "role_fit"
+  /** Sampling uncertainty only; it never changes or shrinks the headline score. */
+  confidenceInterval95: RviBootstrapConfidenceInterval
+}
+
+export interface RviFamilyVector extends RviScoreAggregate {
+  key: string
+  responsibility: RviFamilyResponsibilityAggregate
+  metrics: RviMetricAggregate[]
+}
+
+export interface RviMetricAggregate extends RviScoreAggregate {
+  key: string
+  vector: RviVectorKey
+  label: string
+  description: string
+  formula: string
+  unit: string
+  tier: RviMetricTier
+  /** Average fixed vector policy weight over eligible observations. */
+  vectorWeight: number
+  /** Average exact Grade influence over eligible observations. */
+  gradeWeight: number
+  rawValue: number | null
+  rawNEff: number
+  rawCoverage: RviCoverage
+  evidenceState: RviMetricEvidenceState
+  evidenceReason?: string
+  comparisonScope?: RviMetricComparisonScope
+  referenceMatchCount?: number
+}
+
+export interface RviFamilyResponsibilityAggregate {
+  averageWeight: number | null
+  positiveGames: number
+  nEff: number
+  confidence: RviConfidence | null
+  coverage: RviCoverage
+}
+
+export interface RviConsistencySummary {
+  median: number | null
+  q1: number | null
+  scaledMad: number | null
+  nEff: number
+  confidence: RviConfidence | null
+  coverage: RviCoverage
+}
+
+export interface RviVersatilityCategory {
+  key: string
+  weight: number
+  share: number
+}
+
+export interface RviHillVersatility {
+  effectiveCount: number | null
+  entropy: number | null
+  nEff: number
+  confidence: RviConfidence | null
+  coverage: RviCoverage
+  categories: RviVersatilityCategory[]
+}
+
+export interface RviProfileAggregate {
+  algorithmVersion: typeof RVI_ALGORITHM_VERSION
+  recipeId: string
+  weighting: RviResolvedWeighting
+  headline: RviHeadlineAggregate
+  families: RviFamilyVector[]
+  consistency: RviConsistencySummary
+  versatility: {
+    champions: RviHillVersatility
+    positions: RviHillVersatility
   }
-  const dimensionRaw = effective.reduce((sum, metric) =>
-    sum + (metric.mean ?? 0) * metric.effectiveWeight, 0) / availableWeight
-  const nEff = effective.reduce((sum, metric) =>
-    sum + metric.effectiveWeight / availableWeight * metric.observedGames, 0)
-  const displayScore = 50 + (dimensionRaw * 100 - 50) * nEff /
-    (nEff + RVI_STABILIZATION_GAMES)
+}
+
+export interface RviProfileAggregationInput {
+  recipeId: string
+  /** Ordered family keys from the recipe; wholly missing families still report zero coverage. */
+  familyKeys: readonly string[]
+  observations: readonly RviMatchObservation[]
+  /** Equal match weights are authoritative unless a half-life is explicitly requested. */
+  weighting?: RviWeighting
+  confidenceThresholds?: Readonly<RviConfidenceThresholds>
+}
+
+interface WeightedObservation {
+  observation: RviMatchObservation
+  weight: number
+}
+
+export interface RviWeightedScore {
+  value: number
+  weight: number
+}
+
+function assertPositiveFinite(value: number, label: string) {
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new RangeError(`${label} must be a positive finite number`)
+  }
+}
+
+function assertScore(value: number | null | undefined, label: string) {
+  if (value === null || value === undefined) return
+  if (!Number.isFinite(value) || value < RVI_SCORE_MIN || value > RVI_SCORE_MAX) {
+    throw new RangeError(`${label} must be between ${RVI_SCORE_MIN} and ${RVI_SCORE_MAX}`)
+  }
+}
+
+function validateThresholds(thresholds: Readonly<RviConfidenceThresholds>) {
+  assertPositiveFinite(thresholds.provisionalGames, "provisionalGames")
+  assertPositiveFinite(thresholds.establishedGames, "establishedGames")
+  if (thresholds.establishedGames < thresholds.provisionalGames) {
+    throw new RangeError("establishedGames must be greater than or equal to provisionalGames")
+  }
+}
+
+/** Exponential recency weight: w_i = 2^(-age_i / halfLife). */
+export function halfLifeWeight(age: number, halfLife: number): number {
+  if (!Number.isFinite(age) || age < 0) throw new RangeError("age must be a non-negative finite number")
+  assertPositiveFinite(halfLife, "halfLife")
+  return 2 ** (-age / halfLife)
+}
+
+/** Kish effective sample size: (sum w)^2 / sum(w^2). */
+export function effectiveSampleSize(weights: readonly number[]): number {
+  let sum = 0
+  let squared = 0
+  for (const weight of weights) {
+    if (!Number.isFinite(weight) || weight < 0) {
+      throw new RangeError("weights must be non-negative finite numbers")
+    }
+    sum += weight
+    squared += weight * weight
+  }
+  return squared === 0 ? 0 : sum * sum / squared
+}
+
+export function confidenceForEffectiveGames(
+  nEff: number,
+  thresholds: Readonly<RviConfidenceThresholds> = RVI_DEFAULT_CONFIDENCE_THRESHOLDS,
+): RviConfidence | null {
+  if (!Number.isFinite(nEff) || nEff < 0) throw new RangeError("nEff must be a non-negative finite number")
+  validateThresholds(thresholds)
+  if (nEff === 0) return null
+  if (nEff >= thresholds.establishedGames) return "established"
+  if (nEff >= thresholds.provisionalGames) return "provisional"
+  return "learning"
+}
+
+function resolvedWeighting(
+  weighting: RviWeighting | undefined,
+  observations: readonly RviMatchObservation[],
+): RviResolvedWeighting {
+  if (!weighting || weighting.kind === "equal") return { kind: "equal" }
+  assertPositiveFinite(weighting.halfLifeMs, "halfLifeMs")
+  let latest: number | null = null
+  for (const observation of observations) {
+    latest = latest === null ? observation.playedAt : Math.max(latest, observation.playedAt)
+  }
+  const referenceTime = weighting.referenceTime ?? latest
+  if (referenceTime !== null && !Number.isFinite(referenceTime)) {
+    throw new RangeError("referenceTime must be finite")
+  }
+  if (latest !== null && referenceTime !== null && referenceTime < latest) {
+    throw new RangeError("referenceTime cannot precede the latest observation")
+  }
+  return { kind: "half_life", halfLifeMs: weighting.halfLifeMs, referenceTime }
+}
+
+function observationWeight(observation: RviMatchObservation, weighting: RviResolvedWeighting) {
+  if (weighting.kind === "equal") return 1
+  if (weighting.referenceTime === null) return 0
+  return halfLifeWeight(weighting.referenceTime - observation.playedAt, weighting.halfLifeMs)
+}
+
+function coverageFor(
+  values: readonly WeightedObservation[],
+  observed: (observation: RviMatchObservation) => boolean,
+): RviCoverage {
+  const eligibleWeight = values.reduce((sum, value) => sum + value.weight, 0)
+  const observedValues = values.filter((value) => observed(value.observation))
+  const observedWeight = observedValues.reduce((sum, value) => sum + value.weight, 0)
   return {
-    dimensionCoverage, availableWeight, dimensionRaw, nEff, displayScore,
-    confidence: nEff >= 30 ? "established" : nEff >= 10 ? "provisional" : "learning",
+    eligibleGames: values.length,
+    observedGames: observedValues.length,
+    gameRatio: values.length ? observedValues.length / values.length : null,
+    eligibleWeight,
+    observedWeight,
+    weightRatio: eligibleWeight > 0 ? observedWeight / eligibleWeight : null,
   }
 }
 
-export function aggregateRviHeadline(dimensions: readonly RviDimensionAggregate[]) {
-  const overallCoverage = dimensions.reduce((sum, value) => sum + value.dimensionCoverage, 0) /
-    dimensions.length
-  const complete = dimensions.length === 6 && dimensions.every((value) => value.displayScore !== null)
-  const headlineNEff = complete ? Math.min(...dimensions.map((value) => value.nEff!)) : null
-  // Decimal coverage values such as six exact 0.8 dimensions can sum to the
-  // immediately-adjacent floating-point value below 0.8. Treat only that
-  // representation artifact as the inclusive boundary promised by the
-  // contract; materially lower values remain gated.
-  const meetsCoverageGate = overallCoverage + Number.EPSILON >= RVI_HEADLINE_COVERAGE_GATE
-  const score = complete && meetsCoverageGate
-    ? dimensions.reduce((sum, value) => sum + value.displayScore!, 0) / 6
-    : null
-  return { score, overallCoverage, headlineNEff, label: score === null ? "Building profile" : "Recall heuristic" }
+function aggregateScores(
+  values: readonly WeightedObservation[],
+  resolve: (observation: RviMatchObservation) => number | null | undefined,
+  thresholds: Readonly<RviConfidenceThresholds>,
+): RviScoreAggregate {
+  const coverage = coverageFor(values, (observation) => {
+    const value = resolve(observation)
+    return value !== null && value !== undefined
+  })
+  const observed = values.flatMap(({ observation, weight }) => {
+    const value = resolve(observation)
+    return value === null || value === undefined || weight === 0 ? [] : [{ value, weight }]
+  })
+  const weightSum = observed.reduce((sum, value) => sum + value.weight, 0)
+  const nEff = effectiveSampleSize(observed.map((value) => value.weight))
+  return {
+    score: weightSum === 0 ? null : observed.reduce(
+      (sum, value) => sum + value.value * value.weight, 0) / weightSum,
+    nEff,
+    confidence: confidenceForEffectiveGames(nEff, thresholds),
+    coverage,
+  }
 }
 
+function aggregateFamilyResponsibility(
+  values: readonly WeightedObservation[],
+  familyKey: string,
+  thresholds: Readonly<RviConfidenceThresholds>,
+): RviFamilyResponsibilityAggregate {
+  const resolve = (observation: RviMatchObservation) => {
+    const explicit = observation.familyResponsibilityWeights[familyKey]
+    if (explicit !== null && explicit !== undefined) return explicit
+    const metrics = observation.metrics?.filter((metric) =>
+      metric.vector === familyKey && metric.tier !== "N/A") ?? []
+    return metrics.length ? metrics.reduce((sum, metric) => sum + metric.gradeWeight, 0) : null
+  }
+  const coverage = coverageFor(values, (observation) => {
+    const value = resolve(observation)
+    return value !== null && value !== undefined
+  })
+  const observed = values.flatMap(({ observation, weight }) => {
+    const value = resolve(observation)
+    return value === null || value === undefined || weight === 0 ? [] : [{ value, weight }]
+  })
+  const weightSum = observed.reduce((sum, value) => sum + value.weight, 0)
+  const nEff = effectiveSampleSize(observed.map((value) => value.weight))
+  return {
+    averageWeight: weightSum === 0 ? null : observed.reduce(
+      (sum, value) => sum + value.value * value.weight, 0) / weightSum,
+    positiveGames: observed.filter((value) => value.value > 0).length,
+    nEff,
+    confidence: confidenceForEffectiveGames(nEff, thresholds),
+    coverage,
+  }
+}
+
+function matchVectorScore(
+  observation: RviMatchObservation,
+  vector: string,
+): number | null | undefined {
+  const explicit = observation.familyPercentiles[vector]
+  if (explicit !== null && explicit !== undefined) return explicit
+  const available = observation.metrics?.filter((metric) =>
+    metric.vector === vector && metric.tier !== "N/A" && metric.vectorWeight > 0) ?? []
+  // Diagnostic additions cannot move a scored vector, strongest/growth copy,
+  // or identity. Initiative has no scored base, so its all-diagnostic recipe
+  // may still produce a visibly labeled diagnostic composite.
+  const scored = available.filter((metric) =>
+    metric.tier === "CORE" || metric.tier === "SECONDARY")
+  const metrics = scored.length
+    ? scored
+    : RVI_DIAGNOSTIC_VECTOR_KEYS.includes(vector as RviVectorKey) ? available : []
+  if (!metrics.length || metrics.some((metric) => metric.scoreEvidence.state !== "observed")) {
+    return explicit
+  }
+  const denominator = metrics.reduce((sum, metric) => sum + metric.vectorWeight, 0)
+  return denominator === 0 ? explicit : metrics.reduce((sum, metric) =>
+    sum + (metric.scoreEvidence.state === "observed" ? metric.scoreEvidence.value : 0) *
+      metric.vectorWeight, 0) / denominator
+}
+
+function metricEvidenceReason(metrics: readonly RviMetricObservation[]): string | undefined {
+  const counts = new Map<string, number>()
+  for (const metric of metrics) {
+    if (metric.scoreEvidence.state === "observed" || !metric.scoreEvidence.reason) continue
+    counts.set(metric.scoreEvidence.reason, (counts.get(metric.scoreEvidence.reason) ?? 0) + 1)
+  }
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0]
+}
+
+function metricEvidenceState(metrics: readonly RviMetricObservation[]): RviMetricEvidenceState {
+  if (metrics.some((metric) => metric.scoreEvidence.state === "observed")) return "observed"
+  if (metrics.length === 0) return "missing"
+  const states = metrics.map((metric) => metric.scoreEvidence.state)
+  if (states.every((state) => state === "not_applicable")) return "not_applicable"
+  for (const state of ["invalid", "unavailable", "no_opportunity", "unknown"] as const) {
+    if (states.includes(state)) return state
+  }
+  return states[0] ?? "missing"
+}
+
+function aggregateMetricObservations(
+  values: readonly WeightedObservation[],
+  thresholds: Readonly<RviConfidenceThresholds>,
+): RviMetricAggregate[] {
+  const keys = new Set<string>()
+  for (const { observation } of values) {
+    for (const metric of observation.metrics ?? []) keys.add(metric.key)
+  }
+
+  return [...keys].sort().flatMap((key): RviMetricAggregate[] => {
+    const entries = values.flatMap(({ observation, weight }) => {
+      const metric = observation.metrics?.find((candidate) => candidate.key === key)
+      return metric ? [{ metric, observation, weight }] : []
+    })
+    const first = entries[0]?.metric
+    if (!first) return []
+    const eligible = entries.filter(({ metric }) =>
+      metric.tier !== "N/A" && metric.scoreEvidence.state !== "not_applicable")
+    const tier = (["CORE", "SECONDARY", "DIAGNOSTIC", "N/A"] as const).find(
+      (candidate) => entries.some(({ metric }) => metric.tier === candidate),
+    ) ?? "N/A"
+    const scoreValues: WeightedObservation[] = eligible.map(({ observation, weight }) => ({
+      observation,
+      weight,
+    }))
+    const scoreByMatch = new Map(entries.map(({ observation, metric }) => [
+      matchKey(observation.matchId),
+      metric.scoreEvidence.state === "observed" ? metric.scoreEvidence.value : null,
+    ]))
+    const score = aggregateScores(scoreValues, (observation) =>
+      scoreByMatch.get(matchKey(observation.matchId)), thresholds)
+
+    const rawCoverage: RviCoverage = (() => {
+      const eligibleWeight = eligible.reduce((sum, entry) => sum + entry.weight, 0)
+      const observed = eligible.filter(({ metric }) => metric.rawEvidence.state === "observed")
+      const observedWeight = observed.reduce((sum, entry) => sum + entry.weight, 0)
+      return {
+        eligibleGames: eligible.length,
+        observedGames: observed.length,
+        gameRatio: eligible.length ? observed.length / eligible.length : null,
+        eligibleWeight,
+        observedWeight,
+        weightRatio: eligibleWeight > 0 ? observedWeight / eligibleWeight : null,
+      }
+    })()
+    const rawObserved = eligible.flatMap(({ metric, weight }) =>
+      metric.rawEvidence.state === "observed" && weight > 0
+        ? [{ value: metric.rawEvidence.value, weight }]
+        : [])
+    const rawWeight = rawObserved.reduce((sum, entry) => sum + entry.weight, 0)
+    const policyWeight = eligible.reduce((sum, entry) => sum + entry.weight, 0)
+    const referenceCounts = eligible.flatMap(({ metric }) =>
+      metric.referenceMatchCount === undefined ? [] : [metric.referenceMatchCount])
+    const comparisonScopes = new Set(eligible.flatMap(({ metric }) =>
+      metric.comparisonScope ? [metric.comparisonScope] : []))
+
+    return [{
+      key,
+      vector: first.vector,
+      label: first.label,
+      description: first.description,
+      formula: first.formula,
+      unit: first.unit,
+      // Responsibility can change with position/archetype. Use the strongest
+      // tier actually represented in the aggregate instead of whichever match
+      // happened to be first chronologically.
+      tier,
+      vectorWeight: policyWeight === 0 ? 0 : eligible.reduce(
+        (sum, entry) => sum + entry.metric.vectorWeight * entry.weight, 0) / policyWeight,
+      gradeWeight: policyWeight === 0 ? 0 : eligible.reduce(
+        (sum, entry) => sum + entry.metric.gradeWeight * entry.weight, 0) / policyWeight,
+      rawValue: rawWeight === 0 ? null : rawObserved.reduce(
+        (sum, entry) => sum + entry.value * entry.weight, 0) / rawWeight,
+      rawNEff: effectiveSampleSize(rawObserved.map((entry) => entry.weight)),
+      rawCoverage,
+      evidenceState: metricEvidenceState(entries.map((entry) => entry.metric)),
+      evidenceReason: metricEvidenceReason(entries.map((entry) => entry.metric)),
+      comparisonScope: comparisonScopes.size === 1 ? [...comparisonScopes][0] : undefined,
+      referenceMatchCount: referenceCounts.length
+        ? Math.round(referenceCounts.reduce((sum, count) => sum + count, 0) / referenceCounts.length)
+        : undefined,
+      ...score,
+    }]
+  })
+}
+
+/** Weighted empirical quantile: the first value whose cumulative weight reaches p. */
+export function weightedQuantile(
+  values: readonly RviWeightedScore[],
+  probability: number,
+): number | null {
+  if (!Number.isFinite(probability) || probability < 0 || probability > 1) {
+    throw new RangeError("probability must be between 0 and 1")
+  }
+  for (const value of values) {
+    if (!Number.isFinite(value.value) || !Number.isFinite(value.weight) || value.weight < 0) {
+      throw new RangeError("weighted values must contain finite values and non-negative weights")
+    }
+  }
+  const ordered = values.filter((value) => value.weight > 0)
+    .sort((left, right) => left.value - right.value)
+  const totalWeight = ordered.reduce((sum, value) => sum + value.weight, 0)
+  if (totalWeight === 0) return null
+  const target = probability * totalWeight
+  let cumulative = 0
+  for (const value of ordered) {
+    cumulative += value.weight
+    if (cumulative + Number.EPSILON >= target) return value.value
+  }
+  return ordered.at(-1)!.value
+}
+
+function consistencyFor(
+  values: readonly WeightedObservation[],
+  thresholds: Readonly<RviConfidenceThresholds>,
+): RviConsistencySummary {
+  const coverage = coverageFor(values, (observation) => observation.roleFitScore !== null)
+  const observed = values.flatMap(({ observation, weight }) =>
+    observation.roleFitScore === null || weight === 0
+      ? [] : [{ value: observation.roleFitScore, weight }])
+  const median = weightedQuantile(observed, .5)
+  const q1 = weightedQuantile(observed, .25)
+  // 1.4826 makes MAD comparable to standard deviation under a normal model.
+  const mad = median === null ? null : weightedQuantile(observed.map((value) => ({
+    value: Math.abs(value.value - median),
+    weight: value.weight,
+  })), .5)
+  const nEff = effectiveSampleSize(observed.map((value) => value.weight))
+  return {
+    median,
+    q1,
+    scaledMad: mad === null ? null : mad * RVI_MAD_NORMAL_SCALE,
+    nEff,
+    confidence: confidenceForEffectiveGames(nEff, thresholds),
+    coverage,
+  }
+}
+
+function hillVersatilityFor(
+  values: readonly WeightedObservation[],
+  resolve: (observation: RviMatchObservation) => string | null,
+  thresholds: Readonly<RviConfidenceThresholds>,
+): RviHillVersatility {
+  const coverage = coverageFor(values, (observation) => resolve(observation) !== null)
+  const weights = new Map<string, number>()
+  const observedWeights: number[] = []
+  for (const value of values) {
+    const key = resolve(value.observation)
+    if (key === null || value.weight === 0) continue
+    weights.set(key, (weights.get(key) ?? 0) + value.weight)
+    observedWeights.push(value.weight)
+  }
+  const totalWeight = [...weights.values()].reduce((sum, weight) => sum + weight, 0)
+  const categories = [...weights.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, weight]) => ({ key, weight, share: weight / totalWeight }))
+  // Hill D1 = exp(Shannon entropy); repeated play contributes by match weight.
+  const entropy = categories.length
+    ? -categories.reduce((sum, category) => sum + category.share * Math.log(category.share), 0)
+    : null
+  const nEff = effectiveSampleSize(observedWeights)
+  return {
+    effectiveCount: entropy === null ? null : Math.exp(entropy),
+    entropy,
+    nEff,
+    confidence: confidenceForEffectiveGames(nEff, thresholds),
+    coverage,
+    categories,
+  }
+}
+
+function matchKey(matchId: RviMatchId) {
+  if (typeof matchId === "number" && !Number.isSafeInteger(matchId)) {
+    throw new RangeError("numeric matchId values must be safe integers")
+  }
+  if (typeof matchId === "string" && matchId.length === 0) {
+    throw new RangeError("string matchId values cannot be empty")
+  }
+  return `${typeof matchId}:${matchId}`
+}
+
+function fnv1a32(value: string) {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return hash >>> 0
+}
+
+function deterministicRandom(seed: number) {
+  let state = seed >>> 0
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0
+    let value = state
+    value = Math.imul(value ^ value >>> 15, value | 1)
+    value ^= value + Math.imul(value ^ value >>> 7, value | 61)
+    return ((value ^ value >>> 14) >>> 0) / 0x1_0000_0000
+  }
+}
+
+function interpolatedQuantile(ordered: readonly number[], probability: number) {
+  const index = (ordered.length - 1) * probability
+  const lower = Math.floor(index)
+  const upper = Math.ceil(index)
+  return lower === upper
+    ? ordered[lower]
+    : ordered[lower] + (ordered[upper] - ordered[lower]) * (index - lower)
+}
+
+/**
+ * Resamples independent matches uniformly with replacement, retaining their
+ * configured aggregation weights inside every replicate. Canonical ordering
+ * and a data-derived PRNG seed make the percentile interval reproducible.
+ */
+function headlineBootstrapInterval(
+  recipeId: string,
+  values: readonly WeightedObservation[],
+): RviBootstrapConfidenceInterval {
+  const observed = values.flatMap(({ observation, weight }) => {
+    const value = observation.roleFitScore
+    return value === null || weight === 0 ? [] : [{
+      matchId: observation.matchId,
+      playedAt: observation.playedAt,
+      value,
+      weight,
+    }]
+  }).sort((left, right) => {
+    const leftKey = matchKey(left.matchId)
+    const rightKey = matchKey(right.matchId)
+    return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0
+  })
+  if (!observed.length) {
+    return {
+      method: "deterministic_match_bootstrap_percentile",
+      confidenceLevel: .95,
+      lower: null,
+      upper: null,
+      replicates: 0,
+      seed: null,
+      observedGames: 0,
+    }
+  }
+
+  const seed = fnv1a32(JSON.stringify({
+    recipeId,
+    observations: observed.map((entry) => [
+      typeof entry.matchId,
+      String(entry.matchId),
+      entry.playedAt.toPrecision(17),
+      entry.value.toPrecision(17),
+      entry.weight.toPrecision(17),
+    ]),
+  }))
+  const random = deterministicRandom(seed)
+  const estimates = Array.from({ length: RVI_BOOTSTRAP_REPLICATES }, () => {
+    let weightedScore = 0
+    let weightSum = 0
+    for (let draw = 0; draw < observed.length; draw += 1) {
+      const selected = observed[Math.floor(random() * observed.length)]
+      weightedScore += selected.value * selected.weight
+      weightSum += selected.weight
+    }
+    return weightedScore / weightSum
+  }).sort((left, right) => left - right)
+
+  return {
+    method: "deterministic_match_bootstrap_percentile",
+    confidenceLevel: .95,
+    lower: interpolatedQuantile(estimates, .025),
+    upper: interpolatedQuantile(estimates, .975),
+    replicates: RVI_BOOTSTRAP_REPLICATES,
+    seed,
+    observedGames: observed.length,
+  }
+}
+
+function validateInput(input: RviProfileAggregationInput) {
+  if (!input.recipeId.trim()) throw new RangeError("recipeId cannot be empty")
+  const familyKeys = new Set<string>()
+  for (const familyKey of input.familyKeys) {
+    if (!familyKey.trim()) throw new RangeError("family keys cannot be empty")
+    if (familyKeys.has(familyKey)) throw new RangeError(`duplicate family key: ${familyKey}`)
+    familyKeys.add(familyKey)
+  }
+  const matches = new Set<string>()
+  for (const observation of input.observations) {
+    if (observation.recipeId !== input.recipeId) {
+      throw new RangeError(`observation recipe ${observation.recipeId} does not match ${input.recipeId}`)
+    }
+    const key = matchKey(observation.matchId)
+    if (matches.has(key)) throw new RangeError(`duplicate match observation: ${observation.matchId}`)
+    matches.add(key)
+    if (!Number.isFinite(observation.playedAt)) throw new RangeError("playedAt must be finite")
+    assertScore(observation.roleFitScore, "roleFitScore")
+    if (observation.championId !== null && observation.championId !== undefined &&
+        (!Number.isSafeInteger(observation.championId) || observation.championId <= 0)) {
+      throw new RangeError("championId must be a positive safe integer")
+    }
+    if (observation.primaryArchetype !== null && observation.primaryArchetype !== undefined &&
+        !RVI_PRIMARY_ARCHETYPE_KEYS.has(observation.primaryArchetype)) {
+      throw new RangeError(`unknown primary archetype: ${observation.primaryArchetype}`)
+    }
+    for (const [familyKey, score] of Object.entries(observation.familyPercentiles)) {
+      if (!familyKeys.has(familyKey)) throw new RangeError(`unknown family key: ${familyKey}`)
+      assertScore(score, `family percentile ${familyKey}`)
+    }
+    for (const familyKey of familyKeys) {
+      if (!(familyKey in observation.familyResponsibilityWeights)) {
+        throw new RangeError(`missing family responsibility weight: ${familyKey}`)
+      }
+    }
+    for (const [familyKey, weight] of Object.entries(observation.familyResponsibilityWeights)) {
+      if (!familyKeys.has(familyKey)) {
+        throw new RangeError(`unknown family responsibility weight: ${familyKey}`)
+      }
+      if (weight !== null && weight !== undefined &&
+          (!Number.isFinite(weight) || weight < 0 || weight > 1)) {
+        throw new RangeError(`family responsibility weight ${familyKey} must be between 0 and 1`)
+      }
+    }
+    const metricKeys = new Set<string>()
+    for (const metric of observation.metrics ?? []) {
+      if (!metric.key.trim()) throw new RangeError("metric keys cannot be empty")
+      if (metricKeys.has(metric.key)) throw new RangeError(`duplicate metric key: ${metric.key}`)
+      metricKeys.add(metric.key)
+      if (!familyKeys.has(metric.vector)) throw new RangeError(`unknown metric vector: ${metric.vector}`)
+      if (!metric.label.trim() || !metric.description.trim() || !metric.formula.trim() ||
+          !metric.unit.trim()) {
+        throw new RangeError(`metric ${metric.key} is missing presentation metadata`)
+      }
+      if (!Number.isFinite(metric.vectorWeight) || metric.vectorWeight < 0 ||
+          !Number.isFinite(metric.gradeWeight) || metric.gradeWeight < 0 || metric.gradeWeight > 1) {
+        throw new RangeError(`metric ${metric.key} has invalid weights`)
+      }
+      if (metric.tier === "N/A" && (metric.vectorWeight !== 0 || metric.gradeWeight !== 0)) {
+        throw new RangeError(`not-applicable metric ${metric.key} must have zero weights`)
+      }
+      if (metric.rawEvidence.state === "observed" && !Number.isFinite(metric.rawEvidence.value)) {
+        throw new RangeError(`metric ${metric.key} raw value must be finite`)
+      }
+      if (metric.scoreEvidence.state === "observed") {
+        assertScore(metric.scoreEvidence.value, `metric percentile ${metric.key}`)
+      }
+      if (metric.referenceMatchCount !== undefined &&
+          (!Number.isSafeInteger(metric.referenceMatchCount) || metric.referenceMatchCount < 0)) {
+        throw new RangeError(`metric ${metric.key} reference match count must be non-negative`)
+      }
+    }
+  }
+}
+
+/**
+ * Aggregates one frozen recipe. Headline authority is exclusively the stored
+ * match role-fit score; family vectors, consistency, and versatility cannot
+ * raise or lower it.
+ */
+export function aggregateRviProfile(input: RviProfileAggregationInput): RviProfileAggregate {
+  validateInput(input)
+  const thresholds = input.confidenceThresholds ?? RVI_DEFAULT_CONFIDENCE_THRESHOLDS
+  validateThresholds(thresholds)
+  const weighting = resolvedWeighting(input.weighting, input.observations)
+  const observations = input.observations.map((observation) => ({
+    observation,
+    weight: observationWeight(observation, weighting),
+  }))
+  const headline = aggregateScores(observations, (observation) => observation.roleFitScore, thresholds)
+  const metrics = aggregateMetricObservations(observations, thresholds)
+  const families = input.familyKeys.map((key): RviFamilyVector => ({
+    key,
+    ...aggregateScores(observations, (observation) => matchVectorScore(observation, key), thresholds),
+    responsibility: aggregateFamilyResponsibility(observations, key, thresholds),
+    metrics: metrics.filter((metric) => metric.vector === key),
+  }))
+  return {
+    algorithmVersion: RVI_ALGORITHM_VERSION,
+    recipeId: input.recipeId,
+    weighting,
+    headline: {
+      source: "role_fit",
+      ...headline,
+      confidenceInterval95: headlineBootstrapInterval(input.recipeId, observations),
+    },
+    families,
+    consistency: consistencyFor(observations, thresholds),
+    versatility: {
+      champions: hillVersatilityFor(observations, (observation) =>
+        observation.championId === null || observation.championId === undefined
+          ? null : String(canonicalChampionId(observation.championId)), thresholds),
+      positions: hillVersatilityFor(observations, (observation) => {
+        const position = observation.position?.trim().toUpperCase()
+        return position && RVI_POSITION_KEYS.has(position) ? position : null
+      }, thresholds),
+    },
+  }
+}
+
+/**
+ * Timeline-derived proxies below are diagnostic evidence only. They are not
+ * consumed by aggregateRviProfile and cannot affect the RVI headline.
+ */
 export interface FightKillEvent {
   timestamp: number
   originalEventIndex: number

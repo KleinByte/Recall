@@ -23,11 +23,20 @@ const storeLobby = (scores: (number | undefined)[]) => {
       kills, deaths, assists, gold_earned, damage_to_champions, damage_taken,
       damage_self_mitigated, total_heal, time_ccing_others,
       total_minions_killed, neutral_minions, vision_score, damage_objectives,
-      grade_score, assigned_position)
-     VALUES (1, ?, ?, 100, ?, 84, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ?, ?)`,
+      grade, grade_score, role_fit_score, grade_algorithm_version, grade_status,
+      grade_composite_percentile, assigned_position)
+     VALUES (1, ?, ?, 100, ?, 84, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+             ?, ?, ?, ?, ?, ?, ?)`,
   )
   scores.forEach((score, index) => {
-    insert.run(PUUID, index + 1, index === 0 ? 1 : 0, score ?? null,
+    const ready = score !== undefined
+    insert.run(PUUID, index + 1, index === 0 ? 1 : 0,
+      ready ? "B" : null,
+      score ?? null,
+      score ?? null,
+      ready ? 2 : null,
+      ready ? "ready" : null,
+      ready ? .5 : null,
       index === 0 ? "UTILITY" : null)
   })
 }
@@ -141,6 +150,39 @@ describe("listMatches", () => {
 
     expect(page.total).toBe(1)
     expect(page.rows[0].gameId).toBe(1)
+  })
+
+  it("filters visible v3 grades by authoritative RoleFit", () => {
+    repo.insertMany([
+      buildMatchRow({ gameId: 1 }),
+      buildMatchRow({ gameId: 2 }),
+    ])
+    db.prepare(
+      "UPDATE matches SET role_fit_score = CASE game_id WHEN 1 THEN 82 ELSE 55 END WHERE puuid = ?",
+    ).run(PUUID)
+
+    const page = repo.listMatches({ puuid: PUUID, minRoleFitScore: 81.59 }, 1, 25)
+
+    expect(page.rows.map((row) => row.gameId)).toEqual([1])
+  })
+
+  it("reports an authoritative average RoleFit alongside the compatibility score", () => {
+    repo.insertMany([
+      buildMatchRow({ gameId: 1 }),
+      buildMatchRow({ gameId: 2 }),
+    ])
+    repo.setGrade(1, PUUID, "A", 1)
+    repo.setGrade(2, PUUID, "B", 0)
+    db.prepare(
+      `UPDATE matches
+       SET role_fit_score = CASE game_id WHEN 1 THEN 80 ELSE 60 END
+       WHERE puuid = ?`,
+    ).run(PUUID)
+
+    const summary = repo.getSummary({ puuid: PUUID })
+
+    expect(summary.avgGradeScore).toBeCloseTo(.5)
+    expect(summary.avgRoleFitScore).toBeCloseTo(70)
   })
 
   it("excludes remakes below a minimum duration", () => {

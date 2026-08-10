@@ -35,7 +35,7 @@ const option = computed<EChartsCoreOption>(() => ({
       const game = games.value[x]
       const component = components.value[y]
       return game && component
-        ? `<strong>${escapeTooltip(component.label)}</strong><br/>Component score ${value} · compared with ${escapeTooltip(scope)} peers in this valid lobby<br/>${escapeTooltip(game.grade ?? "–")} · ${new Date(game.playedAt).toLocaleDateString()}`
+        ? `<strong>${escapeTooltip(component.label)}</strong><br/>Stored component score ${value} · ${escapeTooltip(scope)} comparison scope<br/>${escapeTooltip(game.grade ?? "–")} · ${new Date(game.playedAt).toLocaleDateString()}`
         : ""
     },
   },
@@ -60,7 +60,7 @@ const option = computed<EChartsCoreOption>(() => ({
     orient: "horizontal",
     left: "center",
     bottom: 4,
-    text: ["Leads peers", "Trails peers"],
+    text: ["Higher percentile", "Lower percentile"],
     inRange: {
       color: [CHART_SCORE_RAMP[0], CHART_SCORE_RAMP[2], CHART_SCORE_RAMP[3], CHART_SCORE_RAMP[4]],
     },
@@ -87,7 +87,7 @@ const option = computed<EChartsCoreOption>(() => ({
 <template>
   <BaseEChart
     :option="option"
-    ariaLabel="Grade DNA heatmap showing lobby-relative component scores for recent matches."
+    ariaLabel="Grade DNA heatmap showing stored Recall Grade component scores for recent matches."
     height="390px"
   />
 </template>

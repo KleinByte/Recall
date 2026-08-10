@@ -4,13 +4,12 @@ import { computed } from "vue"
 import BaseEChart from "../charts/BaseEChart.vue"
 import { CHART_COLOURS, CHART_STYLES } from "../../charts/recall-chart-theme"
 import { escapeTooltip } from "../../charts/formatters"
-import { recallGradeFromScore } from "../../shared/recall-grade"
 import { championNameById } from "../../helpers/format"
 import type { SkillHistoryPoint } from "../../types/stats"
 
 const props = defineProps<{ history: SkillHistoryPoint[] }>()
 
-const graded = computed(() => props.history.filter((game) => game.gradeScore !== undefined))
+const graded = computed(() => props.history.filter((game) => Number.isFinite(game.roleFitScore)))
 
 const option = computed<EChartsCoreOption>(() => ({
   grid: { top: 18, right: 28, bottom: graded.value.length > 30 ? 64 : 36, left: 46 },
@@ -20,9 +19,9 @@ const option = computed<EChartsCoreOption>(() => ({
       const game = graded.value[params[0]?.dataIndex]
       if (!game) return ""
       return [
-        `<strong>${escapeTooltip(game.grade ?? recallGradeFromScore(game.gradeScore) ?? "Ungraded")}</strong> · ${escapeTooltip(championNameById(null, game.championId))}`,
+        `<strong>${escapeTooltip(game.grade ?? "Ungraded")}</strong> · ${escapeTooltip(championNameById(null, game.championId))}`,
         new Date(game.playedAt).toLocaleString(),
-        `${game.win ? "Win" : "Loss"} · Recall score ${game.gradeScore?.toFixed(2)}`,
+        `${game.win ? "Win" : "Loss"} · RoleFit ${game.roleFitScore?.toFixed(1)}`,
       ].join("<br/>")
     },
   },
@@ -34,20 +33,21 @@ const option = computed<EChartsCoreOption>(() => ({
   },
   yAxis: {
     type: "value",
-    min: (value: { min: number }) => Math.min(-1.6, Math.floor(value.min * 2) / 2),
-    max: (value: { max: number }) => Math.max(1.6, Math.ceil(value.max * 2) / 2),
-    axisLabel: { formatter: (value: number) => recallGradeFromScore(value) ?? "D" },
+    min: 0,
+    max: 100,
+    name: "RoleFit",
+    axisLabel: { formatter: "{value}" },
     splitLine: { lineStyle: { color: CHART_STYLES.gridSoft } },
   },
   dataZoom: graded.value.length > 30 ? [{ type: "inside", start: Math.max(0, 100 - 30 / graded.value.length * 100), end: 100 }, { type: "slider", height: 18, bottom: 8 }] : [],
   series: [{
-    name: "Recall score",
+    name: "RoleFit",
     type: "line",
     smooth: 0.24,
     showSymbol: graded.value.length <= 45,
     symbolSize: 7,
     data: graded.value.map((game) => ({
-      value: game.gradeScore,
+      value: game.roleFitScore,
       itemStyle: { color: game.win ? CHART_COLOURS.positive : CHART_COLOURS.negative },
     })),
     lineStyle: { color: CHART_COLOURS.accentStrong, width: 2 },
@@ -55,8 +55,8 @@ const option = computed<EChartsCoreOption>(() => ({
     markLine: {
       symbol: "none",
       silent: true,
-      data: [{ yAxis: 0, label: {
-        formatter: "Lobby average",
+      data: [{ yAxis: 50, label: {
+        formatter: "Frozen-reference median",
         position: "insideEndTop",
         color: CHART_COLOURS.live,
         backgroundColor: CHART_STYLES.labelBackdrop,
@@ -73,7 +73,7 @@ const option = computed<EChartsCoreOption>(() => ({
 <template>
   <BaseEChart
     :option="option"
-    ariaLabel="Recall Grade journey across recorded matches. Green points are wins and red points are losses."
+    ariaLabel="Recall Grade journey across recorded matches on the zero-to-one-hundred RoleFit scale. Green points are wins and red points are losses."
     height="360px"
   />
 </template>

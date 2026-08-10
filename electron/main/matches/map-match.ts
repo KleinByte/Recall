@@ -2,8 +2,9 @@ import { classifyMatch } from "./classify.js"
 import { isEligibleMatch } from "./eligibility.js"
 import type { QueueInfo } from "./queues.js"
 import type { LcuGame, MatchRow } from "./types.js"
+import { normalizePosition, POSITION_RESOLVER_VERSION } from "./position.js"
 
-export const LCU_MATCH_MAPPER_VERSION = 2
+export const LCU_MATCH_MAPPER_VERSION = 3
 
 const int = (value: number | undefined) => Math.trunc(value ?? 0)
 const bool = (value: boolean | undefined) => (value ? 1 : 0)
@@ -45,6 +46,16 @@ export function mapMatchRow(
     playedAt: int(game.gameCreation),
     durationSecs: int(game.gameDuration),
     gameVersion: game.gameVersion ?? "",
+    mapId: int(game.mapId),
+    gameType: game.gameType,
+    durationQuality: "source_reported",
+    resolvedPosition: normalizePosition({
+      lcuLane: participant.timeline?.lane,
+      lcuRole: participant.timeline?.role,
+      spell1Id: int(participant.spell1Id),
+      spell2Id: int(participant.spell2Id),
+    }),
+    positionResolverVersion: POSITION_RESOLVER_VERSION,
     championId: int(participant.championId),
     win: bool(stats.win),
     kills: int(stats.kills),

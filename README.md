@@ -28,10 +28,11 @@ next month.
   category and tier filters, completion filters, sorting, and pinned goals.
 - Shows whether the champion you are hovering in champion select still counts
   toward a pinned champion challenge.
-- Grades complete scoreboards from S+ through D, resolves Summoner's Rift roles,
-  and compares your performance with the right players in that match.
+- Grades complete scoreboards from S+ through D using position opportunities,
+  detailed champion archetype responsibilities, and a frozen local reference.
 - Keeps ranked snapshots, personal records, champion results, mastery context,
-  playstyle trends, lobby comparisons, and a mode-specific Recall Vector Index.
+  playstyle trends, lobby comparisons, and a mode-specific Recall Vector Index
+  with eight capability vectors and inspectable per-metric evidence.
 - Provides a review journal with bookmarks, notes, tags, session boundaries,
   timeline events, and reusable practice experiments.
 - Stores everything on your machine and includes integrity checks, verified
@@ -70,11 +71,11 @@ own filter instead of being folded into Other.
 
 ![Match history with role-aware rows, lobby rank, and a League Classic filter](docs/screenshots/recall-matches.jpg)
 
-The Review page explains the grading calculation, compares a game only with
-matches that happened before it, and groups games into sessions so a rough
-night does not get flattened into a lifetime average. Full scoreboards are
-ordered like Riot's lanes, while modes without assigned roles omit the role
-presentation entirely.
+The Review page explains the exact grading recipe, shows the informational
+lobby percentile separately from RoleFit, and groups games into sessions so a
+rough night does not get flattened into a lifetime average. Full scoreboards
+are ordered like Riot's lanes, while modes without assigned roles omit the
+role presentation entirely.
 
 Recall captures recent timelines from the authenticated local League Client and
 caches a compact summary. The exact event families vary with what the current
@@ -124,22 +125,49 @@ without borrowing modern item art.
 ## Performance grades
 
 Riot does not provide a post-game letter grade through the local client API, so
-Recall calculates one from the full lobby. An average performance lands around
-a B. Strong games move into A and S territory, while weak games fall below the
-lobby baseline.
+Recall calculates RoleFit from complete scoreboards. RoleFit is a 0–100 measure
+of how well the measurable responsibilities of a champion-position job were
+executed relative to a frozen reference built from complete matches stored in
+that Recall installation. Another installation builds its own reference and
+never receives yours. New games are graded against the frozen snapshot without
+changing it; the Settings page can explicitly create a new snapshot and
+regrade the stored history.
 
-Summoner's Rift grading is role-aware. Recall prefers the position assigned in
-champion select for your team, then uses Riot's post-game lane and role data
-with deterministic team-composition fallbacks where necessary. A support is
-not punished for farming less than a mid laner, and a tank is not expected to
-produce the same damage profile as a carry. ARAM and other modes without roles
-do not invent them.
+Position determines opportunity while the champion's detailed archetype
+determines responsibility. Zac remains a Jungler but is evaluated as a
+Vanguard; Tristana remains Bottom or Middle but is evaluated primarily as a
+Marksman. Recall combines calibrated Fighting, Availability, Resources,
+Objectives, Vision, and Control families with fixed responsibility tiers.
+Observed zero, unavailable data, no opportunity, and not-applicable evidence
+remain distinct, and a missing core responsibility withholds the grade instead
+of making the remaining metrics worth more.
 
-League Classic has its own grading cohort and Recall Vector Index, so its pace,
-economy, and builds are not measured against modern Summoner's Rift. The Review
-page shows the lobby percentile, component weights, and each weighted
-contribution. If a match does not include a complete scoreboard, Recall keeps
-the available data and explains why a detailed grade cannot be produced.
+The reference uses leave-one-match-out empirical calibration and treats a
+complete match—not ten correlated participant rows—as the independent unit.
+The final letter comes directly from the frozen-reference RoleFit score. Lobby
+percentile remains visible as separate context and does not set the grade.
+League Classic, ARAM, and each tracked rules scope remain separate, so their
+pace and economy are not mixed with modern Summoner's Rift.
+
+Grade and the Recall Vector Index consume the same calibrated observations.
+RVI keeps RoleFit as its only headline, then explains the measured shape through
+Threat, Teamfighting, Positioning & Survival, Control & Utility, Economy,
+Objectives & Macro, Vision & Setup, and diagnostic-only Initiative & Pressure.
+Expand a vector to inspect its raw statistic, formula, calibrated score,
+coverage, comparison scope, evidence state, and actual Grade influence. Partial
+matches keep the evidence they support and leave unsupported radar axes as gaps
+instead of turning them into zero or hiding all of the detail.
+
+The selected RVI recipe is immutably linked to the exact Grade recipe and
+calibration snapshot. On the one-time v3 cutover Recall creates a verified
+backup, replaces stale derived grades and metric observations, and preserves
+raw matches, source payloads, timelines, reviews, notes, and settings. Normal
+startup does not repeat the rebuild once the current recipes are selected;
+manual recalibration creates a new frozen reference and rebuilds both together.
+Timeline measurements remain zero-influence diagnostics and receive scores
+only when the retained source can support their exact proxy. If a match lacks
+a complete or source-verifiable scoreboard, Recall keeps the available data
+and explains why a grade cannot be produced.
 
 ## Install
 

@@ -8,7 +8,7 @@ import { openMatch } from "../helpers/navigation"
 import { labelIcon } from "../helpers/label-icons"
 import { itemIconUrl, summonerSpellIconUrl } from "../helpers/ddragon"
 import { itemAsset } from "../helpers/items"
-import { positionIconUrl, positionLabel, resolvePosition } from "../helpers/roles"
+import { positionForPlayer, positionIconUrl, positionLabel } from "../helpers/roles"
 import {
   championIconUrl,
   championNameById,
@@ -41,16 +41,12 @@ const kda = (match: MatchRow) =>
 const position = (match: MatchRow) => {
   if (match.modeFamily !== "sr" && match.modeFamily !== "classic") return undefined
   const owner = player(match)
-  return resolvePosition(
-    owner?.lane ?? match.lane,
-    owner?.role ?? match.role,
-    owner?.assignedPosition ?? match.assignedPosition,
-  )
+  return positionForPlayer(owner ?? match)
 }
 
 const participantPosition = (match: MatchRow, row: ParticipantRow) =>
   match.modeFamily === "sr" || match.modeFamily === "classic"
-    ? resolvePosition(row.lane, row.role, row.assignedPosition)
+    ? positionForPlayer(row)
     : undefined
 
 const creepScore = (match: MatchRow) =>

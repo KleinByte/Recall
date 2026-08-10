@@ -1,4 +1,6 @@
 import type { ParticipantRow, TeamRow } from "./types.js"
+import { normalizePosition, POSITION_RESOLVER_VERSION } from "./position.js"
+import { assessGradeCoreFacts } from "./grade-core-facts.js"
 
 /**
  * The full-detail match payload, which unlike match history carries the whole
@@ -46,6 +48,9 @@ export interface GameDetail {
 
 const int = (value: number | boolean | undefined) =>
   typeof value === "number" ? Math.trunc(value) : 0
+
+const optionalInt = (value: number | boolean | undefined) =>
+  typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : undefined
 
 const bool = (value: number | boolean | string | undefined) => {
   // Teams report their result as the string "Win" rather than a boolean.
@@ -133,6 +138,22 @@ export function mapParticipants(
   return detail.participants.map((participant) => {
     const stats = participant.stats ?? {}
     const player = identities.get(participant.participantId)
+    const gradeCoreFacts = assessGradeCoreFacts("league_client", {
+      participant_id: participant.participantId,
+      team_id: participant.teamId,
+      champion_id: participant.championId,
+      kills: stats.kills,
+      deaths: stats.deaths,
+      assists: stats.assists,
+      gold_earned: stats.goldEarned,
+      damage_to_champions: stats.totalDamageDealtToChampions,
+      total_minions_killed: stats.totalMinionsKilled,
+      neutral_minions: stats.neutralMinionsKilled,
+      damage_objectives: stats.damageDealtToObjectives,
+      damage_turrets: stats.damageDealtToTurrets,
+      time_ccing_others: stats.timeCCingOthers,
+      vision_score: stats.visionScore,
+    })
 
     return {
       gameId,
@@ -141,6 +162,7 @@ export function mapParticipants(
       participantId: participant.participantId,
       teamId: participant.teamId,
       isPlayer: participant.participantId === mine.participantId ? 1 : 0,
+      ...gradeCoreFacts,
       championId: int(participant.championId),
       win: bool(stats.win),
       summonerName: displayName(player),
@@ -221,6 +243,19 @@ export function mapParticipants(
       firstTower: bool(stats.firstTowerKill),
       lane: participant.timeline?.lane,
       role: participant.timeline?.role,
+      controlWardsPurchased: optionalInt(stats.visionWardsBoughtInGame),
+      totalHealsOnTeammates: optionalInt(stats.totalHealsOnTeammates),
+      totalDamageShieldedOnTeammates: optionalInt(stats.totalDamageShieldedOnTeammates),
+      damageDealtToBuildings: optionalInt(stats.damageDealtToBuildings),
+      lcuLane: participant.timeline?.lane,
+      lcuRole: participant.timeline?.role,
+      resolvedPosition: normalizePosition({
+        lcuLane: participant.timeline?.lane,
+        lcuRole: participant.timeline?.role,
+        spell1Id: int(participant.spell1Id),
+        spell2Id: int(participant.spell2Id),
+      }),
+      positionResolverVersion: POSITION_RESOLVER_VERSION,
       augments: augmentValues(stats),
       extendedMetrics: extendedMetrics(stats),
     }

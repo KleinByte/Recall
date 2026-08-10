@@ -49,7 +49,7 @@ describe("classifyMatch", () => {
   it("keeps unrelated modes played on the Howling Abyss", () => {
     expect(
       classifyMatch(game({ gameMode: "URF", queueId: 900 })),
-    ).toMatchObject({ mode: "other", family: "other" })
+    ).toMatchObject({ mode: "urf", family: "other" })
   })
 })
 
@@ -77,6 +77,14 @@ describe("classifyMatch — Summoner's Rift", () => {
   it("classifies normal draft and blind", () => {
     expect(classifyMatch(rift(400))?.mode).toBe("sr_normal")
     expect(classifyMatch(rift(430))?.mode).toBe("sr_normal")
+  })
+
+  it("keeps Rift URF out of the normal-Rift calibration family", () => {
+    expect(classifyMatch(rift(900, "URF"))).toMatchObject({
+      mode: "urf",
+      family: "other",
+      isRanked: false,
+    })
   })
 
   it("falls back to normal for an unknown Rift queue rather than dropping it", () => {
