@@ -449,6 +449,11 @@ function ensureRecallV3Frozen(win?: BrowserWindow) {
   const status = service.calibrationStatus()
   if (collectionDisabled()) return status
   const needsDirectCutover = service.needsDirectCutover()
+  // A recipe cutover must not freeze at process startup, before the signed-in
+  // source-enrichment pass has had a chance to recover retained timelines.
+  // The authenticated afterSync path below waits for that pass, then performs
+  // the one-time rebuild and broadcasts the finished artifacts atomically.
+  if (needsDirectCutover && !win) return status
   const hasRecoverableRawReferenceData = status.state === "calibrating" &&
     status.supportedScopes.length === 0 && service.hasRecoverableRawReferenceData()
   if (!needsDirectCutover &&
@@ -833,6 +838,12 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
 
   broadcast(win, "lcu:status", { connected: true, summoner })
   void initialiseLiveSession(win)
+  // A configured Match-V5 key gives the recipe cutover one chance to enrich
+  // the full stored history before its local reference is frozen. This is a
+  // one-time cost: the direct-cutover predicate becomes false after rebuild.
+  if (getRecallV3().needsDirectCutover() && regionalRoute && readRiotApiKey()) {
+    await startRiotHistoryBackfill(win, true)
+  }
   await runSync(win)
 }
 
@@ -1116,10 +1127,13 @@ async function startRiotHistoryBackfill(
     "riot_history",
   )
 
+  let completed = false
   const task = trackDatabaseTask(
     backfill
       .run(restart, controller.signal)
-      .then(() => undefined)
+      .then((state) => {
+        completed = state.status === "complete"
+      })
       .catch((error) => {
         if (!controller.signal.aborted) {
           console.warn(`Riot history import stopped: ${(error as Error).message}`)
@@ -1130,7 +1144,9 @@ async function startRiotHistoryBackfill(
 
   try {
     await task
-    ensureRecallV3Frozen(win)
+    if (completed && revision === riotBackfillRevision && session === active) {
+      ensureRecallV3Frozen(win)
+    }
   } finally {
     if (revision === riotBackfillRevision) {
       riotBackfillAbort = undefined
@@ -1146,7 +1162,33 @@ async function afterSync(
 ) {
   if (collectionDisabled() || !session) return
 
-  ensureRecallV3Frozen(win)
+  const needsDirectCutover = getRecallV3().needsDirectCutover()
+  const timelineTask = getTimelineService(win)
+    .queueRecentMatches(session.summoner.puuid)
+  if (timelineTask) {
+    const trackedTimelineTask = trackDatabaseTask(timelineTask)
+    // For the v3.0.1 recipe replacement, retained/source timelines need to be
+    // present before the immutable local reference is rebuilt. Normal syncs
+    // remain asynchronous after the cutover has completed.
+    if (needsDirectCutover) await trackedTimelineTask
+  }
+  // A periodic/local sync may overlap the one-time full-history enrichment.
+  // Do not let that race freeze a partially enriched reference.
+  if (needsDirectCutover && riotBackfillTask) {
+    await riotBackfillTask.catch(() => undefined)
+  }
+  let cutoverEnrichmentComplete = true
+  if (needsDirectCutover && session.regionalRoute && readRiotApiKey()) {
+    const enrichment = getRiotBackfills().get(
+      session.summoner.puuid,
+      session.regionalRoute,
+    )
+    // Keep the recipe in an honest building state after an interrupted or
+    // failed full-history pass. Retrying the import resumes the cutover;
+    // clearing the optional API key allows the retained/local-only fallback.
+    cutoverEnrichmentComplete = enrichment?.status === "complete"
+  }
+  if (cutoverEnrichmentComplete) ensureRecallV3Frozen(win)
 
   if (result.inserted > 0) {
     broadcast(win, "stats:updated", result)
@@ -1171,10 +1213,6 @@ async function afterSync(
     seen: result.inserted,
     written: result.inserted,
   })
-  const timelineTask = getTimelineService(win)
-    .queueRecentMatches(session.summoner.puuid)
-  if (timelineTask) void trackDatabaseTask(timelineTask)
-
   // Challenges are synced after matches so a challenge failure can never cost
   // us a recorded game.
   const challengeResult = await session.challengeSync.syncNow()
@@ -1941,7 +1979,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
 
   ipcMain.handle(
     "stats:rvi",
-    (_event, filter: Partial<StatsFilter>, _family: ModeFamily, scoringContext?: PerformanceScoringContext) => {
+    (_event, filter: Partial<StatsFilter>, family: ModeFamily, scoringContext?: PerformanceScoringContext) => {
       const scoped = withPuuid(filter)
       const insightsRepo = getInsights()
       // RVI is a career profile for the selected frozen recipe. At this hobby-
@@ -1952,6 +1990,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
       return buildPerformanceProfile({
         recipeId: rvi.recipeId,
         rviObservations: rvi.observations,
+        family,
         scoringContext,
       })
     },

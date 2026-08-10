@@ -85,6 +85,10 @@ import {
   RVI_V3_TIMELINE_DERIVATION_ID,
 } from "./rvi-v3-timeline.js"
 import { METRIC_DEFINITIONS_V3 } from "./metric-registry-v3.js"
+import {
+  selectTimelineSource,
+  type TimelineSourceCandidate,
+} from "./timeline-source-selector.js"
 
 export const GRADE_V3_MINIMUM_SNAPSHOT_MATCHES = GRADE_V3_MINIMUM_SCOPE_MATCHES
 
@@ -769,9 +773,9 @@ export class RecallV3Service {
   }
 
   /**
-   * Replaces the complete inspectable metric inventory after retained source
-   * evidence (most commonly a timeline) becomes available. The frozen
-   * reference and the stored Grade result are never mutated here.
+   * Regrades atomically after retained source evidence (most commonly a
+   * timeline) becomes available. The calibration reference stays frozen, but
+   * its metric inventory, arm composite, and RoleFit result advance together.
    */
   refreshMetricObservations(
     gameId: number,
@@ -788,27 +792,14 @@ export class RecallV3Service {
     const snapshot = this.loadSnapshot(selected.calibrationId)
     const { match, participants } = this.loadStoredMatch(gameId, puuid)
     if (!match) throw new Error("metric_observation_match_not_found")
-    const resolved = resolvedLobbyPositions(participants, match.modeFamily)
-    const ineligible = gradeEligibility(match, participants, resolved)
-    const raw = ineligible ? undefined : this.buildRawLobby(match, participants, resolved)
-    return this.db.transaction(() => {
-      if (!raw) {
-        this.replaceMetricObservations(match, selectedRvi.recipeId, [])
-        return ineligible ?? "unsupported_mode"
-      }
-      const prepared = prepareGradeLobbyFromSnapshotV3(raw, snapshot)
-      this.writeMetricObservations(
-        match,
-        raw,
-        selectedRvi.recipeId,
-        selected.calibrationId,
-        snapshot,
-        prepared,
-      )
-      return snapshot.referencePopulation.supportedScopes.includes(
-        calibrationScopeKey(raw.context),
-      ) ? "ready" : "calibrating"
-    })()
+    return this.db.transaction(() => this.gradeOne(
+      match,
+      participants,
+      selected.recipeId,
+      selectedRvi.recipeId,
+      selected.calibrationId,
+      snapshot,
+    ))()
   }
 
   /**
@@ -1053,15 +1044,24 @@ export class RecallV3Service {
     snapshot: GradeCalibrationSnapshotV3,
   ): GradeStatus {
     const resolved = resolvedLobbyPositions(participants, match.modeFamily)
+    const ineligible = gradeEligibility(match, participants, resolved)
+    const raw = ineligible ? undefined : this.buildRawLobby(match, participants, resolved)
+    const detailMetricEvidence = raw
+      ? [...(raw.detailMetricObservations ?? new Map())]
+        .sort(([left], [right]) => left - right)
+        .map(([participantId, rows]) => ({
+          participantId,
+          rows: [...rows].sort((left, right) => left.metricKey.localeCompare(right.metricKey)),
+        }))
+      : []
     const inputFingerprint = sha256({
       recipeId,
       match,
       resolvedPositions: [...resolved],
       participants: [...participants].sort((left, right) =>
         left.participantId - right.participantId),
+      detailMetricEvidence,
     })
-    const ineligible = gradeEligibility(match, participants, resolved)
-    const raw = ineligible ? undefined : this.buildRawLobby(match, participants, resolved)
     if (!raw) {
       const status = ineligible ?? "unsupported_mode"
       this.grades.writeCanonicalGrade(match.gameId, match.puuid, {
@@ -1272,29 +1272,29 @@ export class RecallV3Service {
       mapperVersion: number
       dataJson: string | null
     } | undefined
-    const source = this.db.prepare(`
-      SELECT source, mapper_version AS mapperVersion
+    const selectedSource = selectTimelineSource(this.db.prepare(`
+      SELECT source, mapper_version AS mapperVersion, status,
+             data_json AS dataJson, captured_at AS capturedAt
       FROM match_timeline_sources
-      WHERE game_id = ? AND puuid = ? AND status = 'ready'
-      ORDER BY updated_at DESC, source
-      LIMIT 1
-    `).get(match.gameId, match.puuid) as {
-      source: "league_client" | "match_v5" | "live_capture"
-      mapperVersion: number
-    } | undefined
-    const sourceQuality: MetricSourceQualityV3 = source?.source === "match_v5"
+      WHERE game_id = ? AND puuid = ?
+    `).all(match.gameId, match.puuid) as TimelineSourceCandidate[])
+    const selectedCompact = compactTimelineFromJsonV3(selectedSource?.dataJson ?? null)
+    const currentCompact = selectedCompact ?? (
+      cache?.status === "ready" && cache.mapperVersion === TIMELINE_MAPPER_VERSION
+        ? compactTimelineFromJsonV3(cache.dataJson)
+        : undefined
+    )
+    // Quality and capability claims must describe the bytes actually used,
+    // not whichever source row happened to be updated most recently.
+    const actualSource = selectedCompact ? selectedSource : undefined
+    const sourceQuality: MetricSourceQualityV3 = actualSource?.source === "match_v5"
       ? "verified"
-      : source ? "retained" : "legacy"
-    const currentCompact = cache?.status === "ready" &&
-        cache.mapperVersion === TIMELINE_MAPPER_VERSION
-      ? compactTimelineFromJsonV3(cache.dataJson)
-      : undefined
+      : actualSource ? "retained" : "legacy"
     if (currentCompact) {
       return {
         timeline: currentCompact,
         sourceQuality,
-        wardEventsComplete: source?.source === "match_v5" &&
-          source.mapperVersion >= TIMELINE_MAPPER_VERSION,
+        wardEventsComplete: actualSource?.source === "match_v5",
       }
     }
 
@@ -1338,7 +1338,8 @@ export class RecallV3Service {
     }
 
     return {
-      timeline: cache?.status === "ready"
+      timeline: cache?.status === "ready" &&
+          cache.mapperVersion === TIMELINE_MAPPER_VERSION
         ? compactTimelineFromJsonV3(cache.dataJson)
         : undefined,
       sourceQuality,

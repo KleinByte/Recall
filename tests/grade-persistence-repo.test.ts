@@ -162,6 +162,76 @@ beforeEach(() => {
 })
 
 describe("GradePersistenceRepository canonical writer", () => {
+  it("advances mapper metadata for identical raw bytes without replacing the payload", () => {
+    const raw = new MatchSourceRepository(db)
+    const first = raw.persistRawPayload({
+      ownerPuuid: PUUID,
+      source: "league_client",
+      sourceMatchId: "1",
+      gameId: 1,
+      kind: "scoreboard_detail",
+      mapperVersion: 7,
+      fetchedAt: 100,
+      body: rawScoreboard(),
+    })
+    raw.setMappingResult(first, "mapped", 101, { gameId: 1 })
+    const before = db.prepare(`
+      SELECT payload, sha256 FROM match_source_payloads
+      WHERE owner_puuid = ? AND source_match_id = '1'
+        AND kind = 'scoreboard_detail'
+    `).get(PUUID) as { payload: Buffer; sha256: string }
+
+    const repeated = raw.persistRawPayload({
+      ownerPuuid: PUUID,
+      source: "league_client",
+      sourceMatchId: "1",
+      gameId: 1,
+      kind: "scoreboard_detail",
+      mapperVersion: 8,
+      fetchedAt: 200,
+      body: rawScoreboard(),
+    })
+    const upgraded = db.prepare(`
+      SELECT payload, sha256, mapper_version AS mapperVersion,
+             mapping_status AS mappingStatus, mapped_at AS mappedAt,
+             fetched_at AS fetchedAt
+      FROM match_source_payloads
+      WHERE owner_puuid = ? AND source_match_id = '1'
+        AND kind = 'scoreboard_detail'
+    `).get(PUUID) as {
+      payload: Buffer
+      sha256: string
+      mapperVersion: number
+      mappingStatus: string
+      mappedAt: number | null
+      fetchedAt: number
+    }
+
+    expect(upgraded).toMatchObject({
+      sha256: before.sha256,
+      mapperVersion: 8,
+      mappingStatus: "pending",
+      mappedAt: null,
+      fetchedAt: 200,
+    })
+    expect(upgraded.payload.equals(before.payload)).toBe(true)
+    expect(raw.hasMappedPayload({
+      ownerPuuid: PUUID,
+      source: "league_client",
+      sourceMatchId: "1",
+      kind: "scoreboard_detail",
+      mapperVersion: 8,
+    })).toBe(false)
+    raw.setMappingResult(repeated, "mapped", 201, { gameId: 1 })
+    expect(raw.hasMappedPayload({
+      ownerPuuid: PUUID,
+      source: "league_client",
+      sourceMatchId: "1",
+      kind: "scoreboard_detail",
+      mapperVersion: 8,
+    })).toBe(true)
+  })
+
   it("promotes old source facts only after an exact checksummed raw scoreboard proves them", () => {
     const raw = new MatchSourceRepository(db)
     const identity = raw.persistRawPayload({

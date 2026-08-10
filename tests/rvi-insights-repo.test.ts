@@ -210,12 +210,12 @@ function writeReady(
   const recipeDefinitionId = options.recipeDefinitionId ?? GRADE_V3_RECIPE_DEFINITION_ID
   const primaryArchetype = options.primaryArchetype ?? "assassin"
   const familySignals: Record<string, string[]> = {
-    fighting: ["damage_share", "kill_participation"],
-    availability: ["deaths_per_10"],
-    resources: ["gold_per_min", "cs_per_min"],
-    objectives: ["neutral_objective_damage_per_min", "structure_damage_per_min"],
-    vision: ["vision_score_per_min"],
-    control: ["cc_seconds_per_min"],
+    combat: ["damage_share", "kill_participation"],
+    positioning_survival: ["deaths_per_10"],
+    economy: ["gold_per_min", "cs_per_min"],
+    objectives_macro: ["neutral_objective_damage_per_min", "structure_damage_per_min"],
+    vision_setup: ["vision_score_per_min"],
+    control_utility: ["cc_seconds_per_min"],
   }
   const storedComponents = (components: Array<{ key: string; componentScore: number }>) =>
     components.map((component) => {
@@ -255,7 +255,7 @@ function writeReady(
         roleFitScore,
         components: participantId === 1
           ? storedComponents(ownerComponents)
-          : storedComponents([{ key: "fighting", componentScore: 0.5 }]),
+          : storedComponents([{ key: "combat", componentScore: 0.5 }]),
         diagnosticMetrics: participantId === 1 && options.protection
           ? [{
             key: "ally_heal_shield_per_min",
@@ -293,8 +293,8 @@ describe("ReviewRepository.getGradeBreakdown", () => {
     selectRecipe()
     addLobby(1, 1_000, 84, "MIDDLE")
     writeReady(1, 40, [
-      { key: "fighting", componentScore: 0 },
-      { key: "resources", componentScore: 0.8 },
+      { key: "combat", componentScore: 0 },
+      { key: "economy", componentScore: 0.8 },
     ])
 
     expect(reviews.getGradeBreakdown(1, PUUID, 1)).toMatchObject({
@@ -303,8 +303,8 @@ describe("ReviewRepository.getGradeBreakdown", () => {
       roleFitScore: 40,
       compositePercentile: 0.4,
       components: [
-        expect.objectContaining({ key: "fighting", percentile: 0 }),
-        expect.objectContaining({ key: "resources", percentile: 0.8 }),
+        expect.objectContaining({ key: "combat", percentile: 0 }),
+        expect.objectContaining({ key: "economy", percentile: 0.8 }),
       ],
     })
   })
@@ -313,7 +313,7 @@ describe("ReviewRepository.getGradeBreakdown", () => {
     selectRecipe()
     for (let gameId = 1; gameId <= 4; gameId += 1) {
       addLobby(gameId, gameId * 1_000, 84 + gameId, "MIDDLE")
-      writeReady(gameId, 70 + gameId, [{ key: "fighting", componentScore: 0.7 }])
+      writeReady(gameId, 70 + gameId, [{ key: "combat", componentScore: 0.7 }])
     }
 
     const malformed = db.prepare(`
@@ -376,7 +376,7 @@ describe("ReviewRepository.getGradeBreakdown", () => {
       recipeId: "legacy:v3",
       roleFitScore: 50,
       components: [{
-        key: "fighting",
+        key: "combat",
         label: "Fighting",
         componentScore: 0.5,
         weight: 1,
@@ -396,7 +396,7 @@ describe("compiled Grade v3 recipe identity", () => {
     writeReady(
       1,
       75,
-      [{ key: "fighting", componentScore: 0.75 }],
+      [{ key: "combat", componentScore: 0.75 }],
       {
         recipeId: STALE_RECIPE_ID,
         recipeDefinitionId: STALE_RECIPE_DEFINITION_ID,
@@ -414,7 +414,7 @@ describe("InsightsRepository.getRviV3Observations", () => {
     selectRecipe()
     for (let gameId = 1; gameId <= 241; gameId += 1) {
       addLobby(gameId, gameId * 1_000, 84, "MIDDLE")
-      writeReady(gameId, 50, [{ key: "fighting", componentScore: 0.5 }])
+      writeReady(gameId, 50, [{ key: "combat", componentScore: 0.5 }])
     }
 
     expect(insights.getRviV3Observations({ puuid: PUUID })!.observations).toHaveLength(241)
@@ -427,14 +427,14 @@ describe("InsightsRepository.getRviV3Observations", () => {
     addLobby(2, 2_000, 222, "BOTTOM")
     addLobby(1, 1_000, 84, "MIDDLE")
     writeReady(2, 84.5, [
-      { key: "fighting", componentScore: 0.83 },
-      { key: "availability", componentScore: 0 },
-      { key: "resources", componentScore: 0.6 },
-      { key: "objectives", componentScore: 0.5 },
-      { key: "vision", componentScore: 0.4 },
-      { key: "control", componentScore: 0.3 },
+      { key: "combat", componentScore: 0.83 },
+      { key: "positioning_survival", componentScore: 0 },
+      { key: "economy", componentScore: 0.6 },
+      { key: "objectives_macro", componentScore: 0.5 },
+      { key: "vision_setup", componentScore: 0.4 },
+      { key: "control_utility", componentScore: 0.3 },
     ], { primaryArchetype: "marksman" })
-    writeReady(1, 42, [{ key: "resources", componentScore: 0.45 }])
+    writeReady(1, 42, [{ key: "economy", componentScore: 0.45 }])
 
     const result = insights.getRviV3Observations({ puuid: PUUID, modes: ["sr_normal"] })!
 
@@ -452,8 +452,8 @@ describe("InsightsRepository.getRviV3Observations", () => {
       championId: 84,
       position: "MIDDLE",
       primaryArchetype: "assassin",
-      familyPercentiles: { economy: 45, threat: null },
-      familyResponsibilityWeights: { economy: 1, threat: null },
+      familyPercentiles: { economy: 45, combat: null },
+      familyResponsibilityWeights: { economy: 1, combat: null },
     })
     expect(result.observations[1]).toMatchObject({
       roleFitScore: 84.5,
@@ -461,8 +461,7 @@ describe("InsightsRepository.getRviV3Observations", () => {
       position: "BOTTOM",
       primaryArchetype: "marksman",
       familyPercentiles: {
-        threat: 83,
-        teamfighting: 83,
+        combat: 83,
         positioning_survival: 0,
         economy: 60,
         objectives_macro: 50,
@@ -471,8 +470,7 @@ describe("InsightsRepository.getRviV3Observations", () => {
         initiative_pressure: null,
       },
       familyResponsibilityWeights: {
-        threat: 1 / 12,
-        teamfighting: 1 / 12,
+        combat: 1 / 6,
         positioning_survival: 1 / 6,
         economy: 1 / 6,
         objectives_macro: 1 / 6,
@@ -491,11 +489,17 @@ describe("InsightsRepository.getRviV3Observations", () => {
       gradeScore: 0.5,
       compositePercentile: 0.845,
     })
-    expect(gradeHistory[1].components.map((component) => component.key))
-      .toEqual(GRADE_FAMILIES)
+    expect(gradeHistory[1].components.map((component) => component.key)).toEqual([
+      "combat",
+      "positioning_survival",
+      "economy",
+      "objectives_macro",
+      "vision_setup",
+      "control_utility",
+    ])
     expect(gradeHistory[1].components[0]).toMatchObject({
-      key: "fighting",
-      label: "Fighting",
+      key: "combat",
+      label: "Combat",
       percentile: 0.83,
       weight: 1 / 6,
       contribution: 0.83 / 6,
@@ -503,11 +507,11 @@ describe("InsightsRepository.getRviV3Observations", () => {
     })
   })
 
-  it("prefers exact selected-RVI observations and retains raw, score, and Grade influence", () => {
+  it("keeps exact raw observations while Grade components authoritatively explain arm scores", () => {
     selectRecipe()
     const metricRepository = selectRviRecipe()
     addLobby(1, 1_000, 84, "MIDDLE")
-    writeReady(1, 72, [{ key: "fighting", componentScore: .25 }])
+    writeReady(1, 72, [{ key: "combat", componentScore: .25 }])
     const recipeId = rviRecipeIdForCalibration(RECIPE_ID, CALIBRATION_ID)
     const base = {
       gameId: 1,
@@ -560,52 +564,53 @@ describe("InsightsRepository.getRviV3Observations", () => {
 
     const result = insights.getRviV3Observations({ puuid: PUUID })!
     expect(result.recipeId).toBe(recipeId)
-    expect(result.observations[0].familyPercentiles.threat).toBe(88)
-    expect(result.observations[0].familyResponsibilityWeights.threat).toBe(.5)
+    expect(result.observations[0].familyPercentiles.combat).toBe(25)
+    expect(result.observations[0].familyResponsibilityWeights.combat).toBe(1)
     expect(result.observations[0].metrics).toEqual(expect.arrayContaining([
       expect.objectContaining({
         key: "damage_share",
         label: "Damage share",
         formula: "champion damage / team champion damage",
         tier: "CORE",
-        vector: "threat",
-        vectorWeight: 1,
+        vector: "combat",
+        vectorWeight: .3,
         gradeWeight: .5,
         rawEvidence: { state: "observed", value: .31 },
-        scoreEvidence: { state: "observed", value: 88 },
+        scoreEvidence: { state: "observed", value: 25, source: "derived" },
         comparisonScope: "position",
         referenceMatchCount: 44,
       }),
       expect.objectContaining({
         key: "champion_damage_per_min",
-        tier: "DIAGNOSTIC",
+        tier: "SECONDARY",
+        vectorWeight: .15,
         gradeWeight: 0,
         scoreEvidence: { state: "observed", value: 99 },
       }),
       expect.objectContaining({
         key: "cs_per_min",
-        tier: "N/A",
-        vectorWeight: 0,
+        tier: "CORE",
+        vectorWeight: .2,
         gradeWeight: 0,
         rawEvidence: { state: "observed", value: 8.2 },
       }),
     ]))
   })
 
-  it("exposes Enchanter protection as a zero-weight diagnostic and preserves zero versus missing", () => {
+  it("exposes Enchanter protection as optional arm evidence and preserves zero versus missing", () => {
     selectRecipe()
     addLobby(1, 1_000, 16, "UTILITY")
     addLobby(2, 2_000, 16, "UTILITY")
     addLobby(3, 3_000, 16, "UTILITY")
-    writeReady(1, 70, [{ key: "vision", componentScore: .7 }], {
+    writeReady(1, 70, [{ key: "vision_setup", componentScore: .7 }], {
       primaryArchetype: "enchanter",
       protection: { evidenceState: "observed", percentile: .92 },
     })
-    writeReady(2, 60, [{ key: "vision", componentScore: .6 }], {
+    writeReady(2, 60, [{ key: "vision_setup", componentScore: .6 }], {
       primaryArchetype: "enchanter",
       protection: { evidenceState: "observed", percentile: 0 },
     })
-    writeReady(3, 50, [{ key: "vision", componentScore: .5 }], {
+    writeReady(3, 50, [{ key: "vision_setup", componentScore: .5 }], {
       primaryArchetype: "enchanter",
       protection: { evidenceState: "unavailable" },
     })
@@ -626,26 +631,26 @@ describe("InsightsRepository.getRviV3Observations", () => {
       {
         archetype: "enchanter",
         protection: { state: "observed", value: 92, source: "derived" },
-        tier: "DIAGNOSTIC",
+        tier: "SECONDARY",
         influence: 0,
         utilityVector: null,
-        responsibility: 0,
+        responsibility: null,
       },
       {
         archetype: "enchanter",
         protection: { state: "observed", value: 0, source: "derived" },
-        tier: "DIAGNOSTIC",
+        tier: "SECONDARY",
         influence: 0,
         utilityVector: null,
-        responsibility: 0,
+        responsibility: null,
       },
       {
         archetype: "enchanter",
         protection: { state: "unavailable" },
-        tier: "DIAGNOSTIC",
+        tier: "SECONDARY",
         influence: 0,
         utilityVector: null,
-        responsibility: 0,
+        responsibility: null,
       },
     ])
   })
@@ -654,10 +659,10 @@ describe("InsightsRepository.getRviV3Observations", () => {
     selectRecipe()
     addLobby(1, 1_000, 154, "JUNGLE")
     addLobby(2, 2_000, 18, "BOTTOM")
-    writeReady(1, 70, [{ key: "fighting", componentScore: .7 }], {
+    writeReady(1, 70, [{ key: "combat", componentScore: .7 }], {
       primaryArchetype: "marksman",
     })
-    writeReady(2, 60, [{ key: "fighting", componentScore: .6 }], {
+    writeReady(2, 60, [{ key: "combat", componentScore: .6 }], {
       primaryArchetype: "marksman",
     })
 
@@ -688,9 +693,9 @@ describe("InsightsRepository.getRviV3Observations", () => {
     for (let gameId = 1; gameId <= 5; gameId += 1) {
       addLobby(gameId, gameId * 1_000, 84 + gameId, "MIDDLE")
     }
-    writeReady(1, 71, [{ key: "fighting", componentScore: 0.71 }])
+    writeReady(1, 71, [{ key: "combat", componentScore: 0.71 }])
 
-    writeReady(2, 72, [{ key: "fighting", componentScore: 0.72 }])
+    writeReady(2, 72, [{ key: "combat", componentScore: 0.72 }])
     db.prepare(
       `UPDATE match_grade_breakdown_versions SET components_json = ?
        WHERE game_id = 2 AND puuid = ? AND participant_id = 1 AND algorithm_version = 3`,
@@ -698,14 +703,14 @@ describe("InsightsRepository.getRviV3Observations", () => {
       algorithmVersion: 3,
       recipeId: OTHER_RECIPE_ID,
       roleFitScore: 72,
-      components: [{ key: "fighting", componentScore: 0.72 }],
+      components: [{ key: "combat", componentScore: 0.72 }],
     }), PUUID)
 
     // Simulate a database copied from an older/partially repaired build. The
     // v25 trigger normally prevents this corruption; the read path still must
     // never trust a recipe merely because its algorithm version is 3.
     db.exec("DROP TRIGGER grade_attempt_selected_recipe_update")
-    writeReady(3, 73, [{ key: "fighting", componentScore: 0.73 }])
+    writeReady(3, 73, [{ key: "combat", componentScore: 0.73 }])
     for (const table of [
       "match_grade_attempts",
       "match_grade_results",
@@ -715,7 +720,7 @@ describe("InsightsRepository.getRviV3Observations", () => {
         .run(OTHER_RECIPE_ID, PUUID)
     }
 
-    writeReady(4, 74, [{ key: "fighting", componentScore: 0.74 }])
+    writeReady(4, 74, [{ key: "combat", componentScore: 0.74 }])
     for (const table of [
       "match_grade_attempts",
       "match_grade_results",
@@ -742,7 +747,7 @@ describe("InsightsRepository.getRviV3Observations", () => {
       expect.objectContaining({
         gameId: 1,
         compositePercentile: 0.71,
-        components: [expect.objectContaining({ key: "fighting", percentile: 0.71 })],
+        components: [expect.objectContaining({ key: "combat", percentile: 0.71 })],
       }),
     ])
   })

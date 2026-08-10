@@ -8,22 +8,20 @@ import type {
   PerformanceProfile as PerformanceProfileType,
   PerformanceScopeSummary,
 } from "../../types/stats"
-import type { Champion } from "../../types/lol"
-import { championNameById } from "../../helpers/format"
 
 const props = defineProps<{
   profile: PerformanceProfileType
   identity?: { label: string; description: string }
-  champions?: Champion[] | null
+  detailOnly?: boolean
 }>()
 
 const selectedKey = ref(props.profile.strongestKey ?? props.profile.dimensions[0]?.key)
-const detailsOpen = ref(false)
+const detailsOpen = ref(props.detailOnly ?? false)
 
 watch(() => props.profile, (profile) => {
   if (!profile.dimensions.some((dimension) => dimension.key === selectedKey.value)) {
     selectedKey.value = profile.strongestKey ?? profile.dimensions[0]?.key
-    detailsOpen.value = false
+    detailsOpen.value = props.detailOnly ?? false
   }
 })
 
@@ -56,7 +54,7 @@ const metricGroups = computed(() => {
     metric.tier !== "N/A" && metric.evidenceState === "observed" && metric.score !== null)
   const groups = definitions.flatMap((definition) => {
     const rows = available.filter((metric) => definition.matches(metric.tier))
-      .sort((left, right) => right.influence - left.influence || left.label.localeCompare(right.label))
+      .sort((left, right) => right.vectorWeight - left.vectorWeight || left.label.localeCompare(right.label))
     return rows.length ? [{ ...definition, rows }] : []
   })
   const unavailable = metrics.filter((metric) =>
@@ -133,11 +131,13 @@ const scopeLabel = (scope: PerformanceScopeSummary) => {
   if (scope.kind === "primary_archetype" && scope.primaryArchetype) {
     return titleCase(scope.primaryArchetype)
   }
-  if (scope.kind === "champion_position" && scope.championId && scope.position) {
-    return `${championNameById(props.champions ?? null, scope.championId)} · ${positionLabels[scope.position]}`
-  }
   return scope.key
 }
+
+const armCountLabel = (scope: PerformanceScopeSummary) =>
+  scope.headline.source === "career_arm_mean"
+    ? `${scope.headline.availableArms}/${scope.headline.totalArms} arms`
+    : `${scope.measuredGames}/${scope.games} graded games`
 
 const scopeGroups = computed(() => [
   { key: "overall", label: "Overall", items: [props.profile.scopes.overall] },
@@ -145,12 +145,7 @@ const scopeGroups = computed(() => [
   {
     key: "primary-archetype",
     label: "Primary archetype",
-    items: props.profile.scopes.primaryArchetypes,
-  },
-  {
-    key: "champion-position",
-    label: "Champion + position",
-    items: props.profile.scopes.championPositions,
+    items: props.profile.scopes.primaryArchetypes.slice(0, 2),
   },
 ].filter((group) => group.items.length))
 
@@ -162,30 +157,39 @@ const selectDimension = (key: string) => {
 
 <template>
   <section class="dimensions card" aria-labelledby="rvi-title">
-    <header class="dimensions-head">
+    <header v-if="!detailOnly" class="dimensions-head">
       <div>
-        <p class="eyebrow">Recall Vector Index · RVI model {{ profile.algorithmVersion }}</p>
-        <h2 id="rvi-title">Your game, measured in {{ profile.dimensions.length }} vectors.</h2>
+        <p class="eyebrow">Recall Vector Index</p>
+        <h2 id="rvi-title">Your RVI profile</h2>
         <p class="intro">
-          RVI keeps eight stable capability views: threat, teamfighting, positioning and survival,
-          control and utility, economy, objectives and macro, vision and setup, and initiative.
-          Every available measurement stays inspectable; diagnostics remain excluded from the
-          headline. Confidence and coverage show the sample directly, and small samples are never
-          pulled toward 50.
+          Your recorded performance in this scope. Select an arm to inspect its measurements.
         </p>
       </div>
       <div class="profile-meta">
-        <span>RVI score</span>
+        <span>Career RVI</span>
         <strong>{{ profile.score }}</strong>
-        <small>{{ confidenceLabel(profile.confidence) }} · {{ profile.measuredGames }} games · {{ Math.round(profile.coverage * 100) }}% coverage</small>
+        <small>
+          {{ confidenceLabel(profile.confidence) }} ·
+          <template v-if="profile.headline.source === 'career_arm_mean'">
+            {{ profile.headline.availableArms }}/{{ profile.headline.totalArms }} arms ·
+          </template>
+          {{ profile.measuredGames }} graded games
+        </small>
+      </div>
+    </header>
+    <header v-else class="detail-only-head">
+      <div>
+        <p class="eyebrow">Match RVI evidence</p>
+        <h2 id="rvi-title">Arm breakdown</h2>
+        <p class="intro">Select an arm to see the measurements behind this match.</p>
       </div>
     </header>
 
-    <section class="scope-summary" aria-labelledby="rvi-scopes-title">
+    <section v-if="!detailOnly" class="scope-summary" aria-labelledby="rvi-scopes-title">
       <div class="scope-summary-head">
         <div>
           <span id="rvi-scopes-title">Recorded RVI scopes</span>
-          <small>The same stored role-fit headline, grouped without changing its formula.</small>
+          <small>Overall, by position, and across your primary archetypes.</small>
         </div>
       </div>
       <div class="scope-groups">
@@ -197,8 +201,7 @@ const selectDimension = (key: string) => {
               <strong class="numeric">{{ scope.score }}</strong>
               <small>
                 {{ confidenceLabel(scope.confidence) }} ·
-                {{ scope.measuredGames }}/{{ scope.games }} measured ·
-                {{ Math.round(scope.coverage * 100) }}% coverage
+                {{ armCountLabel(scope) }} · {{ scope.games }} games
               </small>
             </article>
           </div>
@@ -206,16 +209,18 @@ const selectDimension = (key: string) => {
       </div>
     </section>
 
-    <div class="profile-lead">
+    <div v-if="!detailOnly" class="profile-lead">
       <PerformanceRadar
         v-if="canRenderRadar"
         :dimensions="profile.dimensions"
+        primary-label="Career profile"
+        secondary-label="Recent form"
         height="clamp(260px, 28vw, 320px)"
       />
       <div v-else class="partial-radar-note">
-        <strong>Radar needs three measured vectors</strong>
+        <strong>Radar needs three measured arms</strong>
         <p>
-          {{ measuredDimensions.length }} of {{ profile.dimensions.length }} vectors currently have
+          {{ measuredDimensions.length }} of {{ profile.dimensions.length }} arms currently have
           calibrated scores. Available measurements and exact evidence gaps remain listed below.
         </p>
       </div>
@@ -226,7 +231,7 @@ const selectDimension = (key: string) => {
           <p>{{ identity.description }}</p>
         </article>
         <article v-if="strongest" class="story-card strongest">
-          <span class="story-label">Top vector</span>
+          <span class="story-label">Top arm</span>
           <strong>{{ strongest.label }}</strong>
           <span class="story-score numeric">{{ strongest.score }}</span>
           <p>{{ strongest.description }}</p>
@@ -248,7 +253,7 @@ const selectDimension = (key: string) => {
       </div>
     </div>
 
-    <div class="dimension-grid" aria-label="RVI performance vectors">
+    <div class="dimension-grid" aria-label="RVI performance arms">
       <button
         v-for="dimension in profile.dimensions"
         :key="dimension.key"
@@ -261,7 +266,10 @@ const selectDimension = (key: string) => {
         <span class="dimension-mark" aria-hidden="true">{{ dimension.shortLabel.slice(0, 2) }}</span>
         <span class="dimension-copy">
           <strong>{{ dimension.label }}</strong>
-          <small v-if="dimension.headlineEligible">
+          <small v-if="dimension.careerOnly">
+            Career only · {{ dimension.games >= 20 ? `${dimension.games} measured games` : `${Math.max(0, 20 - dimension.games)} more games needed` }}
+          </small>
+          <small v-else-if="dimension.headlineEligible">
             {{ confidenceLabel(dimension.confidence) }} · {{ dimension.games }}/{{ dimension.eligibleGames }} games ·
             {{ Math.round(dimension.responsibilityWeight * 100) }}% avg responsibility
           </small>
@@ -272,6 +280,7 @@ const selectDimension = (key: string) => {
           <small>{{ scoreLabel(dimension.score) }}</small>
         </span>
         <span
+          v-if="!detailOnly"
           class="dimension-delta"
           :class="{ positive: (dimension.delta ?? 0) > 0, negative: (dimension.delta ?? 0) < 0 }"
         >
@@ -294,7 +303,7 @@ const selectDimension = (key: string) => {
         </span>
         <span class="toggle-score">
           <strong class="numeric">{{ selected.score ?? '—' }}</strong>
-          <small>vector score</small>
+          <small>arm score</small>
         </span>
         <span class="toggle-action">
           <span>{{ detailsOpen ? "Hide measurements" : "Show measurements" }}</span>
@@ -309,7 +318,10 @@ const selectDimension = (key: string) => {
       <div v-if="detailsOpen" :id="`dimension-${selected.key}`" class="detail-body">
         <p class="detail-description">{{ selected.description }}</p>
         <p class="responsibility-note">
-          <template v-if="selected.headlineEligible">
+          <template v-if="selected.careerOnly">
+            Career RVI only: Range never contributes to an individual match Grade.
+          </template>
+          <template v-else-if="selected.headlineEligible">
             Average stored Grade v3 responsibility weight:
             <strong>{{ Math.round(selected.responsibilityWeight * 100) }}%</strong>.
           </template>
@@ -371,23 +383,38 @@ const selectDimension = (key: string) => {
                   <small>{{ scoreLabel(metric.score) }}</small>
                 </div>
                 <div class="measurement-influence">
-                  <strong v-if="metric.influence > 0" class="numeric">
-                    {{ Math.round(metric.influence * 100) }}%
+                  <strong v-if="metric.vectorWeight > 0" class="numeric">
+                    {{ Math.round(metric.vectorWeight * 100) }}% arm weight
                   </strong>
                   <strong v-else>Diagnostic</strong>
-                  <small>{{ metric.influence > 0 ? 'of Grade responsibility mix' : 'no headline influence' }}</small>
+                  <small v-if="metric.gradeInfluence > 0">
+                    {{ Math.round(metric.gradeInfluence * 100) }}%
+                    {{ profile.scoringContext === 'match' ? "of this match's Grade mix" : 'average Grade influence' }}
+                  </small>
+                  <small v-else-if="metric.vectorWeight > 0">
+                    Declared in the arm;
+                    {{ profile.scoringContext === 'match' ? 'no match Grade responsibility here' : 'no average Grade influence' }}
+                  </small>
+                  <small v-else>No arm or Grade influence</small>
                 </div>
               </article>
             </div>
           </section>
         </div>
+        <p v-else-if="selected.careerOnly" class="no-measurements">
+          Range becomes available after 20 measured games. It is 50% consistency—your RoleFit
+          lower quartile and MAD-based repeatability—and 50% demonstrated breadth across eligible
+          positions, primary archetypes, and champions. Abyss modes omit the position domain.
+        </p>
         <p v-else class="no-measurements">
-          No metric observations were retained for this vector in the selected recipe.
+          No metric observations were retained for this arm in the selected recipe.
         </p>
         <p class="method-note">
-          The headline averages stored match role-fit scores. Capability vectors aggregate their
-          declared measurements with fixed recipe weights; missing scored evidence withholds the
-          vector instead of becoming zero or increasing another measurement's influence.
+           Match RoleFit is frozen-reference calibrated from its applicable responsibility arms.
+           Career RVI is the equal mean of available career arms. Core evidence is required;
+           observed secondary evidence joins an arm at its declared recipe weight, while unavailable
+           secondary evidence remains visible and is arithmetically neutral to the observed core
+           bundle.
         </p>
       </div>
     </section>
@@ -508,6 +535,19 @@ const selectDimension = (key: string) => {
   align-items: center;
   gap: clamp(var(--space-4), 2vw, var(--space-5));
   padding-block: var(--space-3) var(--space-4);
+}
+
+.detail-only-head {
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.detail-only-head h2 {
+  margin: 0;
+  color: var(--gold-bright);
+  font-family: var(--font-display);
+  font-size: clamp(18px, 1.8vw, 23px);
+  font-weight: 500;
 }
 
 .partial-radar-note {

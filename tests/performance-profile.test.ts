@@ -16,7 +16,7 @@ function familyScores(value: number | null): Record<string, number | null> {
 function familyWeights(value = 1 / (RVI_VECTOR_KEYS.length - 1)): Record<string, number> {
   return Object.fromEntries(RVI_VECTOR_KEYS.map((family) => [
     family,
-    family === "initiative_pressure" ? 0 : value,
+    family === "consistency_versatility" ? 0 : value,
   ]))
 }
 
@@ -85,10 +85,9 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
     })).toBeUndefined()
   })
 
-  it("returns eight capability vectors and the authoritative role-fit headline", () => {
+  it("returns seven match arms plus career Range and averages available career arms", () => {
     const familyPercentiles: Record<string, number> = {
-      threat: 90,
-      teamfighting: 85,
+      combat: 90,
       positioning_survival: 80,
       control_utility: 75,
       economy: 70,
@@ -107,23 +106,42 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
 
     expect(profile.algorithmVersion).toBe(3)
     expect(profile.recipeId).toBe(GRADE_V3_RECIPE_ID)
-    expect(profile.score).toBe(72)
-    expect(profile.headline).toMatchObject({ source: "role_fit", score: 72, nEff: 36 })
-    expect(profile.headline.confidenceInterval95).toMatchObject({ lower: 72, upper: 72 })
+    expect(profile.score).toBe(67)
+    expect(profile.headline).toMatchObject({
+      source: "career_arm_mean",
+      score: 67.275,
+      availableArms: 8,
+      totalArms: 8,
+      armCoverage: 1,
+      evidenceCoverage: 1,
+      nEff: 36,
+    })
     expect(profile.confidence).toBe("established")
     expect(profile.dimensions.map((dimension) => dimension.key)).toEqual(RVI_VECTOR_KEYS)
     expect(profile.dimensions.map((dimension) => dimension.score))
-      .toEqual([90, 85, 80, 75, 70, 60, 50, 40])
+      .toEqual([90, 80, 75, 70, 60, 50, 40, 73])
     expect(profile.dimensions.every((dimension) => dimension.metrics.length === 0)).toBe(true)
-    expect(profile.auxiliary).toMatchObject({ excludedFromHeadline: true })
+    expect(profile.auxiliary).toMatchObject({ contributesThroughRange: true })
     expect(profile.auxiliary?.consistency).toMatchObject({ median: 72, scaledMad: 0 })
+    expect(profile.roleFitAverage).toBe(72)
+    expect(profile.coverage).toBe(1)
+    expect(profile.scopes.overall.headline).toMatchObject({
+      source: "career_arm_mean",
+      totalArms: 8,
+    })
+    expect(profile.scopes.positions.every((scope) =>
+      scope.headline.source === "career_arm_mean" && scope.headline.totalArms === 7,
+    )).toBe(true)
+    expect(profile.scopes.primaryArchetypes.every((scope) =>
+      scope.headline.source === "career_arm_mean" && scope.headline.totalArms === 7,
+    )).toBe(true)
   })
 
   it("exposes multiple calibrated measurements instead of one synthetic family row", () => {
     const profile = buildPerformanceProfile({
       rviObservations: [observation(1, {
         metrics: [
-          metric("damage_share", "threat", 80, {
+          metric("damage_share", "combat", 80, {
             label: "Damage share",
             tier: "CORE",
             vectorWeight: 1,
@@ -134,7 +152,7 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
             comparisonScope: "position",
             referenceMatchCount: 64,
           }),
-          metric("champion_damage_per_min", "threat", 72, {
+          metric("champion_damage_per_min", "combat", 72, {
             label: "Champion damage per minute",
             rawEvidence: { state: "observed", value: 812 },
             unit: "damage/min",
@@ -142,17 +160,17 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
         ],
       })],
     })!
-    const threat = profile.dimensions.find((dimension) => dimension.key === "threat")!
+    const combat = profile.dimensions.find((dimension) => dimension.key === "combat")!
 
-    expect(threat.metrics).toHaveLength(2)
-    expect(threat.metrics[0]).toMatchObject({
+    expect(combat.metrics).toHaveLength(2)
+    expect(combat.metrics[0]).toMatchObject({
       key: "champion_damage_per_min",
       score: 72,
       rawValue: 812,
       tier: "DIAGNOSTIC",
       influence: 0,
     })
-    expect(threat.metrics[1]).toMatchObject({
+    expect(combat.metrics[1]).toMatchObject({
       key: "damage_share",
       score: 80,
       rawValue: .31,
@@ -162,10 +180,10 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
       comparisonScope: "position",
       referenceMatchCount: 64,
     })
-    expect(threat.metrics.some((entry) => entry.key === "threat")).toBe(false)
+    expect(combat.metrics.some((entry) => entry.key === "combat")).toBe(false)
   })
 
-  it("summarizes the exact headline by observed position, archetype, and champion-position", () => {
+  it("summarizes the exact headline by observed position and archetype", () => {
     const rows = [
       observation(1, { championId: 84, position: "MIDDLE", primaryArchetype: "assassin", roleFitScore: 80 }),
       observation(2, { championId: 84, position: "MIDDLE", primaryArchetype: "assassin", roleFitScore: 80 }),
@@ -178,49 +196,46 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
 
     expect(profile.scopes.overall).toMatchObject({
       kind: "overall",
-      score: 56,
+      score: 50,
       games: 6,
       measuredGames: 5,
-      coverage: 5 / 6,
+      coverage: 47 / 48,
       confidence: "learning",
     })
     expect(profile.scopes.positions).toEqual([
-      expect.objectContaining({ position: "MIDDLE", score: 80, games: 3, coverage: 2 / 3 }),
+      expect.objectContaining({ position: "MIDDLE", score: 50, games: 3, coverage: 1 }),
       expect.objectContaining({ position: "BOTTOM", score: 50, games: 2, coverage: 1 }),
     ])
     expect(profile.scopes.primaryArchetypes).toEqual([
-      expect.objectContaining({ primaryArchetype: "assassin", score: 80, games: 3 }),
+      expect.objectContaining({ primaryArchetype: "assassin", score: 50, games: 3 }),
       expect.objectContaining({ primaryArchetype: "marksman", score: 50, games: 2 }),
     ])
-    expect(profile.scopes.championPositions).toEqual([
-      expect.objectContaining({ championId: 84, position: "MIDDLE", score: 80, games: 3 }),
-      expect.objectContaining({ championId: 18, position: "BOTTOM", score: 50, games: 2 }),
-    ])
-    expect(profile.scopes.overall.headline).toBe(profile.headline)
+    expect(profile.scopes).not.toHaveProperty("championPositions")
+    expect(profile.scopes.overall.headline).toEqual(profile.headline)
     expect(profile.auxiliary?.consistency).toBeDefined()
     expect(profile.auxiliary?.versatility).toBeDefined()
   })
 
   it("keeps zero-weight Marksman Vision and Control diagnostic and out of identity", () => {
     const responsibilityWeights: Record<string, number> = {
-      threat: .35,
-      teamfighting: .1,
+      combat: .45,
       positioning_survival: .1,
       economy: .35,
       objectives_macro: .1,
       vision_setup: 0,
       control_utility: 0,
       initiative_pressure: 0,
+      consistency_versatility: 0,
     }
     const familyPercentiles: Record<string, number> = {
-      threat: 75,
-      teamfighting: 60,
+      combat: 75,
       positioning_survival: 55,
       economy: 70,
       objectives_macro: 56,
       vision_setup: 99,
       control_utility: 98,
       initiative_pressure: 50,
+      consistency_versatility: 50,
     }
     const profile = buildPerformanceProfile({
       rviObservations: Array.from({ length: 25 }, (_, index) => observation(index + 1, {
@@ -237,17 +252,17 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
     const vision = profile.dimensions.find((dimension) => dimension.key === "vision_setup")!
     const control = profile.dimensions.find((dimension) => dimension.key === "control_utility")!
 
-    expect(vision).toMatchObject({ responsibilityWeight: 0, headlineEligible: false })
-    expect(control).toMatchObject({ responsibilityWeight: 0, headlineEligible: false })
+    expect(vision).toMatchObject({ responsibilityWeight: 0, headlineEligible: true })
+    expect(control).toMatchObject({ responsibilityWeight: 0, headlineEligible: true })
     expect(vision.score).toBeGreaterThan(75)
     expect(control.score).toBeGreaterThan(75)
-    expect(vision.description).toContain("diagnostic")
-    expect(control.description).toContain("diagnostic")
-    expect(profile.strongestKey).toBe("threat")
-    expect(profile.growthKey).toBeUndefined()
+    expect(vision.description).not.toContain("diagnostic")
+    expect(control.description).not.toContain("diagnostic")
+    expect(profile.strongestKey).toBe("vision_setup")
+    expect(profile.growthKey).toBe("control_utility")
     expect(classifyRviIdentity(profile)).toMatchObject({
-      label: "Carry",
-      vectors: ["threat", "economy"],
+      label: "Hybrid",
+      vectors: ["vision_setup", "control_utility"],
     })
   })
 
@@ -259,13 +274,14 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
       roleFitScore: 62,
       familyPercentiles: {
         ...familyScores(index < 5 ? 50 : 60),
-        threat: index < 5 ? 55 : 65,
+        combat: index < 5 ? 55 : 65,
         control_utility: 45,
       },
       metrics: [metric(
         "ally_heal_shield_per_min",
         "control_utility",
         index === 0 ? null : index === 1 ? 0 : 100,
+        { tier: "SECONDARY", vectorWeight: .2, gradeWeight: .1 },
       )],
     }))
     const profile = buildPerformanceProfile({ rviObservations: rows })!
@@ -276,16 +292,16 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
     expect(protection).toMatchObject({
       score: 96,
       games: 24,
-      influence: 0,
-      tier: "DIAGNOSTIC",
+      tier: "SECONDARY",
     })
-    expect(profile.score).toBe(62)
-    expect(profile.strongestKey).toBe("threat")
-    expect(profile.growthKey).toBe("threat")
+    expect(protection.influence).toBeCloseTo(.1, 12)
+    expect(profile.score).toBe(57)
+    expect(profile.strongestKey).toBe("combat")
+    expect(profile.growthKey).toBe("combat")
     expect(classifyRviIdentity(profile).vectors).not.toContain("initiative_pressure")
   })
 
-  it("never rebuilds the headline from family dimensions or shrinks a small sample", () => {
+  it("uses career arms for career RVI while preserving match RoleFit", () => {
     const row = observation(1, {
       roleFitScore: 20,
       familyPercentiles: familyScores(90),
@@ -296,12 +312,21 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
       scoringContext: "match",
     })!
 
-    expect(career.score).toBe(20)
+    expect(career.score).toBe(90)
     expect(match.score).toBe(20)
-    expect(career.dimensions.every((dimension) => dimension.score === 90)).toBe(true)
+    expect(career.roleFitAverage).toBe(20)
+    expect(match.roleFitAverage).toBe(20)
+    expect(career.coverage).toBe(1)
+    expect(match.coverage).toBe(1)
+    expect(career.headline).toMatchObject({ armCoverage: 7 / 8, evidenceCoverage: 1 })
+    expect(career.dimensions.filter((dimension) =>
+      dimension.key !== "consistency_versatility")
+      .every((dimension) => dimension.score === 90)).toBe(true)
+    expect(career.dimensions.at(-1)?.score).toBeNull()
+    expect(career.dimensions.at(-1)?.careerOnly).toBe(true)
     expect(match.dimensions.every((dimension) => dimension.score === 90)).toBe(true)
-    expect(career.headline.confidence).toBe("learning")
-    expect(career.headline.confidenceInterval95).toMatchObject({ lower: 20, upper: 20 })
+    expect(career.headline).toMatchObject({ source: "career_arm_mean", score: 90 })
+    expect(match.headline).toMatchObject({ source: "role_fit", score: 20 })
   })
 
   it("preserves profile recent-form fields and excludes career diagnostics from match context", () => {
@@ -312,12 +337,13 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
     const career = buildPerformanceProfile({ rviObservations: rows })!
     const match = buildPerformanceProfile({ rviObservations: [rows.at(-1)!], scoringContext: "match" })!
 
-    expect(career.score).toBe(74)
-    expect(career.recentHeadline?.score).toBe(90)
-    expect(career.dimensions.every((dimension) =>
+    expect(career.score).toBe(68)
+    expect(career.recentHeadline?.score).toBe(79.25)
+    expect(career.dimensions.filter((dimension) =>
+      dimension.key !== "consistency_versatility").every((dimension) =>
       dimension.score === 68 && dimension.recentScore === 80 && dimension.delta === 12)).toBe(true)
-    expect(career.growthKey).toBe("threat")
-    expect(career.auxiliary?.excludedFromHeadline).toBe(true)
+    expect(career.growthKey).toBe("combat")
+    expect(career.auxiliary?.contributesThroughRange).toBe(true)
     expect(match.recentHeadline).toBeUndefined()
     expect(match.auxiliary).toBeUndefined()
     expect(match.growthKey).toBeUndefined()
@@ -333,13 +359,15 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
       ],
     })!
 
-    expect(profile.score).toBe(20)
+    expect(profile.score).toBe(0)
     expect(profile.games).toBe(2)
     expect(profile.measuredGames).toBe(1)
     expect(profile.coverage).toBe(.5)
+    expect(profile.headline.coverage.gameRatio).toBe(.5)
     expect(profile.dimensions).toHaveLength(8)
-    expect(profile.dimensions.every((dimension) =>
+    expect(profile.dimensions.slice(0, -1).every((dimension) =>
       dimension.score === 0 && dimension.games === 1)).toBe(true)
+    expect(profile.dimensions.at(-1)?.score).toBeNull()
   })
 
   it("uses explicit half-life weighting without changing the underlying formula", () => {
@@ -358,7 +386,7 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
     expect(profile.weighting).toEqual({ kind: "half_life", halfLifeMs: 10, referenceTime: 20 })
   })
 
-  it("exposes the deterministic bootstrap interval independent of input order", () => {
+  it("keeps the career arm headline independent of input order", () => {
     const rows = [10, 30, 70, 90].map((roleFitScore, index) => observation(index + 1, {
       roleFitScore,
       familyPercentiles: familyScores(roleFitScore),
@@ -366,16 +394,15 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
     const ordered = buildPerformanceProfile({ rviObservations: rows })!
     const reversed = buildPerformanceProfile({ rviObservations: [...rows].reverse() })!
 
-    expect(reversed.headline.confidenceInterval95)
-      .toEqual(ordered.headline.confidenceInterval95)
-    expect(ordered.headline.confidenceInterval95).toMatchObject({
-      confidenceLevel: .95,
-      replicates: 2_000,
-      observedGames: 4,
+    expect(reversed.headline).toEqual(ordered.headline)
+    expect(ordered.headline).toMatchObject({
+      source: "career_arm_mean",
+      score: 50,
+      availableArms: 7,
     })
   })
 
-  it("ignores legacy mode, timeline, and champion-class display inputs", () => {
+  it("uses mode family to expose exactly four Abyss match arms plus career Range", () => {
     const row = observation(1, {
       championId: 54,
       roleFitScore: 35,
@@ -390,7 +417,13 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
     })!
 
     expect(legacyDecorated.score).toBe(plain.score)
-    expect(legacyDecorated.dimensions).toEqual(plain.dimensions)
+    expect(legacyDecorated.dimensions.map((dimension) => dimension.key)).toEqual([
+      "combat",
+      "positioning_survival",
+      "control_utility",
+      "economy",
+      "consistency_versatility",
+    ])
     expect(legacyDecorated.dimensions.flatMap((dimension) =>
       dimension.metrics.map((metric) => metric.key))).toEqual([])
   })

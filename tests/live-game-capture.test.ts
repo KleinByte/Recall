@@ -298,4 +298,75 @@ describe("LiveGameCaptureRepository", () => {
       }),
     ])
   })
+
+  it("keeps unmatched incomplete live kills in raw capture instead of the compact timeline", () => {
+    const db = new Database(":memory:")
+    applyMigrations(db)
+    const repo = new LiveGameCaptureRepository(db as never)
+    repo.record(10, "owner", snapshot(412.3, {
+      events: [{
+        id: 77,
+        name: "ChampionKill",
+        time: 412.3,
+        killerName: "Unknown killer",
+        victimName: "Unknown victim",
+        assisters: [],
+      }],
+    }))
+    const timeline: CompactTimeline = { frames: [], events: [], turningPoints: [] }
+
+    const enriched = repo.enrichTimeline(10, "owner", timeline, [
+      { participantId: 1, teamId: 100, isPlayer: 1, summonerName: "Owner#NA1" },
+    ])
+
+    expect(repo.listEvents(10, "owner")).toHaveLength(1)
+    expect(enriched.events.filter((event) => event.type === "CHAMPION_KILL"))
+      .toEqual([])
+    expect(enriched.evidenceCoverage).toMatchObject({
+      incompleteSupplementalKillEvents: 1,
+    })
+  })
+
+  it("joins an unresolved live kill to a unique post-game event by timestamp", () => {
+    const db = new Database(":memory:")
+    applyMigrations(db)
+    const repo = new LiveGameCaptureRepository(db as never)
+    repo.record(10, "owner", snapshot(412.3, {
+      events: [{
+        id: 78,
+        name: "ChampionKill",
+        time: 412.3,
+        killerName: "Unresolved killer",
+        victimName: "Unresolved victim",
+        assisters: [],
+      }],
+    }))
+    const timeline: CompactTimeline = {
+      frames: [],
+      events: [{
+        eventId: "post-game-unique-kill",
+        timestamp: 412_275,
+        type: "CHAMPION_KILL",
+        category: "kill",
+        participantId: 1,
+        targetId: 6,
+        teamId: 100,
+        position: { x: 7_000, y: 7_000 },
+      }],
+      turningPoints: [],
+    }
+
+    const enriched = repo.enrichTimeline(10, "owner", timeline, [
+      { participantId: 1, teamId: 100, isPlayer: 1, summonerName: "Owner#NA1" },
+    ])
+
+    expect(enriched.events.filter((event) => event.type === "CHAMPION_KILL"))
+      .toEqual([expect.objectContaining({
+        eventId: "post-game-unique-kill",
+        participantId: 1,
+        targetId: 6,
+        position: { x: 7_000, y: 7_000 },
+      })])
+    expect(enriched.evidenceCoverage?.incompleteSupplementalKillEvents).toBe(0)
+  })
 })

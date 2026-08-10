@@ -10,8 +10,10 @@ export interface TimelineSourceCandidate {
 }
 
 const AUTHORITY: Record<TimelineSourceCandidate["source"], number> = {
-  league_client: 0,
-  match_v5: 1,
+  // Match-V5 is Riot's canonical post-game artifact. The local endpoint is a
+  // valuable keyless fallback but has repeatedly omitted/duplicated fields.
+  match_v5: 0,
+  league_client: 1,
   live_capture: 2,
 }
 

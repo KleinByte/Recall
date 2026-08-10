@@ -17,6 +17,7 @@ const dimension = (key: string, score: number): PerformanceDimensionScore => ({
   confidence: "established",
   responsibilityWeight: 1,
   headlineEligible: true,
+  careerOnly: false,
   metrics: [],
 })
 
@@ -56,6 +57,7 @@ const profile = (scores: Record<string, number>, measuredGames = 40): Performanc
     scoringContext: "profile",
     weighting: { kind: "equal" },
     score,
+    roleFitAverage: score,
     headline,
     scopes: {
       overall: {
@@ -70,7 +72,6 @@ const profile = (scores: Record<string, number>, measuredGames = 40): Performanc
       },
       positions: [],
       primaryArchetypes: [],
-      championPositions: [],
     },
     games: measuredGames,
     recentGames: Math.min(20, measuredGames),
@@ -84,13 +85,13 @@ const profile = (scores: Record<string, number>, measuredGames = 40): Performanc
 
 describe("RVI identity", () => {
   it("waits for a measured RVI sample", () => {
-    expect(classifyRviIdentity(profile({ threat: 80, control_utility: 74 }, 4)).label)
+    expect(classifyRviIdentity(profile({ combat: 80, control_utility: 74 }, 4)).label)
       .toBe("Developing Identity")
   })
 
   it("turns the RVI shape into a recognizable playstyle", () => {
     const result = classifyRviIdentity(profile({
-      teamfighting: 78,
+      combat: 78,
       control_utility: 72,
       economy: 57,
       positioning_survival: 54,
@@ -99,19 +100,19 @@ describe("RVI identity", () => {
     }))
 
     expect(result.label).toBe("Playmaker")
-    expect(result.vectors).toEqual(["teamfighting", "control_utility"])
-    expect(result.description).toContain("teamfight involvement")
+    expect(result.vectors).toEqual(["combat", "control_utility"])
+    expect(result.description).toContain("fight impact")
   })
 
   it("uses a single vector when it clearly dominates", () => {
-    expect(classifyRviIdentity(profile({ threat: 82, economy: 60, vision_setup: 48 })).label)
-      .toBe("Damage Dealer")
+    expect(classifyRviIdentity(profile({ combat: 82, economy: 60, vision_setup: 48 })).label)
+      .toBe("Combat Carry")
   })
 
   it("recognizes an even RVI shape", () => {
     expect(classifyRviIdentity(profile({
-      threat: 62,
-      teamfighting: 61,
+      combat: 62,
+      initiative_pressure: 61,
       positioning_survival: 60,
       control_utility: 59,
       economy: 58,
@@ -125,7 +126,7 @@ describe("RVI identity", () => {
       objectives_macro: 78,
       economy: 73,
       vision_setup: 55,
-      threat: 52,
+      combat: 52,
       control_utility: 51,
       positioning_survival: 50,
     })).label).toBe("Macro Player")
@@ -135,7 +136,7 @@ describe("RVI identity", () => {
     expect(classifyRviIdentity(profile({
       control_utility: 79,
       positioning_survival: 74,
-      threat: 56,
+      combat: 56,
       objectives_macro: 54,
       economy: 52,
       vision_setup: 51,

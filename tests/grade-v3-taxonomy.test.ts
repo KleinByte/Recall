@@ -40,25 +40,27 @@ describe("Grade v3 taxonomy and recipe identity", () => {
   it("grades Zac Jungle by Vanguard responsibilities", () => {
     const tiers = responsibilityTiersFor(sr, "JUNGLE", "vanguard")
     expect(tiers).toEqual({
-      fighting: 1,
-      availability: 2,
-      resources: 1,
-      objectives: 2,
-      vision: 1,
-      control: 2,
+      combat: 1,
+      positioning_survival: 2,
+      control_utility: 2,
+      economy: 1,
+      objectives_macro: 2,
+      vision_setup: 1,
+      initiative_pressure: 2,
     })
   })
 
-  it.each(["BOTTOM", "MIDDLE"] as const)(
+  it.each([["BOTTOM", 1], ["MIDDLE", 2]] as const)(
     "grades Tristana %s by Marksman responsibilities",
-    (position) => {
+    (position, initiative) => {
       expect(responsibilityTiersFor(sr, position, "marksman")).toEqual({
-        fighting: 2,
-        availability: 1,
-        resources: 2,
-        objectives: 1,
-        vision: 0,
-        control: 0,
+        combat: 2,
+        positioning_survival: 1,
+        control_utility: 0,
+        economy: 2,
+        objectives_macro: 1,
+        vision_setup: 0,
+        initiative_pressure: initiative,
       })
     },
   )
@@ -83,9 +85,9 @@ describe("Grade v3 taxonomy and recipe identity", () => {
     const teemo = responsibilityTiersFor(sr, "TOP", "specialist", 17)
     const chogath = responsibilityTiersFor(sr, "TOP", "specialist", 31)
 
-    expect(kayle).toMatchObject({ fighting: 2, vision: 0, control: 0 })
-    expect(teemo).toMatchObject({ fighting: 1, vision: 2, control: 1 })
-    expect(chogath).toMatchObject({ objectives: 2, control: 2 })
+    expect(kayle).toMatchObject({ combat: 2, vision_setup: 0, control_utility: 0 })
+    expect(teemo).toMatchObject({ combat: 1, vision_setup: 2, control_utility: 1 })
+    expect(chogath).toMatchObject({ objectives_macro: 2, control_utility: 2 })
     expect(teemo).not.toEqual(kayle)
     expect(responsibilityTiersFor(sr, "TOP", "specialist", 60_017)).toEqual(teemo)
   })
@@ -131,16 +133,24 @@ describe("Grade v3 taxonomy and recipe identity", () => {
     expect(CURATED_PRIMARY_ARCHETYPES.size).toBe(bundledCanonicalIds.size)
   })
 
-  it("makes ARAM objective and vision families diagnostic", () => {
+  it("makes exactly Combat, Survival, Utility, and Economy mode-capable on the Abyss", () => {
     const aram: GradeModeContextV3 = {
       modeFamily: "aram",
       trackedMode: "aram",
       ruleset: "howling_abyss",
       rulesetKey: "aram-rules-r1",
     }
-    expect(responsibilityTiersFor(aram, "UNKNOWN", "vanguard")).toMatchObject({
-      objectives: 0,
-      vision: 0,
+    const tiers = responsibilityTiersFor(aram, "UNKNOWN", "vanguard")
+    expect(Object.entries(tiers).filter(([, tier]) => tier > 0).map(([key]) => key)).toEqual([
+      "combat",
+      "positioning_survival",
+      "control_utility",
+      "economy",
+    ])
+    expect(tiers).toMatchObject({
+      objectives_macro: 0,
+      vision_setup: 0,
+      initiative_pressure: 0,
     })
   })
 
@@ -160,6 +170,6 @@ describe("Grade v3 taxonomy and recipe identity", () => {
     expect(first).toContain(GRADE_V3_RECIPE.recipeDefinitionId)
     expect(() => recipeIdForCalibration("mutable current")).toThrow(TypeError)
     expect(Object.isFrozen(GRADE_V3_RECIPE)).toBe(true)
-    expect(Object.isFrozen(GRADE_V3_RECIPE.aggregation.familyMetrics.fighting)).toBe(true)
+    expect(Object.isFrozen(GRADE_V3_RECIPE.aggregation.familyMetrics.combat)).toBe(true)
   })
 })

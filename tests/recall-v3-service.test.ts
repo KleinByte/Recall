@@ -10,6 +10,10 @@ import {
 } from "../electron/main/matches/recall-v3-service.js"
 import { GRADE_V3_RECIPE_DEFINITION_ID } from "../electron/main/matches/grade-v3-recipe.js"
 import { POSITION_RESOLVER_VERSION } from "../electron/main/matches/position.js"
+import {
+  TIMELINE_MAPPER_VERSION,
+  type CompactTimeline,
+} from "../electron/main/riot/timeline-mapper.js"
 import type {
   MatchRow,
   ParticipantRow,
@@ -174,6 +178,117 @@ function rawLcuScoreboard(gameId: number) {
 }
 
 describe("RecallV3Service", () => {
+  it("attributes timeline quality and ward completeness to the selected source", () => {
+    const { db } = databaseWithMatches(10)
+    const service = new RecallV3Service(db, () => 10_000)
+    expect(service.ensureFrozenReference(BACKUP)).toMatchObject({ ready: 10 })
+    const objective = {
+      eventId: "dragon",
+      timestamp: 12 * 60_000,
+      type: "ELITE_MONSTER_KILL",
+      category: "objective" as const,
+      participantId: 2,
+      assistingParticipantIds: [1],
+      teamId: 100,
+      objective: "DRAGON",
+      position: { x: 5_000, y: 5_000 },
+    }
+    const matchV5Timeline: CompactTimeline = {
+      frames: [],
+      events: [{
+        eventId: "ward",
+        timestamp: 11 * 60_000,
+        type: "WARD_PLACED",
+        category: "vision",
+        participantId: 1,
+        teamId: 100,
+        position: { x: 5_100, y: 5_100 },
+      }, objective],
+      turningPoints: [],
+    }
+    const localTimeline: CompactTimeline = {
+      frames: [],
+      events: [objective],
+      turningPoints: [],
+    }
+    const sources = new MatchSourceRepository(db)
+    sources.persistTimelineSource({
+      gameId: 1,
+      puuid: PUUID,
+      source: "match_v5",
+      sourceMatchId: "NA1_1",
+      mapperVersion: TIMELINE_MAPPER_VERSION,
+      timeline: matchV5Timeline,
+      capturedAt: 1,
+    })
+    sources.persistTimelineSource({
+      gameId: 1,
+      puuid: PUUID,
+      source: "league_client",
+      sourceMatchId: "1",
+      mapperVersion: TIMELINE_MAPPER_VERSION,
+      timeline: localTimeline,
+      capturedAt: 2,
+    })
+    db.prepare(`
+      UPDATE match_timeline_sources SET updated_at = CASE source
+        WHEN 'league_client' THEN 200 ELSE 100 END
+      WHERE game_id = 1 AND puuid = ?
+    `).run(PUUID)
+
+    expect(service.gradeStoredMatch(1, PUUID)).toBe("ready")
+    expect(db.prepare(`
+      SELECT raw_evidence_state AS state, raw_value AS value,
+             source_quality AS sourceQuality
+      FROM match_metric_observations
+      WHERE game_id = 1 AND puuid = ? AND participant_id = 1
+        AND metric_key = 'objective_setup_ward_rate'
+    `).get(PUUID)).toEqual({ state: "observed", value: 1, sourceQuality: "verified" })
+  })
+
+  it("does not derive v3 observations from an old-mapper compact fallback", () => {
+    const { db } = databaseWithMatches(10)
+    const service = new RecallV3Service(db, () => 10_000)
+    expect(service.ensureFrozenReference(BACKUP)).toMatchObject({ ready: 10 })
+    const participants = lobby(1)
+    const stale: CompactTimeline = {
+      frames: [{
+        timestamp: 10 * 60_000,
+        blueGold: 50_000,
+        redGold: 49_000,
+        ownerGold: 10_000,
+        ownerLevel: 10,
+        ownerXp: 5_000,
+        ownerCs: 100,
+        participants: participants.map((entry) => ({
+          participantId: entry.participantId,
+          teamId: entry.teamId,
+          currentGold: 500,
+          totalGold: entry.goldEarned,
+          level: 10,
+          xp: 5_000,
+          minionsKilled: entry.totalMinionsKilled,
+          jungleMinionsKilled: entry.neutralMinions,
+        })),
+      }],
+      events: [],
+      turningPoints: [],
+    }
+    db.prepare(`
+      INSERT INTO match_timeline_cache
+        (game_id, puuid, status, mapper_version, data_json, updated_at)
+      VALUES (1, ?, 'ready', ?, ?, 1)
+    `).run(PUUID, TIMELINE_MAPPER_VERSION - 1, JSON.stringify(stale))
+
+    expect(service.gradeStoredMatch(1, PUUID)).toBe("ready")
+    expect(db.prepare(`
+      SELECT raw_evidence_state AS state, raw_evidence_reason AS reason
+      FROM match_metric_observations
+      WHERE game_id = 1 AND puuid = ? AND participant_id = 1
+        AND metric_key = 'gold_delta_10'
+    `).get(PUUID)).toEqual({ state: "unavailable", reason: "timeline_not_retained" })
+  })
+
   it("waits for enough complete local matches before freezing a reference", () => {
     const { db } = databaseWithMatches(9)
     const service = new RecallV3Service(db, () => 10_000)

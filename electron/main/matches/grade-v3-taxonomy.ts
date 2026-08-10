@@ -336,31 +336,38 @@ export function resolvePrimaryArchetypeWithSource(
 type ResponsibilityProfile = Readonly<Record<GradeFamilyV3, ResponsibilityTier>>
 
 const profile = (
-  fighting: ResponsibilityTier,
-  availability: ResponsibilityTier,
-  resources: ResponsibilityTier,
-  objectives: ResponsibilityTier,
-  vision: ResponsibilityTier,
-  control: ResponsibilityTier,
+  combat: ResponsibilityTier,
+  positioningSurvival: ResponsibilityTier,
+  controlUtility: ResponsibilityTier,
+  economy: ResponsibilityTier,
+  objectivesMacro: ResponsibilityTier,
+  visionSetup: ResponsibilityTier,
+  initiativePressure: ResponsibilityTier,
 ): ResponsibilityProfile => Object.freeze({
-  fighting, availability, resources, objectives, vision, control,
+  combat,
+  positioning_survival: positioningSurvival,
+  control_utility: controlUtility,
+  economy,
+  objectives_macro: objectivesMacro,
+  vision_setup: visionSetup,
+  initiative_pressure: initiativePressure,
 })
 
 const ARCHETYPE_RESPONSIBILITIES: Readonly<Record<PrimaryArchetype, ResponsibilityProfile>> =
   Object.freeze({
-    assassin: profile(2, 1, 2, 1, 0, 0),
-    artillery: profile(2, 2, 2, 1, 1, 1),
-    battlemage: profile(2, 2, 2, 1, 1, 1),
-    burst_mage: profile(2, 1, 2, 1, 1, 1),
-    catcher: profile(1, 1, 0, 1, 2, 2),
-    diver: profile(2, 2, 1, 1, 0, 1),
-    enchanter: profile(1, 1, 0, 1, 2, 2),
-    juggernaut: profile(2, 2, 1, 1, 0, 1),
-    marksman: profile(2, 1, 2, 1, 0, 0),
-    skirmisher: profile(2, 2, 1, 1, 0, 1),
-    vanguard: profile(1, 2, 0, 1, 0, 2),
-    warden: profile(1, 2, 0, 1, 1, 2),
-    specialist: profile(1, 1, 1, 1, 1, 1),
+    assassin: profile(2, 1, 0, 2, 1, 0, 2),
+    artillery: profile(2, 2, 1, 2, 1, 1, 1),
+    battlemage: profile(2, 2, 1, 2, 1, 1, 1),
+    burst_mage: profile(2, 1, 1, 2, 1, 1, 1),
+    catcher: profile(1, 1, 2, 0, 1, 2, 2),
+    diver: profile(2, 2, 1, 1, 1, 0, 2),
+    enchanter: profile(1, 1, 2, 0, 1, 2, 2),
+    juggernaut: profile(2, 2, 1, 1, 1, 0, 1),
+    marksman: profile(2, 1, 0, 2, 1, 0, 1),
+    skirmisher: profile(2, 2, 1, 1, 1, 0, 2),
+    vanguard: profile(1, 2, 2, 0, 1, 0, 2),
+    warden: profile(1, 2, 2, 0, 1, 1, 2),
+    specialist: profile(1, 1, 1, 1, 1, 1, 1),
   })
 
 /**
@@ -370,20 +377,20 @@ const ARCHETYPE_RESPONSIBILITIES: Readonly<Record<PrimaryArchetype, Responsibili
  */
 export const SPECIALIST_RESPONSIBILITY_OVERRIDES: ReadonlyMap<number, ResponsibilityProfile> =
   new Map([
-    [9, profile(1, 2, 1, 1, 0, 2)],   // Fiddlesticks
-    [10, profile(2, 2, 2, 1, 0, 0)],  // Kayle
-    [17, profile(1, 2, 2, 1, 2, 1)],  // Teemo
-    [26, profile(1, 2, 0, 1, 1, 2)],  // Zilean
-    [27, profile(1, 2, 2, 1, 0, 2)],  // Singed
-    [31, profile(1, 2, 1, 2, 0, 2)],  // Cho'Gath
-    [41, profile(2, 1, 2, 1, 0, 1)],  // Gangplank
-    [74, profile(2, 2, 2, 2, 0, 1)],  // Heimerdinger
-    [76, profile(2, 2, 2, 1, 1, 0)],  // Nidalee
-    [85, profile(2, 1, 2, 1, 0, 2)],  // Kennen
-    [104, profile(2, 2, 2, 2, 0, 0)], // Graves
-    [133, profile(2, 2, 2, 1, 1, 1)], // Quinn
-    [150, profile(2, 2, 2, 1, 0, 2)], // Gnar
-    [268, profile(2, 2, 2, 2, 0, 1)], // Azir
+    [9, profile(1, 2, 2, 1, 1, 0, 2)],   // Fiddlesticks
+    [10, profile(2, 2, 0, 2, 1, 0, 1)],  // Kayle
+    [17, profile(1, 2, 1, 2, 1, 2, 1)],  // Teemo
+    [26, profile(1, 2, 2, 0, 1, 1, 2)],  // Zilean
+    [27, profile(1, 2, 2, 2, 1, 0, 1)],  // Singed
+    [31, profile(1, 2, 2, 1, 2, 0, 1)],  // Cho'Gath
+    [41, profile(2, 1, 1, 2, 1, 0, 2)],  // Gangplank
+    [74, profile(2, 2, 1, 2, 2, 0, 1)],  // Heimerdinger
+    [76, profile(2, 2, 0, 2, 1, 1, 2)],  // Nidalee
+    [85, profile(2, 1, 2, 2, 1, 0, 2)],  // Kennen
+    [104, profile(2, 2, 0, 2, 2, 0, 2)], // Graves
+    [133, profile(2, 2, 1, 2, 1, 1, 2)], // Quinn
+    [150, profile(2, 2, 2, 2, 1, 0, 1)], // Gnar
+    [268, profile(2, 2, 1, 2, 2, 0, 1)], // Azir
   ])
 
 const missingSpecialistPolicies = [...CURATED_PRIMARY_ARCHETYPES]
@@ -396,11 +403,11 @@ if (missingSpecialistPolicies.length > 0) {
 
 const POSITION_RESPONSIBILITIES: Readonly<Record<Position, ResponsibilityProfile>> =
   Object.freeze({
-    TOP: profile(0, 0, 2, 1, 0, 0),
-    JUNGLE: profile(0, 0, 1, 2, 1, 0),
-    MIDDLE: profile(0, 0, 2, 1, 0, 0),
-    BOTTOM: profile(0, 0, 2, 1, 0, 0),
-    UTILITY: profile(0, 0, 0, 1, 2, 2),
+    TOP: profile(0, 0, 0, 2, 1, 0, 1),
+    JUNGLE: profile(0, 0, 0, 1, 2, 1, 2),
+    MIDDLE: profile(0, 0, 0, 2, 1, 0, 2),
+    BOTTOM: profile(0, 0, 0, 2, 1, 0, 1),
+    UTILITY: profile(0, 0, 2, 0, 1, 2, 2),
   })
 
 const maxTier = (a: ResponsibilityTier, b: ResponsibilityTier): ResponsibilityTier =>
@@ -430,10 +437,19 @@ export function responsibilityTiersFor(
 
   // Support economy is an opportunity constraint, even for damage-oriented
   // archetypes played in the utility position.
-  if (position === "UTILITY") combined.resources = 0
+  if (position === "UTILITY") combined.economy = 0
   if (context.ruleset === "howling_abyss") {
-    combined.objectives = 0
-    combined.vision = 0
+    // ARAM and Mayhem expose exactly the four mode-capable match arms.
+    combined.combat = Math.max(1, combined.combat) as ResponsibilityTier
+    combined.positioning_survival = Math.max(
+      1,
+      combined.positioning_survival,
+    ) as ResponsibilityTier
+    combined.control_utility = Math.max(1, combined.control_utility) as ResponsibilityTier
+    combined.economy = Math.max(1, combined.economy) as ResponsibilityTier
+    combined.objectives_macro = 0
+    combined.vision_setup = 0
+    combined.initiative_pressure = 0
   }
   return Object.freeze(combined)
 }

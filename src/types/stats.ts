@@ -766,6 +766,8 @@ export interface PerformanceMetricScore {
   unit: string
   tier: "CORE" | "SECONDARY" | "DIAGNOSTIC" | "N/A"
   weight: number
+  vectorWeight: number
+  gradeInfluence: number
   influence: number
   games: number
   eligibleGames: number
@@ -796,6 +798,7 @@ export interface PerformanceDimensionScore {
   confidence: PerformanceConfidence | null
   responsibilityWeight: number
   headlineEligible: boolean
+  careerOnly: boolean
   metrics: PerformanceMetricScore[]
 }
 
@@ -830,6 +833,14 @@ export interface RviHeadlineAggregate extends RviScoreAggregate {
   confidenceInterval95: RviBootstrapConfidenceInterval
 }
 
+export interface RviCareerArmHeadlineAggregate extends RviScoreAggregate {
+  source: "career_arm_mean"
+  availableArms: number
+  totalArms: number
+  armCoverage: number
+  evidenceCoverage: number
+}
+
 export type PerformancePosition = "TOP" | "JUNGLE" | "MIDDLE" | "BOTTOM" | "UTILITY"
 export type PerformancePrimaryArchetype =
   | "assassin"
@@ -850,27 +861,24 @@ export type PerformanceScopeKind =
   | "overall"
   | "position"
   | "primary_archetype"
-  | "champion_position"
 
 export interface PerformanceScopeSummary {
   kind: PerformanceScopeKind
   key: string
   score: number
-  headline: RviHeadlineAggregate
+  headline: RviHeadlineAggregate | RviCareerArmHeadlineAggregate
   games: number
   measuredGames: number
   coverage: number
   confidence: PerformanceConfidence
   position?: PerformancePosition
   primaryArchetype?: PerformancePrimaryArchetype
-  championId?: number
 }
 
 export interface PerformanceProfileScopes {
   overall: PerformanceScopeSummary
   positions: PerformanceScopeSummary[]
   primaryArchetypes: PerformanceScopeSummary[]
-  championPositions: PerformanceScopeSummary[]
 }
 
 export type RviResolvedWeighting =
@@ -902,11 +910,12 @@ export interface RviHillVersatility {
 }
 
 export interface PerformanceProfileAuxiliary {
-  excludedFromHeadline: true
+  contributesThroughRange: true
   consistency: RviConsistencySummary
   versatility: {
     champions: RviHillVersatility
     positions: RviHillVersatility
+    archetypes: RviHillVersatility
   }
 }
 
@@ -916,8 +925,9 @@ export interface PerformanceProfile {
   scoringContext: PerformanceScoringContext
   weighting: RviResolvedWeighting
   score: number
-  headline: RviHeadlineAggregate
-  recentHeadline?: RviHeadlineAggregate
+  roleFitAverage: number
+  headline: RviHeadlineAggregate | RviCareerArmHeadlineAggregate
+  recentHeadline?: RviHeadlineAggregate | RviCareerArmHeadlineAggregate
   scopes: PerformanceProfileScopes
   auxiliary?: PerformanceProfileAuxiliary
   games: number

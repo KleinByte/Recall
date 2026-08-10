@@ -7,7 +7,6 @@ import type { GradeComponent } from "../review/types.js"
 import type { CompactTimeline } from "../riot/timeline-mapper.js"
 import {
   GRADE_FAMILIES,
-  GRADE_METRICS,
   GRADE_V3_ALGORITHM_VERSION,
   GRADE_V3_RECIPE_DEFINITION_ID,
 } from "../matches/grade-v3-recipe.js"
@@ -20,7 +19,6 @@ import {
   type OwnerMetricObservationV3,
 } from "./metric-observations-repo.js"
 import {
-  RVI_DIAGNOSTIC_VECTOR_KEYS,
   RVI_VECTOR_KEYS,
   type RviMatchObservation,
   type RviMetricObservation,
@@ -329,8 +327,6 @@ const GRADE_EVIDENCE_STATES = new Set([
   "missing",
 ])
 
-const GRADE_METRIC_KEYS = new Set<string>(GRADE_METRICS)
-
 function parsedResponsibilityTier(value: unknown): ParsedGradeMetric["responsibilityTier"] {
   return value === 2 ? "CORE" : value === 1 ? "SECONDARY" : "DIAGNOSTIC"
 }
@@ -394,7 +390,7 @@ function parseGradeV3Breakdown(
         return undefined
       }
       const signal = signalValue as Record<string, unknown>
-      if (typeof signal.key !== "string" || !GRADE_METRIC_KEYS.has(signal.key) ||
+      if (typeof signal.key !== "string" || !metricDefinitionV3(signal.key) ||
           seenMetrics.has(signal.key) || !finiteInRange(signal.percentile, 0, 1) ||
           !finiteInRange(signal.weight, 0, 1) || signal.evidenceState !== "observed" ||
           typeof signal.sourceEvidenceState !== "string" ||
@@ -424,7 +420,7 @@ function parseGradeV3Breakdown(
     if (!diagnosticValue || typeof diagnosticValue !== "object" ||
         Array.isArray(diagnosticValue)) return undefined
     const diagnostic = diagnosticValue as Record<string, unknown>
-    if (typeof diagnostic.key !== "string" || !GRADE_METRIC_KEYS.has(diagnostic.key) ||
+    if (typeof diagnostic.key !== "string" || !metricDefinitionV3(diagnostic.key) ||
         seenMetrics.has(diagnostic.key) || typeof diagnostic.evidenceState !== "string" ||
         !GRADE_EVIDENCE_STATES.has(diagnostic.evidenceState) ||
         (diagnostic.sourceEvidenceState !== undefined &&
@@ -495,17 +491,14 @@ function scaledStoredScore(evidence: Evidence<number>): Evidence<number> {
 }
 
 function metricTier(
-  key: string,
   rawEvidence: Evidence<number>,
   scoreEvidence: Evidence<number>,
-  parsed: ParsedGradeMetric | undefined,
   policyTier: RviMetricObservation["tier"],
 ): RviMetricObservation["tier"] {
   if (rawEvidence.state === "not_applicable" || scoreEvidence.state === "not_applicable") {
     return "N/A"
   }
-  if (parsed) return parsed.responsibilityTier
-  return GRADE_METRIC_KEYS.has(key) ? "N/A" : policyTier
+  return policyTier
 }
 
 function rviMetricFromStored(
@@ -516,12 +509,15 @@ function rviMetricFromStored(
   const policy = rviMetricPolicyV3(metric.metricKey)
   if (!definition || !policy) return undefined
   const parsed = parsedByKey.get(metric.metricKey)
-  const scoreEvidence = scaledStoredScore(metric.scoreEvidence)
+  // The frozen Grade component is authoritative for any metric it consumed,
+  // including neutral no-opportunity evidence. The stored row still preserves
+  // literal raw provenance for audit and display.
+  const scoreEvidence = parsed
+    ? scoreEvidenceFromParsed(parsed)
+    : scaledStoredScore(metric.scoreEvidence)
   const tier = metricTier(
-    metric.metricKey,
     metric.rawEvidence,
     scoreEvidence,
-    parsed,
     policy.tier,
   )
   return {
@@ -548,7 +544,7 @@ function rviMetricFromBreakdown(metric: ParsedGradeMetric): RviMetricObservation
   if (!definition || !policy) return undefined
   const rawEvidence = rawEvidenceFromParsed(metric)
   const scoreEvidence = scoreEvidenceFromParsed(metric)
-  const tier = metricTier(metric.key, rawEvidence, scoreEvidence, metric, policy.tier)
+  const tier = metricTier(rawEvidence, scoreEvidence, policy.tier)
   return {
     key: metric.key,
     vector: policy.vector,
@@ -584,7 +580,7 @@ function rviMetricsForMatch(
   return [...merged.values()].sort((left, right) => left.key.localeCompare(right.key))
 }
 
-function rviVectorMapsForMatch(metrics: readonly RviMetricObservation[]): {
+function rviVectorMapsForMatch(breakdown: ParsedGradeV3Breakdown): {
   familyPercentiles: Record<RviVectorKey, number | null>
   familyResponsibilityWeights: Record<RviVectorKey, number | null>
 } {
@@ -595,36 +591,13 @@ function rviVectorMapsForMatch(metrics: readonly RviMetricObservation[]): {
     RVI_VECTOR_KEYS.map((key) => [key, null]),
   ) as Record<RviVectorKey, number | null>
 
-  for (const vector of RVI_VECTOR_KEYS) {
-    const applicable = metrics.filter((metric) =>
-      metric.vector === vector && metric.tier !== "N/A")
-    if (applicable.length === 0) continue
-
-    familyResponsibilityWeights[vector] = applicable.reduce(
-      (sum, metric) => sum + metric.gradeWeight,
-      0,
-    )
-
-    const weighted = applicable.filter((metric) => metric.vectorWeight > 0)
-    const scored = weighted.filter((metric) =>
-      metric.tier === "CORE" || metric.tier === "SECONDARY")
-    // A diagnostic can describe a scored vector, but it can never move it.
-    // Initiative is intentionally diagnostic-only, so it uses its retained
-    // diagnostic observations when no scored responsibility exists.
-    const candidates = scored.length > 0
-      ? scored
-      : RVI_DIAGNOSTIC_VECTOR_KEYS.includes(vector) ? weighted : []
-    if (candidates.length === 0 ||
-        candidates.some((metric) => metric.scoreEvidence.state !== "observed")) continue
-
-    const denominator = candidates.reduce((sum, metric) => sum + metric.vectorWeight, 0)
-    if (denominator === 0) continue
-    familyPercentiles[vector] = candidates.reduce(
-      (sum, metric) => sum +
-        (metric.scoreEvidence.state === "observed" ? metric.scoreEvidence.value : 0) *
-        metric.vectorWeight,
-      0,
-    ) / denominator
+  // The immutable Grade breakdown is authoritative for match arms. Stored
+  // metric rows explain those arms, but cannot silently rebuild a different
+  // radar after a late refresh or an applicability-policy change.
+  for (const component of breakdown.components) {
+    const vector = component.key as RviVectorKey
+    familyPercentiles[vector] = component.percentile * 100
+    familyResponsibilityWeights[vector] = component.weight
   }
 
   return { familyPercentiles, familyResponsibilityWeights }
@@ -1297,7 +1270,7 @@ export class InsightsRepository {
         breakdown,
         storedMetricsByMatch.get(`${row.gameId}:${row.participantId}`) ?? [],
       )
-      const vectorMaps = rviVectorMapsForMatch(metrics)
+      const vectorMaps = rviVectorMapsForMatch(breakdown)
       return [{
         matchId: row.gameId,
         recipeId: rviRecipeId,

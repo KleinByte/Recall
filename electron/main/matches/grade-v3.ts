@@ -6,6 +6,7 @@ import type { NormalizedPosition } from "./position.js"
 import { normalizePosition } from "./position.js"
 import {
   GRADE_FAMILIES,
+  GRADE_FAMILY_LABELS,
   GRADE_V3_DIAGNOSTIC_METRICS,
   GRADE_V3_EVIDENCE_POLICY_VERSION,
   GRADE_V3_ALGORITHM_VERSION,
@@ -30,6 +31,11 @@ import {
   type PrimaryArchetype,
 } from "./grade-v3-taxonomy.js"
 import { clampCalibrationPercentile, normalQuantile } from "./grade-v3-calibration.js"
+import {
+  RVI_V3_METRIC_POLICIES,
+  metricDefinitionV3,
+  type MetricKeyV3,
+} from "./metric-registry-v3.js"
 
 export {
   GRADE_V3_ALGORITHM_VERSION,
@@ -67,6 +73,12 @@ export interface GradePlayerV3Input {
    * grade-v3-calibration; zero is a valid observed percentile.
    */
   metricEvidence: Partial<Record<GradeMetricV3, Evidence<number>>>
+  /** Calibrated optional arm detail. Missing detail never blocks core grading. */
+  detailMetricEvidence?: Readonly<Record<string, Evidence<number>>>
+  detailMetricProvenance?: Readonly<Record<string, {
+    state: EvidenceState
+    reason?: string
+  }>>
   /** Original evidence state before calibration (notably no-opportunity). */
   metricProvenance?: Partial<Record<GradeMetricV3, {
     state: EvidenceState
@@ -100,7 +112,7 @@ export interface GradeComponentV3 {
   contribution: number
   evidenceState: EvidenceState
   signals: {
-    key: GradeMetricV3
+    key: MetricKeyV3
     percentile: number
     weight: number
     evidenceState: "observed"
@@ -152,6 +164,10 @@ export interface GradeResultV3 {
     responsibilityTiers: Readonly<Record<GradeFamilyV3, ResponsibilityTier>>
     /** Arithmetic responsibility composite before the second ECDF stage. */
     rawResponsibilityScore: number
+    /** Declared responsibility held neutral because an optional-only arm was unavailable. */
+    neutralizedResponsibilityWeight: number
+    /** Arithmetic contribution of that unavailable responsibility mass. */
+    neutralizedResponsibilityContribution: number
     roleFitCalibrationSource: string
     roleFitScore: number
     gradeScore: number
@@ -244,17 +260,6 @@ function lobbyShape(players: readonly { participantId: number; teamId: number; i
 
 const knownArchetypes = new Set<string>(PRIMARY_ARCHETYPES)
 
-function applicableMetrics(
-  family: GradeFamilyV3,
-  position: NormalizedPosition,
-) {
-  const configured = GRADE_V3_RECIPE.aggregation.familyMetrics[family]
-  if (family === "resources" && position === "UTILITY") {
-    return configured.filter((metric) => metric.key !== "cs_per_min")
-  }
-  return [...configured]
-}
-
 interface FamilyResolution {
   score?: number
   signals: GradeComponentV3["signals"]
@@ -265,40 +270,111 @@ interface FamilyResolution {
 function resolveFamily(
   player: GradePlayerV3Input,
   family: GradeFamilyV3,
+  context: GradeModeContextV3,
+  archetype: PrimaryArchetype,
 ): FamilyResolution {
-  const metrics = applicableMetrics(family, player.position)
-  const denominator = metrics.reduce((sum, metric) => sum + metric.weight, 0)
-  const signals: GradeComponentV3["signals"] = []
-  for (const metric of metrics) {
-    const evidence = player.metricEvidence[metric.key]
-    if (!evidence) {
-      return { signals, reason: `${metric.key}:missing`, evidenceState: "missing" }
+  const policies = RVI_V3_METRIC_POLICIES.filter((policy) =>
+    policy.vector === family && policy.tier !== "DIAGNOSTIC" &&
+    metricDefinitionV3(policy.metricKey)?.applicable({
+      context,
+      position: player.position,
+      archetype,
+    }))
+  const observedPolicies: Array<{
+    policy: typeof policies[number]
+    evidence: Extract<Evidence<number>, { state: "observed" }>
+    provenance?: { state: EvidenceState; reason?: string }
+  }> = []
+  for (const policy of policies) {
+    const evidence = (player.metricEvidence as Readonly<Record<string, Evidence<number>>>)[
+      policy.metricKey
+    ] ?? player.detailMetricEvidence?.[policy.metricKey]
+    const provenance = (player.metricProvenance as Readonly<Record<string, {
+      state: EvidenceState
+      reason?: string
+    }>>)?.[policy.metricKey] ?? player.detailMetricProvenance?.[policy.metricKey]
+    if (!evidence || evidence.state !== "observed") {
+      // Core scoreboard evidence remains mandatory. Restored detail is
+      // opportunity-aware and scores when present without invalidating an
+      // otherwise complete match.
+      if (policy.tier === "CORE") {
+        return {
+          signals: [],
+          reason: `${policy.metricKey}:${evidence?.reason ?? evidence?.state ?? "missing"}`,
+          evidenceState: evidence?.state ?? "missing",
+        }
+      }
+      continue
     }
-    if (evidence.state !== "observed") {
+    if (!Number.isFinite(evidence.value) || evidence.value < 0 || evidence.value > 1) {
       return {
-        signals,
-        reason: `${metric.key}:${evidence.reason ?? evidence.state}`,
-        evidenceState: evidence.state,
+        signals: [],
+        reason: `${policy.metricKey}:percentile_out_of_range`,
+        evidenceState: "invalid",
       }
     }
-    // Do not use truthiness here: an observed zero is valid and intentionally scored.
-    if (!Number.isFinite(evidence.value) || evidence.value < 0 || evidence.value > 1) {
-      return { signals, reason: `${metric.key}:percentile_out_of_range`, evidenceState: "invalid" }
-    }
-    signals.push({
-      key: metric.key,
-      percentile: evidence.value,
-      weight: metric.weight / denominator,
-      evidenceState: "observed",
-      sourceEvidenceState: player.metricProvenance?.[metric.key]?.state ?? evidence.state,
-      ...(player.metricProvenance?.[metric.key]?.reason
-        ? { sourceEvidenceReason: player.metricProvenance[metric.key]?.reason }
-        : {}),
-      ...(evidence.reason ? { calibrationReason: evidence.reason } : {}),
-    })
+    observedPolicies.push({ policy, evidence, provenance })
   }
+
+  const declaredDenominator = policies.reduce(
+    (sum, policy) => sum + policy.vectorWeight,
+    0,
+  )
+  if (declaredDenominator <= 0 || observedPolicies.length === 0) {
+    return { signals: [], reason: "no_observed_arm_metrics", evidenceState: "not_applicable" }
+  }
+
+  const coreBundle = observedPolicies.filter((entry) => entry.policy.tier === "CORE")
+  // Initiative has no scoreboard CORE metric. Once any of its SECONDARY
+  // evidence is observed, that observed bundle becomes the neutral basis for
+  // the remaining optional measurements. With none observed, the arm remains
+  // unavailable and is neutralized only at the responsibility-composite layer.
+  const neutralBundle = coreBundle.length > 0 ? coreBundle : observedPolicies
+  const neutralBundleWeight = neutralBundle.reduce(
+    (sum, entry) => sum + entry.policy.vectorWeight,
+    0,
+  )
+  if (neutralBundleWeight <= 0) {
+    return { signals: [], reason: "no_observed_arm_metrics", evidenceState: "not_applicable" }
+  }
+  const neutralBundleScore = neutralBundle.reduce(
+    (sum, entry) => sum + entry.evidence.value * entry.policy.vectorWeight,
+    0,
+  ) / neutralBundleWeight
+  const missingSecondaryWeight = policies.reduce((sum, policy) => {
+    if (policy.tier !== "SECONDARY" ||
+        observedPolicies.some((entry) => entry.policy.metricKey === policy.metricKey)) return sum
+    return sum + policy.vectorWeight
+  }, 0)
+
+  // Missing/no-opportunity SECONDARY evidence is not promoted to observed.
+  // For arithmetic only, its declared mass inherits the observed CORE bundle
+  // (or the observed Initiative bundle). This keeps the arm on one immutable
+  // denominator while ensuring absence cannot raise or lower a core-only score.
+  const signals: GradeComponentV3["signals"] = observedPolicies.map((entry) => ({
+      key: entry.policy.metricKey,
+      percentile: entry.evidence.value,
+      weight: stableScore(entry.policy.vectorWeight / declaredDenominator +
+        (neutralBundle.includes(entry)
+          ? missingSecondaryWeight / declaredDenominator *
+            entry.policy.vectorWeight / neutralBundleWeight
+          : 0)),
+      evidenceState: "observed",
+      sourceEvidenceState: entry.provenance?.state ?? entry.evidence.state,
+      ...(entry.provenance?.reason
+        ? { sourceEvidenceReason: entry.provenance.reason }
+        : {}),
+      ...(entry.evidence.reason ? { calibrationReason: entry.evidence.reason } : {}),
+    }))
+  const observedNumerator = observedPolicies.reduce(
+    (sum, entry) => sum + entry.evidence.value * entry.policy.vectorWeight,
+    0,
+  )
   return {
-    score: signals.reduce((sum, signal) => sum + signal.percentile * signal.weight, 0),
+    score: stableScore(
+      (observedNumerator + missingSecondaryWeight * neutralBundleScore) /
+        declaredDenominator,
+    ),
     signals,
   }
 }
@@ -311,6 +387,8 @@ interface ResolvedPlayer {
   components: GradeComponentV3[]
   omitted: OmittedGradeComponentV3[]
   composite: number
+  neutralizedResponsibilityWeight: number
+  neutralizedResponsibilityContribution: number
 }
 
 type ResponsibilityResolution =
@@ -347,21 +425,29 @@ function resolveResponsibilityLobbyV3(
       archetypeResolution.archetype,
       player.championId,
     )
-    const denominator = GRADE_FAMILIES.reduce((sum, family) => sum + tiers[family], 0)
-    if (denominator <= 0) {
-      return {
-        status: "missing_core_metric",
-        reason: `participant:${player.participantId}:no_responsibilities`,
-      }
-    }
-
-    const components: GradeComponentV3[] = []
+    const resolvedFamilies: Array<{
+      family: GradeFamilyV3
+      tier: ResponsibilityTier
+      result: FamilyResolution & { score: number }
+    }> = []
     const omitted: OmittedGradeComponentV3[] = []
     for (const family of GRADE_FAMILIES) {
-      const familyResult = resolveFamily(player, family)
+      const familyResult = resolveFamily(
+        player,
+        family,
+        input.context,
+        archetypeResolution.archetype,
+      )
       const tier = tiers[family]
       if (familyResult.score === undefined) {
-        if (tier > 0) {
+        const hasApplicableCore = RVI_V3_METRIC_POLICIES.some((policy) =>
+          policy.vector === family && policy.tier === "CORE" &&
+          metricDefinitionV3(policy.metricKey)?.applicable({
+            context: input.context,
+            position: player.position,
+            archetype: archetypeResolution.archetype,
+          }))
+        if (tier > 0 && hasApplicableCore) {
           return {
             status: "missing_core_metric",
             reason: `participant:${player.participantId}:${family}:${familyResult.reason}`,
@@ -374,27 +460,61 @@ function resolveResponsibilityLobbyV3(
         })
         continue
       }
-      const weight = tier / denominator
-      components.push({
-        key: family,
-        label: family[0].toUpperCase() + family.slice(1),
-        componentScore: familyResult.score,
-        rankPercentile: familyResult.score,
-        magnitudeScore: familyResult.score,
-        peerCount: player.peerCount ?? players.length,
-        comparisonScope: player.comparisonScope ?? "role",
-        metricBasis: family === "fighting" ? "team_share" : "individual",
-        responsibilityTier: tier,
-        weight,
-        contribution: familyResult.score * weight,
-        evidenceState: "observed",
-        signals: familyResult.signals,
+      resolvedFamilies.push({
+        family,
+        tier,
+        result: familyResult as FamilyResolution & { score: number },
       })
     }
+    const declaredDenominator = GRADE_FAMILIES.reduce(
+      (sum, family) => sum + tiers[family],
+      0,
+    )
+    const resolvedDenominator = resolvedFamilies.reduce(
+      (sum, entry) => sum + entry.tier,
+      0,
+    )
+    if (declaredDenominator <= 0 || resolvedDenominator <= 0) {
+      return {
+        status: "missing_core_metric",
+        reason: `participant:${player.participantId}:no_observed_responsibilities`,
+      }
+    }
+    const components: GradeComponentV3[] = resolvedFamilies.map(({ family, tier, result }) => {
+      const weight = stableScore(tier / declaredDenominator)
+      return {
+        key: family,
+        label: GRADE_FAMILY_LABELS[family],
+        componentScore: result.score,
+        rankPercentile: result.score,
+        magnitudeScore: result.score,
+        peerCount: player.peerCount ?? players.length,
+        comparisonScope: player.comparisonScope ?? "role",
+        metricBasis: family === "combat" ? "team_share" : "individual",
+        responsibilityTier: tier,
+        weight,
+        contribution: result.score * weight,
+        evidenceState: "observed",
+        signals: result.signals,
+      }
+    })
+    const resolvedNumerator = resolvedFamilies.reduce(
+      (sum, entry) => sum + entry.result.score * entry.tier,
+      0,
+    )
+    const resolvedBaseline = resolvedNumerator / resolvedDenominator
+    const neutralResponsibilityTier = declaredDenominator - resolvedDenominator
+    const neutralizedResponsibilityWeight = stableScore(
+      neutralResponsibilityTier / declaredDenominator,
+    )
+    const neutralizedResponsibilityContribution = stableScore(
+      neutralizedResponsibilityWeight * resolvedBaseline,
+    )
     // Different responsibility denominators can otherwise turn mathematically
     // equal scores into false lobby ranks through floating-point dust.
     const composite = stableScore(
-      components.reduce((sum, component) => sum + component.contribution, 0),
+      (resolvedNumerator + neutralResponsibilityTier * resolvedBaseline) /
+        declaredDenominator,
     )
     resolved.push({
       player,
@@ -404,6 +524,8 @@ function resolveResponsibilityLobbyV3(
       components,
       omitted,
       composite,
+      neutralizedResponsibilityWeight,
+      neutralizedResponsibilityContribution,
     })
   }
   return { status: "ready", resolved }
@@ -538,6 +660,8 @@ export function scoreLobbyV3(input: GradeLobbyV3Input): GradeLobbyV3Outcome {
         archetypeSource: entry.archetypeSource,
         responsibilityTiers: entry.tiers,
         rawResponsibilityScore,
+        neutralizedResponsibilityWeight: entry.neutralizedResponsibilityWeight,
+        neutralizedResponsibilityContribution: entry.neutralizedResponsibilityContribution,
         roleFitCalibrationSource:
           entry.player.responsibilityEvidence?.reason ?? "frozen_composite_ecdf",
         roleFitScore,

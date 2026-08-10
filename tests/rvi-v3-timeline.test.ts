@@ -107,7 +107,106 @@ describe("Recall v3 corrected timeline diagnostics", () => {
       position: { x: RVI_V3_FIGHT_CLUSTER_RADIUS + 1, y: 0 },
     }])).toMatchObject({ state: "observed", value: [{}, {}] })
     expect(clusterTimelineFightsV3([{ ...first, position: undefined }]))
-      .toMatchObject({ state: "unavailable", reason: "incomplete_spatial_fight_evidence" })
+      .toMatchObject({
+        state: "unavailable",
+        reason: "incomplete_spatial_fight_evidence:0_of_1",
+      })
+    expect(clusterTimelineFightsV3([first, { ...boundary, position: undefined }]))
+      .toMatchObject({
+        state: "unavailable",
+        reason: "incomplete_spatial_fight_evidence:1_of_2",
+      })
+  })
+
+  it("withholds fight scores when spatial event coverage is incomplete", () => {
+    const complete = event("complete", 5 * 60_000, "CHAMPION_KILL", {
+      participantId: 1,
+      targetId: 6,
+      assistingParticipantIds: [],
+      teamId: 100,
+      position: { x: 7_000, y: 7_000 },
+    })
+    const incompleteSupplement = event("live-kill:77", 6 * 60_000, "CHAMPION_KILL", {
+      actorName: "unknown",
+    })
+    const metrics = byKey(deriveTimelineMetricObservationsV3({
+      participantId: 1,
+      teamId: 100,
+      durationSecs: 20 * 60,
+      context: rift,
+      position: "MIDDLE",
+      opponentParticipantId: 6,
+      participantTeams: teams,
+      timeline: timeline([complete, incompleteSupplement]),
+    }))
+
+    expect(metrics.get("duel_outcome_rate")?.rawEvidence).toMatchObject({
+      state: "unavailable",
+      reason: "incomplete_spatial_fight_evidence:1_of_2",
+    })
+    expect(metrics.get("recorded_fight_involvement_per_min")?.rawEvidence)
+      .toMatchObject({
+        state: "unavailable",
+        reason: "incomplete_spatial_fight_evidence:1_of_2",
+      })
+  })
+
+  it("withholds fight scores when an unmatched live kill was excluded", () => {
+    const complete = event("complete", 5 * 60_000, "CHAMPION_KILL", {
+      participantId: 1,
+      targetId: 6,
+      assistingParticipantIds: [],
+      teamId: 100,
+      position: { x: 7_000, y: 7_000 },
+    })
+    const retained = timeline([complete])
+    retained.evidenceCoverage = { incompleteSupplementalKillEvents: 1 }
+    const metrics = byKey(deriveTimelineMetricObservationsV3({
+      participantId: 1,
+      teamId: 100,
+      durationSecs: 20 * 60,
+      context: rift,
+      position: "MIDDLE",
+      opponentParticipantId: 6,
+      participantTeams: teams,
+      timeline: retained,
+    }))
+
+    expect(metrics.get("teamfight_survival_rate")?.rawEvidence).toMatchObject({
+      state: "unavailable",
+      reason: "incomplete_supplemental_kill_coverage:1",
+    })
+    expect(metrics.get("duel_outcome_rate")?.rawEvidence.state).toBe("unavailable")
+  })
+
+  it("counts the player as an ally when identifying outnumbered deaths", () => {
+    const death = (assistingParticipantIds: number[]) => event(
+      `death:${assistingParticipantIds.join(",")}`,
+      5 * 60_000,
+      "CHAMPION_KILL",
+      {
+        participantId: 6,
+        targetId: 1,
+        assistingParticipantIds,
+        teamId: 200,
+        position: { x: 7_000, y: 7_000 },
+      },
+    )
+    const derive = (assists: number[]) => byKey(deriveTimelineMetricObservationsV3({
+      participantId: 1,
+      teamId: 100,
+      durationSecs: 20 * 60,
+      context: rift,
+      position: "MIDDLE",
+      opponentParticipantId: 6,
+      participantTeams: teams,
+      timeline: timeline([death(assists)]),
+    }))
+
+    expect(derive([]).get("outnumbered_death_rate")?.rawEvidence)
+      .toMatchObject({ state: "observed", value: 0 })
+    expect(derive([7]).get("outnumbered_death_rate")?.rawEvidence)
+      .toMatchObject({ state: "observed", value: 1 })
   })
 
   it("returns the full inventory and derives phase, objective, setup, and early evidence", () => {
@@ -170,6 +269,8 @@ describe("Recall v3 corrected timeline diagnostics", () => {
     expect(aramMetrics.get("recorded_fight_involvement_per_min")?.rawEvidence)
       .toMatchObject({ state: "observed", value: 0 })
     expect(aramMetrics.get("duel_outcome_rate")?.rawEvidence.state).toBe("no_opportunity")
+    expect(aramMetrics.get("early_takedown_participation")?.rawEvidence)
+      .toMatchObject({ state: "not_applicable", reason: "early_initiative_rift_only" })
 
     const riftMetrics = byKey(deriveTimelineMetricObservationsV3({
       participantId: 1,
@@ -184,6 +285,59 @@ describe("Recall v3 corrected timeline diagnostics", () => {
       .toMatchObject({ state: "unavailable", reason: "exact_opposing_role_not_resolved" })
     expect(riftMetrics.get("objective_setup_ward_rate")?.rawEvidence.state)
       .toBe("no_opportunity")
+  })
+
+  it("marks checkpoints after match end as not applicable even if stale frames exist", () => {
+    const metrics = byKey(deriveTimelineMetricObservationsV3({
+      participantId: 1,
+      teamId: 100,
+      durationSecs: 12 * 60,
+      context: rift,
+      position: "MIDDLE",
+      opponentParticipantId: 6,
+      participantTeams: teams,
+      timeline: timeline([]),
+    }))
+
+    expect(metrics.get("gold_delta_10")?.rawEvidence.state).toBe("observed")
+    expect(metrics.get("gold_delta_15")?.rawEvidence).toMatchObject({
+      state: "not_applicable",
+      reason: "match_ended_before_phase_checkpoint",
+    })
+    expect(metrics.get("cs_delta_30")?.rawEvidence.state).toBe("not_applicable")
+  })
+
+  it("withholds phase and Baron values when source frame fields are absent", () => {
+    const retained = timeline([event("baron", 12 * 60_000, "ELITE_MONSTER_KILL", {
+      participantId: 2,
+      assistingParticipantIds: [1],
+      teamId: 100,
+      objective: "BARON_NASHOR",
+      position: { x: 5_000, y: 5_000 },
+    })])
+    const phase = retained.frames.find((entry) => entry.timestamp === 10 * 60_000)!
+    phase.participants.find((entry) => entry.participantId === 1)!
+      .missingFields = ["totalGold"]
+    for (const retainedFrame of retained.frames) retainedFrame.teamGoldComplete = false
+    const metrics = byKey(deriveTimelineMetricObservationsV3({
+      participantId: 1,
+      teamId: 100,
+      durationSecs: 32 * 60,
+      context: rift,
+      position: "MIDDLE",
+      opponentParticipantId: 6,
+      participantTeams: teams,
+      timeline: retained,
+    }))
+
+    expect(metrics.get("gold_delta_10")?.rawEvidence).toMatchObject({
+      state: "unavailable",
+      reason: "phase_gold_source_field_missing",
+    })
+    expect(metrics.get("baron_conversion_gold_delta")?.rawEvidence).toMatchObject({
+      state: "unavailable",
+      reason: "baron_conversion_frames_missing",
+    })
   })
 
   it("returns a reasoned full inventory when no timeline was retained", () => {

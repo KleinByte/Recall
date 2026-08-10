@@ -159,6 +159,36 @@ describe("RVI v3 profile aggregation", () => {
     ])
   })
 
+  it("uses the same neutral fixed-denominator fallback when an arm score is absent", () => {
+    const row = (
+      key: string,
+      score: number | null,
+      tier: RviMetricObservation["tier"],
+      vectorWeight: number,
+    ): RviMetricObservation => ({
+      ...metric(key, score),
+      vector: "combat",
+      tier,
+      vectorWeight,
+    })
+    const aggregate = (championDamage: number | null) => aggregateRviProfile({
+      recipeId: RECIPE_ID,
+      familyKeys: ["combat"],
+      observations: [observation(1, {
+        familyPercentiles: { combat: null },
+        familyResponsibilityWeights: { combat: 1 },
+        metrics: [
+          row("damage_share", 20, "CORE", .3),
+          row("kill_participation", 80, "CORE", .3),
+          row("champion_damage_per_min", championDamage, "SECONDARY", .15),
+        ],
+      })],
+    }).families[0].score
+
+    expect(aggregate(null)).toBe(50)
+    expect(aggregate(100)).toBe(60)
+  })
+
   it("aggregates changing responsibility tiers independently of match order", () => {
     const core = metric("cs_per_min", 70, 8)
     const notApplicable: RviMetricObservation = {
@@ -357,6 +387,53 @@ describe("RVI v3 profile aggregation", () => {
       confidence: null,
       coverage: { eligibleGames: 1, observedGames: 0, gameRatio: 0, weightRatio: 0 },
     })
+  })
+
+  it("keeps career Range learning until twenty Grade-ready games", () => {
+    const rows = Array.from({ length: 19 }, (_, index) => observation(index + 1, {
+      roleFitScore: 60,
+      familyPercentiles: { combat: 60, consistency_versatility: null },
+      familyResponsibilityWeights: { combat: 1, consistency_versatility: 0 },
+      championId: 1,
+      position: "MIDDLE",
+      primaryArchetype: "burst_mage",
+    }))
+    const result = aggregateRviProfile({
+      recipeId: RECIPE_ID,
+      familyKeys: ["combat", "consistency_versatility"],
+      observations: rows,
+    })
+
+    expect(result.families.at(-1)).toMatchObject({
+      key: "consistency_versatility",
+      score: null,
+      confidence: "learning",
+    })
+  })
+
+  it("uses the approved consistency floor and adaptive Hill-D1 breadth in Range", () => {
+    const rows = Array.from({ length: 20 }, (_, index) => observation(index + 1, {
+      roleFitScore: 60,
+      familyPercentiles: { combat: 60, consistency_versatility: null },
+      familyResponsibilityWeights: { combat: 1, consistency_versatility: 0 },
+      championId: 1 + index % 4,
+      position: index % 2 ? "MIDDLE" : "BOTTOM",
+      primaryArchetype: index % 2 ? "burst_mage" : "marksman",
+    }))
+    const result = aggregateRviProfile({
+      recipeId: RECIPE_ID,
+      familyKeys: ["combat", "consistency_versatility"],
+      observations: rows,
+    })
+
+    // At 20 games the adaptive targets are 2 positions, 2 archetypes, and
+    // 4 champions. Balanced coverage reaches full breadth in every domain.
+    expect(result.families.at(-1)).toMatchObject({
+      key: "consistency_versatility",
+      score: 76,
+      confidence: "provisional",
+    })
+    expect(result.versatility.archetypes.effectiveCount).toBeCloseTo(2, 9)
   })
 
   it("rejects mixed recipes, duplicates, unknown families, and scores outside 0-100", () => {

@@ -1348,6 +1348,7 @@ export function buildSkillReport(input: SkillReportInput): SkillReportV3 {
       performance: rvi ? buildPerformanceProfile({
         recipeId: rvi.recipeId,
         rviObservations: rvi.observations,
+        family,
       }) : undefined,
       deathMap: buildDeathMap(family, performanceTimelineHistory),
       grades,

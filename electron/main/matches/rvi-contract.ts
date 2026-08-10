@@ -7,6 +7,8 @@ import {
 import { POSITIONS } from "./position.js"
 import {
   RVI_CAPABILITY_VECTORS_V3,
+  RVI_MATCH_ARM_KEYS_V3,
+  RVI_V3_METRIC_POLICIES,
   type RviCapabilityVectorV3,
 } from "./metric-registry-v3.js"
 
@@ -15,11 +17,13 @@ export const RVI_SCORE_MIN = 0
 export const RVI_SCORE_MAX = 100
 export const RVI_MAD_NORMAL_SCALE = 1.4826
 export const RVI_BOOTSTRAP_REPLICATES = 2_000
+export const RVI_RANGE_MINIMUM_GAMES = 20
 export const RVI_VECTOR_KEYS = RVI_CAPABILITY_VECTORS_V3
+export const RVI_MATCH_VECTOR_KEYS = RVI_MATCH_ARM_KEYS_V3
 export type RviVectorKey = RviCapabilityVectorV3
 
-export const RVI_DIAGNOSTIC_VECTOR_KEYS: readonly RviVectorKey[] =
-  Object.freeze(["initiative_pressure"])
+export const RVI_PROFILE_ONLY_VECTOR_KEYS: readonly RviVectorKey[] =
+  Object.freeze(["consistency_versatility"])
 
 export type RviMetricTier = "CORE" | "SECONDARY" | "DIAGNOSTIC" | "N/A"
 export type RviMetricEvidenceState = EvidenceState | "missing"
@@ -125,6 +129,16 @@ export interface RviHeadlineAggregate extends RviScoreAggregate {
   confidenceInterval95: RviBootstrapConfidenceInterval
 }
 
+/** Equal career-arm composite. Match Grade/RoleFit remains a separate score. */
+export interface RviCareerArmHeadlineAggregate extends RviScoreAggregate {
+  source: "career_arm_mean"
+  availableArms: number
+  totalArms: number
+  armCoverage: number
+  /** Weighted measurement coverage across every declared career arm. */
+  evidenceCoverage: number
+}
+
 export interface RviFamilyVector extends RviScoreAggregate {
   key: string
   responsibility: RviFamilyResponsibilityAggregate
@@ -194,6 +208,7 @@ export interface RviProfileAggregate {
   versatility: {
     champions: RviHillVersatility
     positions: RviHillVersatility
+    archetypes: RviHillVersatility
   }
 }
 
@@ -376,23 +391,38 @@ function matchVectorScore(
 ): number | null | undefined {
   const explicit = observation.familyPercentiles[vector]
   if (explicit !== null && explicit !== undefined) return explicit
-  const available = observation.metrics?.filter((metric) =>
-    metric.vector === vector && metric.tier !== "N/A" && metric.vectorWeight > 0) ?? []
-  // Diagnostic additions cannot move a scored vector, strongest/growth copy,
-  // or identity. Initiative has no scored base, so its all-diagnostic recipe
-  // may still produce a visibly labeled diagnostic composite.
-  const scored = available.filter((metric) =>
-    metric.tier === "CORE" || metric.tier === "SECONDARY")
-  const metrics = scored.length
-    ? scored
-    : RVI_DIAGNOSTIC_VECTOR_KEYS.includes(vector as RviVectorKey) ? available : []
-  if (!metrics.length || metrics.some((metric) => metric.scoreEvidence.state !== "observed")) {
-    return explicit
+  const rows = observation.metrics ?? []
+  const requiredCore = RVI_V3_METRIC_POLICIES.filter((policy) =>
+    policy.vector === vector && policy.tier === "CORE")
+  for (const policy of requiredCore) {
+    const metric = rows.find((candidate) => candidate.key === policy.metricKey)
+    if (!metric || (metric.tier !== "N/A" && metric.scoreEvidence.state !== "observed")) {
+      return explicit
+    }
   }
-  const denominator = metrics.reduce((sum, metric) => sum + metric.vectorWeight, 0)
-  return denominator === 0 ? explicit : metrics.reduce((sum, metric) =>
+  const applicable = rows.filter((metric) =>
+    metric.vector === vector && metric.tier !== "N/A" && metric.vectorWeight > 0 &&
+    (metric.tier === "CORE" || metric.tier === "SECONDARY"))
+  const observed = applicable.filter((metric) => metric.scoreEvidence.state === "observed")
+  if (!observed.length) return explicit
+  const coreBundle = observed.filter((metric) => metric.tier === "CORE")
+  const neutralBundle = coreBundle.length > 0 ? coreBundle : observed
+  const neutralWeight = neutralBundle.reduce((sum, metric) => sum + metric.vectorWeight, 0)
+  const declaredWeight = applicable.reduce((sum, metric) => sum + metric.vectorWeight, 0)
+  if (neutralWeight === 0 || declaredWeight === 0) return explicit
+  const neutralScore = neutralBundle.reduce((sum, metric) =>
     sum + (metric.scoreEvidence.state === "observed" ? metric.scoreEvidence.value : 0) *
-      metric.vectorWeight, 0) / denominator
+      metric.vectorWeight, 0) / neutralWeight
+  const missingSecondaryWeight = applicable.reduce((sum, metric) =>
+    metric.tier === "SECONDARY" && metric.scoreEvidence.state !== "observed"
+      ? sum + metric.vectorWeight
+      : sum, 0)
+  // This is only a compatibility fallback for observations without an
+  // immutable Grade arm. It mirrors Grade's fixed-denominator neutral fill;
+  // missing optional evidence remains missing in the metric aggregates.
+  return (observed.reduce((sum, metric) =>
+    sum + (metric.scoreEvidence.state === "observed" ? metric.scoreEvidence.value : 0) *
+      metric.vectorWeight, 0) + missingSecondaryWeight * neutralScore) / declaredWeight
 }
 
 function metricEvidenceReason(metrics: readonly RviMetricObservation[]): string | undefined {
@@ -768,10 +798,114 @@ function validateInput(input: RviProfileAggregationInput) {
   }
 }
 
+const clampScore = (value: number) => Math.max(RVI_SCORE_MIN, Math.min(RVI_SCORE_MAX, value))
+
+function rangeDomainScore(
+  values: readonly WeightedObservation[],
+  resolve: (observation: RviMatchObservation) => string | null,
+  breadthTarget: number,
+): number | null {
+  const groups = new Map<string, WeightedObservation[]>()
+  for (const value of values) {
+    if (value.observation.roleFitScore === null || value.weight === 0) continue
+    const key = resolve(value.observation)
+    if (key === null) continue
+    const group = groups.get(key) ?? []
+    group.push(value)
+    groups.set(key, group)
+  }
+  const eligible = [...groups.entries()].filter(([, entries]) => entries.length >= 3)
+  if (!eligible.length) return null
+  const categoryMeans = eligible.map(([, entries]) => {
+    const weight = entries.reduce((sum, entry) => sum + entry.weight, 0)
+    return {
+      value: entries.reduce((sum, entry) =>
+        sum + (entry.observation.roleFitScore as number) * entry.weight, 0) / weight,
+      weight: 1,
+    }
+  })
+  const floor = weightedQuantile(categoryMeans, .25)
+  const categoryWeights = eligible.map(([, entries]) =>
+    entries.reduce((sum, entry) => sum + entry.weight, 0))
+  const total = categoryWeights.reduce((sum, weight) => sum + weight, 0)
+  const entropy = -categoryWeights.reduce((sum, weight) => {
+    const share = weight / total
+    return sum + share * Math.log(share)
+  }, 0)
+  const effectiveBreadth = Math.exp(entropy)
+  const breadth = clampScore((effectiveBreadth - 1) / Math.max(1, breadthTarget - 1) * 100)
+  return floor === null ? null : .6 * floor + .4 * breadth
+}
+
+function careerRangeVector(
+  values: readonly WeightedObservation[],
+  consistency: RviConsistencySummary,
+  thresholds: Readonly<RviConfidenceThresholds>,
+): RviFamilyVector {
+  const coverage = coverageFor(values, (observation) => observation.roleFitScore !== null)
+  const observed = values.filter((entry) =>
+    entry.observation.roleFitScore !== null && entry.weight > 0)
+  const weights = observed.map((entry) => entry.weight)
+  const nEff = effectiveSampleSize(weights)
+  const learning = observed.length < RVI_RANGE_MINIMUM_GAMES
+  const emptyResponsibility: RviFamilyResponsibilityAggregate = {
+    averageWeight: 0,
+    positiveGames: 0,
+    nEff,
+    confidence: learning ? "learning" : confidenceForEffectiveGames(nEff, thresholds),
+    coverage,
+  }
+  if (learning || consistency.q1 === null || consistency.scaledMad === null) {
+    return {
+      key: "consistency_versatility",
+      score: null,
+      nEff,
+      confidence: "learning",
+      coverage,
+      responsibility: emptyResponsibility,
+      metrics: [],
+    }
+  }
+
+  const games = observed.length
+  const positionTarget = Math.min(5, Math.max(2, Math.floor(Math.sqrt(games / 5))))
+  const archetypeTarget = Math.min(6, Math.max(2, Math.floor(Math.sqrt(games / 5))))
+  const championTarget = Math.min(8, Math.max(3, Math.floor(Math.sqrt(games))))
+  const positionKey = (observation: RviMatchObservation) => {
+    const position = observation.position?.trim().toUpperCase()
+    return position && RVI_POSITION_KEYS.has(position) ? position : null
+  }
+  const archetypeKey = (observation: RviMatchObservation) =>
+    observation.primaryArchetype ?? null
+  const championKey = (observation: RviMatchObservation) =>
+    observation.championId === null || observation.championId === undefined
+      ? null : String(canonicalChampionId(observation.championId))
+  const positionScore = rangeDomainScore(observed, positionKey, positionTarget)
+  const archetypeScore = rangeDomainScore(observed, archetypeKey, archetypeTarget)
+  const championScore = rangeDomainScore(observed, championKey, championTarget)
+  const abyssOnly = observed.every((entry) => positionKey(entry.observation) === null)
+  const versatility = abyssOnly
+    ? archetypeScore === null || championScore === null
+      ? null : .6 * archetypeScore + .4 * championScore
+    : positionScore === null || archetypeScore === null || championScore === null
+      ? null : .4 * positionScore + .35 * archetypeScore + .25 * championScore
+  const repeatability = clampScore(100 - 2.5 * consistency.scaledMad)
+  const consistencyScore = .6 * consistency.q1 + .4 * repeatability
+  return {
+    key: "consistency_versatility",
+    score: versatility === null ? null : .5 * consistencyScore + .5 * versatility,
+    nEff,
+    confidence: versatility === null ? "learning" : confidenceForEffectiveGames(nEff, thresholds),
+    coverage,
+    responsibility: emptyResponsibility,
+    metrics: [],
+  }
+}
+
 /**
- * Aggregates one frozen recipe. Headline authority is exclusively the stored
- * match role-fit score; family vectors, consistency, and versatility cannot
- * raise or lower it.
+ * Aggregates exact-recipe match observations. This low-level headline retains
+ * the stored RoleFit sample; the career profile layer separately computes its
+ * declared equal mean of available career arms.
  */
 export function aggregateRviProfile(input: RviProfileAggregationInput): RviProfileAggregate {
   validateInput(input)
@@ -784,12 +918,15 @@ export function aggregateRviProfile(input: RviProfileAggregationInput): RviProfi
   }))
   const headline = aggregateScores(observations, (observation) => observation.roleFitScore, thresholds)
   const metrics = aggregateMetricObservations(observations, thresholds)
-  const families = input.familyKeys.map((key): RviFamilyVector => ({
-    key,
-    ...aggregateScores(observations, (observation) => matchVectorScore(observation, key), thresholds),
-    responsibility: aggregateFamilyResponsibility(observations, key, thresholds),
-    metrics: metrics.filter((metric) => metric.vector === key),
-  }))
+  const consistency = consistencyFor(observations, thresholds)
+  const range = careerRangeVector(observations, consistency, thresholds)
+  const families = input.familyKeys.map((key): RviFamilyVector => key ===
+    "consistency_versatility" ? range : ({
+      key,
+      ...aggregateScores(observations, (observation) => matchVectorScore(observation, key), thresholds),
+      responsibility: aggregateFamilyResponsibility(observations, key, thresholds),
+      metrics: metrics.filter((metric) => metric.vector === key),
+    }))
   return {
     algorithmVersion: RVI_ALGORITHM_VERSION,
     recipeId: input.recipeId,
@@ -800,7 +937,7 @@ export function aggregateRviProfile(input: RviProfileAggregationInput): RviProfi
       confidenceInterval95: headlineBootstrapInterval(input.recipeId, observations),
     },
     families,
-    consistency: consistencyFor(observations, thresholds),
+    consistency,
     versatility: {
       champions: hillVersatilityFor(observations, (observation) =>
         observation.championId === null || observation.championId === undefined
@@ -809,6 +946,8 @@ export function aggregateRviProfile(input: RviProfileAggregationInput): RviProfi
         const position = observation.position?.trim().toUpperCase()
         return position && RVI_POSITION_KEYS.has(position) ? position : null
       }, thresholds),
+      archetypes: hillVersatilityFor(observations, (observation) =>
+        observation.primaryArchetype ?? null, thresholds),
     },
   }
 }

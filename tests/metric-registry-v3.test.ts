@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest"
 import {
   METRIC_DEFINITIONS_V3,
   RVI_CAPABILITY_VECTORS_V3,
+  RVI_MATCH_ARM_KEYS_V3,
+  RVI_PROFILE_ONLY_ARM_KEYS_V3,
   RVI_V3_METRIC_POLICIES,
   SUMMARY_METRIC_KEYS_V3,
   TIMELINE_METRIC_KEYS_V3,
@@ -27,23 +29,35 @@ describe("Recall v3 metric registry", () => {
     expect(new Set(RVI_V3_METRIC_POLICIES.map((entry) => entry.metricKey)).size)
       .toBe(expected.length)
     expect(new Set(RVI_V3_METRIC_POLICIES.map((entry) => entry.vector)))
-      .toEqual(new Set(RVI_CAPABILITY_VECTORS_V3))
+      .toEqual(new Set(RVI_MATCH_ARM_KEYS_V3))
+    expect(RVI_CAPABILITY_VECTORS_V3).toEqual([
+      ...RVI_MATCH_ARM_KEYS_V3,
+      ...RVI_PROFILE_ONLY_ARM_KEYS_V3,
+    ])
   })
 
-  it("keeps the current Grade base scored and every restored detail diagnostic", () => {
+  it("scores restored evidence inside seven arms with fixed within-arm weights", () => {
     expect(rviMetricPolicyV3("damage_share")).toMatchObject({
-      vector: "threat", tier: "CORE", gradeWeight: 1,
+      vector: "combat", tier: "CORE", vectorWeight: .3,
     })
-    expect(rviMetricPolicyV3("kill_participation")?.vector).toBe("teamfighting")
+    expect(rviMetricPolicyV3("kill_participation")).toMatchObject({
+      vector: "combat", tier: "CORE", vectorWeight: .3,
+    })
     expect(rviMetricPolicyV3("ally_heal_shield_per_min")).toMatchObject({
-      vector: "control_utility", tier: "DIAGNOSTIC", gradeWeight: 0,
+      vector: "control_utility", tier: "SECONDARY", vectorWeight: .2,
     })
     expect(rviMetricPolicyV3("teamfight_outcome_rate")).toMatchObject({
-      tier: "DIAGNOSTIC", gradeWeight: 0,
+      vector: "combat", tier: "SECONDARY", vectorWeight: .05,
     })
-    expect(RVI_V3_METRIC_POLICIES
-      .filter((entry) => entry.vector === "initiative_pressure")
-      .every((entry) => entry.tier === "DIAGNOSTIC" && entry.gradeWeight === 0)).toBe(true)
+    expect(rviMetricPolicyV3("baron_participation_rate")).toMatchObject({
+      vector: "objectives_macro", tier: "DIAGNOSTIC", vectorWeight: 0,
+    })
+    for (const arm of RVI_MATCH_ARM_KEYS_V3) {
+      expect(RVI_V3_METRIC_POLICIES
+        .filter((entry) => entry.vector === arm && entry.tier !== "DIAGNOSTIC")
+        .reduce((sum, entry) => sum + entry.vectorWeight, 0)).toBeCloseTo(1, 12)
+    }
+    expect(RVI_V3_METRIC_POLICIES.every((entry) => !("gradeWeight" in entry))).toBe(true)
   })
 
   it("owns labels, formulas, direction, source, and contextual applicability", () => {

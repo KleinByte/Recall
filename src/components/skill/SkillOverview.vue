@@ -123,7 +123,6 @@ const rviIdentity = computed(() => props.overview.performance
       v-if="overview.performance"
       :profile="overview.performance"
       :identity="rviIdentity"
-      :champions="champions"
     />
 
     <Panel

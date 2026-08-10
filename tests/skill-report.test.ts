@@ -970,20 +970,21 @@ describe("SkillReportV3", () => {
     expect(report.overview.performance).toMatchObject({
       algorithmVersion: 3,
       recipeId,
-      score: 50,
+      score: 60,
+      roleFitAverage: 50,
       measuredGames: 2,
       scoringContext: "profile",
       weighting: { kind: "equal" },
-      headline: { source: "role_fit", score: 50 },
+      headline: { source: "career_arm_mean", score: 60 },
       scopes: {
-        overall: { score: 50, games: 2 },
+        overall: { score: 60, games: 2 },
         positions: [
-          { position: "MIDDLE", score: 20 },
-          { position: "BOTTOM", score: 80 },
+          { position: "MIDDLE", score: 60 },
+          { position: "BOTTOM", score: 60 },
         ],
         primaryArchetypes: [
-          { primaryArchetype: "assassin", score: 20 },
-          { primaryArchetype: "marksman", score: 80 },
+          { primaryArchetype: "assassin", score: 60 },
+          { primaryArchetype: "marksman", score: 60 },
         ],
       },
     })

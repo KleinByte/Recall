@@ -20,6 +20,11 @@ export interface GradeComponent {
     | "vision"
     | "objectives"
     | "control"
+    | "positioning_survival"
+    | "control_utility"
+    | "objectives_macro"
+    | "vision_setup"
+    | "initiative_pressure"
   label: string
   percentile: number
   weight: number

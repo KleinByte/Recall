@@ -1,6 +1,6 @@
 import type { Position } from "./position.js"
 import type { GradeModeContextV3, PrimaryArchetype } from "./grade-v3-taxonomy.js"
-import { GRADE_V3_METRIC_DIRECTIONS } from "./grade-v3-recipe.js"
+import { GRADE_V3_METRIC_DIRECTIONS, GRADE_V3_RECIPE } from "./grade-v3-recipe.js"
 import type {
   MetricDirectionV3,
   MetricResponsibilityTierV3,
@@ -10,15 +10,23 @@ import { SUMMARY_METRIC_KEYS_V3, type SummaryMetricKeyV3 } from "./rvi-v3-summar
 
 export { SUMMARY_METRIC_KEYS_V3 }
 
-export const RVI_CAPABILITY_VECTORS_V3 = [
-  "threat",
-  "teamfighting",
+export const RVI_MATCH_ARM_KEYS_V3 = [
+  "combat",
   "positioning_survival",
   "control_utility",
   "economy",
   "objectives_macro",
   "vision_setup",
   "initiative_pressure",
+] as const
+
+export const RVI_PROFILE_ONLY_ARM_KEYS_V3 = [
+  "consistency_versatility",
+] as const
+
+export const RVI_CAPABILITY_VECTORS_V3 = [
+  ...RVI_MATCH_ARM_KEYS_V3,
+  ...RVI_PROFILE_ONLY_ARM_KEYS_V3,
 ] as const
 
 export type RviCapabilityVectorV3 = typeof RVI_CAPABILITY_VECTORS_V3[number]
@@ -86,8 +94,8 @@ export interface RviMetricPolicyV3<TMetricKey extends string = MetricKeyV3> {
   metricKey: TMetricKey
   vector: RviCapabilityVectorV3
   tier: MetricResponsibilityTierV3
+  /** Fixed metric responsibility inside its match arm, independent of Grade. */
   vectorWeight: number
-  gradeWeight: number
 }
 
 type DefinitionSeed = Omit<MetricDefinitionV3, "applicable"> & {
@@ -172,7 +180,7 @@ const DEFINITIONS: readonly MetricDefinitionV3[] = Object.freeze([
   definition({ key: "baron_conversion_gold_delta", label: "Baron conversion gold delta", description: "Team gold-differential change after a team Baron; this is team context, not individual credit.", formula: "team-relative gold differential after 3 minutes - differential at Baron", unit: "gold", direction: "higher", source: "timeline", applicability: "rift" }),
   definition({ key: "objective_setup_ward_rate", label: "Objective setup wards", description: "Share of team objectives preceded by a positioned player ward action.", formula: "team objectives with player ward action 30-90 seconds before within 1,500 units / team objectives", unit: "ratio", direction: "higher", source: "timeline", applicability: "rift" }),
 
-  definition({ key: "early_takedown_participation", label: "Early takedown participation", description: "Share of team kills before 15:00 with a recorded kill or assist.", formula: "player early kill contributions / team early kills", unit: "ratio", direction: "higher", source: "timeline" }),
+  definition({ key: "early_takedown_participation", label: "Early takedown participation", description: "Share of team kills before 15:00 with a recorded kill or assist.", formula: "player early kill contributions / team early kills", unit: "ratio", direction: "higher", source: "timeline", applicability: "rift" }),
   definition({ key: "spatial_early_roam_rate", label: "Spatial early roam rate", description: "Share of early contributions proven outside lane against a non-lane opponent.", formula: "qualifying spatial roam contributions / early contributions", unit: "ratio", direction: "higher", source: "timeline", applicability: "lane" }),
   definition({ key: "forward_takedown_share", label: "Forward takedown share", description: "Share of takedown contributions occurring on the opponent's side of the Rift.", formula: "forward takedown contributions / takedown contributions", unit: "ratio", direction: "higher", source: "timeline", applicability: "rift" }),
   definition({ key: "solo_pressure_outcome_rate", label: "Solo pressure outcomes", description: "Outcome points in true two-participant clusters involving the player.", formula: "mean(win=1, tie=0.5, loss=0) across involved solo clusters", unit: "ratio", direction: "higher", source: "timeline", applicability: "rift" }),
@@ -189,72 +197,81 @@ const core = (
   vector,
   tier: "CORE",
   vectorWeight,
-  gradeWeight: 1,
+})
+
+const secondary = (
+  metricKey: MetricKeyV3,
+  vector: RviCapabilityVectorV3,
+  vectorWeight: number,
+): RviMetricPolicyV3 => Object.freeze({
+  metricKey,
+  vector,
+  tier: "SECONDARY",
+  vectorWeight,
 })
 
 const diagnostic = (
   metricKey: MetricKeyV3,
   vector: RviCapabilityVectorV3,
-  vectorWeight = 1,
 ): RviMetricPolicyV3 => Object.freeze({
   metricKey,
   vector,
   tier: "DIAGNOSTIC",
-  vectorWeight,
-  gradeWeight: 0,
+  vectorWeight: 0,
 })
 
 const POLICIES: readonly RviMetricPolicyV3[] = Object.freeze([
-  core("damage_share", "threat"),
-  diagnostic("champion_damage_per_min", "threat"),
-  diagnostic("damage_per_1000_gold", "threat"),
-  diagnostic("pick_conversion_rate", "threat"),
-  diagnostic("duel_outcome_rate", "threat"),
+  core("damage_share", "combat", .3),
+  secondary("champion_damage_per_min", "combat", .15),
+  secondary("damage_per_1000_gold", "combat", .1),
+  diagnostic("pick_conversion_rate", "combat"),
+  diagnostic("duel_outcome_rate", "combat"),
+  core("kill_participation", "combat", .3),
+  secondary("teamfight_participation_rate", "combat", .05),
+  secondary("teamfight_outcome_rate", "combat", .05),
+  secondary("skirmish_outcome_rate", "combat", .05),
+  diagnostic("recorded_fight_involvement_per_min", "combat"),
+  diagnostic("kill_share_of_takedowns", "combat"),
+  diagnostic("kda_pace", "combat"),
 
-  core("kill_participation", "teamfighting"),
-  diagnostic("teamfight_participation_rate", "teamfighting"),
-  diagnostic("teamfight_outcome_rate", "teamfighting"),
-  diagnostic("skirmish_outcome_rate", "teamfighting"),
-  diagnostic("recorded_fight_involvement_per_min", "teamfighting"),
-  diagnostic("kill_share_of_takedowns", "teamfighting"),
-  diagnostic("kda_pace", "teamfighting"),
-
-  core("deaths_per_10", "positioning_survival"),
-  diagnostic("time_dead_share", "positioning_survival"),
-  diagnostic("isolated_death_rate", "positioning_survival"),
-  diagnostic("outnumbered_death_rate", "positioning_survival"),
+  core("deaths_per_10", "positioning_survival", .6),
+  secondary("time_dead_share", "positioning_survival", .15),
+  secondary("isolated_death_rate", "positioning_survival", .075),
+  secondary("outnumbered_death_rate", "positioning_survival", .075),
   diagnostic("pre_objective_deaths_per_opportunity", "positioning_survival"),
-  diagnostic("teamfight_survival_rate", "positioning_survival"),
+  secondary("teamfight_survival_rate", "positioning_survival", .1),
   diagnostic("forward_death_share", "positioning_survival"),
 
-  core("cc_seconds_per_min", "control_utility"),
-  diagnostic("ally_heal_shield_per_min", "control_utility"),
-  diagnostic("team_protection_share", "control_utility"),
+  core("cc_seconds_per_min", "control_utility", .7),
+  secondary("ally_heal_shield_per_min", "control_utility", .2),
+  secondary("team_protection_share", "control_utility", .1),
   diagnostic("damage_taken_per_min", "control_utility"),
   diagnostic("damage_taken_share", "control_utility"),
   diagnostic("damage_mitigated_per_min", "control_utility"),
   diagnostic("mitigation_share", "control_utility"),
 
-  core("gold_per_min", "economy"),
-  core("cs_per_min", "economy"),
+  core("gold_per_min", "economy", .3),
+  core("cs_per_min", "economy", .2),
   diagnostic("gold_share", "economy"),
-  ...([10, 15, 20, 30] as const).flatMap((minute) => [
-    diagnostic(`gold_delta_${minute}` as MetricKeyV3, "economy"),
-    diagnostic(`cs_delta_${minute}` as MetricKeyV3, "economy"),
+  ...([10, 15, 20] as const).flatMap((minute) => [
+    secondary(`gold_delta_${minute}` as MetricKeyV3, "economy", .1),
+    secondary(`cs_delta_${minute}` as MetricKeyV3, "economy", .05),
   ]),
-  diagnostic("xp_delta_10", "economy"),
-  diagnostic("xp_delta_15", "economy"),
+  diagnostic("gold_delta_30", "economy"),
+  diagnostic("cs_delta_30", "economy"),
+  secondary("xp_delta_10", "economy", .025),
+  secondary("xp_delta_15", "economy", .025),
 
-  core("neutral_objective_damage_per_min", "objectives_macro"),
-  core("structure_damage_per_min", "objectives_macro"),
+  core("neutral_objective_damage_per_min", "objectives_macro", .25),
+  core("structure_damage_per_min", "objectives_macro", .3),
   diagnostic("objective_damage_mix", "objectives_macro"),
-  diagnostic("objective_participation_rate", "objectives_macro"),
+  secondary("objective_participation_rate", "objectives_macro", .25),
   diagnostic("dragon_participation_rate", "objectives_macro"),
   diagnostic("herald_participation_rate", "objectives_macro"),
   diagnostic("baron_participation_rate", "objectives_macro"),
   diagnostic("objective_secure_rate", "objectives_macro"),
   diagnostic("objective_proximity_rate", "objectives_macro"),
-  diagnostic("structure_takedown_participation_rate", "objectives_macro"),
+  secondary("structure_takedown_participation_rate", "objectives_macro", .2),
   diagnostic("baron_conversion_gold_delta", "objectives_macro"),
 
   core("vision_score_per_min", "vision_setup"),
@@ -264,12 +281,12 @@ const POLICIES: readonly RviMetricPolicyV3[] = Object.freeze([
   diagnostic("detector_wards_placed_per_min", "vision_setup"),
   diagnostic("objective_setup_ward_rate", "vision_setup"),
 
-  diagnostic("early_takedown_participation", "initiative_pressure"),
-  diagnostic("spatial_early_roam_rate", "initiative_pressure"),
+  secondary("early_takedown_participation", "initiative_pressure", .4),
+  secondary("spatial_early_roam_rate", "initiative_pressure", .15),
   diagnostic("forward_takedown_share", "initiative_pressure"),
   diagnostic("solo_pressure_outcome_rate", "initiative_pressure"),
-  diagnostic("early_structure_participation", "initiative_pressure"),
-  diagnostic("early_objective_participation", "initiative_pressure"),
+  secondary("early_structure_participation", "initiative_pressure", .2),
+  secondary("early_objective_participation", "initiative_pressure", .25),
 ])
 
 const DEFINITION_BY_KEY = new Map(DEFINITIONS.map((entry) => [entry.key, entry]))
@@ -313,17 +330,31 @@ export function assertValidMetricRegistryV3(
     policyKeys.add(entry.metricKey)
     if (!definitionKeys.has(entry.metricKey)) throw new Error(`metric_policy_unknown:${entry.metricKey}`)
     if (!vectors.has(entry.vector)) throw new Error(`metric_vector_unknown:${entry.metricKey}`)
-    if (!Number.isFinite(entry.vectorWeight) || entry.vectorWeight < 0 ||
-        !Number.isFinite(entry.gradeWeight) || entry.gradeWeight < 0) {
+    if (!Number.isFinite(entry.vectorWeight) || entry.vectorWeight < 0) {
       throw new Error(`metric_weight_invalid:${entry.metricKey}`)
     }
-    if (entry.tier === "DIAGNOSTIC" && entry.gradeWeight !== 0) {
-      throw new Error(`diagnostic_grade_weight_nonzero:${entry.metricKey}`)
+    if (entry.tier === "DIAGNOSTIC" && entry.vectorWeight !== 0) {
+      throw new Error(`diagnostic_vector_weight_nonzero:${entry.metricKey}`)
     }
     if ((entry.tier === "CORE" || entry.tier === "SECONDARY") &&
-        (entry.vectorWeight <= 0 || entry.gradeWeight <= 0)) {
+        entry.vectorWeight <= 0) {
       throw new Error(`scored_metric_weight_missing:${entry.metricKey}`)
     }
+  }
+  for (const vector of RVI_MATCH_ARM_KEYS_V3) {
+    const scoredPolicies = policies.filter((entry) => entry.vector === vector &&
+      entry.tier !== "DIAGNOSTIC")
+    const total = scoredPolicies.reduce((sum, entry) => sum + entry.vectorWeight, 0)
+    if (Math.abs(total - 1) > 1e-12) {
+      throw new Error(`metric_vector_weight_total_invalid:${vector}:${total}`)
+    }
+    const recipeMetrics = GRADE_V3_RECIPE.aggregation.familyMetrics[vector]
+    if (recipeMetrics.length !== scoredPolicies.length || recipeMetrics.some((metric) => {
+      const policy = scoredPolicies.find((entry) => entry.metricKey === metric.key)
+      const definition = definitions.find((entry) => entry.key === metric.key)
+      return !policy || !definition || policy.vectorWeight !== metric.weight ||
+        definition.direction !== metric.direction
+    })) throw new Error(`grade_arm_recipe_policy_mismatch:${vector}`)
   }
   const expected = new Set<string>([...SUMMARY_METRIC_KEYS_V3, ...TIMELINE_METRIC_KEYS_V3])
   for (const key of expected) {

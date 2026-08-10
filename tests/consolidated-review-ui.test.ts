@@ -30,6 +30,7 @@ describe("consolidated match review UI", () => {
     expect(review).toContain('type MatchTab = "overview" | "stats" | "timeline" | "probability"')
     expect(review).toContain("<ReviewScoreboard")
     expect(review).toContain("<MatchStatsTable")
+    expect(review).toContain("<MatchRviSummary")
     expect(review).toContain("<RviPerformanceProfile")
     expect(rviProfile).toContain("<PerformanceRadar")
     expect(review).toContain("<WinProbabilityChart")
@@ -39,8 +40,9 @@ describe("consolidated match review UI", () => {
     expect(review).toMatch(/getRviProfile\([\s\S]*?family, "match"\)/)
     expect(review).toContain("hasGameRviEvidence")
     expect(review).toContain("Match RVI evidence is unavailable")
+    expect(review).toContain("detail-only")
     expect(rviProfile).toContain("Formula and evidence")
-    expect(review).toContain('label: "Grade & context"')
+    expect(review).toContain('label: "Breakdown"')
     expect(review).toContain('class="match-content-shell"')
     expect(review).toContain('class="match-tab-surface"')
     expect(review).toContain('<section class="insight-shell card"')
@@ -54,6 +56,24 @@ describe("consolidated match review UI", () => {
     expect(review).toContain('class="gold-chart-wrap"')
     expect(review).not.toContain("Every build, role, rune page, and contribution at a glance")
     expect(review).not.toContain("Complete lobby")
+  })
+
+  it("keeps the match summary compact while preserving the detailed RVI evidence", () => {
+    const review = read("src/pages/ReviewPage.vue")
+    const summary = read("src/components/review/MatchRviSummary.vue")
+    const profile = read("src/components/skill/PerformanceProfile.vue")
+
+    expect(summary).toContain('primary-label="This match"')
+    expect(summary).toContain('secondary-label="Your recorded average"')
+    expect(summary).toContain("Recall Grade")
+    expect(summary).toContain("Frozen reference")
+    expect(summary).toContain("Recorded Grade average")
+    expect(summary).toContain("Lobby")
+    expect(summary).toContain("Compared as")
+    expect(review).toMatch(/insightTab === 'performance'[\s\S]*detail-only/)
+    expect(profile).toContain("Arm breakdown")
+    expect(profile).toContain("measurement-table")
+    expect(summary).not.toMatch(/measured in \{\{|keeps eight stable capability views/i)
   })
 
   it("offers mode-aware, champion-filtered death positions beside the gold curve", () => {

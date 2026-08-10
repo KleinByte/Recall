@@ -189,7 +189,7 @@ describe("Grade v3 raw observations", () => {
     })
     expect(outcome.status).toBe("ready")
     expect(outcome.results.get(1)!.breakdown.components
-      .find((entry) => entry.key === "fighting")!.signals
+      .find((entry) => entry.key === "combat")!.signals
       .find((entry) => entry.key === "kill_participation"))
       .toMatchObject({
         sourceEvidenceState: "no_opportunity",

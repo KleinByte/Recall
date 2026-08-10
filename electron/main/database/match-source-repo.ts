@@ -2,6 +2,9 @@ import type { Database } from "better-sqlite3"
 import { createHash } from "node:crypto"
 import { gunzipSync, gzipSync } from "node:zlib"
 import type { SourceArtifactKind } from "../matches/source-capabilities.js"
+import { refreshTimelineCompatibilityCache } from
+  "../matches/timeline-source-selector.js"
+import type { CompactTimeline } from "../riot/timeline-mapper.js"
 
 export type RawPayloadSource = "league_client" | "match_v5"
 export type RawPayloadMappingStatus = "pending" | "mapped" | "unmappable" | "error"
@@ -90,8 +93,84 @@ export interface RawPayloadIdentity {
   sha256: string
 }
 
+export interface PersistTimelineSourceInput {
+  gameId: number
+  puuid: string
+  source: "league_client" | "match_v5"
+  sourceMatchId: string
+  mapperVersion: number
+  timeline: CompactTimeline
+  sourcePayload?: RawPayloadIdentity
+  capturedAt: number
+}
+
+function timelineEvidenceCounts(timeline: CompactTimeline) {
+  return {
+    version: 1,
+    participants: {
+      expected: null,
+      observed: timeline.frames[0]?.participants.length ?? 0,
+    },
+    frames: {
+      total: timeline.frames.length,
+      economy: timeline.frames.length,
+      progression: timeline.frames.length,
+      farm: timeline.frames.length,
+      position: timeline.frames.filter((frame) =>
+        frame.participants.some((participant) => participant.position)).length,
+    },
+    events: {
+      championKill: timeline.events.filter((event) => event.type === "CHAMPION_KILL").length,
+      item: timeline.events.filter((event) => event.category === "item").length,
+      neutralObjective: timeline.events.filter((event) =>
+        event.type === "ELITE_MONSTER_KILL").length,
+      structure: timeline.events.filter((event) =>
+        event.type === "BUILDING_KILL" || event.type === "TURRET_PLATE_DESTROYED").length,
+      ward: timeline.events.filter((event) => event.category === "vision").length,
+      levelExact: timeline.events.filter((event) =>
+        event.category === "level" && !event.approximate).length,
+      gameEnd: timeline.events.filter((event) => event.category === "game").length,
+      augmentSelection: 0,
+      unknownVariant: 0,
+    },
+  }
+}
+
 export class MatchSourceRepository {
   constructor(private readonly db: Database) {}
+
+  hasMappedPayload(input: {
+    ownerPuuid: string
+    source: RawPayloadSource
+    sourceMatchId: string
+    kind: SourceArtifactKind
+    mapperVersion: number
+  }): boolean {
+    const row = this.db.prepare(`
+      SELECT 1 AS present FROM match_source_payloads
+      WHERE owner_puuid = ? AND source = ? AND source_match_id = ? AND kind = ?
+        AND mapper_version >= ? AND mapping_status = 'mapped'
+      LIMIT 1
+    `).get(input.ownerPuuid, input.source, input.sourceMatchId, input.kind,
+      input.mapperVersion) as { present: 1 } | undefined
+    return row?.present === 1
+  }
+
+  hasCurrentTimelineResult(input: {
+    gameId: number
+    puuid: string
+    source: PersistTimelineSourceInput["source"]
+    mapperVersion: number
+  }): boolean {
+    const row = this.db.prepare(`
+      SELECT 1 AS present FROM match_timeline_sources
+      WHERE game_id = ? AND puuid = ? AND source = ? AND mapper_version = ?
+        AND status = 'ready'
+      LIMIT 1
+    `).get(input.gameId, input.puuid, input.source, input.mapperVersion) as
+      { present: 1 } | undefined
+    return row?.present === 1
+  }
 
   persistRawPayload(input: PersistRawPayloadInput): RawPayloadIdentity {
     const encoded = gzipCanonicalJsonV1(input.body)
@@ -102,6 +181,21 @@ export class MatchSourceRepository {
          mapping_status, mapping_error, mapped_at, fetched_at)
       VALUES (?, ?, ?, ?, ?, 'gzip_json_v1', ?, ?, ?, ?, 1, 'pending', NULL, NULL, ?)
       ON CONFLICT(owner_puuid, source, source_match_id, kind, sha256) DO UPDATE SET
+        game_id = COALESCE(match_source_payloads.game_id, excluded.game_id),
+        data_version = COALESCE(excluded.data_version, match_source_payloads.data_version),
+        mapper_version = MAX(match_source_payloads.mapper_version, excluded.mapper_version),
+        mapping_status = CASE
+          WHEN excluded.mapper_version > match_source_payloads.mapper_version THEN 'pending'
+          ELSE match_source_payloads.mapping_status
+        END,
+        mapping_error = CASE
+          WHEN excluded.mapper_version > match_source_payloads.mapper_version THEN NULL
+          ELSE match_source_payloads.mapping_error
+        END,
+        mapped_at = CASE
+          WHEN excluded.mapper_version > match_source_payloads.mapper_version THEN NULL
+          ELSE match_source_payloads.mapped_at
+        END,
         fetched_at = MAX(match_source_payloads.fetched_at, excluded.fetched_at)
     `).run(
       input.ownerPuuid, input.source, input.sourceMatchId, input.gameId ?? null,
@@ -127,6 +221,21 @@ export class MatchSourceRepository {
     return decodeCanonicalJsonV1(row.payload, row.sha256)
   }
 
+  readLatestPayload(input: {
+    ownerPuuid: string
+    source: RawPayloadSource
+    sourceMatchId: string
+    kind: SourceArtifactKind
+  }): unknown | undefined {
+    const row = this.db.prepare(`
+      SELECT payload, sha256 FROM match_source_payloads
+      WHERE owner_puuid = ? AND source = ? AND source_match_id = ? AND kind = ?
+      ORDER BY fetched_at DESC, rowid DESC LIMIT 1
+    `).get(input.ownerPuuid, input.source, input.sourceMatchId, input.kind) as
+      { payload: Buffer; sha256: string } | undefined
+    return row ? decodeCanonicalJsonV1(row.payload, row.sha256) : undefined
+  }
+
   setMappingResult(
     identity: RawPayloadIdentity,
     status: Exclude<RawPayloadMappingStatus, "pending">,
@@ -144,5 +253,63 @@ export class MatchSourceRepository {
     `).run(options.gameId ?? null, status, status === "mapped" ? null : options.error,
       mappedAt, identity.ownerPuuid, identity.source, identity.sourceMatchId,
       identity.kind, identity.sha256)
+  }
+
+  persistTimelineSource(input: PersistTimelineSourceInput): void {
+    const dataJson = canonicalJson(input.timeline)
+    const dataSha256 = createHash("sha256").update(dataJson).digest("hex")
+    const categories = [...new Set(input.timeline.events.map((event) => event.category))]
+      .sort()
+    this.db.prepare(`
+      INSERT INTO match_timeline_sources
+        (game_id, puuid, source, source_match_id, mapper_version, status,
+         data_json, data_sha256, event_categories_json, evidence_counts_json,
+         source_payload_sha256, captured_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 'ready', ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(game_id, puuid, source, mapper_version) DO UPDATE SET
+        source_match_id = excluded.source_match_id, status = 'ready',
+        data_json = excluded.data_json, data_sha256 = excluded.data_sha256,
+        event_categories_json = excluded.event_categories_json,
+        evidence_counts_json = excluded.evidence_counts_json,
+        source_payload_sha256 = excluded.source_payload_sha256,
+        captured_at = excluded.captured_at, updated_at = excluded.updated_at
+    `).run(
+      input.gameId, input.puuid, input.source, input.sourceMatchId,
+      input.mapperVersion, dataJson, dataSha256, canonicalJson(categories),
+      canonicalJson(timelineEvidenceCounts(input.timeline)),
+      input.sourcePayload?.sha256 ?? null, input.capturedAt, Date.now(),
+    )
+    refreshTimelineCompatibilityCache(this.db, input.gameId, input.puuid)
+  }
+
+  markTimelineUnavailable(input: {
+    gameId: number
+    puuid: string
+    source: PersistTimelineSourceInput["source"]
+    sourceMatchId: string
+    mapperVersion: number
+    capturedAt: number
+    reason: string
+  }): void {
+    this.db.prepare(`
+      INSERT INTO match_timeline_sources
+        (game_id, puuid, source, source_match_id, mapper_version, status,
+         data_json, data_sha256, event_categories_json, evidence_counts_json,
+         source_payload_sha256, captured_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 'unavailable', NULL, NULL, '[]', ?, NULL, ?, ?)
+      ON CONFLICT(game_id, puuid, source, mapper_version) DO UPDATE SET
+        source_match_id = excluded.source_match_id,
+        status = CASE WHEN match_timeline_sources.status = 'ready'
+          THEN 'ready' ELSE 'unavailable' END,
+        evidence_counts_json = CASE WHEN match_timeline_sources.status = 'ready'
+          THEN match_timeline_sources.evidence_counts_json
+          ELSE excluded.evidence_counts_json END,
+        captured_at = MAX(match_timeline_sources.captured_at, excluded.captured_at),
+        updated_at = excluded.updated_at
+    `).run(
+      input.gameId, input.puuid, input.source, input.sourceMatchId,
+      input.mapperVersion, canonicalJson({ version: 1, reason: input.reason }),
+      input.capturedAt, Date.now(),
+    )
   }
 }

@@ -277,11 +277,13 @@ export class LiveGameCaptureRepository {
 
     const enrichedDerived = derived.map((event) => {
       if (event.type !== "CHAMPION_KILL") return event
-      const recorded = timeline.events.find((candidate) =>
+      const candidates = timeline.events.filter((candidate) =>
         candidate.type === "CHAMPION_KILL" &&
-        candidate.targetId === event.targetId &&
         Math.abs(candidate.timestamp - event.timestamp) <= 2_000,
       )
+      const recorded = event.targetId
+        ? candidates.find((candidate) => candidate.targetId === event.targetId)
+        : candidates.length === 1 ? candidates[0] : undefined
       if (!recorded) return event
 
       // Live Client Data gives us reliable Riot IDs, while the post-game LCU
@@ -306,6 +308,8 @@ export class LiveGameCaptureRepository {
         : [],
     ))
     const liveKills = enrichedDerived.filter((event) => event.type === "CHAMPION_KILL")
+    const incompleteSupplementalKillEvents = liveKills.filter((event) =>
+      event.eventId.startsWith("live-kill:")).length
     const retained = timeline.events.filter((event) =>
       !(event.type === "CHAMPION_KILL" && liveKills.some((live) =>
         live.targetId === event.targetId && Math.abs(live.timestamp - event.timestamp) <= 2_000,
@@ -326,6 +330,12 @@ export class LiveGameCaptureRepository {
         )
       }
       if (event.category === "kill") {
+        // Live Client kill rows do not carry map coordinates and can retain
+        // unresolved names. They are useful only when they enrich a matching
+        // post-game event above; an unmatched supplement must remain in the
+        // raw live capture instead of masquerading as a complete timeline
+        // kill and invalidating spatial fight evidence.
+        if (event.eventId.startsWith("live-kill:")) return false
         return !retained.some((existing) => existing.type === "CHAMPION_KILL" &&
           existing.targetId === event.targetId && Math.abs(existing.timestamp - event.timestamp) <= 2_000)
       }
@@ -342,6 +352,12 @@ export class LiveGameCaptureRepository {
       events: [...retained, ...added].sort((left, right) =>
         left.timestamp - right.timestamp || left.eventId.localeCompare(right.eventId),
       ),
+      evidenceCoverage: {
+        ...timeline.evidenceCoverage,
+        incompleteSupplementalKillEvents:
+          (timeline.evidenceCoverage?.incompleteSupplementalKillEvents ?? 0) +
+          incompleteSupplementalKillEvents,
+      },
     }
   }
 

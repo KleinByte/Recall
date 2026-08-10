@@ -1,4 +1,12 @@
-export const TIMELINE_MAPPER_VERSION = 9
+export const TIMELINE_MAPPER_VERSION = 11
+
+export type CompactTimelineParticipantField =
+  | "currentGold"
+  | "totalGold"
+  | "level"
+  | "xp"
+  | "minionsKilled"
+  | "jungleMinionsKilled"
 
 export type TimelineEventCategory =
   | "kill"
@@ -16,6 +24,8 @@ export interface CompactTimelineFrame {
   ownerLevel: number
   ownerXp: number
   ownerCs: number
+  /** False when any expected participant lacks total-gold evidence. */
+  teamGoldComplete?: boolean
   participants: CompactTimelineParticipantFrame[]
 }
 
@@ -28,6 +38,8 @@ export interface CompactTimelineParticipantFrame {
   xp: number
   minionsKilled: number
   jungleMinionsKilled: number
+  /** Explicitly distinguishes an absent source field from an observed zero. */
+  missingFields?: CompactTimelineParticipantField[]
   position?: { x: number; y: number }
 }
 
@@ -67,6 +79,10 @@ export interface CompactTimeline {
     beforeDifference: number
     afterDifference: number
   }[]
+  evidenceCoverage?: {
+    /** Live kill-feed rows that could not be joined to post-game events. */
+    incompleteSupplementalKillEvents?: number
+  }
 }
 
 interface RawParticipantFrame {
@@ -148,11 +164,36 @@ function numberOrZero(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0
 }
 
+function hasFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value)
+}
+
+function participantMissingFields(
+  participant: RawParticipantFrame,
+): CompactTimelineParticipantField[] {
+  return ([
+    "currentGold",
+    "totalGold",
+    "level",
+    "xp",
+    "minionsKilled",
+    "jungleMinionsKilled",
+  ] as const).filter((field) => !hasFiniteNumber(participant[field]))
+}
+
 /** Riot timeline payloads sometimes include participantId: 0 alongside the
  * real killerId/creatorId. Zero is a sentinel, not an actor identity. */
 function firstPositiveId(...values: unknown[]) {
   return values.find((value): value is number =>
     Number.isSafeInteger(value) && Number(value) > 0)
+}
+
+/** Riot's local timeline frequently sends an empty monsterSubType for Baron
+ * and Herald while retaining the authoritative monsterType. Empty strings are
+ * absent evidence, so they must not mask the useful fallback field. */
+function firstNonEmptyToken(...values: unknown[]) {
+  return values.find((value): value is string =>
+    typeof value === "string" && value.trim().length > 0)?.trim()
 }
 
 /**
@@ -208,6 +249,7 @@ function inferLevelEvents(
 
   for (const frame of frames) {
     for (const participant of frame.participants) {
+      if (participant.missingFields?.includes("level")) continue
       const previous = previousLevels.get(participant.participantId)
       const current = participant.level
       previousLevels.set(participant.participantId, current)
@@ -250,6 +292,15 @@ export function mapTimeline(
         ...participant,
         participantId: participant.participantId ?? Number(key),
       }))
+    const participantsById = new Map(participantFrames.map((participant) => [
+      numberOrZero(participant.participantId),
+      participant,
+    ]))
+    const expectedTeamParticipants = [...participantTeams.entries()]
+      .filter(([, teamId]) => teamId === 100 || teamId === 200)
+    const teamGoldComplete = expectedTeamParticipants.length > 0 &&
+      expectedTeamParticipants.every(([participantId]) =>
+        hasFiniteNumber(participantsById.get(participantId)?.totalGold))
     let blueGold = 0
     let redGold = 0
     for (const participant of participantFrames) {
@@ -282,6 +333,7 @@ export function mapTimeline(
           xp: numberOrZero(participant.xp),
           minionsKilled: numberOrZero(participant.minionsKilled),
           jungleMinionsKilled: numberOrZero(participant.jungleMinionsKilled),
+          missingFields: participantMissingFields(participant),
           position: participant.position &&
             typeof participant.position.x === "number" &&
             typeof participant.position.y === "number"
@@ -289,6 +341,7 @@ export function mapTimeline(
             : undefined,
         }
       }),
+      teamGoldComplete,
     })
 
     for (const [eventIndex, event] of (frame.events ?? []).entries()) {
@@ -302,8 +355,12 @@ export function mapTimeline(
         event.creatorId,
       )
       const targetId = firstPositiveId(event.victimId)
-      const objective = event.monsterSubType ?? event.monsterType ??
-        event.towerType ?? event.buildingType
+      const objective = firstNonEmptyToken(
+        event.monsterSubType,
+        event.monsterType,
+        event.towerType,
+        event.buildingType,
+      )
       const mappedEvent: Omit<CompactTimelineEvent, "eventId"> = {
         timestamp: numberOrZero(event.timestamp ?? timestamp),
         type: event.type,
@@ -351,15 +408,16 @@ export function mapTimeline(
 export function findTurningPoints(
   frames: CompactTimelineFrame[],
 ): CompactTimeline["turningPoints"] {
-  const candidates = frames.flatMap((frame, index) => {
+  const completeFrames = frames.filter((frame) => frame.teamGoldComplete !== false)
+  const candidates = completeFrames.flatMap((frame, index) => {
     const target = frame.timestamp - 120_000
     let previousIndex = index - 1
     while (
       previousIndex > 0 &&
-      frames[previousIndex].timestamp > target
+      completeFrames[previousIndex].timestamp > target
     ) previousIndex -= 1
     if (previousIndex < 0) return []
-    const previous = frames[previousIndex]
+    const previous = completeFrames[previousIndex]
     const before = previous.blueGold - previous.redGold
     const after = frame.blueGold - frame.redGold
     const swing = after - before

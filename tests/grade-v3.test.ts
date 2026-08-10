@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { observed, unavailable } from "../src/shared/measurement.js"
+import { noOpportunity, observed, unavailable } from "../src/shared/measurement.js"
 import {
   componentScore,
   gradeLobbyV3,
@@ -101,8 +101,12 @@ describe("Grade v3 pure scoring contract", () => {
       positionResolverVersion: expect.any(Number),
       gradeCoreFactContractVersion: expect.any(Number),
     })
-    expect(result.breakdown.components.reduce((sum, component) => sum + component.weight, 0))
-      .toBeCloseTo(1)
+    expect(result.breakdown.components.reduce((sum, component) => sum + component.weight, 0) +
+      result.breakdown.neutralizedResponsibilityWeight).toBeCloseTo(1)
+    expect(result.breakdown.components.reduce(
+      (sum, component) => sum + component.contribution,
+      result.breakdown.neutralizedResponsibilityContribution,
+    )).toBeCloseTo(result.breakdown.rawResponsibilityScore / 100)
   })
 
   it("uses the frozen composite percentile, not the raw arithmetic composite, for letters", () => {
@@ -136,16 +140,109 @@ describe("Grade v3 pure scoring contract", () => {
     },
   )
 
-  it("uses equal, fixed signal denominators inside a family", () => {
+  it("keeps the core-only arm unchanged on its fixed declared denominator", () => {
     const rows = players()
     rows[0].primaryArchetype = "marksman"
     rows[0].position = "BOTTOM"
     rows[0].metricEvidence.damage_share = observed(.9)
     rows[0].metricEvidence.kill_participation = observed(.1)
     const result = scoreLobbyV3(prepared(rows)).results.get(1)!
-    const fighting = result.breakdown.components.find((entry) => entry.key === "fighting")!
-    expect(fighting.componentScore).toBeCloseTo(.5)
-    expect(fighting.signals.map((entry) => entry.weight)).toEqual([.5, .5])
+    const combat = result.breakdown.components.find((entry) => entry.key === "combat")!
+    expect(combat.componentScore).toBeCloseTo(.5)
+    expect(combat.signals.map((entry) => entry.weight)).toEqual([.5, .5])
+  })
+
+  it("assigns missing secondary mass to the core bundle without observing it", () => {
+    const rows = players()
+    rows[0].position = "UTILITY"
+    rows[0].metricEvidence.cc_seconds_per_min = observed(.2)
+    rows[0].metricEvidence.ally_heal_shield_per_min = observed(.8)
+    rows[0].detailMetricEvidence = {
+      team_protection_share: unavailable("not_collected"),
+    }
+
+    const control = scoreLobbyV3(prepared(rows)).results.get(1)!
+      .breakdown.components.find((entry) => entry.key === "control_utility")!
+
+    // .7 * .2 + .2 * .8 + the missing .1 inheriting the .2 CORE bundle.
+    expect(control.componentScore).toBeCloseTo(.32)
+    expect(control.signals).toEqual([
+      expect.objectContaining({ key: "cc_seconds_per_min", percentile: .2, weight: .8 }),
+      expect.objectContaining({ key: "ally_heal_shield_per_min", percentile: .8, weight: .2 }),
+    ])
+    expect(control.signals.some((entry) => entry.key === "team_protection_share")).toBe(false)
+  })
+
+  it("keeps absent, unavailable, and no-opportunity optional rows composite-neutral", () => {
+    const score = (detailMetricEvidence?: GradePlayerV3Input["detailMetricEvidence"]) => {
+      const rows = players()
+      rows[0].metricEvidence.damage_share = observed(.2)
+      rows[0].metricEvidence.kill_participation = observed(.8)
+      rows[0].detailMetricEvidence = detailMetricEvidence
+      return scoreLobbyV3(prepared(rows)).results.get(1)!.breakdown.rawResponsibilityScore
+    }
+
+    const absent = score()
+    expect(score({ champion_damage_per_min: unavailable("not_collected") })).toBe(absent)
+    expect(score({
+      champion_damage_per_min: noOpportunity("no_recorded_fight_opportunity"),
+    })).toBe(absent)
+  })
+
+  it("lets an observed secondary change the raw responsibility composite", () => {
+    const baselineRows = players()
+    baselineRows[0].metricEvidence.damage_share = observed(.2)
+    baselineRows[0].metricEvidence.kill_participation = observed(.2)
+    const baseline = scoreLobbyV3(prepared(baselineRows)).results.get(1)!
+      .breakdown.rawResponsibilityScore
+
+    const enrichedRows = players()
+    enrichedRows[0].metricEvidence.damage_share = observed(.2)
+    enrichedRows[0].metricEvidence.kill_participation = observed(.2)
+    enrichedRows[0].detailMetricEvidence = { champion_damage_per_min: observed(1) }
+    const enriched = scoreLobbyV3(prepared(enrichedRows)).results.get(1)!
+      .breakdown.rawResponsibilityScore
+
+    expect(enriched).toBeGreaterThan(baseline)
+  })
+
+  it("keeps unavailable Initiative off the radar and neutral in the composite", () => {
+    const baselineRows = players()
+    const baseline = scoreLobbyV3(prepared(baselineRows)).results.get(1)!
+
+    const unavailableRows = players()
+    unavailableRows[0].detailMetricEvidence = {
+      early_takedown_participation: unavailable("timeline_missing"),
+      spatial_early_roam_rate: noOpportunity("no_roam_opportunity"),
+      early_structure_participation: unavailable("timeline_missing"),
+      early_objective_participation: unavailable("timeline_missing"),
+    }
+    const missing = scoreLobbyV3(prepared(unavailableRows)).results.get(1)!
+    expect(missing.breakdown.rawResponsibilityScore)
+      .toBe(baseline.breakdown.rawResponsibilityScore)
+    expect(missing.breakdown.components.some((entry) =>
+      entry.key === "initiative_pressure")).toBe(false)
+    expect(missing.breakdown.omittedComponents).toContainEqual(expect.objectContaining({
+      key: "initiative_pressure",
+    }))
+    expect(missing.breakdown.neutralizedResponsibilityWeight).toBeGreaterThan(0)
+
+    const observedRows = players()
+    observedRows[0].detailMetricEvidence = { early_takedown_participation: observed(1) }
+    const observedInitiative = scoreLobbyV3(prepared(observedRows)).results.get(1)!
+    expect(observedInitiative.breakdown.rawResponsibilityScore)
+      .toBeGreaterThan(baseline.breakdown.rawResponsibilityScore)
+    expect(observedInitiative.breakdown.components.find((entry) =>
+      entry.key === "initiative_pressure")).toMatchObject({
+      componentScore: 1,
+      signals: [expect.objectContaining({
+        key: "early_takedown_participation",
+        weight: 1,
+      })],
+    })
+    expect(observedInitiative.breakdown.neutralizedResponsibilityWeight).toBe(0)
+    expect(observedInitiative.breakdown.components.find((entry) => entry.key === "combat")?.weight)
+      .toBe(baseline.breakdown.components.find((entry) => entry.key === "combat")?.weight)
   })
 
   it("preserves an observed zero instead of treating it as missing", () => {
@@ -154,7 +251,7 @@ describe("Grade v3 pure scoring contract", () => {
     rows[0].metricEvidence.kill_participation = observed(0)
     const outcome = scoreLobbyV3(prepared(rows))
     expect(outcome.status).toBe("ready")
-    expect(outcome.results.get(1)?.breakdown.components.find((entry) => entry.key === "fighting"))
+    expect(outcome.results.get(1)?.breakdown.components.find((entry) => entry.key === "combat"))
       .toMatchObject({ componentScore: 0, evidenceState: "observed" })
   })
 
@@ -171,7 +268,7 @@ describe("Grade v3 pure scoring contract", () => {
       },
     }
     const signal = scoreLobbyV3(prepared(rows)).results.get(1)!.breakdown.components
-      .find((entry) => entry.key === "fighting")!.signals
+      .find((entry) => entry.key === "combat")!.signals
       .find((entry) => entry.key === "kill_participation")
     expect(signal).toMatchObject({
       percentile: .5,
@@ -180,21 +277,21 @@ describe("Grade v3 pure scoring contract", () => {
     })
   })
 
-  it("persists calibrated diagnostic evidence even when it has no grade family", () => {
+  it("lets calibrated optional evidence contribute inside its arm", () => {
     const rows = players()
     rows[0].metricEvidence.ally_heal_shield_per_min = observed(.73, {
       source: "derived",
       reason: "local_shrunk",
     })
-    const diagnostic = scoreLobbyV3(prepared(rows)).results.get(1)!
-      .breakdown.diagnosticMetrics
-    expect(diagnostic).toEqual([expect.objectContaining({
+    const control = scoreLobbyV3(prepared(rows)).results.get(1)!
+      .breakdown.components.find((entry) => entry.key === "control_utility")!
+    expect(control.signals).toContainEqual(expect.objectContaining({
       key: "ally_heal_shield_per_min",
-      evidenceState: "observed",
       percentile: .73,
       sourceEvidenceState: "observed",
       calibrationReason: "local_shrunk",
-    })])
+    }))
+    expect(control.componentScore).toBeGreaterThan(.5)
   })
 
   it.each(PRIMARY_ARCHETYPES)(
@@ -211,7 +308,7 @@ describe("Grade v3 pure scoring contract", () => {
       const outcome = scoreLobbyV3(prepared(rows))
       expect(outcome.status).toBe("ready")
       expect(outcome.results.get(1)?.breakdown.components.find(
-        (entry) => entry.key === "control",
+        (entry) => entry.key === "control_utility",
       )).toMatchObject({
         componentScore: 0,
         evidenceState: "observed",
@@ -228,11 +325,11 @@ describe("Grade v3 pure scoring contract", () => {
     expect(scoreLobbyV3(prepared(rows))).toMatchObject({
       status: "missing_core_metric",
       results: new Map(),
-      reason: "participant:1:fighting:damage_share:source_absent",
+      reason: "participant:1:combat:damage_share:source_absent",
     })
   })
 
-  it("does not renormalize a required family and permits missing diagnostics", () => {
+  it("omits zero-responsibility or optional-only arms without invalidating Grade", () => {
     const rows = players()
     rows[0].primaryArchetype = "marksman"
     rows[0].position = "BOTTOM"
@@ -241,10 +338,18 @@ describe("Grade v3 pure scoring contract", () => {
     const outcome = scoreLobbyV3(prepared(rows))
     expect(outcome.status).toBe("ready")
     const breakdown = outcome.results.get(1)!.breakdown
-    expect(breakdown.responsibilityTiers).toMatchObject({ vision: 0, control: 0 })
-    expect(breakdown.omittedComponents.map((entry) => entry.key)).toEqual(["vision", "control"])
-    expect(breakdown.components.reduce((sum, component) => sum + component.weight, 0))
-      .toBeCloseTo(1)
+    expect(breakdown.responsibilityTiers).toMatchObject({
+      vision_setup: 0,
+      control_utility: 0,
+    })
+    expect(breakdown.omittedComponents.map((entry) => entry.key)).toEqual([
+      "control_utility",
+      "vision_setup",
+      "initiative_pressure",
+    ])
+    expect(breakdown.components.reduce((sum, component) => sum + component.weight, 0) +
+      breakdown.neutralizedResponsibilityWeight).toBeCloseTo(1)
+    expect(breakdown.neutralizedResponsibilityWeight).toBeGreaterThan(0)
   })
 
   it("is monotone in every higher-is-better evidenced percentile", () => {
@@ -301,7 +406,7 @@ describe("legacy Grade v3 entry point", () => {
   it("does not invent new source signals absent from GradeInput", () => {
     const outcome = gradeLobbyV3(legacyLobby(), "sr")
     expect(outcome.status).toBe("missing_core_metric")
-    expect(outcome.reason).toContain("structure_damage_per_min")
+    expect(outcome.reason).toContain("cc_seconds_per_min")
   })
 
   it("rejects a non-finite core value instead of coercing it to zero", () => {

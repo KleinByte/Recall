@@ -146,6 +146,42 @@ describe("timeline mapping", () => {
     expect(timeline.events[1].category).toBe("vision")
   })
 
+  it("retains missing frame fields separately from observed zero", () => {
+    const timeline = mapTimeline([{
+      timestamp: 10 * 60_000,
+      participantFrames: {
+        "1": {
+          participantId: 1,
+          currentGold: 0,
+          totalGold: 0,
+          level: 1,
+          minionsKilled: 0,
+          jungleMinionsKilled: 0,
+          // XP is deliberately absent.
+        },
+        "6": {
+          participantId: 6,
+          // Every measured field is deliberately absent.
+        },
+      },
+    }], 1, new Map([[1, 100], [6, 200]]))
+
+    expect(timeline.frames[0]).toMatchObject({
+      blueGold: 0,
+      redGold: 0,
+      teamGoldComplete: false,
+    })
+    expect(timeline.frames[0].participants[0]).toMatchObject({
+      totalGold: 0,
+      xp: 0,
+      missingFields: ["xp"],
+    })
+    expect(timeline.frames[0].participants[1].missingFields).toEqual([
+      "currentGold", "totalGold", "level", "xp", "minionsKilled",
+      "jungleMinionsKilled",
+    ])
+  })
+
   it("accepts both historical item transform event names", () => {
     const timeline = mapTimeline([{
       timestamp: 60_000,
@@ -179,6 +215,7 @@ describe("timeline mapping", () => {
           participantId: 0,
           killerId: 3,
           teamId: 0,
+          monsterSubType: "",
           monsterType: "BARON_NASHOR",
         },
         {

@@ -23,7 +23,7 @@ import type {
 export { TIMELINE_METRIC_KEYS_V3 }
 
 export const RVI_V3_TIMELINE_DERIVATION_ID =
-  "recall.rvi.v3.timeline.2026-08-09.r1" as const
+  "recall.rvi.v3.timeline.2026-08-10.r4" as const
 export const RVI_V3_FIGHT_CLUSTER_WINDOW_MS = 12_000
 export const RVI_V3_FIGHT_CLUSTER_RADIUS = 1_200
 export const RVI_V3_PHASE_FRAME_TOLERANCE_MS = 30_000
@@ -165,19 +165,32 @@ function eventTeam(event: CompactTimelineEvent, teams: ReadonlyMap<number, numbe
 const stableEventOrder = (left: CompactTimelineEvent, right: CompactTimelineEvent) =>
   left.timestamp - right.timestamp || left.eventId.localeCompare(right.eventId)
 
+function hasCompleteKillIdentity(event: CompactTimelineEvent): boolean {
+  return Number.isFinite(event.timestamp) && positiveId(event.participantId) &&
+    positiveId(event.targetId) &&
+    (event.assistingParticipantIds === undefined ||
+      (Array.isArray(event.assistingParticipantIds) &&
+       event.assistingParticipantIds.every(positiveId)))
+}
+
+function hasCompleteSpatialKillEvidence(event: CompactTimelineEvent): boolean {
+  return hasCompleteKillIdentity(event) && finitePoint(event.position)
+}
+
 /** Deterministic connected components at the frozen 12-second/1,200-unit boundary. */
 export function clusterTimelineFightsV3(
   events: readonly CompactTimelineEvent[],
 ): Evidence<readonly TimelineFightClusterV3[]> {
   const kills = events.filter((event) => event.type === "CHAMPION_KILL")
-  if (kills.some((event) => !Number.isFinite(event.timestamp) ||
-      !positiveId(event.participantId) || !positiveId(event.targetId) ||
-      (event.assistingParticipantIds !== undefined &&
-       !Array.isArray(event.assistingParticipantIds)) || !finitePoint(event.position) ||
-      (event.assistingParticipantIds ?? []).some((id) => !positiveId(id)))) {
-    return unavailable("incomplete_spatial_fight_evidence", { source: "legacy" })
+  const usableKills = kills.filter(hasCompleteSpatialKillEvidence)
+  const excludedCount = kills.length - usableKills.length
+  if (excludedCount > 0) {
+    return unavailable(
+      `incomplete_spatial_fight_evidence:${usableKills.length}_of_${kills.length}`,
+      { source: "legacy" },
+    )
   }
-  const ordered = [...kills].sort(stableEventOrder)
+  const ordered = [...usableKills].sort(stableEventOrder)
   const parent = ordered.map((_, index) => index)
   const root = (index: number): number => parent[index] === index
     ? index
@@ -333,16 +346,26 @@ export function deriveTimelineMetricObservationsV3(
   const setRate = (key: TimelineMetricKeyV3, numerator: number, denominator: number, reason: string) =>
     set(key, ratioEvidence(numerator, denominator, reason), detailsForRate(numerator, denominator))
   const teams = teamEntries(input)
-  const kills = timeline.events
+  const retainedKills = timeline.events
     .filter((event) => event.type === "CHAMPION_KILL")
     .sort(stableEventOrder)
+  // Unresolved supplemental live events remain auditable in the source data,
+  // but cannot safely participate in identity/team denominators.
+  const kills = retainedKills.filter(hasCompleteKillIdentity)
   const objectives = timeline.events
     .filter((event) => event.type === "ELITE_MONSTER_KILL")
     .sort(stableEventOrder)
   const structures = timeline.events
     .filter((event) => event.type === "BUILDING_KILL")
     .sort(stableEventOrder)
-  const clustersEvidence = clusterTimelineFightsV3(kills)
+  const incompleteSupplementalKills =
+    timeline.evidenceCoverage?.incompleteSupplementalKillEvents ?? 0
+  const clustersEvidence = incompleteSupplementalKills > 0
+    ? unavailable<readonly TimelineFightClusterV3[]>(
+      `incomplete_supplemental_kill_coverage:${incompleteSupplementalKills}`,
+      { source: "legacy" },
+    )
+    : clusterTimelineFightsV3(retainedKills)
 
   if (clustersEvidence.state !== "observed") {
     for (const key of [
@@ -354,6 +377,13 @@ export function deriveTimelineMetricObservationsV3(
     ] as const) set(key, timelineUnavailable(clustersEvidence.reason ?? "fight_clusters_unavailable"))
   } else {
     const clusters = clustersEvidence.value
+    const setFightRate = (
+      key: TimelineMetricKeyV3,
+      numerator: number,
+      denominator: number,
+      reason: string,
+    ) => set(key, ratioEvidence(numerator, denominator, reason),
+      detailsForRate(numerator, denominator))
     const incompleteTeams = clusters.some((cluster) =>
       cluster.participantIds.some((participantId) => !teams.has(participantId)))
     if (incompleteTeams) {
@@ -400,11 +430,11 @@ export function deriveTimelineMetricObservationsV3(
         cluster.participantIds.some((participantId) => teams.get(participantId) === input.teamId))
       const involvedTeamfights = teamfightOpportunities.filter((cluster) =>
         cluster.participantIds.includes(input.participantId))
-      setRate("teamfight_participation_rate", involvedTeamfights.length,
+      setFightRate("teamfight_participation_rate", involvedTeamfights.length,
         teamfightOpportunities.length, "no_recorded_teamfight_clusters")
       const survived = involvedTeamfights.filter((cluster) =>
         !cluster.events.some((event) => event.targetId === input.participantId)).length
-      setRate("teamfight_survival_rate", survived, involvedTeamfights.length,
+      setFightRate("teamfight_survival_rate", survived, involvedTeamfights.length,
         "no_involved_teamfight_clusters")
 
       const deathClusters = clusters.filter((cluster) =>
@@ -414,13 +444,13 @@ export function deriveTimelineMetricObservationsV3(
           teams.get(participantId) !== input.teamId)).length
       const outnumbered = deathClusters.filter((cluster) => {
         const allies = cluster.participantIds.filter((participantId) =>
-          participantId !== input.participantId && teams.get(participantId) === input.teamId).length
+          teams.get(participantId) === input.teamId).length
         const enemies = cluster.participantIds.filter((participantId) =>
           teams.get(participantId) !== input.teamId).length
         return enemies > allies
       }).length
-      setRate("isolated_death_rate", isolated, deathClusters.length, "player_had_no_recorded_deaths")
-      setRate("outnumbered_death_rate", outnumbered, deathClusters.length, "player_had_no_recorded_deaths")
+      setFightRate("isolated_death_rate", isolated, deathClusters.length, "player_had_no_recorded_deaths")
+      setFightRate("outnumbered_death_rate", outnumbered, deathClusters.length, "player_had_no_recorded_deaths")
     }
     const involvedCount = clustersEvidence.value.filter((cluster) =>
       cluster.participantIds.includes(input.participantId)).length
@@ -482,11 +512,26 @@ export function deriveTimelineMetricObservationsV3(
       return
     }
     const timestamp = minute * 60_000
+    if (input.durationSecs * 1_000 < timestamp) {
+      set(key, timelineNotApplicable("match_ended_before_phase_checkpoint"))
+      return
+    }
     const frame = nearestFrame(timeline.frames, timestamp, RVI_V3_PHASE_FRAME_TOLERANCE_MS)
     const owner = frameParticipant(frame, input.participantId)
     const opponent = frameParticipant(frame, input.opponentParticipantId)
     if (!frame || !owner || !opponent) {
       set(key, timelineUnavailable("phase_frame_not_within_30_seconds"))
+      return
+    }
+    const requiredFields = field === "gold"
+      ? ["totalGold"] as const
+      : field === "xp"
+        ? ["xp"] as const
+        : ["minionsKilled", "jungleMinionsKilled"] as const
+    if (requiredFields.some((required) =>
+      owner.missingFields?.includes(required) ||
+      opponent.missingFields?.includes(required))) {
+      set(key, timelineUnavailable(`phase_${field}_source_field_missing`))
       return
     }
     const value = field === "gold"
@@ -599,7 +644,8 @@ export function deriveTimelineMetricObservationsV3(
         const endTarget = Math.min(input.durationSecs * 1_000, event.timestamp + 180_000)
         const end = nearestFrame(timeline.frames, endTarget,
           RVI_V3_OBJECTIVE_FRAME_TOLERANCE_MS)
-        if (!start || !end) return undefined
+        if (!start || !end || start.teamGoldComplete === false ||
+            end.teamGoldComplete === false) return undefined
         const sign = input.teamId === 100 ? 1 : input.teamId === 200 ? -1 : undefined
         if (sign === undefined) return undefined
         return sign * ((end.blueGold - end.redGold) - (start.blueGold - start.redGold))
@@ -659,7 +705,9 @@ export function deriveTimelineMetricObservationsV3(
     event.timestamp < RVI_V3_EARLY_END_MS && eventTeam(event, teams) === input.teamId)
   const earlyTeamIdentityMissing = kills.some((event) =>
     event.timestamp < RVI_V3_EARLY_END_MS && eventTeam(event, teams) === undefined)
-  if (earlyTeamIdentityMissing) {
+  if (!isRift(input.context)) {
+    set("early_takedown_participation", timelineNotApplicable("early_initiative_rift_only"))
+  } else if (earlyTeamIdentityMissing) {
     set("early_takedown_participation", timelineUnavailable("early_kill_team_identity_missing"))
   } else {
     setRate("early_takedown_participation", earlyTeamKills.filter((event) =>

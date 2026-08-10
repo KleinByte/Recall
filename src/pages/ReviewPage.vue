@@ -19,6 +19,7 @@ import {
 } from "../helpers/game-assets"
 import { focusReviewGameId, reviewMatch } from "../helpers/navigation"
 import { publicAssetUrl } from "../helpers/assets"
+import { lobbyStandings } from "../helpers/match-detail"
 import {
   timelineChartDomain,
   timelineChartX,
@@ -36,6 +37,7 @@ import MatchDeathMap from "../components/MatchDeathMap.vue"
 import MatchPlaybackMap from "../components/MatchPlaybackMap.vue"
 import WinProbabilityChart from "../components/WinProbabilityChart.vue"
 import RviPerformanceProfile from "../components/skill/PerformanceProfile.vue"
+import MatchRviSummary from "../components/review/MatchRviSummary.vue"
 import PageHeader from "../components/ui/PageHeader.vue"
 import Tabs from "../components/ui/Tabs.vue"
 import Button from "../components/ui/Button.vue"
@@ -102,6 +104,15 @@ let annotationSavesInFlight = 0
 const owner = computed(() =>
   review.value?.scoreboard.find((participant) => participant.isPlayer === 1),
 )
+const matchLobbyStanding = computed(() => {
+  const current = review.value
+  if (!current) return undefined
+  if (current.match.lobbyPlace && current.match.lobbySize) {
+    return { place: current.match.lobbyPlace, of: current.match.lobbySize }
+  }
+  const player = owner.value
+  return player ? lobbyStandings(current.scoreboard).get(player.participantId) : undefined
+})
 const matchTabs: { id: MatchTab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "stats", label: "Stats" },
@@ -116,7 +127,7 @@ const pageTabs = [
 ]
 const insightTabs = [
   { value: "rvi", label: "RVI" },
-  { value: "performance", label: "Grade & context" },
+  { value: "performance", label: "Breakdown" },
 ]
 const matchTabOptions = matchTabs.map((item) => ({ value: item.id, label: item.label }))
 const timelineMapViewOptions = [
@@ -803,16 +814,20 @@ onBeforeUnmount(() => {
       <section class="insight-shell card" aria-label="Match insights">
         <Tabs v-model="insightTab" :options="insightTabs" label="Match insights" class="insight-tabs" />
 
-        <div v-if="insightTab === 'rvi' && gameRviPresentation && hasGameRviEvidence" class="rvi-review-detail" role="tabpanel">
-          <RviPerformanceProfile
+        <div v-if="insightTab === 'rvi' && gameRviPresentation && hasGameRviEvidence" role="tabpanel">
+          <MatchRviSummary
             :profile="gameRviPresentation"
-            :champions="champions"
+            :grade="review.match.grade"
+            :personal-score="careerRvi?.roleFitAverage"
+            :lobby-place="matchLobbyStanding?.place"
+            :lobby-size="matchLobbyStanding?.of"
+            :reference-matches="review.match.gradeReferenceSampleCount"
           />
         </div>
         <div v-else-if="insightTab === 'rvi'" class="rvi-empty" role="tabpanel">
           <strong>Match RVI evidence is unavailable</strong>
           <span>The selected Recall v3 recipe has no inspectable metric observations for this game.</span>
-          <Button size="compact" @click="insightTab = 'performance'">Open grade &amp; context</Button>
+          <Button size="compact" @click="insightTab = 'performance'">Open breakdown</Button>
         </div>
       </section>
 
@@ -897,6 +912,13 @@ onBeforeUnmount(() => {
           </template>
           <p v-else class="muted">No earlier matching games are available yet.</p>
         </section>
+
+        <RviPerformanceProfile
+          v-if="gameRviPresentation && hasGameRviEvidence"
+          class="match-rvi-evidence"
+          :profile="gameRviPresentation"
+          detail-only
+        />
       </div>
 
       <section class="match-content-shell">
@@ -1304,9 +1326,8 @@ h2 { margin: 0; }
 .match-tab-surface { display: flex; flex-direction: column; gap: var(--ui-space-4); min-width: 0; padding: clamp(12px, 1.5vw, 18px); border: 1px solid var(--ui-border); border-top: 0; border-radius: 0 0 var(--ui-radius-lg) var(--ui-radius-lg); background: var(--ui-surface-panel); }
 .match-tab-surface > .scoreboard-section, .match-tab-surface > .match-tab-panel { border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .insight-shell { padding: 0; overflow: hidden; }.insight-tabs { border: 0; border-bottom: 1px solid var(--ui-divider); border-radius: 0; }
-.rvi-review { display: grid; grid-template-columns: minmax(220px, .68fr) minmax(0, 1.32fr); align-items: center; min-height: 340px; padding: 12px 22px; background: radial-gradient(circle at 77% 50%, rgba(10,203,230,.055), transparent 38%); }.rvi-review > *, .rvi-copy { min-width: 0; }.rvi-copy { padding-left: 12px; }.rvi-copy h2 { margin-top: 4px; color: var(--text-primary); font: 20px var(--font-heading); }.rvi-copy p { max-width: 44ch; color: var(--text-muted); font-size: 13px; line-height: 1.5; }.rvi-score { display: flex; align-items: baseline; gap: 8px; margin-top: 18px; }.rvi-score strong { color: var(--gold-bright); font: 34px var(--font-display); }.rvi-score span { color: var(--text-muted); font-size: 12px; letter-spacing: .65px; text-transform: uppercase; }
 .rvi-empty { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; min-height: 100px; padding: 18px; }.rvi-empty strong { color: var(--text-primary); }.rvi-empty span { flex: 1 1 280px; color: var(--text-muted); font-size: 11px; }.rvi-empty button { padding: 7px 10px; }
-.insight-performance { grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr)); }.scoreboard-section, .match-tab-panel { min-width: 0; }.scoreboard-section { padding: 0; }.scoreboard-heading { padding-inline: 2px; }.scoreboard-scroll { overflow-x: auto; padding-bottom: 4px; }.annotation-grid { align-items: stretch; }
+.insight-performance { grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr)); }.match-rvi-evidence { grid-column: 1 / -1; }.scoreboard-section, .match-tab-panel { min-width: 0; }.scoreboard-section { padding: 0; }.scoreboard-heading { padding-inline: 2px; }.scoreboard-scroll { overflow-x: auto; padding-bottom: 4px; }.annotation-grid { align-items: stretch; }
 .eyebrow { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .8px; }
 .compact-session { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); }.compact-session > div { display: flex; flex-direction: column; }.compact-session button { padding: var(--space-2) var(--space-3); }
 .review-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }

@@ -32,7 +32,7 @@ next month.
   detailed champion archetype responsibilities, and a frozen local reference.
 - Keeps ranked snapshots, personal records, champion results, mastery context,
   playstyle trends, lobby comparisons, and a mode-specific Recall Vector Index
-  with eight capability vectors and inspectable per-metric evidence.
+  with mode-appropriate match arms, a career Range arm, and inspectable evidence.
 - Provides a review journal with bookmarks, notes, tags, session boundaries,
   timeline events, and reusable practice experiments.
 - Stores everything on your machine and includes integrity checks, verified
@@ -136,11 +136,15 @@ regrade the stored history.
 Position determines opportunity while the champion's detailed archetype
 determines responsibility. Zac remains a Jungler but is evaluated as a
 Vanguard; Tristana remains Bottom or Middle but is evaluated primarily as a
-Marksman. Recall combines calibrated Fighting, Availability, Resources,
-Objectives, Vision, and Control families with fixed responsibility tiers.
+Marksman. Recall combines calibrated measurements into Combat, Positioning &
+Survival, Control & Utility, Economy, Objectives & Macro, Vision & Setup, and
+Initiative & Pressure. A missing core responsibility withholds the grade;
+available secondary evidence joins its arm at the immutable recipe weights.
+Missing secondary evidence stays visibly missing and is neutralized against the
+observed core bundle for arithmetic, so capture coverage cannot improve or
+reduce a core-only result.
 Observed zero, unavailable data, no opportunity, and not-applicable evidence
-remain distinct, and a missing core responsibility withholds the grade instead
-of making the remaining metrics worth more.
+remain distinct throughout that calculation.
 
 The reference uses leave-one-match-out empirical calibration and treats a
 complete match—not ten correlated participant rows—as the independent unit.
@@ -150,13 +154,17 @@ League Classic, ARAM, and each tracked rules scope remain separate, so their
 pace and economy are not mixed with modern Summoner's Rift.
 
 Grade and the Recall Vector Index consume the same calibrated observations.
-RVI keeps RoleFit as its only headline, then explains the measured shape through
-Threat, Teamfighting, Positioning & Survival, Control & Utility, Economy,
-Objectives & Macro, Vision & Setup, and diagnostic-only Initiative & Pressure.
-Expand a vector to inspect its raw statistic, formula, calibrated score,
-coverage, comparison scope, evidence state, and actual Grade influence. Partial
-matches keep the evidence they support and leave unsupported radar axes as gaps
-instead of turning them into zero or hiding all of the detail.
+The applicable match radar arms form the raw responsibility composite that is
+frozen-reference calibrated into RoleFit and the letter grade. Summoner's Rift
+uses seven match arms. ARAM and ARAM Mayhem use only Combat, Positioning &
+Survival, Control & Utility, and Economy. Expand an arm to inspect each raw
+statistic, formula, calibrated score, coverage, comparison scope, evidence
+state, share of that arm, and resulting Grade influence.
+
+Career RVI is the equal mean of its available career arms. Its eighth arm,
+Consistency & Versatility (Range), combines repeatable RoleFit with demonstrated
+breadth across positions, archetypes, and champions after enough recorded
+games. Range never enters a single-match Grade.
 
 The selected RVI recipe is immutably linked to the exact Grade recipe and
 calibration snapshot. On the one-time v3 cutover Recall creates a verified

@@ -12,26 +12,26 @@ const DOMINANT_GAP = 10
 const SECONDARY_FLOOR = 52
 
 const SINGLE: Record<string, Omit<RviIdentity, "vectors">> = {
-  threat: { label: "Damage Dealer", description: "Your clearest measured edge is damage pressure relative to your position and archetype." },
-  teamfighting: { label: "Teamfighter", description: "Your clearest measured edge is contributing when teammates convert fights." },
+  combat: { label: "Combat Carry", description: "Your clearest measured edge is turning damage and fight involvement into results." },
   positioning_survival: { label: "Anchor", description: "Your clearest measured edge is staying available and avoiding costly deaths." },
   control_utility: { label: "Disruptor", description: "Your clearest measured edge is crowd control and utility for your assigned responsibilities." },
   economy: { label: "Scaler", description: "Your clearest measured edge is converting positional access into gold and farm." },
   objectives_macro: { label: "Objective Hunter", description: "Your clearest measured edge is converting pressure into structures and neutral objectives." },
   vision_setup: { label: "Scout", description: "Your clearest measured edge is vision and measurable setup work." },
+  initiative_pressure: { label: "Tempo Setter", description: "Your clearest measured edge is creating early pressure and acting before opportunities close." },
+  consistency_versatility: { label: "Versatile", description: "Your career record combines dependable results with breadth across champions, archetypes, and positions." },
 }
 
 const PAIRS: Record<string, Omit<RviIdentity, "vectors">> = {
+  "combat+positioning_survival": { label: "Juggernaut", description: "You combine combat impact with staying available for your team." },
+  "combat+control_utility": { label: "Playmaker", description: "You combine fight impact with measurable control and utility." },
+  "combat+economy": { label: "Carry", description: "You build a resource edge and convert it into direct combat impact." },
+  "combat+objectives_macro": { label: "Siegebreaker", description: "You convert fight pressure into structures and neutral objectives." },
+  "combat+initiative_pressure": { label: "Aggressor", description: "You pair combat impact with early initiative and pressure." },
   "control_utility+positioning_survival": { label: "Vanguard", description: "You combine availability with high measurable control and utility." },
-  "positioning_survival+threat": { label: "Juggernaut", description: "You combine damage pressure with staying available for your team." },
   "objectives_macro+positioning_survival": { label: "Bulwark", description: "You combine availability with objective and structure pressure." },
   "economy+positioning_survival": { label: "Scaling Anchor", description: "You combine efficient income with fewer costly deaths." },
   "positioning_survival+vision_setup": { label: "Guardian", description: "You combine availability with vision and setup work." },
-  "control_utility+teamfighting": { label: "Playmaker", description: "You combine teamfight involvement with measurable control and utility." },
-  "control_utility+threat": { label: "Battle Mage", description: "You combine damage pressure with measurable control and utility." },
-  "economy+threat": { label: "Carry", description: "You build a resource edge and convert it into direct damage pressure." },
-  "teamfighting+threat": { label: "Combat Carry", description: "You combine damage pressure with consistent teamfight involvement." },
-  "objectives_macro+threat": { label: "Siegebreaker", description: "You convert damage pressure into structures and neutral objectives." },
   "economy+objectives_macro": { label: "Macro Player", description: "You build resources and convert them into objective pressure." },
   "objectives_macro+vision_setup": { label: "Map Controller", description: "You prepare important areas and convert that setup into objectives." },
   "economy+vision_setup": { label: "Resourceful Scout", description: "You balance efficient income with vision and setup work." },

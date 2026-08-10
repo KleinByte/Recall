@@ -3,9 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { MatchesRepository } from "../electron/main/database/matches-repo.js"
 import { ParticipantsRepository } from "../electron/main/database/participants-repo.js"
 import { RiotBackfillRepository } from "../electron/main/database/riot-backfill-repo.js"
+import { MatchSourceRepository } from "../electron/main/database/match-source-repo.js"
 import { applyMigrations } from "../electron/main/database/migrations.js"
 import { RiotHistoryBackfill } from "../electron/main/riot/history-backfill.js"
+import { RiotApiError } from "../electron/main/riot/api-client.js"
 import type { RiotMatchDto } from "../electron/main/riot/match-mapper.js"
+import {
+  mapTimeline,
+  TIMELINE_MAPPER_VERSION,
+} from "../electron/main/riot/timeline-mapper.js"
 
 const PUUID = "owner"
 const MATCH_PUUID = "official-owner-puuid"
@@ -34,11 +40,36 @@ function dto(gameId: number, ownerPuuid = PUUID): RiotMatchDto {
         goldEarned: 12_000 - index * 100,
         totalDamageDealtToChampions: 25_000 - index * 500,
         totalDamageTaken: 10_000 + index * 500,
+        totalTimeSpentDead: 90 + index,
       })),
       teams: [
         { teamId: 100, win: true, objectives: {} },
         { teamId: 200, win: false, objectives: {} },
       ],
+    },
+  }
+}
+
+function timelineDto() {
+  return {
+    info: {
+      frames: [{
+        timestamp: 1_200_000,
+        participantFrames: Object.fromEntries(Array.from({ length: 10 }, (_, index) => [
+          String(index + 1),
+          {
+            participantId: index + 1,
+            currentGold: 500,
+            totalGold: 500,
+            level: 1,
+            xp: 0,
+            minionsKilled: 0,
+            jungleMinionsKilled: 0,
+            position: { x: 5_000 + index, y: 5_000 + index },
+          },
+        ])),
+        events: [],
+      }],
     },
   }
 }
@@ -335,5 +366,171 @@ describe("RiotHistoryBackfill", () => {
 
     expect(secondApi.get).toHaveBeenCalledOnce()
     expect(secondApi.get.mock.calls[0][0]).toContain("/ids?")
+  })
+
+  it("enriches missing extended facts and persists a preferred Match-V5 timeline", async () => {
+    const initialApi = {
+      get: vi.fn(async (path: string) =>
+        path.includes("/ids?") ? ["NA1_9"] : dto(9),
+      ),
+    }
+    await new RiotHistoryBackfill(
+      "key",
+      "americas",
+      PUUID,
+      matches,
+      participants,
+      new Map(),
+      progress,
+      { api: initialApi as never },
+    ).run(true)
+    db.prepare(`
+      UPDATE match_participants SET extended_metrics_json = '{}'
+      WHERE game_id = 9 AND puuid = ? AND is_player = 1
+    `).run(PUUID)
+
+    const api = {
+      get: vi.fn(async (path: string) => {
+        if (path.includes("/ids?")) return ["NA1_9"]
+        if (path.endsWith("/timeline")) return timelineDto()
+        return dto(9)
+      }),
+    }
+    const sources = new MatchSourceRepository(db as never)
+    await new RiotHistoryBackfill(
+      "key",
+      "americas",
+      PUUID,
+      matches,
+      participants,
+      new Map(),
+      progress,
+      { api: api as never, sourceRepository: sources },
+    ).run(true)
+
+    expect(api.get.mock.calls.map(([path]) => String(path))).toEqual([
+      expect.stringContaining("/ids?"),
+      "/lol/match/v5/matches/NA1_9",
+      "/lol/match/v5/matches/NA1_9/timeline",
+    ])
+    expect(participants.getMatchDetail(9, PUUID).participants
+      .find((participant) => participant.isPlayer === 1)?.extendedMetrics)
+      .toMatchObject({ totalTimeSpentDead: 90 })
+    expect(db.prepare(`
+      SELECT status, mapper_version AS mapperVersion
+      FROM match_timeline_sources
+      WHERE game_id = 9 AND puuid = ? AND source = 'match_v5'
+    `).get(PUUID)).toEqual({ status: "ready", mapperVersion: TIMELINE_MAPPER_VERSION })
+    expect(db.prepare(`
+      SELECT status, mapper_version AS mapperVersion
+      FROM match_timeline_cache WHERE game_id = 9 AND puuid = ?
+    `).get(PUUID)).toEqual({ status: "ready", mapperVersion: TIMELINE_MAPPER_VERSION })
+  })
+
+  it("retries a previously unavailable Match-V5 timeline on explicit reimport", async () => {
+    const initialApi = {
+      get: vi.fn(async (path: string) =>
+        path.includes("/ids?") ? ["NA1_9"] : dto(9),
+      ),
+    }
+    await new RiotHistoryBackfill(
+      "key", "americas", PUUID, matches, participants, new Map(), progress,
+      { api: initialApi as never },
+    ).run(true)
+    const sources = new MatchSourceRepository(db as never)
+    const missingApi = {
+      get: vi.fn(async (path: string) => {
+        if (path.includes("/ids?")) return ["NA1_9"]
+        throw new RiotApiError("missing", 404)
+      }),
+    }
+    await new RiotHistoryBackfill(
+      "key", "americas", PUUID, matches, participants, new Map(), progress,
+      { api: missingApi as never, sourceRepository: sources },
+    ).run(true)
+    expect(db.prepare(`
+      SELECT status FROM match_timeline_sources
+      WHERE game_id = 9 AND puuid = ? AND source = 'match_v5'
+        AND mapper_version = ?
+    `).get(PUUID, TIMELINE_MAPPER_VERSION)).toEqual({ status: "unavailable" })
+
+    const recoveredApi = {
+      get: vi.fn(async (path: string) =>
+        path.includes("/ids?") ? ["NA1_9"] : timelineDto(),
+      ),
+    }
+    await new RiotHistoryBackfill(
+      "key", "americas", PUUID, matches, participants, new Map(), progress,
+      { api: recoveredApi as never, sourceRepository: sources },
+    ).run(true)
+
+    expect(recoveredApi.get).toHaveBeenCalledTimes(2)
+    expect(db.prepare(`
+      SELECT status FROM match_timeline_sources
+      WHERE game_id = 9 AND puuid = ? AND source = 'match_v5'
+        AND mapper_version = ?
+    `).get(PUUID, TIMELINE_MAPPER_VERSION)).toEqual({ status: "ready" })
+  })
+
+  it("does not let an incomplete Match-V5 timeline displace a ready LCU source", async () => {
+    const initialApi = {
+      get: vi.fn(async (path: string) =>
+        path.includes("/ids?") ? ["NA1_9"] : dto(9),
+      ),
+    }
+    await new RiotHistoryBackfill(
+      "key", "americas", PUUID, matches, participants, new Map(), progress,
+      { api: initialApi as never },
+    ).run(true)
+    const sources = new MatchSourceRepository(db as never)
+    const stored = participants.getMatchDetail(9, PUUID).participants
+    const local = mapTimeline(
+      timelineDto().info.frames,
+      1,
+      new Map(stored.map((entry) => [entry.participantId, entry.teamId])),
+    )
+    sources.persistTimelineSource({
+      gameId: 9,
+      puuid: PUUID,
+      source: "league_client",
+      sourceMatchId: "9",
+      mapperVersion: TIMELINE_MAPPER_VERSION,
+      timeline: local,
+      capturedAt: 1,
+    })
+    const incomplete = {
+      info: {
+        frames: [{
+          timestamp: 1_200_000,
+          participantFrames: {
+            "1": timelineDto().info.frames[0].participantFrames["1"],
+          },
+          events: [],
+        }],
+      },
+    }
+    const api = {
+      get: vi.fn(async (path: string) =>
+        path.includes("/ids?") ? ["NA1_9"] : incomplete,
+      ),
+    }
+    await new RiotHistoryBackfill(
+      "key", "americas", PUUID, matches, participants, new Map(), progress,
+      { api: api as never, sourceRepository: sources },
+    ).run(true)
+
+    expect(db.prepare(`
+      SELECT status FROM match_timeline_sources
+      WHERE game_id = 9 AND puuid = ? AND source = 'match_v5'
+        AND mapper_version = ?
+    `).get(PUUID, TIMELINE_MAPPER_VERSION)).toEqual({ status: "unavailable" })
+    expect(db.prepare(`
+      SELECT cache.data_json = source.data_json AS sameData
+      FROM match_timeline_cache cache
+      JOIN match_timeline_sources source
+        ON source.game_id = cache.game_id AND source.puuid = cache.puuid
+       AND source.source = 'league_client' AND source.mapper_version = ?
+      WHERE cache.game_id = 9 AND cache.puuid = ?
+    `).get(TIMELINE_MAPPER_VERSION, PUUID)).toEqual({ sameData: 1 })
   })
 })

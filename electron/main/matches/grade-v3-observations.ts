@@ -7,7 +7,6 @@ import {
 } from "../../../src/shared/measurement.js"
 import {
   GRADE_V3_RECIPE,
-  GRADE_V3_DIAGNOSTIC_METRICS,
   GRADE_METRICS,
   GRADE_V3_METRIC_DIRECTIONS,
   type GradeMetricV3,
@@ -25,7 +24,7 @@ import {
   type MetricComparisonScopeV3,
   type RawMetricObservationV3,
 } from "./metric-observations-v3.js"
-import { metricDefinitionV3 } from "./metric-registry-v3.js"
+import { RVI_V3_METRIC_POLICIES, metricDefinitionV3 } from "./metric-registry-v3.js"
 import {
   shrunkMidEcdf,
   type CalibrationCohort,
@@ -33,7 +32,7 @@ import {
 } from "./grade-v3-calibration.js"
 import { rawResponsibilityScoresV3 } from "./grade-v3.js"
 
-export const GRADE_V3_CALIBRATION_FORMAT_VERSION = 4 as const
+export const GRADE_V3_CALIBRATION_FORMAT_VERSION = 5 as const
 export const GRADE_V3_MINIMUM_REFERENCE_MATCHES = 5
 export const GRADE_V3_MINIMUM_SCOPE_MATCHES =
   GRADE_V3_RECIPE.calibration.minimumScopeMatches
@@ -124,7 +123,7 @@ export interface GradeCompositeObservationV3 {
   scopeKey: string
   position: NormalizedPosition
   archetype: PrimaryArchetype
-  /** First-stage fixed-denominator responsibility composite in [0, 1]. */
+  /** First-stage active-evidence responsibility composite in [0, 1]. */
   value: number
 }
 
@@ -155,6 +154,11 @@ export interface PreparedGradeParticipantV3 {
   primaryArchetype?: PrimaryArchetype
   metricEvidence: Partial<Record<GradeMetricV3, Evidence<number>>>
   metricProvenance: Partial<Record<GradeMetricV3, {
+    state: Evidence<number>["state"]
+    reason?: string
+  }>>
+  detailMetricEvidence?: Readonly<Record<string, Evidence<number>>>
+  detailMetricProvenance?: Readonly<Record<string, {
     state: Evidence<number>["state"]
     reason?: string
   }>>
@@ -196,7 +200,9 @@ const finiteNonnegative = (value: number | undefined): value is number =>
 const rate = (value: number, durationSecs: number, scale = 60) =>
   value / durationSecs * scale
 
-const DIAGNOSTIC_METRICS = new Set<GradeMetricV3>(GRADE_V3_DIAGNOSTIC_METRICS)
+const CORE_GRADE_METRICS = new Set<string>(RVI_V3_METRIC_POLICIES
+  .filter((policy) => policy.tier === "CORE")
+  .map((policy) => policy.metricKey))
 
 /**
  * Converts one complete scoreboard into evidence-aware, duration-normalized
@@ -364,6 +370,11 @@ export function buildGradeCalibrationSnapshotV3(
       const playerEvidence = evidence.get(player.participantId) ?? {}
       for (const metric of GRADE_METRICS) {
         const entry = playerEvidence[metric]
+        if (!metricDefinitionV3(metric)?.applicable({
+          context: lobby.context,
+          position: player.position,
+          archetype,
+        })) continue
         if (entry?.state !== "observed" || !Number.isFinite(entry.value)) continue
         observations[metric].push({
           clusterId: lobby.clusterId,
@@ -377,6 +388,11 @@ export function buildGradeCalibrationSnapshotV3(
       for (const entry of [...(lobby.detailMetricObservations?.get(
         player.participantId,
       ) ?? [])].sort((left, right) => left.metricKey.localeCompare(right.metricKey))) {
+        if (!metricDefinitionV3(entry.metricKey)?.applicable({
+          context: lobby.context,
+          position: player.position,
+          archetype,
+        })) continue
         if (entry.rawEvidence.state !== "observed" ||
             !Number.isFinite(entry.rawEvidence.value)) continue
         const rows = detailObservations[entry.metricKey] ?? []
@@ -417,6 +433,7 @@ export function buildGradeCalibrationSnapshotV3(
   // making RoleFit a percentile of the same responsibility formula users see.
   for (const lobby of sorted) {
     const prepared = prepareMetricLobbyFromSnapshotV3(lobby, snapshot)
+    attachDetailMetricEvidenceV3(lobby, snapshot, prepared)
     const rawScores = rawResponsibilityScoresV3({
       players: prepared.players,
       context: lobby.context,
@@ -633,6 +650,19 @@ export function prepareDetailMetricObservationsFromSnapshotV3(
         })
         continue
       }
+      if (!definition.applicable({
+        context: lobby.context,
+        position: player.position,
+        archetype,
+      })) {
+        rows.push({
+          ...raw,
+          scoreEvidence: notApplicable("metric_not_applicable_to_context", {
+            source: "derived",
+          }),
+        })
+        continue
+      }
       const calibrated = calibrateRawDetailMetricV3(raw, {
         matchId: lobby.clusterId,
         scopeKey,
@@ -650,6 +680,30 @@ export function prepareDetailMetricObservationsFromSnapshotV3(
     result.set(player.participantId, rows)
   }
   return result
+}
+
+function attachDetailMetricEvidenceV3(
+  lobby: GradeRawLobbyV3,
+  snapshot: GradeCalibrationSnapshotV3,
+  prepared: PreparedGradeLobbyV3,
+): void {
+  const detail = prepareDetailMetricObservationsFromSnapshotV3(lobby, snapshot)
+  for (const player of prepared.players) {
+    const evidence: Record<string, Evidence<number>> = {}
+    const provenance: Record<string, {
+      state: Evidence<number>["state"]
+      reason?: string
+    }> = {}
+    for (const entry of detail.get(player.participantId) ?? []) {
+      evidence[entry.metricKey] = entry.scoreEvidence
+      provenance[entry.metricKey] = {
+        state: entry.rawEvidence.state,
+        ...(entry.rawEvidence.reason ? { reason: entry.rawEvidence.reason } : {}),
+      }
+    }
+    player.detailMetricEvidence = evidence
+    player.detailMetricProvenance = provenance
+  }
 }
 
 /** First-stage metric calibration shared by snapshot construction and scoring. */
@@ -679,7 +733,17 @@ function prepareMetricLobbyFromSnapshotV3(
         state: entry.state,
         ...(entry.reason ? { reason: entry.reason } : {}),
       }
-      const scoredMetric = !DIAGNOSTIC_METRICS.has(metric)
+      const scoredMetric = CORE_GRADE_METRICS.has(metric)
+      if (!metricDefinitionV3(metric)?.applicable({
+        context: lobby.context,
+        position: player.position,
+        archetype,
+      })) {
+        metricEvidence[metric] = notApplicable("metric_not_applicable_to_context", {
+          source: "derived",
+        })
+        continue
+      }
       if (entry.state === "not_applicable") {
         metricEvidence[metric] = entry
         continue
@@ -771,6 +835,7 @@ export function prepareGradeLobbyFromSnapshotV3(
   snapshot: GradeCalibrationSnapshotV3,
 ): PreparedGradeLobbyV3 {
   const prepared = prepareMetricLobbyFromSnapshotV3(lobby, snapshot)
+  attachDetailMetricEvidenceV3(lobby, snapshot, prepared)
   const rawScores = rawResponsibilityScoresV3({
     players: prepared.players,
     context: lobby.context,

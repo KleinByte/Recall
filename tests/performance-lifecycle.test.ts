@@ -67,4 +67,26 @@ describe("performance and resource lifecycle", () => {
     expect(main).toContain('if (imported > 0 && state.status !== "running")')
     expect(main).not.toContain("imported >= 10")
   })
+
+  it("enriches retained timelines before freezing a direct Recall v3 recipe cutover", () => {
+    const main = read("electron/main/index.ts")
+    const sessionStart = main.indexOf("async function startSession(")
+    const sessionEnd = main.indexOf("function stopSession", sessionStart)
+    const startSession = main.slice(sessionStart, sessionEnd)
+    const start = main.indexOf("async function afterSync(")
+    const end = main.indexOf("async function snapshotRanked", start)
+    const afterSync = main.slice(start, end)
+
+    expect(main).toContain("if (needsDirectCutover && !win) return status")
+    expect(startSession).toContain("getRecallV3().needsDirectCutover()")
+    expect(startSession.indexOf("startRiotHistoryBackfill(win, true)")).toBeLessThan(
+      startSession.indexOf("await runSync(win)"),
+    )
+    expect(afterSync.indexOf(".queueRecentMatches(")).toBeGreaterThan(-1)
+    expect(afterSync.indexOf(".queueRecentMatches(")).toBeLessThan(
+      afterSync.indexOf("ensureRecallV3Frozen(win)"),
+    )
+    expect(afterSync).toContain("if (needsDirectCutover) await trackedTimelineTask")
+    expect(afterSync).toContain("if (needsDirectCutover && riotBackfillTask)")
+  })
 })

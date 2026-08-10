@@ -28,6 +28,36 @@ type LcuTimelineResponse = LcuTimelineDto | TimelineFrames
 
 type TimelineStatus = "pending" | "loading" | "ready" | "unavailable" | "error"
 
+export const LCU_TIMELINE_MAX_ATTEMPTS = 3
+export const LCU_TIMELINE_RETRY_DELAY_MS = 200
+export const LCU_TIMELINE_404_GRACE_MS = 15 * 60 * 1000
+export const LCU_TIMELINE_REQUEST_TIMEOUT_MS = 15_000
+export const LCU_TIMELINE_LOADING_STALE_MS = 60_000
+
+class IncompleteLcuTimelineError extends Error {
+  constructor() {
+    super("League Client timeline data is incomplete")
+    this.name = "IncompleteLcuTimelineError"
+  }
+}
+
+class LcuTimelineTimeoutError extends Error {
+  constructor() {
+    super("League Client timeline request timed out")
+    this.name = "LcuTimelineTimeoutError"
+  }
+}
+
+function retryableTimelineError(error: unknown): boolean {
+  if (!(error instanceof LcuRequestError)) return true
+  // The local match-history endpoint commonly returns 404 for a short window
+  // while the client is still committing a just-finished game. Treat that as
+  // transient here; the bounded attempt loop prevents an individual request
+  // from spinning forever.
+  return error.status === 404 || error.status === 408 || error.status === 409 || error.status === 425 ||
+    error.status === 429 || error.status >= 500
+}
+
 /**
  * Reads recent timelines from the authenticated local League Client.
  *
@@ -49,6 +79,8 @@ export class LcuTimelineService {
       summary: CompactTimeline,
     ) => void | Promise<void>,
     private readonly liveCaptures?: LiveGameCaptureRepository,
+    private readonly now: () => number = Date.now,
+    private readonly requestTimeoutMs = LCU_TIMELINE_REQUEST_TIMEOUT_MS,
   ) {}
 
   get(gameId: number, puuid: string) {
@@ -72,8 +104,9 @@ export class LcuTimelineService {
       return { status: "not_requested" as const }
     }
     if (row.mapperVersion !== TIMELINE_MAPPER_VERSION) {
-      const summary = row.status === "ready" && row.rawJson
-        ? this.remapCached(gameId, puuid, row.rawJson)
+      const durableRaw = row.rawJson ?? this.rawTimelineJson(gameId, puuid)
+      const summary = row.status === "ready" && durableRaw
+        ? this.remapCached(gameId, puuid, durableRaw)
         : undefined
       if (!summary) return { status: "not_requested" as const }
       this.write(gameId, puuid, row.riotMatchId, "ready", {
@@ -101,9 +134,14 @@ export class LcuTimelineService {
     if (current.status === "unavailable" && !manualRetry) return current
 
     const match = this.db.prepare(
-      `SELECT riot_match_id AS riotMatchId FROM matches
+      `SELECT riot_match_id AS riotMatchId, played_at AS playedAt,
+              duration_secs AS durationSecs FROM matches
        WHERE game_id = ? AND puuid = ?`,
-    ).get(gameId, puuid) as { riotMatchId?: string } | undefined
+    ).get(gameId, puuid) as {
+      riotMatchId?: string
+      playedAt: number
+      durationSecs: number
+    } | undefined
     if (!match) throw new Error("Match not found")
 
     const client = this.client()
@@ -119,9 +157,7 @@ export class LcuTimelineService {
     let rawPayload: RawPayloadIdentity | undefined
     let sourceRepository: MatchSourceRepository | undefined
     try {
-      const dto = await client.request<LcuTimelineResponse>(
-        `/lol-match-history/v1/game-timelines/${gameId}`,
-      )
+      const dto = await this.fetchTimelineWithRetry(client, gameId)
       const fetchedAt = Date.now()
       sourceRepository = new MatchSourceRepository(this.db)
       rawPayload = sourceRepository.persistRawPayload({
@@ -147,7 +183,7 @@ export class LcuTimelineService {
       }[]
       const owner = participants.find((participant) => participant.isPlayer === 1)
       if (!owner || !frames?.length) {
-        throw new Error("League Client timeline data is incomplete")
+        throw new IncompleteLcuTimelineError()
       }
 
       let summary = mapTimeline(
@@ -167,6 +203,7 @@ export class LcuTimelineService {
       this.write(gameId, puuid, match.riotMatchId, "ready", {
         fetchedAt,
         data: summary,
+        raw: dto,
         sourcePayload: rawPayload,
       })
       sourceRepository.setMappingResult(rawPayload, "mapped", fetchedAt, { gameId })
@@ -182,12 +219,17 @@ export class LcuTimelineService {
           error: error instanceof Error ? error.message.slice(0, 500) : "timeline_unmappable",
         })
       }
-      const unavailable = error instanceof LcuRequestError && error.status === 404
+      const missingRecentlyFinishedTimeline = error instanceof LcuRequestError &&
+        error.status === 404 &&
+        this.now() - (match.playedAt + match.durationSecs * 1000) <=
+          LCU_TIMELINE_404_GRACE_MS
       this.write(
         gameId,
         puuid,
         match.riotMatchId,
-        unavailable ? "unavailable" : "error",
+        error instanceof IncompleteLcuTimelineError ? "unavailable" :
+          missingRecentlyFinishedTimeline ? "error" :
+          error instanceof LcuRequestError && error.status === 404 ? "unavailable" : "error",
         { error: (error as Error).message },
       )
     }
@@ -205,6 +247,16 @@ export class LcuTimelineService {
 
     const task = Promise.resolve().then(async () => {
       try {
+        // Mapper upgrades are local work when Recall retained the raw payload;
+        // rebuild every such artifact before spending the client's short
+        // history window on network requests for the newest uncached games.
+        const outdated = this.db.prepare(`
+          SELECT game_id AS gameId FROM match_timeline_cache
+          WHERE puuid = ? AND status = 'ready' AND mapper_version <> ?
+          ORDER BY game_id
+        `).all(puuid, TIMELINE_MAPPER_VERSION) as { gameId: number }[]
+        for (const row of outdated) this.get(row.gameId, puuid)
+
         const rows = this.db.prepare(
           `SELECT m.game_id AS gameId
            FROM matches m
@@ -219,11 +271,17 @@ export class LcuTimelineService {
              )
              AND (
                t.status IS NULL OR t.mapper_version <> ? OR
-               t.status IN ('not_requested', 'pending', 'error')
+               t.status IN ('not_requested', 'pending', 'error') OR
+               (t.status = 'loading' AND t.updated_at <= ?)
              )
            ORDER BY m.played_at DESC
            LIMIT ?`,
-        ).all(puuid, TIMELINE_MAPPER_VERSION, limit) as { gameId: number }[]
+        ).all(
+          puuid,
+          TIMELINE_MAPPER_VERSION,
+          this.now() - LCU_TIMELINE_LOADING_STALE_MS,
+          limit,
+        ) as { gameId: number }[]
 
         for (const row of rows) {
           if (!this.client()) break
@@ -265,6 +323,66 @@ export class LcuTimelineService {
         summary,
         participants,
       ) ?? summary
+    } catch {
+      return undefined
+    }
+  }
+
+  private async fetchTimelineWithRetry(
+    client: Pick<LcuClient, "request">,
+    gameId: number,
+  ): Promise<LcuTimelineResponse> {
+    const path = `/lol-match-history/v1/game-timelines/${gameId}`
+    let lastError: unknown
+    for (let attempt = 1; attempt <= LCU_TIMELINE_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        return await this.requestWithTimeout(client, path)
+      } catch (error) {
+        lastError = error
+        if (attempt === LCU_TIMELINE_MAX_ATTEMPTS || !retryableTimelineError(error)) throw error
+        await new Promise<void>((resolve) => setTimeout(
+          resolve,
+          LCU_TIMELINE_RETRY_DELAY_MS * attempt,
+        ))
+      }
+    }
+    throw lastError
+  }
+
+  private requestWithTimeout(
+    client: Pick<LcuClient, "request">,
+    path: string,
+  ): Promise<LcuTimelineResponse> {
+    return new Promise((resolve, reject) => {
+      let settled = false
+      const timer = setTimeout(() => {
+        if (settled) return
+        settled = true
+        reject(new LcuTimelineTimeoutError())
+      }, this.requestTimeoutMs)
+      void client.request<LcuTimelineResponse>(path).then((value) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve(value)
+      }, (error) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        reject(error)
+      })
+    })
+  }
+
+  private rawTimelineJson(gameId: number, puuid: string): string | undefined {
+    try {
+      const raw = new MatchSourceRepository(this.db).readLatestPayload({
+        ownerPuuid: puuid,
+        source: "league_client",
+        sourceMatchId: String(gameId),
+        kind: "timeline",
+      })
+      return raw === undefined ? undefined : canonicalJson(raw)
     } catch {
       return undefined
     }
@@ -326,6 +444,17 @@ export class LcuTimelineService {
         values.sourcePayload?.sha256 ?? null, capturedAt, Date.now(),
       )
       refreshTimelineCompatibilityCache(this.db, gameId, puuid)
+      this.db.prepare(`
+        UPDATE match_timeline_cache
+        SET riot_match_id = COALESCE(?, riot_match_id),
+            raw_json = COALESCE(?, raw_json)
+        WHERE game_id = ? AND puuid = ?
+      `).run(
+        riotMatchId ?? null,
+        values.raw ? canonicalJson(values.raw) : null,
+        gameId,
+        puuid,
+      )
       return
     }
     this.db.prepare(

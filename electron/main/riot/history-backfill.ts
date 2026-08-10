@@ -18,11 +18,23 @@ import {
   MATCH_V5_MAPPER_VERSION,
   type RiotMatchDto,
 } from "./match-mapper.js"
+import {
+  mapTimeline,
+  TIMELINE_MAPPER_VERSION,
+  type CompactTimeline,
+} from "./timeline-mapper.js"
 
 const PAGE_SIZE = 100
 
 interface MatchApi {
   get<T>(path: string, scope: string, signal?: AbortSignal): Promise<T>
+}
+
+type TimelineFrames = Parameters<typeof mapTimeline>[0]
+
+interface RiotMatchTimelineDto {
+  frames?: TimelineFrames
+  info?: { frames?: TimelineFrames }
 }
 
 interface BackfillOptions {
@@ -37,6 +49,31 @@ interface BackfillOptions {
 const gameIdFromMatchId = (matchId: string) => {
   const value = Number(matchId.match(/(\d+)$/)?.[1])
   return Number.isSafeInteger(value) && value > 0 ? value : undefined
+}
+
+function ownerHasTotalTimeSpentDead(
+  participants: ReturnType<ParticipantsRepository["getMatchDetail"]>["participants"],
+): boolean {
+  const value = participants.find((participant) => participant.isPlayer === 1)
+    ?.extendedMetrics?.totalTimeSpentDead
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+}
+
+function completeMappedTimeline(
+  timeline: CompactTimeline,
+  participantIds: readonly number[],
+  durationSecs: number,
+): boolean {
+  const expected = new Set(participantIds.filter((id) =>
+    Number.isSafeInteger(id) && id > 0))
+  if (expected.size === 0 || timeline.frames.length === 0) return false
+  if (timeline.frames.some((frame) => frame.teamGoldComplete === false ||
+      [...expected].some((participantId) =>
+        !frame.participants.some((participant) =>
+          participant.participantId === participantId)))) return false
+  const lastTimestamp = timeline.frames.at(-1)?.timestamp
+  return typeof lastTimestamp === "number" && Number.isFinite(lastTimestamp) &&
+    lastTimestamp >= Math.max(0, durationSecs * 1_000 - 90_000)
 }
 
 /**
@@ -133,13 +170,46 @@ export class RiotHistoryBackfill {
           let imported = 0
           let skipped = 0
           const knownGameId = gameIdFromMatchId(matchId)
-          if (
-            knownGameId &&
+          const hasCompleteLocalMatch = knownGameId !== undefined &&
             this.matches.hasCompleteMatch(knownGameId, this.puuid) &&
-            this.participants.hasCurrentLobby(knownGameId, this.puuid) &&
-            !this.matches.needsLabelEvaluation(knownGameId, this.puuid)
-          ) {
+            this.participants.hasCurrentLobby(knownGameId, this.puuid)
+          const storedParticipants = hasCompleteLocalMatch && knownGameId
+            ? this.participants.getMatchDetail(knownGameId, this.puuid).participants
+            : []
+          const hasCurrentDetailArtifact = this.sourceRepository?.hasMappedPayload({
+            ownerPuuid: this.puuid,
+            source: "match_v5",
+            sourceMatchId: matchId,
+            kind: "match_detail",
+            mapperVersion: MATCH_V5_MAPPER_VERSION,
+          }) ?? false
+          // A Riot match id alone is not proof that Match-V5 extended facts
+          // were captured. Enrich an otherwise complete LCU lobby once when
+          // its owner lacks time-dead evidence and no authoritative detail
+          // artifact establishes that the field was genuinely absent.
+          const needsExtendedDetail = hasCompleteLocalMatch &&
+            !ownerHasTotalTimeSpentDead(storedParticipants) &&
+            this.sourceRepository !== undefined && !hasCurrentDetailArtifact
+          const needsTimeline = knownGameId !== undefined &&
+            this.sourceRepository !== undefined &&
+            !this.sourceRepository.hasCurrentTimelineResult({
+              gameId: knownGameId,
+              puuid: this.puuid,
+              source: "match_v5",
+              mapperVersion: TIMELINE_MAPPER_VERSION,
+            })
+          if (knownGameId !== undefined && hasCompleteLocalMatch &&
+              !this.matches.needsLabelEvaluation(knownGameId, this.puuid) &&
+              !needsExtendedDetail) {
             this.matches.setRiotMatchId(knownGameId, this.puuid, matchId)
+            if (needsTimeline) {
+              await this.captureTimeline(
+                matchId,
+                knownGameId,
+                storedParticipants,
+                signal,
+              )
+            }
             state = this.advanceOne(state, {
               downloaded,
               imported,
@@ -245,6 +315,12 @@ export class RiotHistoryBackfill {
           if (raw) this.sourceRepository?.setMappingResult(raw, "mapped", Date.now(), {
             gameId: mapped.match.gameId,
           })
+          await this.captureTimeline(
+            matchId,
+            mapped.match.gameId,
+            mapped.participants,
+            signal,
+          )
 
           state = this.advanceOne(state, {
             downloaded,
@@ -296,6 +372,115 @@ export class RiotHistoryBackfill {
       this.onProgress(state)
       throw error
     }
+  }
+
+  private async captureTimeline(
+    matchId: string,
+    gameId: number,
+    participants: ReturnType<ParticipantsRepository["getMatchDetail"]>["participants"],
+    signal?: AbortSignal,
+  ): Promise<CompactTimeline | undefined> {
+    const sources = this.sourceRepository
+    if (!sources || sources.hasCurrentTimelineResult({
+      gameId,
+      puuid: this.puuid,
+      source: "match_v5",
+      mapperVersion: TIMELINE_MAPPER_VERSION,
+    })) return undefined
+
+    let dto: RiotMatchTimelineDto
+    try {
+      dto = await this.api.get<RiotMatchTimelineDto>(
+        `/lol/match/v5/matches/${encodeURIComponent(matchId)}/timeline`,
+        "timeline",
+        signal,
+      )
+    } catch (error) {
+      if (!(error instanceof RiotApiError) || error.status !== 404) throw error
+      sources.markTimelineUnavailable({
+        gameId,
+        puuid: this.puuid,
+        source: "match_v5",
+        sourceMatchId: matchId,
+        mapperVersion: TIMELINE_MAPPER_VERSION,
+        capturedAt: Date.now(),
+        reason: "match_v5_timeline_not_found",
+      })
+      return undefined
+    }
+
+    const fetchedAt = Date.now()
+    const raw = sources.persistRawPayload({
+      ownerPuuid: this.puuid,
+      source: "match_v5",
+      sourceMatchId: matchId,
+      gameId,
+      kind: "timeline",
+      body: dto,
+      mapperVersion: TIMELINE_MAPPER_VERSION,
+      fetchedAt,
+    })
+    const frames = dto.frames ?? dto.info?.frames
+    const owner = participants.find((participant) => participant.isPlayer === 1)
+    if (!owner || !frames?.length) {
+      sources.setMappingResult(raw, "unmappable", fetchedAt, {
+        gameId,
+        error: "match_v5_timeline_incomplete",
+      })
+      sources.markTimelineUnavailable({
+        gameId,
+        puuid: this.puuid,
+        source: "match_v5",
+        sourceMatchId: matchId,
+        mapperVersion: TIMELINE_MAPPER_VERSION,
+        capturedAt: fetchedAt,
+        reason: "match_v5_timeline_incomplete",
+      })
+      return undefined
+    }
+
+    const timeline = mapTimeline(
+      frames,
+      owner.participantId,
+      new Map(participants.map((participant) => [
+        participant.participantId,
+        participant.teamId,
+      ])),
+    )
+    const durationSecs = this.matches.getMatch(gameId, this.puuid)?.durationSecs ?? 0
+    if (!completeMappedTimeline(
+      timeline,
+      participants.map((participant) => participant.participantId),
+      durationSecs,
+    )) {
+      sources.setMappingResult(raw, "unmappable", fetchedAt, {
+        gameId,
+        error: "match_v5_timeline_failed_completeness_contract",
+      })
+      sources.markTimelineUnavailable({
+        gameId,
+        puuid: this.puuid,
+        source: "match_v5",
+        sourceMatchId: matchId,
+        mapperVersion: TIMELINE_MAPPER_VERSION,
+        capturedAt: fetchedAt,
+        reason: "match_v5_timeline_failed_completeness_contract",
+      })
+      return undefined
+    }
+    sources.persistTimelineSource({
+      gameId,
+      puuid: this.puuid,
+      source: "match_v5",
+      sourceMatchId: matchId,
+      mapperVersion: TIMELINE_MAPPER_VERSION,
+      timeline,
+      sourcePayload: raw,
+      capturedAt: fetchedAt,
+    })
+    sources.setMappingResult(raw, "mapped", fetchedAt, { gameId })
+    this.recallV3?.gradeStoredMatch(gameId, this.puuid)
+    return timeline
   }
 
   private advanceOne(

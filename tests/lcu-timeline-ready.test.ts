@@ -3,7 +3,13 @@ import { describe, expect, it, vi } from "vitest"
 import { applyMigrations } from "../electron/main/database/migrations.js"
 import { MatchesRepository } from "../electron/main/database/matches-repo.js"
 import { ParticipantsRepository } from "../electron/main/database/participants-repo.js"
-import { LcuTimelineService } from "../electron/main/lcu-timeline-service.js"
+import {
+  LCU_TIMELINE_404_GRACE_MS,
+  LCU_TIMELINE_LOADING_STALE_MS,
+  LCU_TIMELINE_MAX_ATTEMPTS,
+  LcuTimelineService,
+} from "../electron/main/lcu-timeline-service.js"
+import { LcuRequestError } from "../electron/main/lcu-client.js"
 import type { ParticipantRow } from "../electron/main/matches/types.js"
 import { TIMELINE_MAPPER_VERSION } from "../electron/main/riot/timeline-mapper.js"
 import { buildMatchRow } from "./fixtures/matches.js"
@@ -124,5 +130,162 @@ describe("LCU timeline ready integration", () => {
       expect.objectContaining({ frames: expect.any(Array), events: expect.any(Array) }),
     )
     expect(observedStatus).toEqual([`ready:${TIMELINE_MAPPER_VERSION}:true`])
+  })
+
+  it("retries transient local timeline failures within a bounded attempt count", async () => {
+    const db = database()
+    const request = vi.fn()
+      .mockRejectedValueOnce(new LcuRequestError(503, "/timeline"))
+      .mockResolvedValue(rawTimeline)
+    const service = new LcuTimelineService(
+      db,
+      () => ({ request }),
+      () => undefined,
+    )
+
+    await expect(service.request(1, PUUID)).resolves.toMatchObject({ status: "ready" })
+    expect(request).toHaveBeenCalledTimes(2)
+    expect(request.mock.calls.length).toBeLessThanOrEqual(LCU_TIMELINE_MAX_ATTEMPTS)
+  })
+
+  it("retries a local 404 without making the missing timeline permanently sticky", async () => {
+    const db = database()
+    const match = db.prepare(`SELECT played_at AS playedAt, duration_secs AS durationSecs
+      FROM matches WHERE game_id = 1 AND puuid = ?`).get(PUUID) as {
+        playedAt: number
+        durationSecs: number
+      }
+    const justFinished = match.playedAt + match.durationSecs * 1000 + 1_000
+    const request = vi.fn().mockRejectedValue(new LcuRequestError(404, "/timeline"))
+    const service = new LcuTimelineService(
+      db,
+      () => ({ request }),
+      () => undefined,
+      undefined,
+      undefined,
+      () => justFinished,
+    )
+
+    await expect(service.request(1, PUUID)).resolves.toMatchObject({ status: "error" })
+    expect(request).toHaveBeenCalledTimes(LCU_TIMELINE_MAX_ATTEMPTS)
+
+    request.mockResolvedValueOnce(rawTimeline)
+    await expect(service.request(1, PUUID)).resolves.toMatchObject({ status: "ready" })
+  })
+
+  it("stops retrying a 404 after the local post-game grace window", async () => {
+    const db = database()
+    const match = db.prepare(`SELECT played_at AS playedAt, duration_secs AS durationSecs
+      FROM matches WHERE game_id = 1 AND puuid = ?`).get(PUUID) as {
+        playedAt: number
+        durationSecs: number
+      }
+    const request = vi.fn().mockRejectedValue(new LcuRequestError(404, "/timeline"))
+    const service = new LcuTimelineService(
+      db,
+      () => ({ request }),
+      () => undefined,
+      undefined,
+      undefined,
+      () => match.playedAt + match.durationSecs * 1000 + LCU_TIMELINE_404_GRACE_MS + 1,
+    )
+
+    await expect(service.request(1, PUUID)).resolves.toMatchObject({ status: "unavailable" })
+    expect(request).toHaveBeenCalledTimes(LCU_TIMELINE_MAX_ATTEMPTS)
+    await expect(service.request(1, PUUID)).resolves.toMatchObject({ status: "unavailable" })
+    expect(request).toHaveBeenCalledTimes(LCU_TIMELINE_MAX_ATTEMPTS)
+  })
+
+  it("remaps an outdated compact timeline from its durable raw payload", async () => {
+    const db = database()
+    const request = vi.fn().mockResolvedValue(rawTimeline)
+    const service = new LcuTimelineService(
+      db,
+      () => ({ request }),
+      () => undefined,
+    )
+    await service.request(1, PUUID)
+    db.prepare(`
+      UPDATE match_timeline_cache
+      SET mapper_version = ?, raw_json = NULL
+      WHERE game_id = 1 AND puuid = ?
+    `).run(TIMELINE_MAPPER_VERSION - 1, PUUID)
+
+    request.mockClear()
+    await service.queueRecentMatches(PUUID)
+    expect(db.prepare(`
+      SELECT mapper_version AS mapperVersion, status
+      FROM match_timeline_cache WHERE game_id = 1 AND puuid = ?
+    `).get(PUUID)).toEqual({ mapperVersion: TIMELINE_MAPPER_VERSION, status: "ready" })
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it("recovers a stale loading row during the account drain", async () => {
+    const db = database()
+    const now = 1_000_000
+    db.prepare(`
+      INSERT INTO match_timeline_cache
+        (game_id, puuid, riot_match_id, status, mapper_version, updated_at)
+      VALUES (1, ?, 'NA1_1', 'loading', ?, ?)
+    `).run(PUUID, TIMELINE_MAPPER_VERSION, now - LCU_TIMELINE_LOADING_STALE_MS - 1)
+    const request = vi.fn().mockResolvedValue(rawTimeline)
+    const service = new LcuTimelineService(
+      db,
+      () => ({ request }),
+      () => undefined,
+      undefined,
+      undefined,
+      () => now,
+    )
+
+    await service.queueRecentMatches(PUUID)
+
+    expect(request).toHaveBeenCalledOnce()
+    expect(service.get(1, PUUID)).toMatchObject({ status: "ready" })
+  })
+
+  it("times out a hung local request after bounded attempts", async () => {
+    const db = database()
+    const request = vi.fn(() => new Promise(() => undefined))
+    const service = new LcuTimelineService(
+      db,
+      () => ({ request }),
+      () => undefined,
+      undefined,
+      undefined,
+      Date.now,
+      1,
+    )
+
+    await expect(service.request(1, PUUID)).resolves.toMatchObject({
+      status: "error",
+      error: "League Client timeline request timed out",
+    })
+    expect(request).toHaveBeenCalledTimes(LCU_TIMELINE_MAX_ATTEMPTS)
+  })
+
+  it("makes a structurally incomplete payload terminal for the current mapper", async () => {
+    const db = database()
+    const request = vi.fn().mockResolvedValue({ frames: [] })
+    const service = new LcuTimelineService(
+      db,
+      () => ({ request }),
+      () => undefined,
+    )
+
+    await expect(service.request(1, PUUID)).resolves.toMatchObject({
+      status: "unavailable",
+      error: "League Client timeline data is incomplete",
+    })
+    await service.queueRecentMatches(PUUID)
+    expect(request).toHaveBeenCalledOnce()
+    expect(db.prepare(`
+      SELECT mapper_version AS mapperVersion, mapping_status AS mappingStatus
+      FROM match_source_payloads
+      WHERE owner_puuid = ? AND source = 'league_client' AND kind = 'timeline'
+    `).get(PUUID)).toEqual({
+      mapperVersion: TIMELINE_MAPPER_VERSION,
+      mappingStatus: "unmappable",
+    })
   })
 })

@@ -10,6 +10,7 @@ import {
   aggregateRviProfile,
   RVI_ALGORITHM_VERSION as RVI_V3_ALGORITHM_VERSION,
   RVI_VECTOR_KEYS,
+  type RviCareerArmHeadlineAggregate,
   type RviHeadlineAggregate,
   type RviHillVersatility,
   type RviMatchObservation,
@@ -19,7 +20,6 @@ import {
   type RviWeighting,
 } from "./rvi-contract.js"
 import {
-  canonicalChampionId,
   PRIMARY_ARCHETYPES,
   type PrimaryArchetype,
 } from "./grade-v3-taxonomy.js"
@@ -41,8 +41,12 @@ export interface PerformanceMetricScore {
   rawValue: number | null
   unit: string
   tier: "CORE" | "SECONDARY" | "DIAGNOSTIC" | "N/A"
-  /** Compatibility alias for influence. */
+  /** Compatibility alias for exact stored Grade influence. */
   weight: number
+  /** Declared recipe weight inside the containing RVI arm, before active-evidence normalization. */
+  vectorWeight: number
+  /** Exact stored contribution to the match Grade/RoleFit responsibility mix. */
+  gradeInfluence: number
   influence: number
   games: number
   eligibleGames: number
@@ -73,8 +77,10 @@ export interface PerformanceDimensionScore {
   confidence: PerformanceConfidence | null
   /** Average exact per-match Grade v3 component weight. */
   responsibilityWeight: number
-  /** False only when this family was observed exclusively at diagnostic weight zero. */
+  /** Whether this arm enters the displayed match or career headline. */
   headlineEligible: boolean
+  /** True for the Range arm, which is calculated only across a career sample. */
+  careerOnly: boolean
   metrics: PerformanceMetricScore[]
 }
 
@@ -82,36 +88,34 @@ export type PerformanceScopeKind =
   | "overall"
   | "position"
   | "primary_archetype"
-  | "champion_position"
 
 export interface PerformanceScopeSummary {
   kind: PerformanceScopeKind
   key: string
   score: number
-  headline: RviHeadlineAggregate
+  headline: RviHeadlineAggregate | RviCareerArmHeadlineAggregate
   games: number
   measuredGames: number
   coverage: number
   confidence: PerformanceConfidence
   position?: Position
   primaryArchetype?: PrimaryArchetype
-  championId?: number
 }
 
 export interface PerformanceProfileScopes {
   overall: PerformanceScopeSummary
   positions: PerformanceScopeSummary[]
   primaryArchetypes: PerformanceScopeSummary[]
-  championPositions: PerformanceScopeSummary[]
 }
 
 export interface PerformanceProfileAuxiliary {
-  /** These diagnostics describe the sample and never contribute to headline.score. */
-  excludedFromHeadline: true
+  /** Consistency and breadth feed the career-only Range arm. */
+  contributesThroughRange: true
   consistency: RviConsistencySummary
   versatility: {
     champions: RviHillVersatility
     positions: RviHillVersatility
+    archetypes: RviHillVersatility
   }
 }
 
@@ -126,8 +130,10 @@ export interface PerformanceProfile {
   scoringContext: PerformanceScoringContext
   weighting: RviResolvedWeighting
   score: number
-  headline: RviHeadlineAggregate
-  recentHeadline?: RviHeadlineAggregate
+  /** Mean stored match RoleFit; separate from the career arm mean. */
+  roleFitAverage: number
+  headline: RviHeadlineAggregate | RviCareerArmHeadlineAggregate
+  recentHeadline?: RviHeadlineAggregate | RviCareerArmHeadlineAggregate
   scopes: PerformanceProfileScopes
   auxiliary?: PerformanceProfileAuxiliary
   games: number
@@ -142,13 +148,13 @@ export interface PerformanceProfile {
 }
 
 interface DeprecatedPerformanceProfileFields {
-  /** @deprecated RVI v3 does not derive scores from insight observations. */
+  /** Selected mode family controls which recipe arms are mode-capable. */
   family?: ModeFamily
   /** @deprecated Supply rviObservations populated from exact-recipe Grade v3 artifacts. */
   observations?: readonly InsightObservation[]
   /** @deprecated Grade v2 component rows are not valid RVI v3 inputs. */
   gradeComponentHistory?: readonly GradeComponentObservation[]
-  /** @deprecated Timeline proxies are diagnostic-only and never enter RVI v3. */
+  /** @deprecated Timeline rows must arrive through exact-recipe RVI observations. */
   timelineHistory?: readonly RviTimelineObservation[]
   /** @deprecated Champion-class display ceilings were removed in RVI v3. */
   championRoles?: ReadonlyMap<number, readonly string[]>
@@ -212,7 +218,7 @@ const PERFORMANCE_SCOPE_POSITIONS = new Set<string>(POSITIONS)
 type ProfileAggregate = ReturnType<typeof aggregateRviProfile>
 type PerformanceScopeIdentity = Pick<
   PerformanceScopeSummary,
-  "kind" | "key" | "position" | "primaryArchetype" | "championId"
+  "kind" | "key" | "position" | "primaryArchetype"
 >
 
 function positionForScope(value: string | null | undefined): Position | undefined {
@@ -222,20 +228,90 @@ function positionForScope(value: string | null | undefined): Position | undefine
     : undefined
 }
 
+const ABYSS_MATCH_ARMS: readonly RviVectorKey[] = Object.freeze([
+  "combat",
+  "positioning_survival",
+  "control_utility",
+  "economy",
+])
+
+function activeVectorKeys(
+  family: ModeFamily | undefined,
+  scoringContext: PerformanceScoringContext,
+): readonly RviVectorKey[] {
+  const matchArms = family === "aram"
+    ? ABYSS_MATCH_ARMS
+    : RVI_VECTOR_KEYS.filter((key) => key !== "consistency_versatility")
+  return scoringContext === "profile"
+    ? [...matchArms, "consistency_versatility"]
+    : matchArms
+}
+
+function careerArmHeadline(
+  aggregate: ProfileAggregate,
+  arms: readonly RviVectorKey[],
+): RviCareerArmHeadlineAggregate {
+  const available = arms.flatMap((key) => {
+    const family = aggregate.families.find((candidate) => candidate.key === key)
+    return family?.score === null || family?.score === undefined ? [] : [family]
+  })
+  const scores = available.map((family) => family.score as number)
+  const declared = arms.flatMap((key) => {
+    const family = aggregate.families.find((candidate) => candidate.key === key)
+    return family ? [family] : []
+  })
+  const eligibleEvidenceWeight = declared.reduce((sum, family) =>
+    sum + family.coverage.eligibleWeight, 0)
+  const observedEvidenceWeight = declared.reduce((sum, family) =>
+    sum + family.coverage.observedWeight, 0)
+  const confidenceRank: Record<PerformanceConfidence, number> = {
+    learning: 0,
+    provisional: 1,
+    established: 2,
+  }
+  const confidence = available.flatMap((family) =>
+    family.confidence === null ? [] : [family.confidence])
+    .sort((left, right) => confidenceRank[left] - confidenceRank[right])[0] ?? null
+  return {
+    source: "career_arm_mean",
+    score: scores.length
+      ? scores.reduce((sum, score) => sum + score, 0) / scores.length
+      : null,
+    // Career uncertainty follows the least-supported arm that actually enters
+    // the mean. RoleFit sample size is not a proxy for arm completeness.
+    nEff: available.length ? Math.min(...available.map((family) => family.nEff)) : 0,
+    confidence,
+    coverage: aggregate.headline.coverage,
+    availableArms: scores.length,
+    totalArms: arms.length,
+    armCoverage: arms.length ? scores.length / arms.length : 0,
+    evidenceCoverage: eligibleEvidenceWeight > 0
+      ? observedEvidenceWeight / eligibleEvidenceWeight
+      : 0,
+  }
+}
+
 function performanceScopeSummary(
   identity: PerformanceScopeIdentity,
   observations: readonly RviMatchObservation[],
   aggregate: ProfileAggregate,
+  activeArms: readonly RviVectorKey[],
+  scoringContext: PerformanceScoringContext,
 ): PerformanceScopeSummary | undefined {
-  if (aggregate.headline.score === null || aggregate.headline.confidence === null) return undefined
+  const headline = scoringContext === "match"
+    ? aggregate.headline
+    : careerArmHeadline(aggregate, activeArms)
+  if (headline.score === null || headline.confidence === null) return undefined
   return {
     ...identity,
-    score: roundScore(aggregate.headline.score),
-    headline: aggregate.headline,
+    score: roundScore(headline.score),
+    headline,
     games: observations.length,
-    measuredGames: aggregate.headline.coverage.observedGames,
-    coverage: aggregate.headline.coverage.gameRatio ?? 0,
-    confidence: aggregate.headline.confidence,
+    measuredGames: headline.coverage.observedGames,
+    coverage: headline.source === "career_arm_mean"
+      ? headline.evidenceCoverage
+      : headline.coverage.gameRatio ?? 0,
+    confidence: headline.confidence,
   }
 }
 
@@ -243,6 +319,8 @@ function buildPerformanceScopes(
   observations: readonly RviMatchObservation[],
   recipeId: string,
   overallAggregate: ProfileAggregate,
+  activeArms: readonly RviVectorKey[],
+  scoringContext: PerformanceScoringContext,
 ): PerformanceProfileScopes {
   const weighting: RviWeighting = overallAggregate.weighting.kind === "equal"
     ? { kind: "equal" }
@@ -261,13 +339,23 @@ function buildPerformanceScopes(
     identity: PerformanceScopeIdentity,
     rows: readonly RviMatchObservation[],
   ) => rows.length
-    ? performanceScopeSummary(identity, rows, aggregateScope(rows))
+    ? performanceScopeSummary(
+      identity,
+      rows,
+      aggregateScope(rows),
+      scoringContext === "profile"
+        ? activeArms.filter((key) => key !== "consistency_versatility")
+        : activeArms,
+      scoringContext,
+    )
     : undefined
 
   const overall = performanceScopeSummary(
     { kind: "overall", key: "overall" },
     observations,
     overallAggregate,
+    activeArms,
+    scoringContext,
   )!
   const positions = POSITIONS.flatMap((position): PerformanceScopeSummary[] => {
     const rows = observations.filter((observation) =>
@@ -288,35 +376,7 @@ function buildPerformanceScopes(
     },
   ).sort((left, right) => right.games - left.games || left.key.localeCompare(right.key))
 
-  const championPositionGroups = new Map<
-    string,
-    { championId: number; position: Position; observations: RviMatchObservation[] }
-  >()
-  for (const observation of observations) {
-    const position = positionForScope(observation.position)
-    const championId = observation.championId === null || observation.championId === undefined
-      ? undefined
-      : canonicalChampionId(observation.championId)
-    if (!position || championId === undefined || championId <= 0) continue
-    const key = `${championId}:${position}`
-    const group = championPositionGroups.get(key) ?? { championId, position, observations: [] }
-    group.observations.push(observation)
-    championPositionGroups.set(key, group)
-  }
-  const championPositions = [...championPositionGroups.values()].flatMap(
-    (group): PerformanceScopeSummary[] => {
-      const summary = summarize({
-        kind: "champion_position",
-        key: `champion_position:${group.championId}:${group.position}`,
-        championId: group.championId,
-        position: group.position,
-      }, group.observations)
-      return summary ? [summary] : []
-    },
-  ).sort((left, right) => right.games - left.games ||
-    (left.championId ?? 0) - (right.championId ?? 0) || left.key.localeCompare(right.key))
-
-  return { overall, positions, primaryArchetypes, championPositions }
+  return { overall, positions, primaryArchetypes }
 }
 
 function profileDimension(
@@ -328,7 +388,10 @@ function profileDimension(
   const presentation = FAMILY_PRESENTATION[family]
   const score = aggregate.score === null ? null : roundScore(aggregate.score)
   const responsibilityWeight = aggregate.responsibility.averageWeight ?? 0
-  const headlineEligible = aggregate.responsibility.positiveGames > 0
+  const profileOnly = family === "consistency_versatility"
+  const headlineEligible = scoringContext === "profile"
+    ? score !== null
+    : !profileOnly && aggregate.responsibility.positiveGames > 0
   const recentScore = scoringContext === "profile" && recent?.score !== null &&
       recent?.score !== undefined
     ? roundScore(recent.score)
@@ -341,7 +404,7 @@ function profileDimension(
     key: family,
     label: presentation.label,
     shortLabel: presentation.shortLabel,
-    description: headlineEligible
+    description: headlineEligible || profileOnly
       ? presentation.description
       : `${presentation.description} This vector is diagnostic for the observed sample and was excluded from every stored role-fit headline.`,
     score,
@@ -354,6 +417,7 @@ function profileDimension(
     confidence: aggregate.confidence,
     responsibilityWeight,
     headlineEligible,
+    careerOnly: profileOnly,
     metrics: aggregate.metrics.map((metric): PerformanceMetricScore => ({
       key: metric.key,
       label: metric.label,
@@ -362,6 +426,8 @@ function profileDimension(
       unit: metric.unit,
       tier: metric.tier,
       weight: metric.gradeWeight,
+      vectorWeight: metric.vectorWeight,
+      gradeInfluence: metric.gradeWeight,
       influence: metric.gradeWeight,
       games: metric.coverage.observedGames,
       eligibleGames: metric.coverage.eligibleGames,
@@ -404,6 +470,7 @@ export function buildPerformanceProfile(
     weighting: input.weighting,
   })
   if (aggregate.headline.score === null || aggregate.headline.confidence === null) return undefined
+  const activeArms = activeVectorKeys(input.family, scoringContext)
 
   const recentObservations = observations.slice(-PERFORMANCE_RECENT_GAMES)
   const recent = scoringContext === "profile"
@@ -415,7 +482,7 @@ export function buildPerformanceProfile(
     })
     : undefined
   const recentFamilies = new Map(recent?.families.map((family) => [family.key, family]))
-  const dimensions = RVI_VECTOR_KEYS.flatMap((family) => {
+  const dimensions = activeArms.flatMap((family) => {
     const familyAggregate = aggregate.families.find((entry) => entry.key === family)
     if (!familyAggregate) return []
     return [profileDimension(
@@ -433,31 +500,47 @@ export function buildPerformanceProfile(
       .filter((dimension) => dimension.delta !== undefined && dimension.delta > 0)
       .sort((left, right) => right.delta! - left.delta!)[0]
     : undefined
+  const headline = scoringContext === "match"
+    ? aggregate.headline
+    : careerArmHeadline(aggregate, activeArms)
+  if (headline.score === null || headline.confidence === null) return undefined
+  const recentHeadline = scoringContext === "profile" && recent
+    ? careerArmHeadline(recent, activeArms)
+    : undefined
 
   return {
     algorithmVersion: PERFORMANCE_PROFILE_VERSION,
     recipeId,
     scoringContext,
     weighting: aggregate.weighting,
-    score: roundScore(aggregate.headline.score),
-    headline: aggregate.headline,
-    recentHeadline: recent?.headline,
-    scopes: buildPerformanceScopes(observations, recipeId, aggregate),
+    score: roundScore(headline.score),
+    roleFitAverage: roundScore(aggregate.headline.score),
+    headline,
+    ...(recentHeadline && recentHeadline.score !== null ? { recentHeadline } : {}),
+    scopes: buildPerformanceScopes(
+      observations,
+      recipeId,
+      aggregate,
+      activeArms,
+      scoringContext,
+    ),
     auxiliary: scoringContext === "profile"
       ? {
-        excludedFromHeadline: true,
+        contributesThroughRange: true,
         consistency: aggregate.consistency,
         versatility: aggregate.versatility,
       }
       : undefined,
     games: observations.length,
     recentGames: recentObservations.length,
-    measuredGames: aggregate.headline.coverage.observedGames,
-    coverage: aggregate.headline.coverage.gameRatio ?? 0,
-    confidence: aggregate.headline.confidence,
+    measuredGames: headline.coverage.observedGames,
+    coverage: headline.source === "career_arm_mean"
+      ? headline.evidenceCoverage
+      : headline.coverage.gameRatio ?? 0,
+    confidence: headline.confidence,
     comparison: scoringContext === "match"
       ? "Authoritative Grade v3 role-fit percentile from this match"
-      : "Authoritative Grade v3 role-fit percentiles across recorded matches",
+      : "Equal mean of available career capability arms; match Grade remains RoleFit",
     dimensions,
     strongestKey: strongest?.key,
     growthKey: growth?.key,
