@@ -6,17 +6,18 @@ import type { ModeFamily, TrackedMode } from "../matches/types.js"
 import type { GradeComponent } from "../review/types.js"
 import type { CompactTimeline } from "../riot/timeline-mapper.js"
 import {
-  GRADE_FAMILIES,
-  GRADE_V3_ALGORITHM_VERSION,
-  GRADE_V3_RECIPE_DEFINITION_ID,
-} from "../matches/grade-v3-recipe.js"
+  MATCH_GRADE_ARM_KEYS,
+  MATCH_GRADE_ARM_LABELS,
+  MATCH_GRADE_ALGORITHM_VERSION,
+  MATCH_GRADE_RECIPE_DEFINITION_ID,
+} from "../matches/match-grade-recipe.js"
 import {
   PRIMARY_ARCHETYPES,
   type PrimaryArchetype,
-} from "../matches/grade-v3-taxonomy.js"
+} from "../matches/match-grade-taxonomy.js"
 import {
   MetricObservationsRepository,
-  type OwnerMetricObservationV3,
+  type OwnerMetricObservation,
 } from "./metric-observations-repo.js"
 import {
   RVI_VECTOR_KEYS,
@@ -26,10 +27,10 @@ import {
 } from "../matches/rvi-contract.js"
 import type { Evidence, EvidenceState } from "../../../src/shared/measurement.js"
 import {
-  metricDefinitionV3,
-  rviMetricPolicyV3,
-} from "../matches/metric-registry-v3.js"
-import { RVI_V3_RECIPE_DEFINITION_ID } from "../matches/rvi-v3-recipe.js"
+  metricDefinition,
+  rviMetricPolicy,
+} from "../matches/match-metric-registry.js"
+import { RVI_RECIPE_DEFINITION_ID } from "../matches/rvi-recipe.js"
 import {
   GRADE_CORE_FACT_CONTRACT_VERSION,
   isGradeCoreSource,
@@ -104,8 +105,8 @@ export interface InsightObservation {
   grade?: string
   /** Legacy/internal compatibility normal score. */
   gradeScore?: number
-  /** Authoritative Recall v3 score on a fixed 0-100 scale. */
-  roleFitScore?: number
+  /** Authoritative Recall score on a fixed 0-100 scale. */
+  recallScore?: number
   championId: number
   role?: string
   durationSecs: number
@@ -124,12 +125,12 @@ export interface GradeComponentObservation {
 }
 
 /**
- * Authoritative RVI input for the one Grade v3 recipe selected by this install.
+ * Authoritative RVI input for the one match Grade recipe selected by this install.
  * Recipe identity travels with the rows so callers never need to infer it from
  * an algorithm version or from whichever breakdown happens to be newest.
  */
-export interface RviV3ObservationSet {
-  algorithmVersion: typeof GRADE_V3_ALGORITHM_VERSION
+export interface RviObservationSet {
+  algorithmVersion: typeof MATCH_GRADE_ALGORITHM_VERSION
   recipeId: string
   calibrationId: string
   familyKeys: readonly RviVectorKey[]
@@ -273,12 +274,12 @@ const rate = (wins: number, games: number) => (games === 0 ? 0 : wins / games)
 const finiteInRange = (value: unknown, minimum: number, maximum: number): value is number =>
   typeof value === "number" && Number.isFinite(value) && value >= minimum && value <= maximum
 
-interface SelectedGradeV3Recipe {
+interface SelectedGradeRecipe {
   recipeId: string
   calibrationId: string
 }
 
-function selectedGradeV3Recipe(db: Database): SelectedGradeV3Recipe | undefined {
+function selectedGradeRecipe(db: Database): SelectedGradeRecipe | undefined {
   return db.prepare(
     `SELECT r.recipe_id AS recipeId, r.calibration_id AS calibrationId
      FROM grade_recipe_selections s
@@ -291,13 +292,13 @@ function selectedGradeV3Recipe(db: Database): SelectedGradeV3Recipe | undefined 
        AND json_extract(r.definition_json, '$.recipeDefinitionId') = ?
        AND r.recipe_id = ? || '@calibration:' || r.calibration_id`,
   ).get(
-    GRADE_V3_ALGORITHM_VERSION,
-    GRADE_V3_RECIPE_DEFINITION_ID,
-    GRADE_V3_RECIPE_DEFINITION_ID,
-  ) as SelectedGradeV3Recipe | undefined
+    MATCH_GRADE_ALGORITHM_VERSION,
+    MATCH_GRADE_RECIPE_DEFINITION_ID,
+    MATCH_GRADE_RECIPE_DEFINITION_ID,
+  ) as SelectedGradeRecipe | undefined
 }
 
-interface ParsedGradeV3Breakdown {
+interface ParsedGradeBreakdown {
   components: GradeComponent[]
   primaryArchetype: PrimaryArchetype
   metrics: ParsedGradeMetric[]
@@ -332,15 +333,15 @@ function parsedResponsibilityTier(value: unknown): ParsedGradeMetric["responsibi
 }
 
 /**
- * Stored Grade v3 component scores are calibrated 0-1 family percentiles.
+ * Stored match Grade component scores are calibrated 0-1 family percentiles.
  * RVI's public observation contract uses 0-100. Missing diagnostic families
  * remain null; they are coverage gaps and must not silently become zero.
  */
-function parseGradeV3Breakdown(
+function parseGradeBreakdown(
   value: string,
   recipeId: string,
-  roleFitScore: number,
-): ParsedGradeV3Breakdown | undefined {
+  recallScore: number,
+): ParsedGradeBreakdown | undefined {
   let parsed: unknown
   try {
     parsed = JSON.parse(value) as unknown
@@ -349,18 +350,19 @@ function parseGradeV3Breakdown(
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined
   const breakdown = parsed as Record<string, unknown>
-  if (breakdown.algorithmVersion !== GRADE_V3_ALGORITHM_VERSION ||
-      breakdown.recipeDefinitionId !== GRADE_V3_RECIPE_DEFINITION_ID ||
+  const storedRecallScore = breakdown.recallScore ?? breakdown.roleFitScore
+  if (breakdown.algorithmVersion !== MATCH_GRADE_ALGORITHM_VERSION ||
+      breakdown.recipeDefinitionId !== MATCH_GRADE_RECIPE_DEFINITION_ID ||
       breakdown.recipeId !== recipeId ||
       typeof breakdown.primaryArchetype !== "string" ||
       !PRIMARY_ARCHETYPE_KEYS.has(breakdown.primaryArchetype) ||
-      !finiteInRange(breakdown.roleFitScore, 0, 100) ||
-      Math.abs(breakdown.roleFitScore - roleFitScore) > 1e-9 ||
+      !finiteInRange(storedRecallScore, 0, 100) ||
+      Math.abs(storedRecallScore - recallScore) > 1e-9 ||
       !Array.isArray(breakdown.components) || breakdown.components.length === 0) return undefined
 
   const seen = new Set<string>()
   const seenMetrics = new Set<string>()
-  const knownFamilies = new Set<string>(GRADE_FAMILIES)
+  const knownFamilies = new Set<string>(MATCH_GRADE_ARM_KEYS)
   const components: GradeComponent[] = []
   const metrics: ParsedGradeMetric[] = []
   for (const value of breakdown.components) {
@@ -378,7 +380,7 @@ function parseGradeV3Breakdown(
     seen.add(component.key)
     components.push({
       key: component.key as GradeComponent["key"],
-      label: component.label,
+      label: MATCH_GRADE_ARM_LABELS[component.key as GradeComponent["key"]],
       percentile,
       weight: component.weight,
       contribution: component.contribution,
@@ -390,7 +392,7 @@ function parseGradeV3Breakdown(
         return undefined
       }
       const signal = signalValue as Record<string, unknown>
-      if (typeof signal.key !== "string" || !metricDefinitionV3(signal.key) ||
+      if (typeof signal.key !== "string" || !metricDefinition(signal.key) ||
           seenMetrics.has(signal.key) || !finiteInRange(signal.percentile, 0, 1) ||
           !finiteInRange(signal.weight, 0, 1) || signal.evidenceState !== "observed" ||
           typeof signal.sourceEvidenceState !== "string" ||
@@ -420,7 +422,7 @@ function parseGradeV3Breakdown(
     if (!diagnosticValue || typeof diagnosticValue !== "object" ||
         Array.isArray(diagnosticValue)) return undefined
     const diagnostic = diagnosticValue as Record<string, unknown>
-    if (typeof diagnostic.key !== "string" || !metricDefinitionV3(diagnostic.key) ||
+    if (typeof diagnostic.key !== "string" || !metricDefinition(diagnostic.key) ||
         seenMetrics.has(diagnostic.key) || typeof diagnostic.evidenceState !== "string" ||
         !GRADE_EVIDENCE_STATES.has(diagnostic.evidenceState) ||
         (diagnostic.sourceEvidenceState !== undefined &&
@@ -502,11 +504,11 @@ function metricTier(
 }
 
 function rviMetricFromStored(
-  metric: OwnerMetricObservationV3,
+  metric: OwnerMetricObservation,
   parsedByKey: ReadonlyMap<string, ParsedGradeMetric>,
 ): RviMetricObservation | undefined {
-  const definition = metricDefinitionV3(metric.metricKey)
-  const policy = rviMetricPolicyV3(metric.metricKey)
+  const definition = metricDefinition(metric.metricKey)
+  const policy = rviMetricPolicy(metric.metricKey)
   if (!definition || !policy) return undefined
   const parsed = parsedByKey.get(metric.metricKey)
   // The frozen Grade component is authoritative for any metric it consumed,
@@ -539,8 +541,8 @@ function rviMetricFromStored(
 }
 
 function rviMetricFromBreakdown(metric: ParsedGradeMetric): RviMetricObservation | undefined {
-  const definition = metricDefinitionV3(metric.key)
-  const policy = rviMetricPolicyV3(metric.key)
+  const definition = metricDefinition(metric.key)
+  const policy = rviMetricPolicy(metric.key)
   if (!definition || !policy) return undefined
   const rawEvidence = rawEvidenceFromParsed(metric)
   const scoreEvidence = scoreEvidenceFromParsed(metric)
@@ -564,8 +566,8 @@ function rviMetricFromBreakdown(metric: ParsedGradeMetric): RviMetricObservation
 }
 
 function rviMetricsForMatch(
-  breakdown: ParsedGradeV3Breakdown,
-  stored: readonly OwnerMetricObservationV3[],
+  breakdown: ParsedGradeBreakdown,
+  stored: readonly OwnerMetricObservation[],
 ): RviMetricObservation[] {
   const parsedByKey = new Map(breakdown.metrics.map((metric) => [metric.key, metric]))
   const merged = new Map<string, RviMetricObservation>()
@@ -580,7 +582,7 @@ function rviMetricsForMatch(
   return [...merged.values()].sort((left, right) => left.key.localeCompare(right.key))
 }
 
-function rviVectorMapsForMatch(breakdown: ParsedGradeV3Breakdown): {
+function rviVectorMapsForMatch(breakdown: ParsedGradeBreakdown): {
   familyPercentiles: Record<RviVectorKey, number | null>
   familyResponsibilityWeights: Record<RviVectorKey, number | null>
 } {
@@ -1039,7 +1041,7 @@ export class InsightsRepository {
         win: m.win === 1,
         grade: m.grade ?? undefined,
         gradeScore: m.grade_score ?? undefined,
-        roleFitScore: m.role_fit_score ?? undefined,
+        recallScore: m.role_fit_score ?? undefined,
         championId: m.champion_id,
         role: m.role ?? undefined,
         durationSecs: m.duration_secs,
@@ -1132,24 +1134,24 @@ export class InsightsRepository {
   }
 
   /**
-   * Grade v3 rows eligible to feed RVI v3.
+   * match Grade rows eligible to feed RVI.
    *
    * This deliberately does not use the denormalized match grade cache or the
    * compatibility breakdown table. A row is eligible only when the selected
    * non-legacy recipe, its ready owner attempt, result, and immutable versioned
   * breakdown all agree on the exact recipe identity.
   */
-  getRviV3Observations(filter: StatsFilter, limit?: number): RviV3ObservationSet | undefined {
-    const selected = selectedGradeV3Recipe(this.db)
+  getRviObservations(filter: StatsFilter, limit?: number): RviObservationSet | undefined {
+    const selected = selectedGradeRecipe(this.db)
     if (!selected) return undefined
     const metricRepository = new MetricObservationsRepository(this.db)
-    const selectedRvi = metricRepository.getSelectedRecipe(GRADE_V3_ALGORITHM_VERSION)
+    const selectedRvi = metricRepository.getSelectedRecipe(MATCH_GRADE_ALGORITHM_VERSION)
     if (selectedRvi && (selectedRvi.gradeRecipeId !== selected.recipeId ||
         selectedRvi.calibrationId !== selected.calibrationId)) return undefined
     if (selectedRvi && (!selectedRvi.definition || typeof selectedRvi.definition !== "object" ||
         Array.isArray(selectedRvi.definition) ||
         (selectedRvi.definition as Record<string, unknown>).recipeDefinitionId !==
-          RVI_V3_RECIPE_DEFINITION_ID)) return undefined
+          RVI_RECIPE_DEFINITION_ID)) return undefined
     const rviRecipeId = selectedRvi?.recipeId ?? selected.recipeId
 
     const conditions = [
@@ -1172,7 +1174,7 @@ export class InsightsRepository {
     ]
     const params: (string | number)[] = [
       filter.puuid,
-      GRADE_V3_ALGORITHM_VERSION,
+      MATCH_GRADE_ALGORITHM_VERSION,
       selected.recipeId,
     ]
 
@@ -1213,7 +1215,7 @@ export class InsightsRepository {
               p.participant_id AS participantId,
               p.champion_id AS championId,
               p.resolved_position AS resolvedPosition,
-              r.role_fit_score AS roleFitScore,
+              r.role_fit_score AS recallScore,
               b.components_json AS breakdownJson
        FROM matches m
        JOIN match_participants p
@@ -1236,15 +1238,15 @@ export class InsightsRepository {
       participantId: number
       championId: number | null
       resolvedPosition: string | null
-      roleFitScore: number
+      recallScore: number
       breakdownJson: string
     }>
 
-    const storedMetricsByMatch = new Map<string, OwnerMetricObservationV3[]>()
+    const storedMetricsByMatch = new Map<string, OwnerMetricObservation[]>()
     if (selectedRvi) {
       for (const metric of metricRepository.getOwnerHistory(
         filter.puuid,
-        GRADE_V3_ALGORITHM_VERSION,
+        MATCH_GRADE_ALGORITHM_VERSION,
         selectedRvi.recipeId,
       )) {
         const key = `${metric.gameId}:${metric.participantId}`
@@ -1255,15 +1257,15 @@ export class InsightsRepository {
     }
 
     const observations = rows.flatMap((row): RviMatchObservation[] => {
-      if (!finiteInRange(row.roleFitScore, 0, 100) ||
+      if (!finiteInRange(row.recallScore, 0, 100) ||
           !Number.isFinite(row.playedAt) ||
           (row.championId !== null && (!Number.isSafeInteger(row.championId) || row.championId <= 0))) {
         return []
       }
-      const breakdown = parseGradeV3Breakdown(
+      const breakdown = parseGradeBreakdown(
         row.breakdownJson,
         selected.recipeId,
-        row.roleFitScore,
+        row.recallScore,
       )
       if (!breakdown) return []
       const metrics = rviMetricsForMatch(
@@ -1275,7 +1277,7 @@ export class InsightsRepository {
         matchId: row.gameId,
         recipeId: rviRecipeId,
         playedAt: row.playedAt,
-        roleFitScore: row.roleFitScore,
+        recallScore: row.recallScore,
         ...vectorMaps,
         metrics,
         championId: row.championId,
@@ -1285,7 +1287,7 @@ export class InsightsRepository {
     }).reverse()
 
     return {
-      algorithmVersion: GRADE_V3_ALGORITHM_VERSION,
+      algorithmVersion: MATCH_GRADE_ALGORITHM_VERSION,
       recipeId: rviRecipeId,
       calibrationId: selected.calibrationId,
       familyKeys: [...RVI_VECTOR_KEYS],
@@ -1293,15 +1295,15 @@ export class InsightsRepository {
     }
   }
 
-  /** Chart-ready grade families for the exact selected Grade v3 recipe. */
+  /** Chart-ready grade families for the exact selected match Grade recipe. */
   getGradeComponentHistory(filter: StatsFilter, limit = 60): GradeComponentObservation[] {
-    const selected = selectedGradeV3Recipe(this.db)
+    const selected = selectedGradeRecipe(this.db)
     return selected
-      ? this.getGradeV3ComponentHistory(filter, limit, selected.recipeId)
+      ? this.getGradeComponentHistoryForRecipe(filter, limit, selected.recipeId)
       : []
   }
 
-  private getGradeV3ComponentHistory(
+  private getGradeComponentHistoryForRecipe(
     filter: StatsFilter,
     limit: number,
     recipeId: string,
@@ -1325,7 +1327,7 @@ export class InsightsRepository {
     ]
     const params: (string | number)[] = [
       filter.puuid,
-      GRADE_V3_ALGORITHM_VERSION,
+      MATCH_GRADE_ALGORITHM_VERSION,
       recipeId,
     ]
 
@@ -1362,7 +1364,7 @@ export class InsightsRepository {
     const rows = this.db.prepare(
       `SELECT m.game_id AS gameId, m.played_at AS playedAt,
               r.grade, r.grade_score AS gradeScore,
-              r.role_fit_score AS roleFitScore,
+              r.role_fit_score AS recallScore,
               b.components_json AS breakdownJson
        FROM matches m
        JOIN match_participants p
@@ -1385,20 +1387,20 @@ export class InsightsRepository {
       playedAt: number
       grade: string
       gradeScore: number
-      roleFitScore: number
+      recallScore: number
       breakdownJson: string
     }>
 
     return rows.flatMap((row): GradeComponentObservation[] => {
-      if (!finiteInRange(row.roleFitScore, 0, 100) || !Number.isFinite(row.gradeScore)) return []
-      const breakdown = parseGradeV3Breakdown(row.breakdownJson, recipeId, row.roleFitScore)
+      if (!finiteInRange(row.recallScore, 0, 100) || !Number.isFinite(row.gradeScore)) return []
+      const breakdown = parseGradeBreakdown(row.breakdownJson, recipeId, row.recallScore)
       if (!breakdown) return []
       return [{
         gameId: row.gameId,
         playedAt: row.playedAt,
         grade: row.grade,
         gradeScore: row.gradeScore,
-        compositePercentile: row.roleFitScore / 100,
+        compositePercentile: row.recallScore / 100,
         components: breakdown.components,
       }]
     }).reverse()

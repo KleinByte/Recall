@@ -6,6 +6,7 @@ import type {
   TeamRow,
   TrackedMode,
 } from "./stats"
+import type { MatchRviArmKey } from "../shared/performance-vocabulary"
 
 export type Confidence = "thin" | "fair" | "solid"
 export type DataTrustState =
@@ -112,19 +113,7 @@ export interface RateLimitWindow {
   resetsAt?: number
 }
 
-export type GradeComponentKey =
-  | "combat"
-  | "participation"
-  | "economy"
-  | "survival"
-  | "frontlining"
-  | "farming"
-  | "fighting"
-  | "availability"
-  | "resources"
-  | "vision"
-  | "objectives"
-  | "control"
+export type GradeComponentKey = MatchRviArmKey
 
 export interface GradeComponent {
   key: GradeComponentKey
@@ -138,7 +127,7 @@ export interface GradeComponent {
 export interface GradeBreakdown {
   algorithmVersion: number
   recipeId?: string
-  roleFitScore?: number
+  recallScore?: number
   lobbyPercentile?: number
   compositePercentile: number
   components: GradeComponent[]
@@ -214,8 +203,8 @@ export interface OwnerAugmentSummary {
   lastPlayedAt: number
   /** Legacy/internal compatibility normal score. */
   averageGrade?: number
-  /** Visible authoritative Recall v3 average (0-100). */
-  averageRoleFit?: number
+  /** Visible authoritative Recall average (0-100). */
+  averageRecallScore?: number
   kda: number
   damagePerMinute: number
   champions: { championId: number; games: number }[]
@@ -268,8 +257,8 @@ export interface ChampionChoice {
   adjustedWinRate: number
   /** Legacy/internal compatibility normal score. */
   averageGrade?: number
-  /** Visible authoritative Recall v3 average (0-100). */
-  averageRoleFit?: number
+  /** Visible authoritative Recall average (0-100). */
+  averageRecallScore?: number
   kda: number
   confidence: Confidence
   recentDirection: "up" | "down" | "stable" | "unknown"

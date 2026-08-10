@@ -1,3 +1,5 @@
+import type { MatchRviArmKey } from "../shared/performance-vocabulary"
+
 export type TrackedMode =
   | "sr_ranked_solo"
   | "sr_ranked_flex"
@@ -10,7 +12,7 @@ export type TrackedMode =
   | "league_classic"
   | "other"
 
-export interface RecallV3CalibrationStatus {
+export interface PerformanceReferenceStatus {
   state: "calibrating" | "frozen"
   requiredMatches: number
   eligibleMatches: number
@@ -24,7 +26,7 @@ export interface RecallV3CalibrationStatus {
   referenceMatches?: number
 }
 
-export interface RecallV3RebuildResult {
+export interface PerformanceReferenceRebuildResult {
   canceled?: boolean
   recipeId?: string
   calibrationId?: string
@@ -56,8 +58,8 @@ export interface MatchQuery extends StatsFilter {
   result?: "win" | "loss"
   /** Legacy/internal compatibility-score filter. */
   minGradeScore?: number
-  /** Authoritative Recall v3 RoleFit filter (0-100). */
-  minRoleFitScore?: number
+  /** Authoritative Recall filter (0-100). */
+  minRecallScore?: number
   minDurationSecs?: number
   sortBy?: "played_at" | "kda" | "damage" | "grade" | "duration"
   sortDir?: "asc" | "desc"
@@ -174,7 +176,7 @@ export interface StatsSummary {
   currentStreak: number
   longestWinStreak: number
   avgGradeScore?: number
-  avgRoleFitScore?: number
+  averageRecallScore?: number
   gradedGames: number
 }
 
@@ -194,7 +196,7 @@ export interface ChampionStatRow {
   kda: number
   avgDamageToChampions: number
   avgGradeScore?: number
-  avgRoleFitScore?: number
+  averageRecallScore?: number
   gradedGames: number
 }
 
@@ -315,7 +317,7 @@ export interface ParticipantRow {
   grade?: string
   gradeScore?: number
   gradeAlgorithmVersion?: number
-  roleFitScore?: number
+  recallScore?: number
   gradeRecipeId?: string
   gradeStatus?: string
   gradeEvidenceCoverage?: number
@@ -409,8 +411,8 @@ export interface RankedChampion {
   kda: number
   rawGrade?: number
   adjustedGrade: number
-  /** Visible authoritative Recall v3 average; never reliability-shrunk. */
-  roleFitScore?: number
+  /** Visible authoritative Recall average; never reliability-shrunk. */
+  recallScore?: number
   confidence: Confidence
 }
 
@@ -574,7 +576,7 @@ export interface MatchRow {
   grade?: string
   gradeScore?: number
   gradeAlgorithmVersion?: number
-  roleFitScore?: number
+  recallScore?: number
   gradeRecipeId?: string
   gradeStatus?: string
   gradeEvidenceCoverage?: number
@@ -707,25 +709,13 @@ export interface SkillHistoryPoint {
   grade?: string
   /** Legacy/internal compatibility normal score. */
   gradeScore?: number
-  /** Authoritative Recall v3 score on a fixed 0-100 scale. */
-  roleFitScore?: number
+  /** Authoritative Recall score on a fixed 0-100 scale. */
+  recallScore?: number
   durationSecs: number
 }
 
 export interface SkillGradeComponent {
-  key:
-    | "combat"
-    | "participation"
-    | "economy"
-    | "survival"
-    | "frontlining"
-    | "farming"
-    | "fighting"
-    | "availability"
-    | "resources"
-    | "vision"
-    | "objectives"
-    | "control"
+  key: MatchRviArmKey
   label: string
   percentile: number
   weight: number
@@ -750,8 +740,8 @@ export interface SkillChampionPoint {
   kda: number
   /** Legacy/internal compatibility normal score. */
   avgGradeScore?: number
-  /** Average authoritative Recall v3 RoleFit score (0-100). */
-  avgRoleFitScore?: number
+  /** Average authoritative Recall score (0-100). */
+  averageRecallScore?: number
   gradedGames: number
 }
 
@@ -925,7 +915,7 @@ export interface PerformanceProfile {
   scoringContext: PerformanceScoringContext
   weighting: RviResolvedWeighting
   score: number
-  roleFitAverage: number
+  recallScoreAverage: number
   headline: RviHeadlineAggregate | RviCareerArmHeadlineAggregate
   recentHeadline?: RviHeadlineAggregate | RviCareerArmHeadlineAggregate
   scopes: PerformanceProfileScopes
@@ -955,7 +945,7 @@ export interface SkillDeathMap {
   deaths: SkillDeathPoint[]
 }
 
-export interface SkillReportV3 {
+export interface SkillReport {
   version: 3
   generatedAt: number
   scope: { modes: TrackedMode[]; family: ModeFamily }
@@ -991,6 +981,3 @@ export interface SkillReportV3 {
     items: InsightSection
   }
 }
-
-/** @deprecated Use SkillReportV3; retained for existing renderer imports. */
-export type SkillReportV2 = SkillReportV3

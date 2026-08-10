@@ -8,7 +8,7 @@ describe("Skill Overview", () => {
     const overview = read("src/components/skill/SkillOverview.vue")
     const profile = read("src/components/skill/PerformanceProfile.vue")
     const engine = read("electron/main/matches/performance-profile.ts")
-    const recipe = read("electron/main/matches/rvi-v3-recipe.ts")
+    const vocabulary = read("src/shared/performance-vocabulary.ts")
 
     expect(overview).toMatch(/RankedHistoryPanel[\s\S]*PerformanceProfile[\s\S]*title="Recorded comparisons"/)
     expect(overview).toContain("classifyRviIdentity")
@@ -16,7 +16,7 @@ describe("Skill Overview", () => {
     expect(overview).not.toContain("classifyPlaystyle")
     expect(overview).not.toContain('title="Playstyle"')
     expect(profile).toContain("Recall Vector Index")
-    expect(profile).toContain("RVI playstyle")
+    expect(profile).toContain("Performance style")
     expect(profile).toContain("How RVI measures it")
     expect(profile).toContain("measurement-table")
     expect(profile).toContain("segment-meter")
@@ -29,8 +29,8 @@ describe("Skill Overview", () => {
     expect(profile).toContain("Select an arm to inspect its measurements")
     expect(profile).not.toContain("measured in {{ profile.dimensions.length }} vectors")
     expect(profile).not.toContain("RVI keeps eight stable capability views")
-    expect(profile).toContain("Core evidence is required")
-    expect(profile).toContain("secondary evidence remains visible")
+    expect(profile).toContain("Missing optional stats never count as zero")
+    expect(profile).not.toContain("metric.evidenceReason")
     expect(profile).toContain("metric.vectorWeight")
     expect(profile).toContain("metric.gradeInfluence")
     expect(profile).toContain("Recorded RVI scopes")
@@ -41,7 +41,7 @@ describe("Skill Overview", () => {
     expect(profile).toContain("scope.measuredGames")
     expect(profile).toContain("armCountLabel")
     expect(profile).toContain("headline.availableArms")
-    expect(profile).toContain("Diagnostic · excluded from headline")
+    expect(profile).toContain("Shown for detail only")
     expect(profile).toContain("responsibilityWeight")
     expect(profile).toContain("Core measurements")
     expect(profile).toContain("Secondary measurements")
@@ -51,9 +51,9 @@ describe("Skill Overview", () => {
     expect(overview).not.toMatch(/<PerformanceProfile[\s\S]*?:champions="champions"/)
     expect(profile).not.toContain("remaining weights rebalance")
     expect(engine).toContain("RVI_ALGORITHM_VERSION")
-    expect(engine).toContain("RVI_V3_VECTOR_DEFINITIONS")
-    expect(recipe).toContain("Availability and the context of recorded deaths")
-    expect(recipe).toContain("Crowd control, ally protection, and literal pressure absorbed")
+    expect(engine).toContain("RVI_VECTOR_DEFINITIONS")
+    expect(vocabulary).toContain('label: "Macro"')
+    expect(vocabulary).toContain("Staying alive and avoiding costly deaths")
   })
 
   it("offers queue and season-selectable ranked growth history", () => {
@@ -72,7 +72,7 @@ describe("Skill Overview", () => {
   it("uses literal Recall and an RVI-native identity", () => {
     const overview = read("src/components/skill/SkillOverview.vue")
 
-    expect(overview).toContain("Avg RoleFit")
+    expect(overview).toContain("Average Recall Score")
     expect(overview).toContain("TelemetryBoard")
     expect(overview).toContain("graded")
     expect(overview).toContain("rviIdentity")
@@ -146,7 +146,7 @@ describe("Skill Insights", () => {
     expect(finding).toContain("finding.games }} games")
     expect(finding).toContain("finding.eligibleGames }} eligible in scope")
     expect(insights).toContain("timezoneLabel")
-    expect(insights).toContain("stored Grade family percentile")
+    expect(insights).toContain("Each cell shows one part of the Grade")
     expect(insights).toContain('class="detail-pane"')
   })
 
@@ -165,7 +165,7 @@ describe("Skill Insights", () => {
     const overview = read("src/components/skill/SkillOverview.vue")
     const effectChart = read("src/components/skill/EffectChart.vue")
 
-    expect(insights).toContain("One grade. Six responsibilities. Every match in context.")
+    expect(insights).toContain("See what shaped your grades over time.")
     expect(insights).toContain("grade-identity")
     expect(insights).toContain("EffectChart")
     expect(finding).toContain("findingItemAsset")
@@ -211,10 +211,21 @@ describe("Skill Insights", () => {
 })
 
 describe("Skill page coordination", () => {
+  it("defaults to current-season Ranked Solo and restores saved filters", () => {
+    const page = read("src/pages/SkillPage.vue")
+
+    expect(page).toContain('ref<SkillScopeId>("rankedSolo")')
+    expect(page).toContain("currentRankedSeason()")
+    expect(page).toContain("api.getSkillViewPreferences()")
+    expect(page).toContain("api.saveSkillViewPreferences(currentPreferences())")
+    expect(page).toContain("rankedSeasonById(seasonId.value)")
+    expect(page).not.toContain("choseInitialScope")
+  })
+
   it("keeps tabs local and uses one report fetch path", () => {
     const page = read("src/pages/SkillPage.vue")
 
-    expect(page).toContain('type SkillTab = "overview" | "insights" | "analyze"')
+    expect(page).toContain("import type { SkillTab, SkillViewPreferences }")
     expect(page).toContain('ref<SkillTab>("overview")')
     expect(page).toContain("<SkillInsights")
     expect(page).toContain("<SkillAnalyze")
@@ -232,7 +243,7 @@ describe("Skill page coordination", () => {
     expect(page).toContain("abyssScopes")
     expect(page).toContain("classicScopes")
     expect(page).toContain("counts[scope.id]")
-    expect(page).toContain('v-model="season"')
+    expect(page).toContain('v-model="seasonId"')
     expect(page).toContain('v-model="role"')
     expect(page).toContain('v-model="championId"')
     expect(page).toContain("ChampionPicker")
@@ -291,7 +302,7 @@ describe("Skill page coordination", () => {
     expect(analyze).toContain("ChampionQuadrantChart")
     expect(analyze).toContain("ChampionLearningCurve")
     expect(analyze).toContain("classifyRviIdentity")
-    expect(analyze).toContain("RVI headline and its sample diagnostics")
+    expect(analyze).toContain("Every line shows the Grade arms recorded for one game")
     expect(signatures).toContain('type: "parallel"')
     expect(form).toContain("dimension.delta")
     expect(form).toContain('import { CHART_COLOURS, CHART_STYLES } from "../../charts/recall-chart-theme"')

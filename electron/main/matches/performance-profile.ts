@@ -4,11 +4,11 @@ import type {
   RviTimelineObservation,
 } from "../database/insights-repo.js"
 import {
-  GRADE_V3_RECIPE_ID,
-} from "./grade-v3-recipe.js"
+  MATCH_GRADE_RECIPE_ID,
+} from "./match-grade-recipe.js"
 import {
   aggregateRviProfile,
-  RVI_ALGORITHM_VERSION as RVI_V3_ALGORITHM_VERSION,
+  RVI_ALGORITHM_VERSION as CONTRACT_RVI_ALGORITHM_VERSION,
   RVI_VECTOR_KEYS,
   type RviCareerArmHeadlineAggregate,
   type RviHeadlineAggregate,
@@ -22,12 +22,12 @@ import {
 import {
   PRIMARY_ARCHETYPES,
   type PrimaryArchetype,
-} from "./grade-v3-taxonomy.js"
+} from "./match-grade-taxonomy.js"
 import { POSITIONS, type Position } from "./position.js"
-import { RVI_V3_VECTOR_DEFINITIONS } from "./rvi-v3-recipe.js"
+import { RVI_VECTOR_DEFINITIONS } from "./rvi-recipe.js"
 import type { ModeFamily } from "./types.js"
 
-export const RVI_ALGORITHM_VERSION = RVI_V3_ALGORITHM_VERSION
+export const RVI_ALGORITHM_VERSION = CONTRACT_RVI_ALGORITHM_VERSION
 export const PERFORMANCE_PROFILE_VERSION = RVI_ALGORITHM_VERSION
 export const PERFORMANCE_RECENT_GAMES = 20
 
@@ -45,7 +45,7 @@ export interface PerformanceMetricScore {
   weight: number
   /** Declared recipe weight inside the containing RVI arm, before active-evidence normalization. */
   vectorWeight: number
-  /** Exact stored contribution to the match Grade/RoleFit responsibility mix. */
+  /** Exact stored contribution to the match Grade/Recall Score responsibility mix. */
   gradeInfluence: number
   influence: number
   games: number
@@ -75,7 +75,7 @@ export interface PerformanceDimensionScore {
   coverage: number | null
   effectiveGames: number
   confidence: PerformanceConfidence | null
-  /** Average exact per-match Grade v3 component weight. */
+  /** Average exact per-match match Grade component weight. */
   responsibilityWeight: number
   /** Whether this arm enters the displayed match or career headline. */
   headlineEligible: boolean
@@ -130,8 +130,8 @@ export interface PerformanceProfile {
   scoringContext: PerformanceScoringContext
   weighting: RviResolvedWeighting
   score: number
-  /** Mean stored match RoleFit; separate from the career arm mean. */
-  roleFitAverage: number
+  /** Mean stored match Recall Score; separate from the career arm mean. */
+  recallScoreAverage: number
   headline: RviHeadlineAggregate | RviCareerArmHeadlineAggregate
   recentHeadline?: RviHeadlineAggregate | RviCareerArmHeadlineAggregate
   scopes: PerformanceProfileScopes
@@ -150,20 +150,20 @@ export interface PerformanceProfile {
 interface DeprecatedPerformanceProfileFields {
   /** Selected mode family controls which recipe arms are mode-capable. */
   family?: ModeFamily
-  /** @deprecated Supply rviObservations populated from exact-recipe Grade v3 artifacts. */
+  /** @deprecated Supply rviObservations populated from exact-recipe match Grade artifacts. */
   observations?: readonly InsightObservation[]
-  /** @deprecated Grade v2 component rows are not valid RVI v3 inputs. */
+  /** @deprecated Grade v2 component rows are not valid RVI inputs. */
   gradeComponentHistory?: readonly GradeComponentObservation[]
   /** @deprecated Timeline rows must arrive through exact-recipe RVI observations. */
   timelineHistory?: readonly RviTimelineObservation[]
-  /** @deprecated Champion-class display ceilings were removed in RVI v3. */
+  /** @deprecated Champion-class display ceilings were removed in RVI. */
   championRoles?: ReadonlyMap<number, readonly string[]>
 }
 
-export interface PerformanceProfileV3Input extends DeprecatedPerformanceProfileFields {
-  /** Exact-recipe, per-match Grade v3 RoleFit and RVI metric observations. */
+export interface PerformanceProfileInput extends DeprecatedPerformanceProfileFields {
+  /** Exact-recipe, per-match match Grade Recall Score and RVI metric observations. */
   rviObservations: readonly RviMatchObservation[]
-  /** Defaults to the currently bundled immutable Grade v3 recipe. */
+  /** Defaults to the currently bundled immutable match Grade recipe. */
   recipeId?: string
   /** Equal match weights are authoritative unless half-life weighting is explicit. */
   weighting?: RviWeighting
@@ -183,9 +183,9 @@ export interface LegacyPerformanceProfileInput extends DeprecatedPerformanceProf
   scoringContext?: PerformanceScoringContext
 }
 
-function isPerformanceProfileV3Input(
-  input: PerformanceProfileV3Input | LegacyPerformanceProfileInput,
-): input is PerformanceProfileV3Input {
+function isPerformanceProfileInput(
+  input: PerformanceProfileInput | LegacyPerformanceProfileInput,
+): input is PerformanceProfileInput {
   return "rviObservations" in input && Array.isArray(input.rviObservations)
 }
 
@@ -196,7 +196,7 @@ interface FamilyPresentation {
 }
 
 const FAMILY_PRESENTATION: Readonly<Record<RviVectorKey, FamilyPresentation>> = Object.freeze(
-  Object.fromEntries(RVI_V3_VECTOR_DEFINITIONS.map((definition) => [definition.key, {
+  Object.fromEntries(RVI_VECTOR_DEFINITIONS.map((definition) => [definition.key, {
     label: definition.label,
     shortLabel: definition.shortLabel,
     description: definition.description,
@@ -278,7 +278,7 @@ function careerArmHeadline(
       ? scores.reduce((sum, score) => sum + score, 0) / scores.length
       : null,
     // Career uncertainty follows the least-supported arm that actually enters
-    // the mean. RoleFit sample size is not a proxy for arm completeness.
+    // the mean. Recall Score sample size is not a proxy for arm completeness.
     nEff: available.length ? Math.min(...available.map((family) => family.nEff)) : 0,
     confidence,
     coverage: aggregate.headline.coverage,
@@ -397,8 +397,8 @@ function profileDimension(
     ? roundScore(recent.score)
     : undefined
   const comparison = scoringContext === "match"
-    ? "Frozen-reference metric percentile from this match"
-    : "Frozen-reference metric percentiles across recorded matches"
+    ? "Compared with similar recorded matches"
+    : "Compared across the selected recorded matches"
 
   return {
     key: family,
@@ -406,7 +406,7 @@ function profileDimension(
     shortLabel: presentation.shortLabel,
     description: headlineEligible || profileOnly
       ? presentation.description
-      : `${presentation.description} This vector is diagnostic for the observed sample and was excluded from every stored role-fit headline.`,
+      : `${presentation.description} This vector is diagnostic for the observed sample and was excluded from every stored recall-score headline.`,
     score,
     recentScore,
     delta: recentScore === undefined || score === null ? undefined : recentScore - score,
@@ -438,7 +438,7 @@ function profileDimension(
       description: metric.description,
       formula: metric.formula,
       comparison: metric.comparisonScope
-        ? `${comparison}; ${metric.comparisonScope} reference`
+        ? `${comparison} · grouped by ${metric.comparisonScope}`
         : comparison,
       comparisonScope: metric.comparisonScope,
       referenceMatchCount: metric.referenceMatchCount,
@@ -447,21 +447,21 @@ function profileDimension(
 }
 
 export function buildPerformanceProfile(
-  input: PerformanceProfileV3Input,
+  input: PerformanceProfileInput,
 ): PerformanceProfile | undefined
-/** @deprecated Supply PerformanceProfileV3Input with rviObservations. */
+/** @deprecated Supply PerformanceProfileInput with rviObservations. */
 export function buildPerformanceProfile(
   input: LegacyPerformanceProfileInput,
 ): PerformanceProfile | undefined
 export function buildPerformanceProfile(
-  input: PerformanceProfileV3Input | LegacyPerformanceProfileInput,
+  input: PerformanceProfileInput | LegacyPerformanceProfileInput,
 ): PerformanceProfile | undefined {
-  if (!isPerformanceProfileV3Input(input)) return undefined
+  if (!isPerformanceProfileInput(input)) return undefined
 
   const scoringContext: PerformanceScoringContext = input.scoringContext === "match"
     ? "match"
     : "profile"
-  const recipeId = input.recipeId ?? GRADE_V3_RECIPE_ID
+  const recipeId = input.recipeId ?? MATCH_GRADE_RECIPE_ID
   const observations = orderedObservations(input.rviObservations)
   const aggregate = aggregateRviProfile({
     recipeId,
@@ -514,7 +514,7 @@ export function buildPerformanceProfile(
     scoringContext,
     weighting: aggregate.weighting,
     score: roundScore(headline.score),
-    roleFitAverage: roundScore(aggregate.headline.score),
+    recallScoreAverage: roundScore(aggregate.headline.score),
     headline,
     ...(recentHeadline && recentHeadline.score !== null ? { recentHeadline } : {}),
     scopes: buildPerformanceScopes(
@@ -539,8 +539,8 @@ export function buildPerformanceProfile(
       : headline.coverage.gameRatio ?? 0,
     confidence: headline.confidence,
     comparison: scoringContext === "match"
-      ? "Authoritative Grade v3 role-fit percentile from this match"
-      : "Equal mean of available career capability arms; match Grade remains RoleFit",
+      ? "This match compared with similar recorded games"
+      : "Average of the career arms with enough data",
     dimensions,
     strongestKey: strongest?.key,
     growthKey: growth?.key,

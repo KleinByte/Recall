@@ -14,7 +14,7 @@ const props = defineProps<{ history: SkillHistoryPoint[] }>()
 
 const days = computed(() => {
   return calendarDays(props.history).map((day) => [
-    day.date, day.roleFitScore, day.games, day.wins,
+    day.date, day.recallScore, day.games, day.wins,
   ] as [string, number | null, number, number])
 })
 
@@ -27,10 +27,10 @@ const option = computed<EChartsCoreOption>(() => ({
   tooltip: {
     formatter: (raw: unknown) => {
       const [date, score, games, wins] = (raw as { data: [string, number | null, number, number] }).data
-      const roleFit = score === null
+      const recallScore = score === null
         ? "No graded games"
-        : `Average RoleFit ${score.toFixed(1)}`
-      return `<strong>${escapeTooltip(new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { dateStyle: "medium" }))}</strong><br/>${games} game${games === 1 ? "" : "s"} · ${wins}W<br/>${roleFit}`
+        : `Average Recall Score ${score.toFixed(1)}`
+      return `<strong>${escapeTooltip(new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { dateStyle: "medium" }))}</strong><br/>${games} game${games === 1 ? "" : "s"} · ${wins}W<br/>${recallScore}`
     },
   },
   visualMap: {
@@ -41,7 +41,7 @@ const option = computed<EChartsCoreOption>(() => ({
     orient: "horizontal",
     left: "center",
     bottom: 0,
-    text: ["Higher RoleFit", "Lower RoleFit"],
+    text: ["Higher Recall Score", "Lower Recall Score"],
     inRange: {
       color: [CHART_SCORE_RAMP[0], CHART_SCORE_RAMP[2], CHART_SCORE_RAMP[3], CHART_SCORE_RAMP[4]],
     },
@@ -66,7 +66,7 @@ const option = computed<EChartsCoreOption>(() => ({
 <template>
   <BaseEChart
     :option="option"
-    ariaLabel="Play calendar colored by average RoleFit on a zero-to-one-hundred scale for each recorded day."
+    ariaLabel="Play calendar colored by average Recall Score on a zero-to-one-hundred scale for each recorded day."
     height="230px"
   />
 </template>

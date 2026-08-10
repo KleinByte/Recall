@@ -9,7 +9,7 @@ import type { SkillHistoryPoint } from "../../types/stats"
 
 const props = defineProps<{ history: SkillHistoryPoint[] }>()
 
-const graded = computed(() => props.history.filter((game) => Number.isFinite(game.roleFitScore)))
+const graded = computed(() => props.history.filter((game) => Number.isFinite(game.recallScore)))
 
 const option = computed<EChartsCoreOption>(() => ({
   grid: { top: 18, right: 28, bottom: graded.value.length > 30 ? 64 : 36, left: 46 },
@@ -21,7 +21,7 @@ const option = computed<EChartsCoreOption>(() => ({
       return [
         `<strong>${escapeTooltip(game.grade ?? "Ungraded")}</strong> · ${escapeTooltip(championNameById(null, game.championId))}`,
         new Date(game.playedAt).toLocaleString(),
-        `${game.win ? "Win" : "Loss"} · RoleFit ${game.roleFitScore?.toFixed(1)}`,
+        `${game.win ? "Win" : "Loss"} · Recall Score ${game.recallScore?.toFixed(1)}`,
       ].join("<br/>")
     },
   },
@@ -35,19 +35,19 @@ const option = computed<EChartsCoreOption>(() => ({
     type: "value",
     min: 0,
     max: 100,
-    name: "RoleFit",
+    name: "Recall Score",
     axisLabel: { formatter: "{value}" },
     splitLine: { lineStyle: { color: CHART_STYLES.gridSoft } },
   },
   dataZoom: graded.value.length > 30 ? [{ type: "inside", start: Math.max(0, 100 - 30 / graded.value.length * 100), end: 100 }, { type: "slider", height: 18, bottom: 8 }] : [],
   series: [{
-    name: "RoleFit",
+    name: "Recall Score",
     type: "line",
     smooth: 0.24,
     showSymbol: graded.value.length <= 45,
     symbolSize: 7,
     data: graded.value.map((game) => ({
-      value: game.roleFitScore,
+      value: game.recallScore,
       itemStyle: { color: game.win ? CHART_COLOURS.positive : CHART_COLOURS.negative },
     })),
     lineStyle: { color: CHART_COLOURS.accentStrong, width: 2 },
@@ -56,7 +56,7 @@ const option = computed<EChartsCoreOption>(() => ({
       symbol: "none",
       silent: true,
       data: [{ yAxis: 50, label: {
-        formatter: "Frozen-reference median",
+        formatter: "Typical score",
         position: "insideEndTop",
         color: CHART_COLOURS.live,
         backgroundColor: CHART_STYLES.labelBackdrop,
@@ -73,7 +73,7 @@ const option = computed<EChartsCoreOption>(() => ({
 <template>
   <BaseEChart
     :option="option"
-    ariaLabel="Recall Grade journey across recorded matches on the zero-to-one-hundred RoleFit scale. Green points are wins and red points are losses."
+    ariaLabel="Recall Grade journey across recorded matches on the zero-to-one-hundred Recall Score scale. Green points are wins and red points are losses."
     height="360px"
   />
 </template>

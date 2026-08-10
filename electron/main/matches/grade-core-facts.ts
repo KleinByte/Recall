@@ -1,6 +1,6 @@
 /**
  * Raw participant facts that must have been present in the source payload
- * before a participant can contribute to a Recall v3 grade or calibration.
+ * before a participant can contribute to a Recall grade or calibration.
  *
  * Keep these source-facing names stable. They are persisted in
  * `grade_core_missing_fields_json`, so renaming one is a contract migration.

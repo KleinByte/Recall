@@ -44,8 +44,8 @@ export interface RankedChampion {
   kda: number
   rawGrade?: number
   adjustedGrade: number
-  /** Visible authoritative Recall v3 average; never reliability-shrunk. */
-  roleFitScore?: number
+  /** Visible authoritative Recall average; never reliability-shrunk. */
+  recallScore?: number
   confidence: Confidence
 }
 
@@ -68,7 +68,7 @@ export function rankChampions(
       winRate: row.winRate,
       kda: row.kda,
       rawGrade: row.avgGradeScore,
-      roleFitScore: row.avgRoleFitScore,
+      recallScore: row.averageRecallScore,
       adjustedGrade: shrinkToward(
         row.avgGradeScore!,
         row.gradedGames,
@@ -96,7 +96,7 @@ export function splitChampionSignals(
       winRate: row.winRate,
       kda: row.kda,
       rawGrade: row.avgGradeScore,
-      roleFitScore: row.avgRoleFitScore,
+      recallScore: row.averageRecallScore,
       adjustedGrade: shrinkToward(row.avgGradeScore!, row.gradedGames, baseline),
       confidence: confidenceOf(row.gradedGames),
     }))

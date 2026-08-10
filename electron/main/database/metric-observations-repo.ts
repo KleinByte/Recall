@@ -4,12 +4,12 @@ import type {
   EvidenceState,
 } from "../../../src/shared/measurement.js"
 import {
-  validateMatchMetricObservationV3,
-  type MatchMetricObservationV3,
-  type MetricComparisonScopeV3,
-  type MetricSourceQualityV3,
-  type MetricSourceV3,
-} from "../matches/metric-observations-v3.js"
+  validateMatchMetricObservation,
+  type MatchMetricObservation,
+  type MetricComparisonScope,
+  type MetricSourceQuality,
+  type MetricSource,
+} from "../matches/match-metric-observations.js"
 import { canonicalJson } from "./match-source-repo.js"
 
 export interface RviRecipeRegistration {
@@ -32,19 +32,19 @@ export interface StoredRviRecipe {
   createdAt: number
 }
 
-export interface MatchMetricObservationSetV3 {
+export interface MatchMetricObservationSet {
   gameId: number
   puuid: string
   algorithmVersion: number
   recipeId: string
-  observations: readonly MatchMetricObservationV3[]
+  observations: readonly MatchMetricObservation[]
 }
 
-export interface StoredMatchMetricObservationV3 extends MatchMetricObservationV3 {
+export interface StoredMatchMetricObservation extends MatchMetricObservation {
   algorithmVersion: number
 }
 
-export interface OwnerMetricObservationV3 extends StoredMatchMetricObservationV3 {
+export interface OwnerMetricObservation extends StoredMatchMetricObservation {
   playedAt: number
 }
 
@@ -72,10 +72,10 @@ interface ObservationRow {
   denominator: number | null
   opportunityCount: number | null
   unit: string
-  comparisonScope: MetricComparisonScopeV3 | null
+  comparisonScope: MetricComparisonScope | null
   referenceMatchCount: number | null
-  source: MetricSourceV3
-  sourceQuality: MetricSourceQualityV3
+  source: MetricSource
+  sourceQuality: MetricSourceQuality
   derivationId: string
   derivedAt: number
 }
@@ -115,7 +115,7 @@ function evidenceFromRow(
   return reason === null ? { state } : { state, reason }
 }
 
-function mapObservation(row: ObservationRow): StoredMatchMetricObservationV3 {
+function mapObservation(row: ObservationRow): StoredMatchMetricObservation {
   return {
     gameId: row.gameId,
     puuid: row.puuid,
@@ -180,10 +180,10 @@ const OBSERVATION_SELECT = `
 `
 
 /**
- * Persists the exact metric evidence shared by Grade v3 and RVI v3.
+ * Persists the exact metric evidence shared by match Grade and RVI.
  *
  * RVI recipe selection follows the same purge-before-switch invariant as the
- * Grade v3 repository. Reads always take an explicit recipe identity; callers
+ * match Grade repository. Reads always take an explicit recipe identity; callers
  * that want the current product view first resolve `getSelectedRecipe()`.
  */
 export class MetricObservationsRepository {
@@ -292,12 +292,12 @@ export class MetricObservationsRepository {
     return recipe
   }
 
-  replaceMatchObservations(input: MatchMetricObservationSetV3): number {
+  replaceMatchObservations(input: MatchMetricObservationSet): number {
     this.validateObservationSet(input)
     return this.db.transaction(() => this.replaceSet(input))()
   }
 
-  replaceManyMatches(inputs: readonly MatchMetricObservationSetV3[]): number {
+  replaceManyMatches(inputs: readonly MatchMetricObservationSet[]): number {
     const identities = new Set<string>()
     for (const input of inputs) {
       this.validateObservationSet(input)
@@ -322,7 +322,7 @@ export class MetricObservationsRepository {
     participantId: number,
     algorithmVersion: number,
     recipeId: string,
-  ): StoredMatchMetricObservationV3[] {
+  ): StoredMatchMetricObservation[] {
     return (this.db.prepare(`
       SELECT ${OBSERVATION_SELECT}
       FROM match_metric_observations observation
@@ -339,7 +339,7 @@ export class MetricObservationsRepository {
     puuid: string,
     algorithmVersion: number,
     recipeId: string,
-  ): StoredMatchMetricObservationV3[] {
+  ): StoredMatchMetricObservation[] {
     return (this.db.prepare(`
       SELECT ${OBSERVATION_SELECT}
       FROM match_metric_observations observation
@@ -359,7 +359,7 @@ export class MetricObservationsRepository {
     puuid: string,
     algorithmVersion: number,
     recipeId: string,
-  ): OwnerMetricObservationV3[] {
+  ): OwnerMetricObservation[] {
     return (this.db.prepare(`
       SELECT ${OBSERVATION_SELECT}, match.played_at AS playedAt
       FROM match_metric_observations observation
@@ -394,7 +394,7 @@ export class MetricObservationsRepository {
     `).run(...parameters).changes
   }
 
-  private validateObservationSet(input: MatchMetricObservationSetV3) {
+  private validateObservationSet(input: MatchMetricObservationSet) {
     assertIntegerAtLeast(input.gameId, 1, "metric_observation_game_id")
     assertNonempty(input.puuid, "metric_observation_puuid")
     assertIntegerAtLeast(input.algorithmVersion, 1, "rvi_algorithm_version")
@@ -412,7 +412,7 @@ export class MetricObservationsRepository {
         .map((row) => row.participantId))
     const identities = new Set<string>()
     for (const observation of input.observations) {
-      validateMatchMetricObservationV3(observation)
+      validateMatchMetricObservation(observation)
       if (observation.gameId !== input.gameId || observation.puuid !== input.puuid ||
           observation.recipeId !== input.recipeId) {
         throw new Error("metric_observation_set_identity_mismatch")
@@ -451,7 +451,7 @@ export class MetricObservationsRepository {
     }
   }
 
-  private replaceSet(input: MatchMetricObservationSetV3): number {
+  private replaceSet(input: MatchMetricObservationSet): number {
     this.db.prepare(`
       DELETE FROM match_metric_observations
       WHERE game_id = ? AND puuid = ? AND algorithm_version = ? AND recipe_id = ?

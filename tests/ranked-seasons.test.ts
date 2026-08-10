@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest"
 import {
   currentRankedSeason,
   pointsForSeason,
+  rankedSeasonById,
+  rankedSeasonsBetween,
   seasonsWithRankedHistory,
 } from "../src/helpers/ranked-seasons.js"
 import type { RankedPoint } from "../src/types/stats.js"
@@ -47,5 +49,15 @@ describe("ranked season boundaries", () => {
     }])
 
     expect(seasons.map((season) => season.id)).toEqual(["2026-s3", "2025-s2"])
+  })
+
+  it("resolves saved season IDs and offers the current split for Skill filters", () => {
+    expect(rankedSeasonById("2026-s3")).toMatchObject({
+      startMs: new Date(2026, 6, 29, 12).getTime(),
+    })
+    expect(rankedSeasonsBetween(
+      new Date(2026, 0, 1).getTime(),
+      new Date(2026, 7, 10).getTime(),
+    ).map((season) => season.id)).toEqual(["2026-s3", "2026-s2", "2026-s1", "2025-s3"])
   })
 })

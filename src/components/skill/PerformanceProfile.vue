@@ -218,15 +218,12 @@ const selectDimension = (key: string) => {
         height="clamp(260px, 28vw, 320px)"
       />
       <div v-else class="partial-radar-note">
-        <strong>Radar needs three measured arms</strong>
-        <p>
-          {{ measuredDimensions.length }} of {{ profile.dimensions.length }} arms currently have
-          calibrated scores. Available measurements and exact evidence gaps remain listed below.
-        </p>
+        <strong>Radar is still building</strong>
+        <p>More recorded games are needed for a complete radar. Available details remain below.</p>
       </div>
       <div class="profile-story">
         <article v-if="identity" class="story-card identity">
-          <span class="story-label">RVI playstyle</span>
+          <span class="story-label">Performance style</span>
           <strong>{{ identity.label }}</strong>
           <p>{{ identity.description }}</p>
         </article>
@@ -271,9 +268,9 @@ const selectDimension = (key: string) => {
           </small>
           <small v-else-if="dimension.headlineEligible">
             {{ confidenceLabel(dimension.confidence) }} · {{ dimension.games }}/{{ dimension.eligibleGames }} games ·
-            {{ Math.round(dimension.responsibilityWeight * 100) }}% avg responsibility
+            {{ Math.round(dimension.responsibilityWeight * 100) }}% average Grade share
           </small>
-          <small v-else>Diagnostic · excluded from headline</small>
+          <small v-else>Shown for detail only</small>
         </span>
         <span class="dimension-result">
           <strong class="dimension-score numeric">{{ dimension.score ?? '—' }}</strong>
@@ -319,15 +316,14 @@ const selectDimension = (key: string) => {
         <p class="detail-description">{{ selected.description }}</p>
         <p class="responsibility-note">
           <template v-if="selected.careerOnly">
-            Career RVI only: Range never contributes to an individual match Grade.
+            Range summarizes your overall history. It does not affect any single match Grade.
           </template>
           <template v-else-if="selected.headlineEligible">
-            Average stored Grade v3 responsibility weight:
+            Average share of the Grade:
             <strong>{{ Math.round(selected.responsibilityWeight * 100) }}%</strong>.
           </template>
           <template v-else>
-            Diagnostic only: its stored responsibility weight was zero, so it did not contribute
-            to the role-fit headline or RVI identity.
+            Shown for detail only. This arm did not affect the selected games' Grades.
           </template>
         </p>
         <div v-if="metricGroups.length" class="measurement-groups">
@@ -357,9 +353,6 @@ const selectDimension = (key: string) => {
                     {{ metric.comparison }}<template v-if="metric.referenceMatchCount !== undefined">
                       · {{ metric.referenceMatchCount }} reference matches
                     </template>
-                  </small>
-                  <small v-if="metric.evidenceReason" class="evidence-reason">
-                    {{ metric.evidenceReason }}
                   </small>
                   <details class="formula-detail">
                     <summary>Formula and evidence</summary>
@@ -392,29 +385,24 @@ const selectDimension = (key: string) => {
                     {{ profile.scoringContext === 'match' ? "of this match's Grade mix" : 'average Grade influence' }}
                   </small>
                   <small v-else-if="metric.vectorWeight > 0">
-                    Declared in the arm;
-                    {{ profile.scoringContext === 'match' ? 'no match Grade responsibility here' : 'no average Grade influence' }}
+                    Included in this arm, but it had no Grade influence here
                   </small>
-                  <small v-else>No arm or Grade influence</small>
+                  <small v-else>Shown for detail only</small>
                 </div>
               </article>
             </div>
           </section>
         </div>
         <p v-else-if="selected.careerOnly" class="no-measurements">
-          Range becomes available after 20 measured games. It is 50% consistency—your RoleFit
-          lower quartile and MAD-based repeatability—and 50% demonstrated breadth across eligible
-          positions, primary archetypes, and champions. Abyss modes omit the position domain.
+          Range unlocks after 20 graded games. It rewards steady results and strong play across
+          different champions, playstyles, and positions. ARAM and Mayhem do not use positions.
         </p>
         <p v-else class="no-measurements">
           No metric observations were retained for this arm in the selected recipe.
         </p>
         <p class="method-note">
-           Match RoleFit is frozen-reference calibrated from its applicable responsibility arms.
-           Career RVI is the equal mean of available career arms. Core evidence is required;
-           observed secondary evidence joins an arm at its declared recipe weight, while unavailable
-           secondary evidence remains visible and is arithmetically neutral to the observed core
-           bundle.
+          Your match Grade compares this performance with similar games in your saved history.
+          Career RVI averages the areas with enough data. Missing optional stats never count as zero.
         </p>
       </div>
     </section>
@@ -751,7 +739,6 @@ const selectDimension = (key: string) => {
 }
 .evidence-badge[data-state="observed"] { border-color: rgba(10, 203, 230, .28); color: var(--cyan); }
 .evidence-badge[data-state="invalid"] { border-color: rgba(239, 92, 105, .35); color: var(--loss); }
-.evidence-reason { color: var(--loss) !important; }
 .formula-detail { margin-top: 5px; color: var(--text-muted); font-size: 10px; }
 .formula-detail summary { width: max-content; color: var(--cyan); cursor: pointer; }
 .formula-detail span { display: block; margin-top: 3px; line-height: 1.45; }

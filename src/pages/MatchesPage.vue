@@ -19,8 +19,8 @@ import {
   modeLabel,
 } from "../helpers/format"
 import {
-  RECALL_ROLE_FIT_THRESHOLDS,
-  recallGradeFromRoleFitScore,
+  RECALL_SCORE_THRESHOLDS,
+  recallGradeFromRecallScore,
   type RecallGrade,
 } from "../shared/recall-grade"
 import type { Champion } from "../types/lol"
@@ -56,13 +56,13 @@ const RANGES = [
   { label: "7 days", days: 7 },
 ]
 
-const roleFitMinimum = (grade: RecallGrade) =>
-  RECALL_ROLE_FIT_THRESHOLDS.find(([candidate]) => candidate === grade)?.[1]
+const recallScoreMinimum = (grade: RecallGrade) =>
+  RECALL_SCORE_THRESHOLDS.find(([candidate]) => candidate === grade)?.[1]
 
 const GRADES = [
   { label: "Any grade", score: undefined },
-  { label: "A- or better", score: roleFitMinimum("A-") },
-  { label: "S- or better", score: roleFitMinimum("S-") },
+  { label: "A- or better", score: recallScoreMinimum("A-") },
+  { label: "S- or better", score: recallScoreMinimum("S-") },
 ]
 
 const SORTS: { value: MatchQuery["sortBy"]; label: string }[] = [
@@ -77,7 +77,7 @@ const selectedModes = ref<TrackedMode[]>([])
 const rangeDays = ref<number | null>(null)
 const result = ref<"win" | "loss" | undefined>(undefined)
 const championId = ref<number | undefined>(undefined)
-const minRoleFitScore = ref<number | undefined>(undefined)
+const minRecallScore = ref<number | undefined>(undefined)
 const excludeRemakes = ref(true)
 const sortBy = ref<MatchQuery["sortBy"]>("played_at")
 const sortDir = ref<"asc" | "desc">("desc")
@@ -105,7 +105,7 @@ const query = computed<MatchQuery>(() => ({
       : Date.now() - rangeDays.value * 86_400_000,
   result: result.value,
   championIds: championId.value ? [championId.value] : undefined,
-  minRoleFitScore: minRoleFitScore.value,
+  minRecallScore: minRecallScore.value,
   minDurationSecs: excludeRemakes.value ? 300 : undefined,
   sortBy: sortBy.value,
   sortDir: sortDir.value,
@@ -190,7 +190,7 @@ const hasFilters = computed(
     rangeDays.value !== null ||
     result.value !== undefined ||
     championId.value !== undefined ||
-    minRoleFitScore.value !== undefined ||
+    minRecallScore.value !== undefined ||
     bookmarked.value ||
     hasNotes.value ||
     tagId.value !== undefined ||
@@ -202,14 +202,14 @@ const clearFilters = () => {
   rangeDays.value = null
   result.value = undefined
   championId.value = undefined
-  minRoleFitScore.value = undefined
+  minRecallScore.value = undefined
   bookmarked.value = false
   hasNotes.value = false
   tagId.value = undefined
   experimentId.value = undefined
 }
 
-const averageGrade = computed(() => recallGradeFromRoleFitScore(summary.value?.avgRoleFitScore))
+const averageGrade = computed(() => recallGradeFromRecallScore(summary.value?.averageRecallScore))
 </script>
 
 <template>
@@ -271,7 +271,7 @@ const averageGrade = computed(() => recallGradeFromRoleFitScore(summary.value?.a
         </Field>
 
         <Field label="Grade" compact>
-          <select v-model="minRoleFitScore" class="league-select">
+          <select v-model="minRecallScore" class="league-select">
             <option
               v-for="option in GRADES"
               :key="option.label"
@@ -362,8 +362,8 @@ const averageGrade = computed(() => recallGradeFromRoleFitScore(summary.value?.a
       <StatTile density="compact" label="KDA" :value="formatDecimal(summary.kda, 2)" />
       <StatTile
         density="compact"
-        label="Avg RoleFit"
-        :value="summary.avgRoleFitScore?.toFixed(1) ?? '–'"
+        label="Average Recall Score"
+        :value="summary.averageRecallScore?.toFixed(1) ?? '–'"
         :hint="averageGrade ?? 'No grade'"
       />
     </Surface>

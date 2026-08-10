@@ -57,7 +57,7 @@ const profile = (scores: Record<string, number>, measuredGames = 40): Performanc
     scoringContext: "profile",
     weighting: { kind: "equal" },
     score,
-    roleFitAverage: score,
+    recallScoreAverage: score,
     headline,
     scopes: {
       overall: {
@@ -100,7 +100,7 @@ describe("RVI identity", () => {
     }))
 
     expect(result.label).toBe("Playmaker")
-    expect(result.vectors).toEqual(["combat", "control_utility"])
+    expect(result.arms).toEqual(["combat", "control_utility"])
     expect(result.description).toContain("fight impact")
   })
 

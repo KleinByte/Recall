@@ -86,8 +86,8 @@ const lobbyValue = computed(() => props.lobbyPlace && props.lobbySize
       <div v-else class="radar-unavailable">
         <strong>Radar is still building</strong>
         <span>
-          {{ measuredDimensions.length }} of {{ profile.dimensions.length }} match arms have a
-          measured score. The available evidence remains in Breakdown.
+          This match does not have enough recorded data for a complete radar. Available details
+          remain in Breakdown.
         </span>
       </div>
     </div>
@@ -98,17 +98,17 @@ const lobbyValue = computed(() => props.lobbyPlace && props.lobbySize
         <div>
           <span>Recall Grade</span>
           <strong>{{ Math.round(profile.score) }}</strong>
-          <small>RoleFit</small>
+          <small>Recall Score</small>
         </div>
       </div>
       <p class="comparison-context">{{ comparisonContext }}</p>
 
       <div class="context-grid" aria-label="Grade context">
         <article>
-          <span>Frozen reference</span>
+          <span>Similar recorded games</span>
           <strong>{{ ordinal(profile.score) }} percentile</strong>
           <small v-if="referenceMatches">
-            {{ referenceMatches }} core/composite reference matches
+            {{ referenceMatches }} comparison matches
           </small>
           <small v-else>Position and archetype comparison</small>
         </article>

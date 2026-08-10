@@ -51,8 +51,8 @@ export interface StatsSummary {
   longestWinStreak: number
   /** Average frozen-reference grade normal score, or undefined if none. */
   avgGradeScore?: number
-  /** Average authoritative Recall v3 RoleFit score (0-100), or undefined if none. */
-  avgRoleFitScore?: number
+  /** Average authoritative Recall score (0-100), or undefined if none. */
+  averageRecallScore?: number
   gradedGames: number
 }
 
@@ -68,8 +68,8 @@ export interface ChampionStatRow {
   avgDamageToChampions: number
   /** Average frozen-reference grade normal score for this champion. */
   avgGradeScore?: number
-  /** Average authoritative Recall v3 RoleFit score (0-100) for this champion. */
-  avgRoleFitScore?: number
+  /** Average authoritative Recall score (0-100) for this champion. */
+  averageRecallScore?: number
   gradedGames: number
 }
 
@@ -92,8 +92,8 @@ export interface MatchQuery extends StatsFilter {
   result?: "win" | "loss"
   /** Legacy/internal compatibility-score filter. */
   minGradeScore?: number
-  /** Authoritative Recall v3 RoleFit filter (0-100). */
-  minRoleFitScore?: number
+  /** Authoritative Recall filter (0-100). */
+  minRecallScore?: number
   minDurationSecs?: number
   sortBy?: "played_at" | "kda" | "damage" | "grade" | "duration"
   sortDir?: "asc" | "desc"
@@ -675,7 +675,7 @@ export class MatchesRepository {
            COALESCE(AVG(duration_secs), 0)       AS avgDurationSecs,
            COALESCE(SUM(penta_kills), 0)         AS pentaKills,
            AVG(grade_score)                      AS avgGradeScore,
-           AVG(role_fit_score)                   AS avgRoleFitScore,
+           AVG(role_fit_score)                   AS averageRecallScore,
            COUNT(grade)                          AS gradedGames
          FROM matches ${clause}`,
       )
@@ -704,7 +704,7 @@ export class MatchesRepository {
       avgDurationSecs: totals.avgDurationSecs,
       pentaKills: totals.pentaKills,
       avgGradeScore: totals.avgGradeScore ?? undefined,
-      avgRoleFitScore: totals.avgRoleFitScore ?? undefined,
+      averageRecallScore: totals.averageRecallScore ?? undefined,
       gradedGames: totals.gradedGames,
       currentStreak: computeCurrentStreak(results.map((row) => row.win === 1)),
       longestWinStreak: computeLongestWinStreak(
@@ -730,7 +730,7 @@ export class MatchesRepository {
            COALESCE(AVG(assists), 0) AS avgAssists,
            COALESCE(AVG(damage_to_champions), 0) AS avgDamageToChampions,
            AVG(grade_score)                      AS avgGradeScore,
-           AVG(role_fit_score)                   AS avgRoleFitScore,
+           AVG(role_fit_score)                   AS averageRecallScore,
            COUNT(grade)                          AS gradedGames
          FROM matches ${clause}
          GROUP BY champion_id
@@ -749,7 +749,7 @@ export class MatchesRepository {
       kda: computeKda(row.totalKills, row.totalDeaths, row.totalAssists),
       avgDamageToChampions: row.avgDamageToChampions,
       avgGradeScore: row.avgGradeScore ?? undefined,
-      avgRoleFitScore: row.avgRoleFitScore ?? undefined,
+      averageRecallScore: row.averageRecallScore ?? undefined,
       gradedGames: row.gradedGames,
     }))
   }
@@ -1178,9 +1178,9 @@ function buildQuery(query: MatchQuery) {
     params.push(query.minGradeScore)
   }
 
-  if (query.minRoleFitScore !== undefined) {
+  if (query.minRecallScore !== undefined) {
     conditions.push("role_fit_score >= ?")
-    params.push(query.minRoleFitScore)
+    params.push(query.minRecallScore)
   }
 
   if (query.minDurationSecs !== undefined) {
@@ -1422,7 +1422,7 @@ function toMatchRow(row: Record<string, never>): MatchRow {
     grade: row.grade ?? undefined,
     gradeScore: row.grade_score ?? undefined,
     gradeAlgorithmVersion: row.grade_algorithm_version ?? undefined,
-    roleFitScore: row.role_fit_score ?? undefined,
+    recallScore: row.role_fit_score ?? undefined,
     gradeRecipeId: row.grade_recipe_id ?? undefined,
     gradeStatus: row.grade_status ?? undefined,
     gradeEvidenceCoverage: row.grade_evidence_coverage ?? undefined,

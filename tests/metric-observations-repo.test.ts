@@ -8,8 +8,8 @@ import { applyMigrations } from "../electron/main/database/migrations.js"
 import { MatchesRepository } from "../electron/main/database/matches-repo.js"
 import { ParticipantsRepository } from
   "../electron/main/database/participants-repo.js"
-import type { MatchMetricObservationV3 } from
-  "../electron/main/matches/metric-observations-v3.js"
+import type { MatchMetricObservation } from
+  "../electron/main/matches/match-metric-observations.js"
 import type { ParticipantRow } from "../electron/main/matches/types.js"
 import { buildMatchRow } from "./fixtures/matches.js"
 
@@ -78,8 +78,8 @@ let db: InstanceType<typeof Database>
 let metrics: MetricObservationsRepository
 
 const observation = (
-  overrides: Partial<MatchMetricObservationV3> = {},
-): MatchMetricObservationV3 => ({
+  overrides: Partial<MatchMetricObservation> = {},
+): MatchMetricObservation => ({
   gameId: 1,
   puuid: PUUID,
   participantId: 1,

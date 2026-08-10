@@ -1,9 +1,6 @@
 import type { ModeFamily, StatsFilter, TrackedMode } from "../types/stats"
-
-export type SkillScopeId =
-  | "riftAll" | "riftRanked" | "riftNormal"
-  | "rankedSolo" | "rankedFlex" | "draftBlind"
-  | "quickplay" | "swiftplay" | "aram" | "mayhem" | "leagueClassic"
+import type { SkillScopeId } from "../shared/skill-preferences"
+export type { SkillScopeId } from "../shared/skill-preferences"
 
 export interface SkillScope {
   id: SkillScopeId

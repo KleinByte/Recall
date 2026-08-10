@@ -13,20 +13,20 @@ import { ParticipantsRepository } from "../electron/main/database/participants-r
 import { ReviewRepository } from "../electron/main/database/review-repo.js"
 import type { ParticipantRow } from "../electron/main/matches/types.js"
 import {
-  GRADE_FAMILIES,
-  GRADE_V3_RECIPE_DEFINITION_ID,
-} from "../electron/main/matches/grade-v3-recipe.js"
-import type { PrimaryArchetype } from "../electron/main/matches/grade-v3-taxonomy.js"
+  MATCH_GRADE_ARM_KEYS,
+  MATCH_GRADE_RECIPE_DEFINITION_ID,
+} from "../electron/main/matches/match-grade-recipe.js"
+import type { PrimaryArchetype } from "../electron/main/matches/match-grade-taxonomy.js"
 import { RVI_VECTOR_KEYS } from "../electron/main/matches/rvi-contract.js"
 import {
-  rviRecipeDefinitionV3,
+  rviRecipeDefinition,
   rviRecipeIdForCalibration,
-} from "../electron/main/matches/rvi-v3-recipe.js"
+} from "../electron/main/matches/rvi-recipe.js"
 import { buildMatchRow } from "./fixtures/matches.js"
 
 const PUUID = "rvi-owner"
 const CALIBRATION_ID = "recall.grade.v3.calibration.test"
-const RECIPE_ID = `${GRADE_V3_RECIPE_DEFINITION_ID}@calibration:${CALIBRATION_ID}`
+const RECIPE_ID = `${MATCH_GRADE_RECIPE_DEFINITION_ID}@calibration:${CALIBRATION_ID}`
 const OTHER_RECIPE_ID = "recall.grade.v3.definition.other@calibration:test"
 const STALE_RECIPE_DEFINITION_ID = "recall.grade.v3.definition.2026-08-08.r1"
 const STALE_RECIPE_ID = `${STALE_RECIPE_DEFINITION_ID}@calibration:${CALIBRATION_ID}`
@@ -137,8 +137,8 @@ function selectRecipe() {
     recipeHash: "b".repeat(64),
     calibrationId: CALIBRATION_ID,
     definition: {
-      recipeDefinitionId: GRADE_V3_RECIPE_DEFINITION_ID,
-      familyKeys: GRADE_FAMILIES,
+      recipeDefinitionId: MATCH_GRADE_RECIPE_DEFINITION_ID,
+      familyKeys: MATCH_GRADE_ARM_KEYS,
     },
   })
   grades.registerRecipe({
@@ -148,7 +148,7 @@ function selectRecipe() {
     calibrationId: CALIBRATION_ID,
     definition: {
       recipeDefinitionId: "recall.grade.v3.definition.other",
-      familyKeys: GRADE_FAMILIES,
+      familyKeys: MATCH_GRADE_ARM_KEYS,
       other: true,
     },
   })
@@ -170,7 +170,7 @@ function selectStaleRecipe() {
     calibrationId: CALIBRATION_ID,
     definition: {
       recipeDefinitionId: STALE_RECIPE_DEFINITION_ID,
-      familyKeys: GRADE_FAMILIES,
+      familyKeys: MATCH_GRADE_ARM_KEYS,
     },
   })
   grades.selectRecipe(STALE_RECIPE_ID)
@@ -178,7 +178,7 @@ function selectStaleRecipe() {
 
 function selectRviRecipe() {
   const repository = new MetricObservationsRepository(db, () => 10_000)
-  const definition = rviRecipeDefinitionV3(RECIPE_ID, CALIBRATION_ID)
+  const definition = rviRecipeDefinition(RECIPE_ID, CALIBRATION_ID)
   repository.registerRecipe({
     recipeId: definition.recipeId,
     algorithmVersion: 3,
@@ -202,12 +202,12 @@ interface ReadyOptions {
 
 function writeReady(
   gameId: number,
-  ownerRoleFitScore: number,
+  ownerRecallScore: number,
   ownerComponents: Array<{ key: string; componentScore: number }>,
   options: ReadyOptions = {},
 ) {
   const recipeId = options.recipeId ?? RECIPE_ID
-  const recipeDefinitionId = options.recipeDefinitionId ?? GRADE_V3_RECIPE_DEFINITION_ID
+  const recipeDefinitionId = options.recipeDefinitionId ?? MATCH_GRADE_RECIPE_DEFINITION_ID
   const primaryArchetype = options.primaryArchetype ?? "assassin"
   const familySignals: Record<string, string[]> = {
     combat: ["damage_share", "kill_participation"],
@@ -238,12 +238,12 @@ function writeReady(
     })
   const results = new Map<number, CanonicalGradeResultInput>()
   for (let participantId = 1; participantId <= 10; participantId += 1) {
-    const roleFitScore = participantId === 1 ? ownerRoleFitScore : 50
+    const recallScore = participantId === 1 ? ownerRecallScore : 50
     results.set(participantId, {
       participantId,
       grade: participantId === 1 ? "A" : "B",
       gradeScore: participantId === 1 ? 0.5 : 0,
-      roleFitScore,
+      recallScore,
       lobbyPercentile: participantId / 10,
       evidenceCoverage: 1,
       referenceSampleCount: 50,
@@ -252,7 +252,7 @@ function writeReady(
         recipeDefinitionId,
         recipeId,
         primaryArchetype: participantId === 1 ? primaryArchetype : "specialist",
-        roleFitScore,
+        recallScore,
         components: participantId === 1
           ? storedComponents(ownerComponents)
           : storedComponents([{ key: "combat", componentScore: 0.5 }]),
@@ -300,7 +300,7 @@ describe("ReviewRepository.getGradeBreakdown", () => {
     expect(reviews.getGradeBreakdown(1, PUUID, 1)).toMatchObject({
       algorithmVersion: 3,
       recipeId: RECIPE_ID,
-      roleFitScore: 40,
+      recallScore: 40,
       compositePercentile: 0.4,
       components: [
         expect.objectContaining({ key: "combat", percentile: 0 }),
@@ -374,7 +374,7 @@ describe("ReviewRepository.getGradeBreakdown", () => {
     `).run(PUUID, JSON.stringify({
       algorithmVersion: 3,
       recipeId: "legacy:v3",
-      roleFitScore: 50,
+      recallScore: 50,
       components: [{
         key: "combat",
         label: "Fighting",
@@ -389,7 +389,7 @@ describe("ReviewRepository.getGradeBreakdown", () => {
   })
 })
 
-describe("compiled Grade v3 recipe identity", () => {
+describe("compiled match Grade recipe identity", () => {
   it("withholds a calibrated nonlegacy recipe from a prior code definition", () => {
     selectStaleRecipe()
     addLobby(1, 1_000, 84, "MIDDLE")
@@ -403,13 +403,13 @@ describe("compiled Grade v3 recipe identity", () => {
       },
     )
 
-    expect(insights.getRviV3Observations({ puuid: PUUID })).toBeUndefined()
+    expect(insights.getRviObservations({ puuid: PUUID })).toBeUndefined()
     expect(insights.getGradeComponentHistory({ puuid: PUUID })).toEqual([])
     expect(reviews.getGradeBreakdown(1, PUUID, 1)).toBeUndefined()
   })
 })
 
-describe("InsightsRepository.getRviV3Observations", () => {
+describe("InsightsRepository.getRviObservations", () => {
   it("uses the entire selected-recipe history unless a caller explicitly requests a window", () => {
     selectRecipe()
     for (let gameId = 1; gameId <= 241; gameId += 1) {
@@ -417,12 +417,12 @@ describe("InsightsRepository.getRviV3Observations", () => {
       writeReady(gameId, 50, [{ key: "combat", componentScore: 0.5 }])
     }
 
-    expect(insights.getRviV3Observations({ puuid: PUUID })!.observations).toHaveLength(241)
-    expect(insights.getRviV3Observations({ puuid: PUUID }, 12)!.observations)
+    expect(insights.getRviObservations({ puuid: PUUID })!.observations).toHaveLength(241)
+    expect(insights.getRviObservations({ puuid: PUUID }, 12)!.observations)
       .toHaveLength(12)
   })
 
-  it("returns selected-recipe role fit and 0-100 capability vectors chronologically", () => {
+  it("returns selected-recipe Recall Score and 0-100 capability vectors chronologically", () => {
     selectRecipe()
     addLobby(2, 2_000, 222, "BOTTOM")
     addLobby(1, 1_000, 84, "MIDDLE")
@@ -436,7 +436,7 @@ describe("InsightsRepository.getRviV3Observations", () => {
     ], { primaryArchetype: "marksman" })
     writeReady(1, 42, [{ key: "economy", componentScore: 0.45 }])
 
-    const result = insights.getRviV3Observations({ puuid: PUUID, modes: ["sr_normal"] })!
+    const result = insights.getRviObservations({ puuid: PUUID, modes: ["sr_normal"] })!
 
     expect(result).toMatchObject({
       algorithmVersion: 3,
@@ -448,7 +448,7 @@ describe("InsightsRepository.getRviV3Observations", () => {
     expect(result.observations[0]).toMatchObject({
       recipeId: RECIPE_ID,
       playedAt: 1_000,
-      roleFitScore: 42,
+      recallScore: 42,
       championId: 84,
       position: "MIDDLE",
       primaryArchetype: "assassin",
@@ -456,7 +456,7 @@ describe("InsightsRepository.getRviV3Observations", () => {
       familyResponsibilityWeights: { economy: 1, combat: null },
     })
     expect(result.observations[1]).toMatchObject({
-      roleFitScore: 84.5,
+      recallScore: 84.5,
       championId: 222,
       position: "BOTTOM",
       primaryArchetype: "marksman",
@@ -479,7 +479,7 @@ describe("InsightsRepository.getRviV3Observations", () => {
         initiative_pressure: null,
       },
     })
-    expect(insights.getRviV3Observations({ puuid: PUUID, roles: ["bottom"] })!
+    expect(insights.getRviObservations({ puuid: PUUID, roles: ["bottom"] })!
       .observations.map((row) => row.matchId)).toEqual([2])
 
     const gradeHistory = insights.getGradeComponentHistory({ puuid: PUUID })
@@ -562,7 +562,7 @@ describe("InsightsRepository.getRviV3Observations", () => {
       ],
     })
 
-    const result = insights.getRviV3Observations({ puuid: PUUID })!
+    const result = insights.getRviObservations({ puuid: PUUID })!
     expect(result.recipeId).toBe(recipeId)
     expect(result.observations[0].familyPercentiles.combat).toBe(25)
     expect(result.observations[0].familyResponsibilityWeights.combat).toBe(1)
@@ -615,7 +615,7 @@ describe("InsightsRepository.getRviV3Observations", () => {
       protection: { evidenceState: "unavailable" },
     })
 
-    const result = insights.getRviV3Observations({ puuid: PUUID })!
+    const result = insights.getRviObservations({ puuid: PUUID })!
     expect(result.familyKeys).toEqual(RVI_VECTOR_KEYS)
     expect(result.observations.map((row) => ({
       archetype: row.primaryArchetype,
@@ -678,7 +678,7 @@ describe("InsightsRepository.getRviV3Observations", () => {
       WHERE game_id = 2 AND puuid = ? AND participant_id = 1 AND algorithm_version = 3
     `).run(JSON.stringify(missingArchetype), PUUID)
 
-    expect(insights.getRviV3Observations({ puuid: PUUID })!.observations).toEqual([
+    expect(insights.getRviObservations({ puuid: PUUID })!.observations).toEqual([
       expect.objectContaining({
         matchId: 1,
         championId: 154,
@@ -702,7 +702,7 @@ describe("InsightsRepository.getRviV3Observations", () => {
     ).run(JSON.stringify({
       algorithmVersion: 3,
       recipeId: OTHER_RECIPE_ID,
-      roleFitScore: 72,
+      recallScore: 72,
       components: [{ key: "combat", componentScore: 0.72 }],
     }), PUUID)
 
@@ -740,8 +740,8 @@ describe("InsightsRepository.getRviV3Observations", () => {
       results: new Map(),
     })
 
-    expect(insights.getRviV3Observations({ puuid: PUUID })!.observations).toEqual([
-      expect.objectContaining({ matchId: 1, roleFitScore: 71 }),
+    expect(insights.getRviObservations({ puuid: PUUID })!.observations).toEqual([
+      expect.objectContaining({ matchId: 1, recallScore: 71 }),
     ])
     expect(insights.getGradeComponentHistory({ puuid: PUUID })).toEqual([
       expect.objectContaining({
@@ -753,13 +753,13 @@ describe("InsightsRepository.getRviV3Observations", () => {
   })
 
   it("returns no observation set without a current non-legacy calibrated recipe", () => {
-    expect(insights.getRviV3Observations({ puuid: PUUID })).toBeUndefined()
+    expect(insights.getRviObservations({ puuid: PUUID })).toBeUndefined()
 
     db.prepare(
       `INSERT INTO grade_recipe_selections (algorithm_version, recipe_id, selected_at)
        VALUES (3, 'legacy:v3', 1)`,
     ).run()
 
-    expect(insights.getRviV3Observations({ puuid: PUUID })).toBeUndefined()
+    expect(insights.getRviObservations({ puuid: PUUID })).toBeUndefined()
   })
 })

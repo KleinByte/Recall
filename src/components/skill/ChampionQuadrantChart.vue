@@ -15,7 +15,7 @@ const props = defineProps<{
 }>()
 
 const rows = computed(() => props.champions.filter((champion) =>
-  champion.gradedGames > 0 && champion.avgRoleFitScore !== undefined,
+  champion.gradedGames > 0 && champion.averageRecallScore !== undefined,
 ))
 const experienceCutoff = computed(() => {
   const games = rows.value.map((row) => row.games).sort((left, right) => left - right)
@@ -35,7 +35,7 @@ const option = computed<EChartsCoreOption>(() => ({
   tooltip: {
     formatter: (raw: unknown) => {
       const values = (raw as { value?: Array<number | string> }).value ?? []
-      return `<strong>${escapeTooltip(values[5])}</strong><br/>${escapeTooltip(values[6])}<br/>${values[0]} games · ${Number(values[1]).toFixed(1)} average RoleFit<br/>${Math.round(Number(values[3]) * 100)}% win rate · ${Number(values[4]).toFixed(2)} KDA`
+      return `<strong>${escapeTooltip(values[5])}</strong><br/>${escapeTooltip(values[6])}<br/>${values[0]} games · ${Number(values[1]).toFixed(1)} average Recall Score<br/>${Math.round(Number(values[3]) * 100)}% win rate · ${Number(values[4]).toFixed(2)} KDA`
     },
   },
   xAxis: {
@@ -48,7 +48,7 @@ const option = computed<EChartsCoreOption>(() => ({
   },
   yAxis: {
     type: "value",
-    name: "RoleFit",
+    name: "Recall Score",
     min: 0,
     max: 100,
     splitLine: { lineStyle: { color: CHART_STYLES.gridSoft } },
@@ -57,12 +57,12 @@ const option = computed<EChartsCoreOption>(() => ({
     type: "scatter",
     data: rows.value.map((champion) => [
       champion.games,
-      champion.avgRoleFitScore!,
+      champion.averageRecallScore!,
       champion.championId,
       champion.winRate,
       champion.kda,
       championNameById(props.catalog, champion.championId),
-      quadrant(champion.games, champion.avgRoleFitScore!),
+      quadrant(champion.games, champion.averageRecallScore!),
     ]),
     symbolSize: (value: unknown) => Math.min(38, 10 + Math.sqrt(Number((value as unknown[])[0]) || 1) * 3),
     itemStyle: { color: CHART_COLOURS.live, opacity: .66, borderColor: CHART_COLOURS.text, borderWidth: 1 },
@@ -80,7 +80,7 @@ const option = computed<EChartsCoreOption>(() => ({
 <template>
   <BaseEChart
     :option="option"
-    ariaLabel="Champion efficiency quadrant. Experience is on the horizontal axis and average RoleFit on a zero-to-one-hundred scale is on the vertical axis."
+    ariaLabel="Champion efficiency quadrant. Experience is on the horizontal axis and average Recall Score on a zero-to-one-hundred scale is on the vertical axis."
     height="330px"
   />
 </template>

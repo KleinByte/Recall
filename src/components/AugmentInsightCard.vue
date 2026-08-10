@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue"
-import { recallGradeFromRoleFitScore } from "../shared/recall-grade"
+import { recallGradeFromRecallScore } from "../shared/recall-grade"
 import { normalizeAugmentRarity } from "../helpers/game-assets"
 import type { OwnerAugmentSummary } from "../types/review"
 
@@ -15,7 +15,7 @@ const props = defineProps<{
   compact?: boolean
 }>()
 
-const tier = computed(() => recallGradeFromRoleFitScore(props.summary?.averageRoleFit) ?? "—")
+const tier = computed(() => recallGradeFromRecallScore(props.summary?.averageRecallScore) ?? "—")
 const rarity = computed(() => normalizeAugmentRarity(props.rarity))
 const rarityClass = computed(() => rarity.value?.toLowerCase() ?? "unknown")
 const cleanDescription = computed(() => (props.description ?? "")

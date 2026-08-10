@@ -67,7 +67,7 @@ const option = computed<EChartsCoreOption>(() => ({
 <template>
   <BaseEChart
     :option="option"
-    ariaLabel="RVI recent form by vector compared with the recorded profile."
+    ariaLabel="RVI recent form by arm compared with the recorded profile."
     :height="`${Math.max(250, rows.length * 38 + 60)}px`"
   />
 </template>

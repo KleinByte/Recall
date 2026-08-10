@@ -3,10 +3,11 @@ import type { MatchRow, TrackedMode } from "../matches/types.js"
 import type { GradeBreakdown } from "../review/types.js"
 import { confidenceForGames } from "../review/types.js"
 import {
-  GRADE_FAMILIES,
-  GRADE_V3_ALGORITHM_VERSION,
-  GRADE_V3_RECIPE_DEFINITION_ID,
-} from "../matches/grade-v3-recipe.js"
+  MATCH_GRADE_ARM_KEYS,
+  MATCH_GRADE_ARM_LABELS,
+  MATCH_GRADE_ALGORITHM_VERSION,
+  MATCH_GRADE_RECIPE_DEFINITION_ID,
+} from "../matches/match-grade-recipe.js"
 
 export type ExperimentStatus = "active" | "paused" | "completed"
 export type ExperimentOutcome = "worked" | "mixed" | "did_not_work" | "unrated"
@@ -95,10 +96,10 @@ function parseModes(value: string): TrackedMode[] {
 const finiteInRange = (value: unknown, minimum: number, maximum: number): value is number =>
   typeof value === "number" && Number.isFinite(value) && value >= minimum && value <= maximum
 
-function parseSelectedGradeV3Breakdown(
+function parseSelectedGradeBreakdown(
   value: string,
   recipeId: string,
-  roleFitScore: number,
+  recallScore: number,
 ): GradeBreakdown["components"] | undefined {
   let parsed: unknown
   try {
@@ -108,16 +109,17 @@ function parseSelectedGradeV3Breakdown(
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined
   const breakdown = parsed as Record<string, unknown>
-  if (breakdown.algorithmVersion !== GRADE_V3_ALGORITHM_VERSION ||
-      breakdown.recipeDefinitionId !== GRADE_V3_RECIPE_DEFINITION_ID ||
+  const storedRecallScore = breakdown.recallScore ?? breakdown.roleFitScore
+  if (breakdown.algorithmVersion !== MATCH_GRADE_ALGORITHM_VERSION ||
+      breakdown.recipeDefinitionId !== MATCH_GRADE_RECIPE_DEFINITION_ID ||
       breakdown.recipeId !== recipeId ||
-      !finiteInRange(breakdown.roleFitScore, 0, 100) ||
-      Math.abs(breakdown.roleFitScore - roleFitScore) > 1e-9 ||
+      !finiteInRange(storedRecallScore, 0, 100) ||
+      Math.abs(storedRecallScore - recallScore) > 1e-9 ||
       !Array.isArray(breakdown.components) || breakdown.components.length === 0) {
     return undefined
   }
 
-  const knownFamilies = new Set<string>(GRADE_FAMILIES)
+  const knownFamilies = new Set<string>(MATCH_GRADE_ARM_KEYS)
   const seen = new Set<string>()
   const components: GradeBreakdown["components"] = []
   for (const raw of breakdown.components) {
@@ -134,7 +136,9 @@ function parseSelectedGradeV3Breakdown(
     seen.add(component.key)
     components.push({
       key: component.key as GradeBreakdown["components"][number]["key"],
-      label: component.label,
+      label: MATCH_GRADE_ARM_LABELS[
+        component.key as GradeBreakdown["components"][number]["key"]
+      ],
       percentile: component.componentScore,
       weight: component.weight,
       contribution: component.contribution,
@@ -155,7 +159,7 @@ export class ReviewRepository {
     const row = this.db.prepare(
       `SELECT b.algorithm_version AS algorithmVersion,
               b.recipe_id AS recipeId,
-              r.role_fit_score AS roleFitScore,
+              r.role_fit_score AS recallScore,
               b.composite_percentile AS lobbyPercentile,
               b.components_json AS componentsJson
        FROM match_grade_breakdown_versions b
@@ -197,28 +201,28 @@ export class ReviewRepository {
       gameId,
       puuid,
       participantId,
-      GRADE_V3_ALGORITHM_VERSION,
-      GRADE_V3_RECIPE_DEFINITION_ID,
-      GRADE_V3_RECIPE_DEFINITION_ID,
+      MATCH_GRADE_ALGORITHM_VERSION,
+      MATCH_GRADE_RECIPE_DEFINITION_ID,
+      MATCH_GRADE_RECIPE_DEFINITION_ID,
     ) as
-      | { algorithmVersion: number; recipeId: string; roleFitScore: number;
+      | { algorithmVersion: number; recipeId: string; recallScore: number;
           lobbyPercentile: number; componentsJson: string }
       | undefined
     if (!row) return undefined
-    if (!finiteInRange(row.roleFitScore, 0, 100) ||
+    if (!finiteInRange(row.recallScore, 0, 100) ||
         !finiteInRange(row.lobbyPercentile, 0, 1)) return undefined
-    const components = parseSelectedGradeV3Breakdown(
+    const components = parseSelectedGradeBreakdown(
       row.componentsJson,
       row.recipeId,
-      row.roleFitScore,
+      row.recallScore,
     )
     if (!components) return undefined
     return {
       algorithmVersion: row.algorithmVersion,
       recipeId: row.recipeId,
-      roleFitScore: row.roleFitScore,
+      recallScore: row.recallScore,
       lobbyPercentile: row.lobbyPercentile,
-      compositePercentile: row.roleFitScore / 100,
+      compositePercentile: row.recallScore / 100,
       components,
     }
   }

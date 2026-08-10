@@ -17,8 +17,8 @@ import type { ParticipantRow } from "../electron/main/matches/types.js"
 import { buildMatchRow } from "./fixtures/matches.js"
 
 const PUUID = "grade-owner"
-const RECIPE_A = "recall-v3:test-a"
-const RECIPE_B = "recall-v3:test-b"
+const RECIPE_A = "recall-current:test-a"
+const RECIPE_B = "recall-current:test-b"
 const INPUT_HASH = "1".repeat(64)
 
 let db: InstanceType<typeof Database>
@@ -118,7 +118,7 @@ const resultMap = (): Map<number, CanonicalGradeResultInput> => new Map(
       participantId,
       grade: participantId === 1 ? "A" as const : "B" as const,
       gradeScore: participantId === 1 ? 0.5 : 0,
-      roleFitScore: 70 + participantId,
+      recallScore: 70 + participantId,
       lobbyPercentile: participantId / 10,
       evidenceCoverage: 0.8,
       referenceSampleCount: 240,
@@ -319,7 +319,15 @@ describe("GradePersistenceRepository canonical writer", () => {
   })
 
   it("atomically writes one ready attempt, ten results, and cache-identical values", () => {
-    grades.writeCanonicalGrade(1, PUUID, readyWrite())
+    const input = readyWrite()
+    const ownerResult = input.results.get(1)!
+    ownerResult.breakdown = {
+      algorithmVersion: 3,
+      recallScore: ownerResult.recallScore,
+      recallScoreCalibrationSource: "frozen_composite_ecdf",
+      components: [],
+    }
+    grades.writeCanonicalGrade(1, PUUID, input)
 
     expect(db.prepare("SELECT COUNT(*) AS count FROM match_grade_attempts")
       .get()).toEqual({ count: 1 })
@@ -332,7 +340,7 @@ describe("GradePersistenceRepository canonical writer", () => {
       recipeId: RECIPE_A,
       inputFingerprint: INPUT_HASH,
       status: "ready",
-      roleFitScore: 71,
+      recallScore: 71,
       evidenceCoverage: 0.8,
       referenceSampleCount: 240,
     })
@@ -340,7 +348,7 @@ describe("GradePersistenceRepository canonical writer", () => {
       SELECT p.participant_id AS participantId,
              p.grade = r.grade AS sameGrade,
              p.grade_score = r.grade_score AS sameGradeScore,
-             p.role_fit_score = r.role_fit_score AS sameRoleFit,
+             p.role_fit_score = r.role_fit_score AS sameRecallScore,
              p.grade_recipe_id = r.recipe_id AS sameRecipe,
              p.grade_evidence_coverage = r.evidence_coverage AS sameCoverage,
              p.grade_reference_sample_count = r.reference_sample_count AS sameReference
@@ -356,18 +364,29 @@ describe("GradePersistenceRepository canonical writer", () => {
       .every(([, value]) => value === 1))).toBe(true)
     const ownerCache = db.prepare(`
       SELECT m.grade, m.grade_score AS gradeScore,
-             m.role_fit_score AS roleFitScore, m.grade_recipe_id AS recipeId,
+             m.role_fit_score AS recallScore, m.grade_recipe_id AS recipeId,
              r.grade AS resultGrade, r.grade_score AS resultGradeScore,
-             r.role_fit_score AS resultRoleFit
+             r.role_fit_score AS resultRecallScore
       FROM matches m
       JOIN match_grade_results r
         ON r.game_id = m.game_id AND r.puuid = m.puuid AND r.participant_id = 1
       WHERE m.game_id = 1 AND m.puuid = ? AND r.recipe_id = ?
     `).get(PUUID, RECIPE_A)
     expect(ownerCache).toEqual({
-      grade: "A", gradeScore: 0.5, roleFitScore: 71, recipeId: RECIPE_A,
-      resultGrade: "A", resultGradeScore: 0.5, resultRoleFit: 71,
+      grade: "A", gradeScore: 0.5, recallScore: 71, recipeId: RECIPE_A,
+      resultGrade: "A", resultGradeScore: 0.5, resultRecallScore: 71,
     })
+    const storedBreakdown = JSON.parse((db.prepare(`
+      SELECT components_json AS componentsJson
+      FROM match_grade_breakdown_versions
+      WHERE game_id = 1 AND puuid = ? AND participant_id = 1
+    `).get(PUUID) as { componentsJson: string }).componentsJson) as Record<string, unknown>
+    expect(storedBreakdown).toMatchObject({
+      roleFitScore: 71,
+      roleFitCalibrationSource: "frozen_composite_ecdf",
+    })
+    expect(storedBreakdown).not.toHaveProperty("recallScore")
+    expect(storedBreakdown).not.toHaveProperty("recallScoreCalibrationSource")
   })
 
   it("rejects a ready write unless it has exactly the ten stored participants", () => {
@@ -400,7 +419,7 @@ describe("GradePersistenceRepository canonical writer", () => {
       .get()).toEqual({ count: 0 })
     expect(grades.getCurrentAttempt(1, PUUID, 3)).toMatchObject({
       status: "short_game",
-      roleFitScore: null,
+      recallScore: null,
       statusReason: "duration_under_300_seconds",
     })
     expect(db.prepare(`
@@ -408,13 +427,13 @@ describe("GradePersistenceRepository canonical writer", () => {
       WHERE grade IS NOT NULL OR grade_score IS NOT NULL OR role_fit_score IS NOT NULL
     `).get()).toEqual({ count: 0 })
     expect(db.prepare(`
-      SELECT grade, grade_score AS gradeScore, role_fit_score AS roleFitScore,
+      SELECT grade, grade_score AS gradeScore, role_fit_score AS recallScore,
              grade_status AS status, grade_recipe_id AS recipeId
       FROM matches WHERE game_id = 1 AND puuid = ?
     `).get(PUUID)).toEqual({
       grade: null,
       gradeScore: null,
-      roleFitScore: null,
+      recallScore: null,
       status: "short_game",
       recipeId: RECIPE_A,
     })

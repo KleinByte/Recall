@@ -16,17 +16,17 @@ export function recallGradeFromScore(score?: number | null): RecallGrade | undef
   return RECALL_GRADE_THRESHOLDS.find(([, minimum]) => score >= minimum)?.[0] ?? "D"
 }
 
-/** Recall v3 letter bands in the authoritative 0-100 RoleFit score space. */
-export const RECALL_ROLE_FIT_THRESHOLDS: ReadonlyArray<readonly [RecallGrade, number]> = [
+/** Recall letter bands in the authoritative 0-100 Recall Score space. */
+export const RECALL_SCORE_THRESHOLDS: ReadonlyArray<readonly [RecallGrade, number]> = [
   ["S+", 93.94], ["S", 88.49], ["S-", 81.59], ["A+", 74.22], ["A", 65.54],
   ["A-", 55.96], ["B+", 46.02], ["B", 36.32], ["B-", 27.43],
   ["C+", 18.41], ["C", 12.51], ["C-", 7.35],
 ]
 
-/** Derives an aggregate display letter from an average Recall v3 RoleFit score. */
-export function recallGradeFromRoleFitScore(score?: number | null): RecallGrade | undefined {
+/** Derives an aggregate display letter from an average Recall score. */
+export function recallGradeFromRecallScore(score?: number | null): RecallGrade | undefined {
   if (score === undefined || score === null || !Number.isFinite(score)) return undefined
-  return RECALL_ROLE_FIT_THRESHOLDS.find(([, minimum]) => score >= minimum)?.[0] ?? "D"
+  return RECALL_SCORE_THRESHOLDS.find(([, minimum]) => score >= minimum)?.[0] ?? "D"
 }
 
 export function recallGradeBand(grade?: string): "S" | "A" | "B" | "C" | "D" | undefined {

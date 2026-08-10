@@ -1240,7 +1240,7 @@ export const migrations: Migration[] = [
     `,
   },
   {
-    // Recall v3 grades are identified by an immutable recipe, not only by the
+    // Recall grades are identified by an immutable recipe, not only by the
     // product-facing algorithm version. The derived tables deliberately keep
     // their existing algorithm-version primary keys: one recipe can occupy an
     // algorithm version at a time, and a recipe change must purge those

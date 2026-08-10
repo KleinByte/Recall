@@ -7,7 +7,7 @@ import type {
   FinalItemObservation,
   GradeComponentObservation,
   RviTimelineObservation,
-  RviV3ObservationSet,
+  RviObservationSet,
   ChampionPool,
   BuiltItem,
   BucketRow,
@@ -35,7 +35,7 @@ import {
 import type { TrackedMode, ModeFamily } from "./types.js"
 import { buildPredictiveSection, type PredictiveSection, type PredictiveSignal } from "./predictive-insights.js"
 export { buildPredictiveSection, type PredictiveSection, type PredictiveSignal }
-export { conditionFindingV3, benjaminiHochberg } from "./statistical-contract-v3.js"
+export { conditionFinding, benjaminiHochberg } from "./statistical-contract.js"
 
 export const SKILL_REPORT_VERSION = 3
 
@@ -1160,8 +1160,8 @@ export interface SkillReportInput {
   championStats: ChampionStatRow[]
   itemObservations: FinalItemObservation[]
   gradeComponentHistory: GradeComponentObservation[]
-  /** Exact selected-recipe Grade v3 observations; the only source for RVI. */
-  rvi?: RviV3ObservationSet
+  /** Exact selected-recipe match Grade observations; the only source for RVI. */
+  rvi?: RviObservationSet
   /** Timeline data remains a separate map diagnostic and never enters RVI. */
   performanceTimelineHistory?: RviTimelineObservation[]
 }
@@ -1245,7 +1245,7 @@ function buildStyleDrift(
   return windows
 }
 
-export interface SkillReportV3 {
+export interface SkillReport {
   version: 3
   generatedAt: number
   scope: { modes: TrackedMode[]; family: ModeFamily }
@@ -1271,8 +1271,8 @@ export interface SkillReportV3 {
       grade?: string
       /** Legacy/internal compatibility normal score. */
       gradeScore?: number
-      /** Authoritative Recall v3 score on a fixed 0-100 scale. */
-      roleFitScore?: number
+      /** Authoritative Recall score on a fixed 0-100 scale. */
+      recallScore?: number
       durationSecs: number
     }>
     gradeComponents: GradeComponentObservation[]
@@ -1284,8 +1284,8 @@ export interface SkillReportV3 {
       kda: number
       /** Legacy/internal compatibility normal score. */
       avgGradeScore?: number
-      /** Average authoritative Recall v3 RoleFit score (0-100). */
-      avgRoleFitScore?: number
+      /** Average authoritative Recall score (0-100). */
+      averageRecallScore?: number
       gradedGames: number
     }>
   }
@@ -1300,10 +1300,7 @@ export interface SkillReportV3 {
   }
 }
 
-/** @deprecated Use SkillReportV3; retained as a source-compatible type alias. */
-export type SkillReportV2 = SkillReportV3
-
-export function buildSkillReport(input: SkillReportInput): SkillReportV3 {
+export function buildSkillReport(input: SkillReportInput): SkillReport {
   const {
     modes, family, generatedAt, summary, style, grades, lobby, contribution,
     pool, builds, observations, championStats, itemObservations, gradeComponentHistory,
@@ -1369,7 +1366,7 @@ export function buildSkillReport(input: SkillReportInput): SkillReportV3 {
         win: observation.win,
         grade: observation.grade,
         gradeScore: observation.gradeScore,
-        roleFitScore: observation.roleFitScore,
+        recallScore: observation.recallScore,
         durationSecs: observation.durationSecs,
       })),
       gradeComponents: gradeComponentHistory,
@@ -1380,7 +1377,7 @@ export function buildSkillReport(input: SkillReportInput): SkillReportV3 {
         winRate: champion.winRate,
         kda: champion.kda,
         avgGradeScore: champion.avgGradeScore,
-        avgRoleFitScore: champion.avgRoleFitScore,
+        averageRecallScore: champion.averageRecallScore,
         gradedGames: champion.gradedGames,
       })),
     },

@@ -3,7 +3,7 @@ import type { ChampSelectRepository } from "./database/champ-select-repo.js"
 import type { ParticipantsRepository } from "./database/participants-repo.js"
 import type { LiveGameCaptureRepository } from "./database/live-game-capture-repo.js"
 import type { LcuClient } from "./lcu-client.js"
-import type { RecallV3Service } from "./matches/recall-v3-service.js"
+import type { MatchGradingService } from "./matches/match-grading-service.js"
 import {
   evaluateMatchLabels,
   prioritizePerformanceLabels,
@@ -71,7 +71,7 @@ export class MatchSync {
     private readonly champSelect?: ChampSelectRepository,
     private readonly liveCaptures?: LiveGameCaptureRepository,
     private readonly sourceRepository?: MatchSourceRepository,
-    private readonly recallV3?: RecallV3Service,
+    private readonly recall?: MatchGradingService,
   ) {}
 
   async syncNow(): Promise<SyncResult> {
@@ -219,8 +219,8 @@ export class MatchSync {
         detail.gameDuration,
       )
     }
-    if (detail.gameId && this.recallV3) {
-      const status = this.recallV3.gradeStoredMatch(detail.gameId, this.puuid)
+    if (detail.gameId && this.recall) {
+      const status = this.recall.gradeStoredMatch(detail.gameId, this.puuid)
       if (status === "ready") this.gradedThisSync += 1
     }
     if (detail.gameId) {

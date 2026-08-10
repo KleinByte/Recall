@@ -6,7 +6,7 @@ import type {
 
 export interface CalendarDay {
   date: string
-  roleFitScore: number | null
+  recallScore: number | null
   games: number
   wins: number
 }
@@ -23,12 +23,12 @@ export function calendarDays(history: readonly SkillHistoryPoint[]): CalendarDay
     const day = grouped.get(key) ?? { games: 0, wins: 0, scores: [] }
     day.games += 1
     day.wins += Number(game.win)
-    if (Number.isFinite(game.roleFitScore)) day.scores.push(game.roleFitScore as number)
+    if (Number.isFinite(game.recallScore)) day.scores.push(game.recallScore as number)
     grouped.set(key, day)
   }
   return [...grouped].map(([date, day]) => ({
     date,
-    roleFitScore: day.scores.length
+    recallScore: day.scores.length
       ? day.scores.reduce((sum, score) => sum + score, 0) / day.scores.length
       : null,
     games: day.games,
@@ -38,12 +38,12 @@ export function calendarDays(history: readonly SkillHistoryPoint[]): CalendarDay
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const
 
-export function weekdayRoleFitGroups(history: readonly SkillHistoryPoint[]) {
+export function weekdayRecallScoreGroups(history: readonly SkillHistoryPoint[]) {
   return WEEKDAYS.flatMap((label, index) => {
     const values = history
       .filter((game) => ((new Date(game.playedAt).getDay() + 6) % 7) === index &&
-        Number.isFinite(game.roleFitScore))
-      .map((game) => game.roleFitScore as number)
+        Number.isFinite(game.recallScore))
+      .map((game) => game.recallScore as number)
     return values.length ? [{ label, values }] : []
   })
 }

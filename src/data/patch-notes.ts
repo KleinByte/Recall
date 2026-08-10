@@ -21,6 +21,15 @@ function note(
 /** Shipped releases, newest first. */
 export const patchNotes: readonly PatchNoteRelease[] = [
   note(
+    "3.0.2",
+    "2026-08-10",
+    "Clearer performance reports",
+    "Grades and RVI are easier to understand throughout Recall.",
+    "Unified Grade and RVI names without changing saved results.",
+    "Simplified Skill and review explanations.",
+    "Skill filters now remember your last selection.",
+  ),
+  note(
     "3.0.1",
     "2026-08-10",
     "RVI scoring fixes",
@@ -32,7 +41,7 @@ export const patchNotes: readonly PatchNoteRelease[] = [
   note(
     "3.0.0",
     "2026-08-09",
-    "Recall v3",
+    "Recall",
     "Grade and RVI now share one evidence-aware performance system.",
     "Position sets opportunity, champion archetype sets responsibility.",
     "A frozen local reference keeps grades reproducible and private to your installation.",

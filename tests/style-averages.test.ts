@@ -194,10 +194,10 @@ describe("getChampionStats", () => {
     const caitlyn = stats.find((row) => row.championId === 22)!
 
     expect(akali.avgGradeScore).toBeCloseTo(0.6)
-    expect(akali.avgRoleFitScore).toBeCloseTo(70)
+    expect(akali.averageRecallScore).toBeCloseTo(70)
     expect(akali.gradedGames).toBe(2)
     expect(caitlyn.avgGradeScore).toBeUndefined()
-    expect(caitlyn.avgRoleFitScore).toBeUndefined()
+    expect(caitlyn.averageRecallScore).toBeUndefined()
     expect(caitlyn.gradedGames).toBe(0)
   })
 })

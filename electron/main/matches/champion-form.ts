@@ -23,7 +23,7 @@ export interface ChampionFormGame {
   assists: number
 }
 
-export interface ChampionFormRowV2 {
+export interface ChampionFormRowLegacy {
   version: 2
   championId: number
   gradedGames: number
@@ -40,15 +40,15 @@ export interface ChampionFormRowV2 {
   kda: number
 }
 
-export interface ChampionFormV2 {
+export interface ChampionFormLegacy {
   version: 2
   activeFamily: ChampionFormFamily | null
   reason?: "no_supported_grade_history"
   window: { lowerMs: number; asOfMs: number; timeZone: string }
   baselineMean: number | null
   baselineSampleSd: number
-  main: ChampionFormRowV2[]
-  earlySignals: ChampionFormRowV2[]
+  main: ChampionFormRowLegacy[]
+  earlySignals: ChampionFormRowLegacy[]
   gameWeightedMean: number | null
 }
 
@@ -66,21 +66,21 @@ const sampleSd = (values: readonly number[]) => {
   return Number.isFinite(value) ? value : 1
 }
 
-const confidence = (games: number): ChampionFormRowV2["confidence"] =>
+const confidence = (games: number): ChampionFormRowLegacy["confidence"] =>
   games >= 12 ? "solid" : games >= 5 ? "fair" : "thin"
 
-const compareRows = (left: ChampionFormRowV2, right: ChampionFormRowV2) =>
+const compareRows = (left: ChampionFormRowLegacy, right: ChampionFormRowLegacy) =>
   right.rankScore - left.rankScore || right.gradedGames - left.gradedGames ||
   right.lastEligiblePlayedAt - left.lastEligiblePlayedAt || left.championId - right.championId
 
-export function buildChampionFormV2(
+export function buildChampionFormLegacy(
   games: readonly ChampionFormGame[],
   options: {
     asOfMs: number
     timeZone: string
     family?: ChampionFormFamily
   },
-): ChampionFormV2 {
+): ChampionFormLegacy {
   const lowerMs = subtractCalendarDays(options.asOfMs, FORM_WINDOW_DAYS, options.timeZone)
   const supported = games.filter((game): game is ChampionFormGame & { family: ChampionFormFamily } =>
     game.gradeEligible && game.family !== "other")
@@ -112,7 +112,7 @@ export function buildChampionFormV2(
     byChampion.set(game.championId, rows)
   })
 
-  const rows: ChampionFormRowV2[] = []
+  const rows: ChampionFormRowLegacy[] = []
   for (const [championId, eligible] of byChampion) {
     const graded = eligible.filter((game) => game.gradeEligible && finiteGrade(game))
     if (graded.length === 0) continue

@@ -10,7 +10,7 @@ import {
   type RiotBackfillState,
 } from "../database/riot-backfill-repo.js"
 import { evaluateMatchLabels } from "../matches/labels.js"
-import type { RecallV3Service } from "../matches/recall-v3-service.js"
+import type { MatchGradingService } from "../matches/match-grading-service.js"
 import type { QueueIndex } from "../matches/queues.js"
 import { RiotApiClient, RiotApiError } from "./api-client.js"
 import {
@@ -42,7 +42,7 @@ interface BackfillOptions {
   matchPuuid?: string
   onProgress?: (state: RiotBackfillState) => void
   champSelect?: ChampSelectRepository
-  recallV3?: RecallV3Service
+  recall?: MatchGradingService
   sourceRepository?: MatchSourceRepository
 }
 
@@ -88,7 +88,7 @@ export class RiotHistoryBackfill {
   private readonly matchPuuid: string
   private readonly onProgress: (state: RiotBackfillState) => void
   private readonly champSelect?: ChampSelectRepository
-  private readonly recallV3?: RecallV3Service
+  private readonly recall?: MatchGradingService
   private readonly sourceRepository?: MatchSourceRepository
 
   constructor(
@@ -107,7 +107,7 @@ export class RiotHistoryBackfill {
     this.matchPuuid = options.matchPuuid ?? puuid
     this.onProgress = options.onProgress ?? (() => undefined)
     this.champSelect = options.champSelect
-    this.recallV3 = options.recallV3
+    this.recall = options.recall
     this.sourceRepository = options.sourceRepository
   }
 
@@ -311,7 +311,7 @@ export class RiotHistoryBackfill {
             }) : [],
           )
 
-          this.recallV3?.gradeStoredMatch(mapped.match.gameId, this.puuid)
+          this.recall?.gradeStoredMatch(mapped.match.gameId, this.puuid)
           if (raw) this.sourceRepository?.setMappingResult(raw, "mapped", Date.now(), {
             gameId: mapped.match.gameId,
           })
@@ -479,7 +479,7 @@ export class RiotHistoryBackfill {
       capturedAt: fetchedAt,
     })
     sources.setMappingResult(raw, "mapped", fetchedAt, { gameId })
-    this.recallV3?.gradeStoredMatch(gameId, this.puuid)
+    this.recall?.gradeStoredMatch(gameId, this.puuid)
     return timeline
   }
 

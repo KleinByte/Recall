@@ -53,7 +53,7 @@ export class ClearHistoryService {
       // Invalidate only v3-derived state globally; unrelated accounts keep
       // their raw/normalized matches, participants, source payloads, and
       // timelines and can deterministically rebuild against a fresh snapshot.
-      deleted += this.resetGlobalRecallV3DerivedState(present)
+      deleted += this.resetGlobalRecallDerivedState(present)
       const remaining = ACCOUNT_SCOPED_DELETE_ORDER.reduce((sum, table) => {
         if (!present.has(table)) return sum
         const columns = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
@@ -74,7 +74,7 @@ export class ClearHistoryService {
     }
   }
 
-  private resetGlobalRecallV3DerivedState(present: ReadonlySet<string>): number {
+  private resetGlobalRecallDerivedState(present: ReadonlySet<string>): number {
     if (!present.has("grade_recipe_selections")) return 0
     let deleted = 0
     for (const table of [

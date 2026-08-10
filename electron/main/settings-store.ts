@@ -1,7 +1,7 @@
 import {
-  validateDataIntegrityFlagOverrides,
-  type DataIntegrityFlagOverridesV1,
-} from "./feature-flags.js"
+  validateSkillViewPreferences,
+  type SkillViewPreferences,
+} from "../../src/shared/skill-preferences.js"
 
 export interface UiSettings {
   isColoredWhenDone: boolean
@@ -25,12 +25,12 @@ export interface SettingsValues {
   "launch-at-login": boolean
   "last-puuid": string
   "riot-api-key-encrypted": string
-  "data-integrity-flag-overrides-v1": DataIntegrityFlagOverridesV1
   "champion-catalog": unknown[]
   "ddragon-version": string
   "aram-stats": Record<string, unknown>
   "last-daily-backup": string
   "collection-mode": "enabled" | "disabled_after_clear"
+  "skill-view-preferences": SkillViewPreferences
 }
 
 export type SettingsKey = keyof SettingsValues
@@ -108,6 +108,10 @@ export const SETTINGS_REGISTRY: { [K in SettingsKey]: RegistryEntry<SettingsValu
       "best_overall", "recent_form", "challenges", "practice", "most_reliable",
     ].includes(value) ? value as RecommendationObjective : undefined,
   },
+  "skill-view-preferences": {
+    class: "user_preference", rendererRead: true, rendererWrite: true, fullBackup: true,
+    validate: validateSkillViewPreferences,
+  },
   "pinned-challenges": {
     class: "user_preference", rendererRead: false, rendererWrite: false, fullBackup: true,
     validate: (value) => {
@@ -135,10 +139,6 @@ export const SETTINGS_REGISTRY: { [K in SettingsKey]: RegistryEntry<SettingsValu
   "riot-api-key-encrypted": {
     class: "secret", rendererRead: false, rendererWrite: false, fullBackup: false,
     validate: (value) => typeof value === "string" && value.length > 0 ? value : undefined,
-  },
-  "data-integrity-flag-overrides-v1": {
-    class: "internal_rollback", rendererRead: false, rendererWrite: false, fullBackup: true,
-    validate: validateDataIntegrityFlagOverrides,
   },
   "champion-catalog": {
     class: "rebuildable_cache", rendererRead: false, rendererWrite: false, fullBackup: false,
@@ -219,7 +219,7 @@ export class SettingsStore {
         pinnedChallenges: snapshot("pinned-challenges"),
         displayTimezone: snapshot("display-timezone"),
         lastSeenPatchNotesVersion: snapshot("last-seen-patch-notes-version"),
-        dataIntegrityFlagOverridesV1: snapshot("data-integrity-flag-overrides-v1"),
+        skillViewPreferences: snapshot("skill-view-preferences"),
       },
     }
   }
@@ -236,7 +236,7 @@ export interface RecallSettingsSnapshotV1 {
     pinnedChallenges: SettingSnapshot<number[]>
     displayTimezone: SettingSnapshot<string>
     lastSeenPatchNotesVersion: SettingSnapshot<string>
-    dataIntegrityFlagOverridesV1: SettingSnapshot<DataIntegrityFlagOverridesV1>
+    skillViewPreferences: SettingSnapshot<SkillViewPreferences>
   }
 }
 

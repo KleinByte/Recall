@@ -129,9 +129,9 @@ describe("team totals", () => {
 })
 
 describe("lobbyStandings", () => {
-  const graded = (participantId: number, roleFitScore: number) => ({
+  const graded = (participantId: number, recallScore: number) => ({
     ...participant(participantId, participantId <= 5 ? 100 : 200),
-    roleFitScore,
+    recallScore,
   })
 
   it("places the best graded player first and the worst last", () => {

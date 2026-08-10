@@ -66,7 +66,7 @@ describe("consolidated match review UI", () => {
     expect(summary).toContain('primary-label="This match"')
     expect(summary).toContain('secondary-label="Your recorded average"')
     expect(summary).toContain("Recall Grade")
-    expect(summary).toContain("Frozen reference")
+    expect(summary).toContain("Similar recorded games")
     expect(summary).toContain("Recorded Grade average")
     expect(summary).toContain("Lobby")
     expect(summary).toContain("Compared as")

@@ -13,7 +13,7 @@ import {
   formatDuration,
   formatPercent,
 } from "../helpers/format"
-import { recallGradeFromRoleFitScore } from "../shared/recall-grade"
+import { recallGradeFromRecallScore } from "../shared/recall-grade"
 import {
   itemIconUrl,
   loadGameAssets,
@@ -466,7 +466,7 @@ function eventLabel(name: string) {
             <div v-if="stat(id)" class="record-cell">
               <strong>{{ stat(id)!.wins }}–{{ stat(id)!.losses }}</strong>
               <span>{{ formatPercent(stat(id)!.adjustedWinRate) }} smoothed</span>
-              <span>{{ formatDecimal(stat(id)!.kda, 2) }} KDA · {{ stat(id)!.averageRoleFit?.toFixed(1) ?? "—" }} avg RoleFit</span>
+              <span>{{ formatDecimal(stat(id)!.kda, 2) }} KDA · {{ stat(id)!.averageRecallScore?.toFixed(1) ?? "—" }} average Recall Score</span>
             </div>
             <div v-else class="record-cell muted">No games in this mode</div>
             <div class="confidence-cell">
@@ -516,7 +516,7 @@ function eventLabel(name: string) {
             <div v-if="stat(localChampionId)" class="selected-stats">
               <div><strong>{{ stat(localChampionId)!.wins }}–{{ stat(localChampionId)!.losses }}</strong><span>Record</span></div>
               <div><strong>{{ formatDecimal(stat(localChampionId)!.kda, 2) }}</strong><span>KDA</span></div>
-              <div><strong>{{ stat(localChampionId)!.averageRoleFit?.toFixed(1) ?? "—" }}</strong><span>Avg RoleFit · {{ recallGradeFromRoleFitScore(stat(localChampionId)!.averageRoleFit) ?? "—" }}</span></div>
+              <div><strong>{{ stat(localChampionId)!.averageRecallScore?.toFixed(1) ?? "—" }}</strong><span>Average Recall Score · {{ recallGradeFromRecallScore(stat(localChampionId)!.averageRecallScore) ?? "—" }}</span></div>
               <div><strong>{{ stat(localChampionId)!.confidence }}</strong><span>Confidence</span></div>
             </div>
             <div v-if="modifierChips.length" class="modifier-list">

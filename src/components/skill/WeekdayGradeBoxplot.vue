@@ -6,12 +6,12 @@ import { registerInsightCharts } from "../../charts/register-insights"
 import { CHART_COLOURS, CHART_STYLES } from "../../charts/recall-chart-theme"
 import { boxplot } from "../../charts/statistics"
 import type { SkillHistoryPoint } from "../../types/stats"
-import { weekdayRoleFitGroups } from "../../charts/evidence-adapters"
+import { weekdayRecallScoreGroups } from "../../charts/evidence-adapters"
 
 registerInsightCharts()
 
 const props = defineProps<{ history: SkillHistoryPoint[] }>()
-const groups = computed(() => weekdayRoleFitGroups(props.history))
+const groups = computed(() => weekdayRecallScoreGroups(props.history))
 
 const option = computed<EChartsCoreOption>(() => ({
   grid: { top: 20, right: 24, bottom: 34, left: 46 },
@@ -22,7 +22,7 @@ const option = computed<EChartsCoreOption>(() => ({
       const group = groups.value[item.dataIndex]
       const median = item.value?.[2]
       if (!group || !Number.isFinite(median)) return "Insufficient evidence"
-      return `<strong>${group.label}</strong><br/>${group.values.length} graded games<br/>Median RoleFit ${median.toFixed(1)}<br/>Box = middle 50% of games`
+      return `<strong>${group.label}</strong><br/>${group.values.length} graded games<br/>Median Recall Score ${median.toFixed(1)}<br/>Box = middle 50% of games`
     },
   },
   xAxis: { type: "category", data: groups.value.map((group) => group.label), boundaryGap: true },
@@ -44,7 +44,7 @@ const option = computed<EChartsCoreOption>(() => ({
 <template>
   <BaseEChart
     :option="option"
-    ariaLabel="Distribution of RoleFit scores by weekday on a zero-to-one-hundred scale. Each box shows the middle half of graded games."
+    ariaLabel="Distribution of Recall Scores by weekday on a zero-to-one-hundred scale. Each box shows the middle half of graded games."
     height="290px"
   />
 </template>

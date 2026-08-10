@@ -76,6 +76,27 @@ export function currentRankedSeason(now = Date.now()): RankedSeason {
   return rankedSeasonAt(now)
 }
 
+export function rankedSeasonById(id: string): RankedSeason | undefined {
+  if (id === "all") return undefined
+  const known = KNOWN_RANKED_SEASONS.find((season) => season.id === id)
+  if (known) return known
+  const match = /^(\d{4})-ranked-year$/.exec(id)
+  return match ? annualSeason(Number(match[1])) : undefined
+}
+
+/** Ranked-season choices covering a recorded date range, newest first. */
+export function rankedSeasonsBetween(startMs: number, endMs = Date.now()): RankedSeason[] {
+  const firstYear = new Date(startMs).getFullYear()
+  const lastYear = new Date(endMs).getFullYear()
+  const seasons = KNOWN_RANKED_SEASONS.filter((season) =>
+    season.startMs <= endMs && (season.endMs === undefined || season.endMs >= startMs))
+  const coveredYears = new Set(seasons.map((season) => new Date(season.startMs).getFullYear()))
+  for (let year = firstYear; year <= lastYear; year += 1) {
+    if (!coveredYears.has(year)) seasons.push(annualSeason(year))
+  }
+  return seasons.sort((left, right) => right.startMs - left.startMs)
+}
+
 export function pointsForSeason(
   points: RankedPoint[],
   season: RankedSeason,

@@ -22,7 +22,7 @@ import {
   GRADE_ORDER,
   modeLabel,
 } from "../helpers/format"
-import { recallGradeFromRoleFitScore } from "../shared/recall-grade"
+import { recallGradeFromRecallScore } from "../shared/recall-grade"
 import type { Champion } from "../types/lol"
 import type {
   ChampionNeed,
@@ -107,7 +107,7 @@ watch(() => props.championId, load, { immediate: true })
 
 const name = computed(() => championNameById(props.champions, props.championId))
 const detail = computed(() => championStyle.value?.detail)
-const averageGrade = computed(() => recallGradeFromRoleFitScore(summary.value?.avgRoleFitScore))
+const averageGrade = computed(() => recallGradeFromRecallScore(summary.value?.averageRecallScore))
 const hasGames = computed(() => (summary.value?.games ?? 0) > 0)
 
 type TelemetryReading = {
@@ -131,8 +131,8 @@ const telemetryReadings = computed<TelemetryReading[]>(() => {
       tone: summary.value.winRate >= 0.5 ? "win" : "loss",
     },
     {
-      label: "Avg RoleFit",
-      value: summary.value.avgRoleFitScore?.toFixed(1) ?? "–",
+      label: "Average Recall Score",
+      value: summary.value.averageRecallScore?.toFixed(1) ?? "–",
       hint: `${averageGrade.value ?? "No grade"} · ${summary.value.gradedGames} graded`,
     },
     { label: "KDA", value: formatDecimal(summary.value.kda, 2) },

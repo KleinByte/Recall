@@ -21,7 +21,7 @@ const props = defineProps<{
 }>()
 
 /**
- * RoleFit is the authoritative frozen-reference percentile, so the trend uses
+ * Recall Score is the authoritative frozen-reference percentile, so the trend uses
  * its fixed 0-100 scale rather than auto-scaling. A flat run stays flat instead
  * of being stretched by a rounding-sized difference.
  */
@@ -45,7 +45,7 @@ const points = computed(() => {
     const x = count === 1
       ? VIEW_WIDTH / 2
       : ((index + 0.5) / count) * VIEW_WIDTH
-    const score = match.roleFitScore
+    const score = match.recallScore
     if (score === undefined) return { match, index, x, y: undefined }
 
     const clamped = Math.min(SCORE_CEILING, Math.max(SCORE_FLOOR, score))

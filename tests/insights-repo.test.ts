@@ -517,7 +517,7 @@ describe("getObservations", () => {
       queueId: 420,
       win: true,
       gradeScore: 0.5,
-      roleFitScore: 72.5,
+      recallScore: 72.5,
       championId: 84,
       role: "MIDDLE",
       durationSecs: 1800,

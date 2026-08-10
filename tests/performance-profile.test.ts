@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { InsightObservation } from "../electron/main/database/insights-repo.js"
-import { GRADE_V3_RECIPE_ID } from "../electron/main/matches/grade-v3-recipe.js"
+import { MATCH_GRADE_RECIPE_ID } from "../electron/main/matches/match-grade-recipe.js"
 import { buildPerformanceProfile } from "../electron/main/matches/performance-profile.js"
 import {
   RVI_VECTOR_KEYS,
@@ -52,9 +52,9 @@ function observation(
 ): RviMatchObservation {
   const base: RviMatchObservation = {
     matchId,
-    recipeId: GRADE_V3_RECIPE_ID,
+    recipeId: MATCH_GRADE_RECIPE_ID,
     playedAt: matchId * 1_000,
-    roleFitScore: 50,
+    recallScore: 50,
     familyPercentiles: familyScores(50),
     familyResponsibilityWeights: familyWeights(),
     championId: 1,
@@ -97,7 +97,7 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
     }
     const profile = buildPerformanceProfile({
       rviObservations: Array.from({ length: 36 }, (_, index) => observation(index + 1, {
-        roleFitScore: 72,
+        recallScore: 72,
         familyPercentiles,
         championId: 1 + index % 3,
         position: index % 2 ? "MIDDLE" : "BOTTOM",
@@ -105,7 +105,7 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
     })!
 
     expect(profile.algorithmVersion).toBe(3)
-    expect(profile.recipeId).toBe(GRADE_V3_RECIPE_ID)
+    expect(profile.recipeId).toBe(MATCH_GRADE_RECIPE_ID)
     expect(profile.score).toBe(67)
     expect(profile.headline).toMatchObject({
       source: "career_arm_mean",
@@ -123,7 +123,7 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
     expect(profile.dimensions.every((dimension) => dimension.metrics.length === 0)).toBe(true)
     expect(profile.auxiliary).toMatchObject({ contributesThroughRange: true })
     expect(profile.auxiliary?.consistency).toMatchObject({ median: 72, scaledMad: 0 })
-    expect(profile.roleFitAverage).toBe(72)
+    expect(profile.recallScoreAverage).toBe(72)
     expect(profile.coverage).toBe(1)
     expect(profile.scopes.overall.headline).toMatchObject({
       source: "career_arm_mean",
@@ -185,12 +185,12 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
 
   it("summarizes the exact headline by observed position and archetype", () => {
     const rows = [
-      observation(1, { championId: 84, position: "MIDDLE", primaryArchetype: "assassin", roleFitScore: 80 }),
-      observation(2, { championId: 84, position: "MIDDLE", primaryArchetype: "assassin", roleFitScore: 80 }),
-      observation(3, { championId: 84, position: "MIDDLE", primaryArchetype: "assassin", roleFitScore: null }),
-      observation(4, { championId: 18, position: "BOTTOM", primaryArchetype: "marksman", roleFitScore: 60 }),
-      observation(5, { championId: 18, position: "BOTTOM", primaryArchetype: "marksman", roleFitScore: 40 }),
-      observation(6, { championId: null, position: null, primaryArchetype: null, roleFitScore: 20 }),
+      observation(1, { championId: 84, position: "MIDDLE", primaryArchetype: "assassin", recallScore: 80 }),
+      observation(2, { championId: 84, position: "MIDDLE", primaryArchetype: "assassin", recallScore: 80 }),
+      observation(3, { championId: 84, position: "MIDDLE", primaryArchetype: "assassin", recallScore: null }),
+      observation(4, { championId: 18, position: "BOTTOM", primaryArchetype: "marksman", recallScore: 60 }),
+      observation(5, { championId: 18, position: "BOTTOM", primaryArchetype: "marksman", recallScore: 40 }),
+      observation(6, { championId: null, position: null, primaryArchetype: null, recallScore: 20 }),
     ]
     const profile = buildPerformanceProfile({ rviObservations: rows })!
 
@@ -242,7 +242,7 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
         championId: 18,
         position: "BOTTOM",
         primaryArchetype: "marksman",
-        roleFitScore: 70,
+        recallScore: 70,
         familyPercentiles: index < 5
           ? { ...familyPercentiles, vision_setup: 90, control_utility: 89 }
           : familyPercentiles,
@@ -262,7 +262,7 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
     expect(profile.growthKey).toBe("control_utility")
     expect(classifyRviIdentity(profile)).toMatchObject({
       label: "Hybrid",
-      vectors: ["vision_setup", "control_utility"],
+      arms: ["vision_setup", "control_utility"],
     })
   })
 
@@ -271,7 +271,7 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
       championId: 16,
       position: "UTILITY",
       primaryArchetype: "enchanter",
-      roleFitScore: 62,
+      recallScore: 62,
       familyPercentiles: {
         ...familyScores(index < 5 ? 50 : 60),
         combat: index < 5 ? 55 : 65,
@@ -298,12 +298,12 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
     expect(profile.score).toBe(57)
     expect(profile.strongestKey).toBe("combat")
     expect(profile.growthKey).toBe("combat")
-    expect(classifyRviIdentity(profile).vectors).not.toContain("initiative_pressure")
+    expect(classifyRviIdentity(profile).arms).not.toContain("initiative_pressure")
   })
 
-  it("uses career arms for career RVI while preserving match RoleFit", () => {
+  it("uses career arms for career RVI while preserving match Recall Score", () => {
     const row = observation(1, {
-      roleFitScore: 20,
+      recallScore: 20,
       familyPercentiles: familyScores(90),
     })
     const career = buildPerformanceProfile({ rviObservations: [row] })!
@@ -314,8 +314,8 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
 
     expect(career.score).toBe(90)
     expect(match.score).toBe(20)
-    expect(career.roleFitAverage).toBe(20)
-    expect(match.roleFitAverage).toBe(20)
+    expect(career.recallScoreAverage).toBe(20)
+    expect(match.recallScoreAverage).toBe(20)
     expect(career.coverage).toBe(1)
     expect(match.coverage).toBe(1)
     expect(career.headline).toMatchObject({ armCoverage: 7 / 8, evidenceCoverage: 1 })
@@ -331,7 +331,7 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
 
   it("preserves profile recent-form fields and excludes career diagnostics from match context", () => {
     const rows = Array.from({ length: 25 }, (_, index) => observation(index + 1, {
-      roleFitScore: index < 5 ? 10 : 90,
+      recallScore: index < 5 ? 10 : 90,
       familyPercentiles: familyScores(index < 5 ? 20 : 80),
     }))
     const career = buildPerformanceProfile({ rviObservations: rows })!
@@ -354,8 +354,8 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
   it("keeps observed zero, excludes missing values, and exposes coverage separately", () => {
     const profile = buildPerformanceProfile({
       rviObservations: [
-        observation(1, { roleFitScore: 20, familyPercentiles: familyScores(0) }),
-        observation(2, { roleFitScore: null, familyPercentiles: familyScores(null) }),
+        observation(1, { recallScore: 20, familyPercentiles: familyScores(0) }),
+        observation(2, { recallScore: null, familyPercentiles: familyScores(null) }),
       ],
     })!
 
@@ -373,9 +373,9 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
   it("uses explicit half-life weighting without changing the underlying formula", () => {
     const profile = buildPerformanceProfile({
       rviObservations: [
-        observation(1, { playedAt: 0, roleFitScore: 0, familyPercentiles: familyScores(0) }),
-        observation(2, { playedAt: 10, roleFitScore: 50, familyPercentiles: familyScores(50) }),
-        observation(3, { playedAt: 20, roleFitScore: 100, familyPercentiles: familyScores(100) }),
+        observation(1, { playedAt: 0, recallScore: 0, familyPercentiles: familyScores(0) }),
+        observation(2, { playedAt: 10, recallScore: 50, familyPercentiles: familyScores(50) }),
+        observation(3, { playedAt: 20, recallScore: 100, familyPercentiles: familyScores(100) }),
       ],
       weighting: { kind: "half_life", halfLifeMs: 10 },
     })!
@@ -387,9 +387,9 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
   })
 
   it("keeps the career arm headline independent of input order", () => {
-    const rows = [10, 30, 70, 90].map((roleFitScore, index) => observation(index + 1, {
-      roleFitScore,
-      familyPercentiles: familyScores(roleFitScore),
+    const rows = [10, 30, 70, 90].map((recallScore, index) => observation(index + 1, {
+      recallScore,
+      familyPercentiles: familyScores(recallScore),
     }))
     const ordered = buildPerformanceProfile({ rviObservations: rows })!
     const reversed = buildPerformanceProfile({ rviObservations: [...rows].reverse() })!
@@ -405,7 +405,7 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
   it("uses mode family to expose exactly four Abyss match arms plus career Range", () => {
     const row = observation(1, {
       championId: 54,
-      roleFitScore: 35,
+      recallScore: 35,
       familyPercentiles: familyScores(40),
     })
     const plain = buildPerformanceProfile({ rviObservations: [row] })!

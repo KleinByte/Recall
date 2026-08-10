@@ -90,7 +90,7 @@ export interface ParticipantRow {
   grade?: string
   gradeScore?: number
   gradeAlgorithmVersion?: number
-  roleFitScore?: number
+  recallScore?: number
   gradeRecipeId?: string
   gradeStatus?: string
   gradeEvidenceCoverage?: number
@@ -292,7 +292,7 @@ export interface MatchRow {
   grade?: string
   gradeScore?: number
   gradeAlgorithmVersion?: number
-  roleFitScore?: number
+  recallScore?: number
   gradeRecipeId?: string
   gradeStatus?: string
   gradeEvidenceCoverage?: number

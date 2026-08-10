@@ -13,7 +13,7 @@ export interface RecommendationGame {
   deaths: number
   assists: number
   gradeScore?: number
-  roleFitScore?: number
+  recallScore?: number
   durationSecs?: number
 }
 
@@ -35,8 +35,8 @@ export interface ChampionRecommendation {
   adjustedWinRate: number
   /** Legacy/internal compatibility normal score. */
   averageGrade?: number
-  /** Visible authoritative Recall v3 average (0-100). */
-  averageRoleFit?: number
+  /** Visible authoritative Recall average (0-100). */
+  averageRecallScore?: number
   kda: number
   confidence: ReturnType<typeof confidenceForGames>
   recentDirection: "up" | "down" | "stable" | "unknown"
@@ -45,7 +45,7 @@ export interface ChampionRecommendation {
   signals: ChoiceSignal[]
 }
 
-export interface RecommendationDirectionV3 {
+export interface RecommendationDirection {
   direction: "up" | "down" | "stable" | "unknown"
   delta: number | null
   interval: ConfidenceInterval | null
@@ -55,12 +55,12 @@ export interface RecommendationDirectionV3 {
 }
 
 /** Fixed latest-ten versus preceding-ten Grade-v3 posterior comparison. */
-export function recommendationDirectionV3(
+export function recommendationDirection(
   input: readonly RecommendationGame[],
   family: string,
   championId: number,
   careerPriorMean: number,
-): RecommendationDirectionV3 {
+): RecommendationDirection {
   const ordered = [...input].sort((left, right) =>
     right.playedAt - left.playedAt || (right.gameId ?? 0) - (left.gameId ?? 0))
   const labelled = ordered.slice(0, 20).map((game, index) => ({
@@ -205,7 +205,7 @@ export function recommendChampions(
     const kills = games.reduce((sum, game) => sum + game.kills, 0)
     const deaths = games.reduce((sum, game) => sum + game.deaths, 0)
     const assists = games.reduce((sum, game) => sum + game.assists, 0)
-    const direction = recommendationDirectionV3(
+    const direction = recommendationDirection(
       games,
       "active",
       candidate.championId,
@@ -225,10 +225,10 @@ export function recommendChampions(
           .reduce((sum, game) => sum + (game.gradeScore ?? 0), 0) /
           games.filter((game) => game.gradeScore !== undefined).length
         : undefined,
-      averageRoleFit: games.some((game) => game.roleFitScore !== undefined)
-        ? games.filter((game) => game.roleFitScore !== undefined)
-          .reduce((sum, game) => sum + (game.roleFitScore ?? 0), 0) /
-          games.filter((game) => game.roleFitScore !== undefined).length
+      averageRecallScore: games.some((game) => game.recallScore !== undefined)
+        ? games.filter((game) => game.recallScore !== undefined)
+          .reduce((sum, game) => sum + (game.recallScore ?? 0), 0) /
+          games.filter((game) => game.recallScore !== undefined).length
         : undefined,
       kda: deaths ? (kills + assists) / deaths : kills + assists,
       confidence: confidenceForGames(games.length),

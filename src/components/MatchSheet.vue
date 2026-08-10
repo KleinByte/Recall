@@ -244,7 +244,7 @@ const evidenceOf = (label: PerformanceLabel) =>
       </section>
 
       <div class="body">
-        <Panel title="Play style" class="chart-side">
+        <Panel title="Playstyle stats" class="chart-side">
           <StyleRadar
             v-if="gameAxes.length"
             :axes="gameAxes"

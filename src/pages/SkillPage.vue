@@ -18,8 +18,14 @@ import {
   SKILL_SCOPES,
   type SkillScopeId,
 } from "../helpers/skill-scopes"
+import {
+  currentRankedSeason,
+  rankedSeasonById,
+  rankedSeasonsBetween,
+} from "../helpers/ranked-seasons"
+import type { SkillTab, SkillViewPreferences } from "../shared/skill-preferences"
 import type { Champion } from "../types/lol"
-import type { RankedHistory, SkillReportV3, StatsFilter } from "../types/stats"
+import type { RankedHistory, SkillReport, StatsFilter } from "../types/stats"
 
 const SkillInsights = defineAsyncComponent(() => import("../components/skill/SkillInsights.vue"))
 const SkillAnalyze = defineAsyncComponent(() => import("../components/skill/SkillAnalyze.vue"))
@@ -30,8 +36,6 @@ const props = defineProps<{
   connected: boolean
 }>()
 
-type SkillTab = "overview" | "insights" | "analyze"
-
 const ROLES = [
   { value: "TOP", label: "Top" },
   { value: "JUNGLE", label: "Jungle" },
@@ -40,14 +44,18 @@ const ROLES = [
   { value: "UTILITY", label: "Support" },
 ]
 
-const scopeId = ref<SkillScopeId>("riftAll")
-const season = ref<number | undefined>(undefined)
+const defaultSeason = currentRankedSeason()
+const scopeId = ref<SkillScopeId>("rankedSolo")
+const seasonId = ref(defaultSeason.id)
 const role = ref<string | undefined>(undefined)
 const championId = ref<number | undefined>(undefined)
 const tab = ref<SkillTab>("overview")
 const tabModel = computed<string>({
   get: () => tab.value,
-  set: (value) => { tab.value = value as SkillTab },
+  set: (value) => {
+    tab.value = value as SkillTab
+    void persistSkillPreferences()
+  },
 })
 const tabOptions = [
   { value: "overview", label: "Overview" },
@@ -57,13 +65,12 @@ const tabOptions = [
 const counts = ref<Record<SkillScopeId, number>>(
   Object.fromEntries(SKILL_SCOPES.map((scope) => [scope.id, 0])) as Record<SkillScopeId, number>,
 )
-const report = ref<SkillReportV3 | null>(null)
+const report = ref<SkillReport | null>(null)
 const ranked = ref<RankedHistory[]>([])
 const loading = ref(true)
 const failed = ref(false)
 const oldestPlayedAt = ref<number | undefined>()
 const playedChampionIds = ref<number[]>([])
-let choseInitialScope = false
 let countsRequest = 0
 let reportRequest = 0
 
@@ -80,11 +87,8 @@ const classicScopes = computed(() =>
   SKILL_SCOPES.filter((scope) => scope.primary === "classic"),
 )
 const seasonOptions = computed(() => {
-  const newest = new Date().getFullYear()
-  const oldest = oldestPlayedAt.value
-    ? new Date(oldestPlayedAt.value).getFullYear()
-    : newest
-  return Array.from({ length: newest - oldest + 1 }, (_, index) => newest - index)
+  const oldest = oldestPlayedAt.value ?? defaultSeason.startMs
+  return rankedSeasonsBetween(oldest)
 })
 const championOptions = computed(() => {
   const played = new Set(playedChampionIds.value)
@@ -93,15 +97,17 @@ const championOptions = computed(() => {
     .sort((left, right) => left.name.localeCompare(right.name))
 })
 const hasDetailFilters = computed(() =>
-  season.value !== undefined || role.value !== undefined || championId.value !== undefined,
+  scopeId.value !== "rankedSolo" || seasonId.value !== defaultSeason.id ||
+  role.value !== undefined || championId.value !== undefined,
 )
 const timezoneLabel = Intl.DateTimeFormat().resolvedOptions().timeZone || "local time"
 
 function detailFilter(): StatsFilter {
   const filter: StatsFilter = {}
-  if (season.value !== undefined) {
-    filter.sinceMs = new Date(season.value, 0, 1).getTime()
-    filter.untilMs = new Date(season.value + 1, 0, 1).getTime() - 1
+  const season = rankedSeasonById(seasonId.value)
+  if (season) {
+    filter.sinceMs = season.startMs
+    filter.untilMs = (season.endMs ?? Date.now() + 1) - 1
   }
   if (role.value !== undefined && (selectedScope.value.family === "sr" || selectedScope.value.family === "classic")) {
     filter.roles = [role.value]
@@ -126,13 +132,6 @@ async function loadCounts() {
     SKILL_SCOPES.map((scope, index) => [scope.id, summaries[index].games]),
   ) as Record<SkillScopeId, number>
 
-  if (!choseInitialScope) {
-    const candidates: SkillScopeId[] = ["riftAll", "aram", "mayhem", "leagueClassic"]
-    scopeId.value = candidates.reduce((best, id) =>
-      counts.value[id] > counts.value[best] ? id : best,
-    )
-    choseInitialScope = true
-  }
 }
 
 async function loadReport() {
@@ -158,14 +157,34 @@ async function loadReport() {
 
 async function applyFilters() {
   if (selectedScope.value.family !== "sr" && selectedScope.value.family !== "classic") role.value = undefined
+  await persistSkillPreferences()
   await Promise.all([loadCounts(), loadReport()])
 }
 
 async function clearDetailFilters() {
-  season.value = undefined
+  scopeId.value = "rankedSolo"
+  seasonId.value = defaultSeason.id
   role.value = undefined
   championId.value = undefined
   await applyFilters()
+}
+
+function currentPreferences(): SkillViewPreferences {
+  return {
+    scopeId: scopeId.value,
+    seasonId: seasonId.value,
+    ...(role.value ? { role: role.value as SkillViewPreferences["role"] } : {}),
+    ...(championId.value ? { championId: championId.value } : {}),
+    tab: tab.value,
+  }
+}
+
+async function persistSkillPreferences() {
+  try {
+    await api.saveSkillViewPreferences(currentPreferences())
+  } catch (error) {
+    console.warn("Could not save Skill filters", error)
+  }
 }
 
 const refreshAll = useCoalescedTask(applyFilters)
@@ -173,19 +192,33 @@ const refreshReport = useCoalescedTask(loadReport)
 
 onMounted(async () => {
   try {
-    const [meta, championIds, rankedHistory] = await Promise.all([
+    const [preferences, meta, championIds, rankedHistory] = await Promise.all([
+      api.getSkillViewPreferences(),
       api.getStatsMeta(),
       api.getPlayedChampionIds(),
       api.getRankedHistory(),
     ])
+    if (preferences) {
+      scopeId.value = preferences.scopeId
+      seasonId.value = preferences.seasonId === "all" || rankedSeasonById(preferences.seasonId)
+        ? preferences.seasonId
+        : defaultSeason.id
+      role.value = preferences.role
+      championId.value = preferences.championId
+      tab.value = preferences.tab
+    }
     oldestPlayedAt.value = meta.oldestPlayedAt
     playedChampionIds.value = championIds
     ranked.value = rankedHistory
-    await loadCounts()
+    if (championId.value && !championIds.includes(championId.value)) championId.value = undefined
+    if (selectedScope.value.family !== "sr" && selectedScope.value.family !== "classic") {
+      role.value = undefined
+    }
+    await persistSkillPreferences()
   } catch {
     // The normal empty state handles an account without recorded matches.
   }
-  await loadReport()
+  await Promise.all([loadCounts(), loadReport()])
   events.on("stats:updated", () => void refreshAll())
   events.on("ranked:updated", async () => {
     ranked.value = await api.getRankedHistory()
@@ -198,8 +231,8 @@ onMounted(async () => {
   <div class="page">
     <PageHeader
       title="Skill"
-      eyebrow="Performance laboratory"
-      description="Measurements and evidence from your recorded games."
+      eyebrow="Performance"
+      description="Review your Grades, RVI, and patterns across recorded games."
     />
 
     <Surface as="section" variant="toolbar" padding="compact" class="filters" aria-label="Skill report filters">
@@ -225,9 +258,11 @@ onMounted(async () => {
         </UiField>
 
         <UiField label="Season" compact>
-          <select v-model="season" class="league-select" @change="applyFilters">
-            <option :value="undefined">All seasons</option>
-            <option v-for="year in seasonOptions" :key="year" :value="year">{{ year }} season</option>
+          <select v-model="seasonId" class="league-select" @change="applyFilters">
+            <option value="all">All seasons</option>
+            <option v-for="season in seasonOptions" :key="season.id" :value="season.id">
+              {{ season.label }}
+            </option>
           </select>
         </UiField>
 
@@ -255,7 +290,7 @@ onMounted(async () => {
         </div>
 
         <UiButton v-if="hasDetailFilters" class="clear" variant="ghost" @click="clearDetailFilters">
-          Clear filters
+          Reset filters
         </UiButton>
       </div>
       <p class="filter-note muted">

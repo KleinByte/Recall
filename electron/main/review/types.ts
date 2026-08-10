@@ -1,3 +1,5 @@
+import type { MatchRviArmKey } from "../../../src/shared/performance-vocabulary.js"
+
 export type Confidence = "thin" | "fair" | "solid"
 
 export function confidenceForGames(games: number): Confidence {
@@ -7,24 +9,7 @@ export function confidenceForGames(games: number): Confidence {
 }
 
 export interface GradeComponent {
-  key:
-    | "combat"
-    | "participation"
-    | "economy"
-    | "survival"
-    | "frontlining"
-    | "farming"
-    | "fighting"
-    | "availability"
-    | "resources"
-    | "vision"
-    | "objectives"
-    | "control"
-    | "positioning_survival"
-    | "control_utility"
-    | "objectives_macro"
-    | "vision_setup"
-    | "initiative_pressure"
+  key: MatchRviArmKey
   label: string
   percentile: number
   weight: number
@@ -35,7 +20,7 @@ export interface GradeComponent {
 export interface GradeBreakdown {
   algorithmVersion: number
   recipeId?: string
-  roleFitScore?: number
+  recallScore?: number
   lobbyPercentile?: number
   compositePercentile: number
   components: GradeComponent[]

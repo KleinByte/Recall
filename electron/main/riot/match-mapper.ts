@@ -1,5 +1,3 @@
-import type { GradeInput } from "../matches/grade.js"
-import { resolveChampionClass } from "../matches/class-expectations.js"
 import {
   normalizePosition,
   POSITION_RESOLVER_VERSION,
@@ -155,7 +153,6 @@ export interface MappedRiotMatch {
   match: MatchRow
   participants: ParticipantRow[]
   teams: TeamRow[]
-  gradeInputs: GradeInput[]
   unknownParticipantFields: string[]
 }
 
@@ -521,32 +518,10 @@ export function mapRiotMatch(
     firstInhibitor: bool(team.objectives?.inhibitor?.first),
   } satisfies TeamRow))
 
-  const minutes = Math.max(1, duration / 60)
-  const gradeInputs = participants.map((participant) => ({
-    participantId: participant.participantId,
-    teamId: participant.teamId,
-    kills: participant.kills,
-    deaths: participant.deaths,
-    assists: participant.assists,
-    damageToChampions: participant.damageToChampions,
-    damageTaken: participant.damageTaken,
-    goldEarned: participant.goldEarned,
-    csPerMin:
-      (participant.totalMinionsKilled + participant.neutralMinions) / minutes,
-    visionScore: participant.visionScore,
-    damageObjectives: participant.damageObjectives,
-    damageMitigated: participant.damageSelfMitigated,
-    championClass: resolveChampionClass(participant.championId),
-    role: resolvePosition(
-      participant.lane,
-      participant.role,
-    ),
-  }))
-
   const unknownParticipantFields = [...new Set(
     info.participants.flatMap((participant) =>
       Object.keys(participant).filter((key) => !KNOWN_PARTICIPANT_FIELDS.has(key)),
     ),
   )]
-  return { match, participants, teams, gradeInputs, unknownParticipantFields }
+  return { match, participants, teams, unknownParticipantFields }
 }

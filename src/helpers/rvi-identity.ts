@@ -3,7 +3,7 @@ import type { PerformanceProfile } from "../types/stats"
 export interface RviIdentity {
   label: string
   description: string
-  vectors: string[]
+  arms: string[]
 }
 
 const MIN_GAMES = 10
@@ -11,7 +11,7 @@ const BALANCED_SPREAD = 8
 const DOMINANT_GAP = 10
 const SECONDARY_FLOOR = 52
 
-const SINGLE: Record<string, Omit<RviIdentity, "vectors">> = {
+const SINGLE: Record<string, Omit<RviIdentity, "arms">> = {
   combat: { label: "Combat Carry", description: "Your clearest measured edge is turning damage and fight involvement into results." },
   positioning_survival: { label: "Anchor", description: "Your clearest measured edge is staying available and avoiding costly deaths." },
   control_utility: { label: "Disruptor", description: "Your clearest measured edge is crowd control and utility for your assigned responsibilities." },
@@ -22,7 +22,7 @@ const SINGLE: Record<string, Omit<RviIdentity, "vectors">> = {
   consistency_versatility: { label: "Versatile", description: "Your career record combines dependable results with breadth across champions, archetypes, and positions." },
 }
 
-const PAIRS: Record<string, Omit<RviIdentity, "vectors">> = {
+const PAIRS: Record<string, Omit<RviIdentity, "arms">> = {
   "combat+positioning_survival": { label: "Juggernaut", description: "You combine combat impact with staying available for your team." },
   "combat+control_utility": { label: "Playmaker", description: "You combine fight impact with measurable control and utility." },
   "combat+economy": { label: "Carry", description: "You build a resource edge and convert it into direct combat impact." },
@@ -47,8 +47,8 @@ export function classifyRviIdentity(profile: PerformanceProfile): RviIdentity {
       label: "Developing Identity",
       description: needed
         ? `${needed} more ${needed === 1 ? "measured game" : "measured games"} will make this RVI identity more stable.`
-        : "Recall needs more measured vectors before naming this RVI identity.",
-      vectors: [],
+        : "Recall needs more measured arms before naming this performance style.",
+      arms: [],
     }
   }
 
@@ -58,8 +58,8 @@ export function classifyRviIdentity(profile: PerformanceProfile): RviIdentity {
   if (ranked.length < 2) {
     return {
       label: "Developing Identity",
-      description: "Recall needs at least two responsibility-weighted vectors before naming this RVI identity.",
-      vectors: [],
+      description: "Recall needs at least two measured arms before naming this performance style.",
+      arms: [],
     }
   }
   const first = ranked[0]
@@ -72,7 +72,7 @@ export function classifyRviIdentity(profile: PerformanceProfile): RviIdentity {
       description: profile.score >= 58
         ? "You influence games in several ways and can shift between fighting, map play, and adaptation as needed."
         : "Your approach is balanced, with no single habit dominating how you play your games.",
-      vectors: ranked.map((dimension) => dimension.key),
+      arms: ranked.map((dimension) => dimension.key),
     }
   }
 
@@ -81,12 +81,12 @@ export function classifyRviIdentity(profile: PerformanceProfile): RviIdentity {
       label: `${first.label} Specialist`,
       description: `Your approach to games is most clearly shaped by how you use ${first.label.toLowerCase()}.`,
     }
-    return { ...identity, vectors: [first.key] }
+    return { ...identity, arms: [first.key] }
   }
 
   const identity = PAIRS[pairKey(first.key, second.key)] ?? {
     label: "Hybrid",
     description: `You blend ${first.label.toLowerCase()} with ${second.label.toLowerCase()} instead of following one narrow game plan.`,
   }
-  return { ...identity, vectors: [first.key, second.key] }
+  return { ...identity, arms: [first.key, second.key] }
 }

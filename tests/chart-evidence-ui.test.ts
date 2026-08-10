@@ -4,19 +4,19 @@ import {
   commonSignatureAxes,
   completeRecentRadar,
   driftSeries,
-  weekdayRoleFitGroups,
+  weekdayRecallScoreGroups,
 } from "../src/charts/evidence-adapters.js"
 
 describe("chart evidence adapters", () => {
   it("keeps an ungraded day null instead of fabricating B+", () => {
     expect(calendarDays([
       { gameId: 1, playedAt: Date.UTC(2026, 7, 5), championId: 26, win: true, durationSecs: 1_000 },
-    ])[0]).toMatchObject({ roleFitScore: null, games: 1, wins: 1 })
+    ])[0]).toMatchObject({ recallScore: null, games: 1, wins: 1 })
   })
 
   it("omits weekdays with no finite grades", () => {
-    const groups = weekdayRoleFitGroups([
-      { gameId: 1, playedAt: new Date(2026, 7, 3, 12).getTime(), championId: 1, win: true, durationSecs: 1_000, roleFitScore: 0 },
+    const groups = weekdayRecallScoreGroups([
+      { gameId: 1, playedAt: new Date(2026, 7, 3, 12).getTime(), championId: 1, win: true, durationSecs: 1_000, recallScore: 0 },
     ])
     expect(groups).toHaveLength(1)
     expect(groups[0]).toMatchObject({ label: "Mon", values: [0] })

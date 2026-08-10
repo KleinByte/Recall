@@ -2,6 +2,7 @@ import type { AramStats, Challenge, Champion, Summoner } from "../types/lol"
 import type { RawChallenge } from "../types/lcu"
 import type { UpdateStatus } from "../types/update"
 import type { StoredSettings } from "../types/app"
+import type { SkillViewPreferences } from "../shared/skill-preferences"
 import type {
   ChallengeFilter,
   ChallengeHistoryRow,
@@ -25,10 +26,10 @@ import type {
   PersonalRecord,
   ProfileSummary,
   RankedHistory,
-  RecallV3CalibrationStatus,
-  RecallV3RebuildResult,
+  PerformanceReferenceStatus,
+  PerformanceReferenceRebuildResult,
   RiotHistoryBackfillState,
-  SkillReportV3,
+  SkillReport,
   StatsFilter,
   StatsMeta,
   StatsSummary,
@@ -186,6 +187,14 @@ export const api = {
     return invoke("settings:ui:set", value)
   },
 
+  getSkillViewPreferences(): Promise<SkillViewPreferences | undefined> {
+    return invoke("settings:skill-view:get")
+  },
+
+  saveSkillViewPreferences(value: SkillViewPreferences): Promise<SkillViewPreferences> {
+    return invoke("settings:skill-view:set", value)
+  },
+
   getRecommendationObjective(): Promise<ChampionChoiceObjective | undefined> {
     return invoke("settings:recommendation-objective:get")
   },
@@ -328,7 +337,7 @@ export const api = {
   getSkillReport(
     filter: Partial<StatsFilter>,
     family: ModeFamily,
-  ): Promise<SkillReportV3> {
+  ): Promise<SkillReport> {
     return invoke("stats:skill-report", filter, family)
   },
 
@@ -340,12 +349,12 @@ export const api = {
     return invoke("stats:rvi", filter, family, scoringContext)
   },
 
-  getRecallV3Status(): Promise<RecallV3CalibrationStatus> {
-    return invoke("recall-v3:status")
+  getPerformanceReferenceStatus(): Promise<PerformanceReferenceStatus> {
+    return invoke("performance-reference:status")
   },
 
-  recalibrateRecallV3(): Promise<RecallV3RebuildResult> {
-    return invoke("recall-v3:recalibrate")
+  rebuildPerformanceReference(): Promise<PerformanceReferenceRebuildResult> {
+    return invoke("performance-reference:rebuild")
   },
 
   getDrift(

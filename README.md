@@ -72,7 +72,7 @@ own filter instead of being folded into Other.
 ![Match history with role-aware rows, lobby rank, and a League Classic filter](docs/screenshots/recall-matches.jpg)
 
 The Review page explains the exact grading recipe, shows the informational
-lobby percentile separately from RoleFit, and groups games into sessions so a
+lobby percentile separately from Recall Score, and groups games into sessions so a
 rough night does not get flattened into a lifetime average. Full scoreboards
 are ordered like Riot's lanes, while modes without assigned roles omit the
 role presentation entirely.
@@ -125,57 +125,47 @@ without borrowing modern item art.
 ## Performance grades
 
 Riot does not provide a post-game letter grade through the local client API, so
-Recall calculates RoleFit from complete scoreboards. RoleFit is a 0–100 measure
-of how well the measurable responsibilities of a champion-position job were
-executed relative to a frozen reference built from complete matches stored in
-that Recall installation. Another installation builds its own reference and
-never receives yours. New games are graded against the frozen snapshot without
-changing it; the Settings page can explicitly create a new snapshot and
-regrade the stored history.
+Recall calculates a 0–100 Recall Score from complete scoreboards. It compares
+the performance with similar games in that installation's saved history.
+Another installation builds its own comparison baseline and never receives
+yours. New games use the saved baseline without changing it; Settings can
+explicitly build a new one and regrade the stored history.
 
 Position determines opportunity while the champion's detailed archetype
 determines responsibility. Zac remains a Jungler but is evaluated as a
 Vanguard; Tristana remains Bottom or Middle but is evaluated primarily as a
-Marksman. Recall combines calibrated measurements into Combat, Positioning &
-Survival, Control & Utility, Economy, Objectives & Macro, Vision & Setup, and
-Initiative & Pressure. A missing core responsibility withholds the grade;
-available secondary evidence joins its arm at the immutable recipe weights.
-Missing secondary evidence stays visibly missing and is neutralized against the
-observed core bundle for arithmetic, so capture coverage cannot improve or
-reduce a core-only result.
+Marksman. Recall organizes the Grade into Combat, Survival, Utility, Economy,
+Macro, Vision, and Initiative. A missing core measurement withholds the Grade.
+Available optional measurements join at their declared weights, while missing
+optional stats stay missing and never count as zero.
 Observed zero, unavailable data, no opportunity, and not-applicable evidence
 remain distinct throughout that calculation.
 
 The reference uses leave-one-match-out empirical calibration and treats a
 complete match—not ten correlated participant rows—as the independent unit.
-The final letter comes directly from the frozen-reference RoleFit score. Lobby
+The final letter comes directly from Recall Score. Lobby
 percentile remains visible as separate context and does not set the grade.
 League Classic, ARAM, and each tracked rules scope remain separate, so their
 pace and economy are not mixed with modern Summoner's Rift.
 
 Grade and the Recall Vector Index consume the same calibrated observations.
-The applicable match radar arms form the raw responsibility composite that is
-frozen-reference calibrated into RoleFit and the letter grade. Summoner's Rift
-uses seven match arms. ARAM and ARAM Mayhem use only Combat, Positioning &
-Survival, Control & Utility, and Economy. Expand an arm to inspect each raw
-statistic, formula, calibrated score, coverage, comparison scope, evidence
-state, share of that arm, and resulting Grade influence.
+The applicable match radar arms combine into Recall Score and the letter Grade.
+Summoner's Rift uses seven match arms. ARAM and ARAM Mayhem use only Combat,
+Survival, Utility, and Economy. Expand an arm to inspect each raw statistic,
+formula, score, coverage, comparison group, evidence state, arm share, and
+resulting Grade influence.
 
-Career RVI is the equal mean of its available career arms. Its eighth arm,
-Consistency & Versatility (Range), combines repeatable RoleFit with demonstrated
-breadth across positions, archetypes, and champions after enough recorded
-games. Range never enters a single-match Grade.
+Career RVI averages the career arms with enough data. Its eighth arm, Range,
+rewards steady results and breadth across positions, archetypes, and champions
+after enough recorded games. Range never enters a single-match Grade.
 
-The selected RVI recipe is immutably linked to the exact Grade recipe and
-calibration snapshot. On the one-time v3 cutover Recall creates a verified
-backup, replaces stale derived grades and metric observations, and preserves
-raw matches, source payloads, timelines, reviews, notes, and settings. Normal
-startup does not repeat the rebuild once the current recipes are selected;
-manual recalibration creates a new frozen reference and rebuilds both together.
-Timeline measurements remain zero-influence diagnostics and receive scores
-only when the retained source can support their exact proxy. If a match lacks
-a complete or source-verifiable scoreboard, Recall keeps the available data
-and explains why a grade cannot be produced.
+The selected RVI recipe remains linked to the exact Grade recipe and comparison
+baseline. Rebuilding creates a verified backup and replaces derived Grades and
+metric observations while preserving raw matches, source payloads, timelines,
+reviews, notes, and settings. Timeline measurements contribute only when the
+retained source supports their formula. If a match lacks a complete or
+source-verifiable scoreboard, Recall keeps the available data and explains why
+a Grade cannot be produced.
 
 ## Install
 

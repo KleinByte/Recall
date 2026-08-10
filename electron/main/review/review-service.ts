@@ -2,7 +2,7 @@ import type { Database } from "better-sqlite3"
 import type { MatchesRepository } from "../database/matches-repo.js"
 import type { ParticipantsRepository } from "../database/participants-repo.js"
 import type { ReviewRepository } from "../database/review-repo.js"
-import type { RecallV3Service } from "../matches/recall-v3-service.js"
+import type { MatchGradingService } from "../matches/match-grading-service.js"
 import { recordScopeForMatch } from "../matches/records.js"
 import type { MatchRow } from "../matches/types.js"
 import type { LcuTimelineService } from "../lcu-timeline-service.js"
@@ -16,7 +16,7 @@ export class ReviewService {
     private readonly participants: ParticipantsRepository,
     private readonly reviews: ReviewRepository,
     private readonly timelines: LcuTimelineService,
-    private readonly recallV3?: RecallV3Service,
+    private readonly recall?: MatchGradingService,
   ) {}
 
   overview(puuid: string) {
@@ -49,7 +49,7 @@ export class ReviewService {
     let grade = owner
       ? this.reviews.getGradeBreakdown(gameId, puuid, owner.participantId)
       : undefined
-    if (!grade && owner && this.recallV3) {
+    if (!grade && owner && this.recall) {
       this.regrade(match, puuid)
       grade = this.reviews.getGradeBreakdown(gameId, puuid, owner.participantId)
     }
@@ -77,7 +77,7 @@ export class ReviewService {
    * until a pass regrades nothing.
    */
   regradeOutdated(limit = 200): number {
-    if (!this.recallV3) return 0
+    if (!this.recall) return 0
     const candidates = this.matches.getOutdatedGradeMatches(3, limit)
     let regraded = 0
     for (const candidate of candidates) {
@@ -89,7 +89,7 @@ export class ReviewService {
 
   /** Regrades one match from its stored lobby with the current algorithm. */
   private regrade(match: MatchRow, puuid: string): boolean {
-    return this.recallV3?.gradeStoredMatch(match.gameId, puuid) === "ready"
+    return this.recall?.gradeStoredMatch(match.gameId, puuid) === "ready"
   }
 
   sessions(puuid: string, page: number, pageSize = 20) {

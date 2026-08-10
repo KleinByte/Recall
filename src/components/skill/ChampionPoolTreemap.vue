@@ -6,7 +6,7 @@ import { registerInsightCharts } from "../../charts/register-insights"
 import { escapeTooltip } from "../../charts/formatters"
 import { CHART_COLOURS, CHART_SCORE_RAMP, CHART_STYLES } from "../../charts/recall-chart-theme"
 import { championNameById } from "../../helpers/format"
-import { recallGradeFromRoleFitScore } from "../../shared/recall-grade"
+import { recallGradeFromRecallScore } from "../../shared/recall-grade"
 import type { SkillChampionPoint } from "../../types/stats"
 import type { Champion } from "../../types/lol"
 
@@ -16,7 +16,7 @@ const props = defineProps<{ champions: SkillChampionPoint[]; catalog: Champion[]
 
 function colorFor(score?: number) {
   if (score === undefined) return CHART_COLOURS.neutral
-  const band = recallGradeFromRoleFitScore(score)?.charAt(0)
+  const band = recallGradeFromRecallScore(score)?.charAt(0)
   if (band === "S" || band === "A") return CHART_SCORE_RAMP[4]
   if (band === "B") return CHART_SCORE_RAMP[3]
   if (band === "C") return CHART_SCORE_RAMP[2]
@@ -29,7 +29,7 @@ const nodes = computed(() => props.champions
   .map((champion) => ({
     name: championNameById(props.catalog, champion.championId),
     value: champion.games,
-    itemStyle: { color: colorFor(champion.avgRoleFitScore), borderColor: CHART_COLOURS.surfaceInset, borderWidth: 2 },
+    itemStyle: { color: colorFor(champion.averageRecallScore), borderColor: CHART_COLOURS.surfaceInset, borderWidth: 2 },
     recall: champion,
   })))
 
@@ -40,7 +40,7 @@ const option = computed<EChartsCoreOption>(() => ({
       const champion = item.data?.recall
       if (!champion) return ""
       const name = item.data?.name ?? item.name ?? championNameById(props.catalog, champion.championId)
-      return `<strong>${escapeTooltip(name)}</strong><br/>${champion.games} games · ${Math.round(champion.winRate * 100)}% win rate<br/>${champion.avgRoleFitScore === undefined ? "No graded games" : `Average RoleFit ${champion.avgRoleFitScore.toFixed(1)} (${escapeTooltip(recallGradeFromRoleFitScore(champion.avgRoleFitScore) ?? "–")})`}<br/>${champion.kda.toFixed(2)} KDA`
+      return `<strong>${escapeTooltip(name)}</strong><br/>${champion.games} games · ${Math.round(champion.winRate * 100)}% win rate<br/>${champion.averageRecallScore === undefined ? "No graded games" : `Average Recall Score ${champion.averageRecallScore.toFixed(1)} (${escapeTooltip(recallGradeFromRecallScore(champion.averageRecallScore) ?? "–")})`}<br/>${champion.kda.toFixed(2)} KDA`
     },
   },
   series: [{
@@ -69,7 +69,7 @@ const option = computed<EChartsCoreOption>(() => ({
 <template>
   <BaseEChart
     :option="option"
-    ariaLabel="Champion pool treemap. Tile size represents games played and color represents average RoleFit on a zero-to-one-hundred scale."
+    ariaLabel="Champion pool treemap. Tile size represents games played and color represents average Recall Score on a zero-to-one-hundred scale."
     height="360px"
   />
 </template>

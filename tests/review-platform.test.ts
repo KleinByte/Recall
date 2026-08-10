@@ -88,18 +88,18 @@ describe("champion recommendations", () => {
       .toBe(50)
   })
 
-  it("carries average RoleFit for display without changing recommendation scoring", () => {
+  it("carries average Recall Score for display without changing recommendation scoring", () => {
     const [only] = recommendChampions([{
       championId: 1,
       championName: "Only",
       games: [
-        { ...game(1, true, 1, 1), roleFitScore: 80 },
-        { ...game(1, false, 2, -1), roleFitScore: 60 },
+        { ...game(1, true, 1, 1), recallScore: 80 },
+        { ...game(1, false, 2, -1), recallScore: 60 },
       ],
     }], "best_overall", 100)
 
     expect(only.averageGrade).toBe(0)
-    expect(only.averageRoleFit).toBe(70)
+    expect(only.averageRecallScore).toBe(70)
   })
 
   it("sorts deterministic ties by champion name", () => {

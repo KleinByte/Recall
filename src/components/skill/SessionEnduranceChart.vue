@@ -21,7 +21,7 @@ const buckets = computed(() => {
       const bucket = values[Math.min(4, index)]
       bucket.games += 1
       bucket.wins += Number(game.win)
-      if (Number.isFinite(game.roleFitScore)) bucket.grades.push(game.roleFitScore!)
+      if (Number.isFinite(game.recallScore)) bucket.grades.push(game.recallScore!)
     })
   }
   return values.filter((bucket) => bucket.games > 0)
@@ -30,7 +30,7 @@ const buckets = computed(() => {
 const option = computed<EChartsCoreOption>(() => ({
   grid: { top: 28, right: 48, bottom: 34, left: 46 },
   tooltip: { trigger: "axis" },
-  legend: { top: 0, data: ["Win rate", "RoleFit"] },
+  legend: { top: 0, data: ["Win rate", "Recall Score"] },
   xAxis: { type: "category", data: buckets.value.map((bucket) => bucket.label), axisTick: { show: false } },
   yAxis: [
     { type: "value", min: 0, max: 100, axisLabel: { formatter: "{value}%" }, splitLine: { lineStyle: { color: CHART_STYLES.gridSoft } } },
@@ -47,7 +47,7 @@ const option = computed<EChartsCoreOption>(() => ({
       barMaxWidth: 30,
     },
     {
-      name: "RoleFit",
+      name: "Recall Score",
       type: "line",
       yAxisIndex: 1,
       connectNulls: false,
@@ -66,7 +66,7 @@ const option = computed<EChartsCoreOption>(() => ({
 <template>
   <BaseEChart
     :option="option"
-    ariaLabel="Session endurance chart comparing win rate and average RoleFit on a zero-to-one-hundred scale by game number within a session."
+    ariaLabel="Session endurance chart comparing win rate and average Recall Score on a zero-to-one-hundred scale by game number within a session."
     height="300px"
   />
 </template>

@@ -723,7 +723,7 @@ const highlightValue = (highlight: ReviewHighlight) => {
 
 const highlightContext = (highlight: ReviewHighlight) => {
   const component = highlightComponent(highlight)
-  if (component) return `${component.label} · frozen-reference percentile`
+  if (component) return `${component.label} · similar-game percentile`
   const metric = highlightBaseline(highlight)
   return metric ? `${metric.label} · versus your prior average` : highlight.title
 }
@@ -818,7 +818,7 @@ onBeforeUnmount(() => {
           <MatchRviSummary
             :profile="gameRviPresentation"
             :grade="review.match.grade"
-            :personal-score="careerRvi?.roleFitAverage"
+            :personal-score="careerRvi?.recallScoreAverage"
             :lobby-place="matchLobbyStanding?.place"
             :lobby-size="matchLobbyStanding?.of"
             :reference-matches="review.match.gradeReferenceSampleCount"
@@ -826,7 +826,7 @@ onBeforeUnmount(() => {
         </div>
         <div v-else-if="insightTab === 'rvi'" class="rvi-empty" role="tabpanel">
           <strong>Match RVI evidence is unavailable</strong>
-          <span>The selected Recall v3 recipe has no inspectable metric observations for this game.</span>
+          <span>The selected Recall recipe has no inspectable metric observations for this game.</span>
           <Button size="compact" @click="insightTab = 'performance'">Open breakdown</Button>
         </div>
       </section>
@@ -835,14 +835,14 @@ onBeforeUnmount(() => {
         <section class="card grade-card">
           <div class="section-heading compact-heading">
             <div><span class="eyebrow">Performance model</span><h2 class="section-title">Why this grade</h2></div>
-            <span v-if="review.grade" class="algorithm-label">Frozen local reference · archetype + position</span>
+            <span v-if="review.grade" class="algorithm-label">Compared by archetype and position</span>
           </div>
           <p v-if="review.grade?.unavailableReason" class="muted">{{ review.grade.unavailableReason }}</p>
           <div v-else-if="review.grade" class="grade-story">
             <div class="grade-orbit" :style="gradeRingStyle">
               <div>
                 <strong>{{ gradePercentile }}</strong>
-                <span>role-fit score</span>
+                <span>recall-score score</span>
               </div>
             </div>
             <div class="components">
@@ -851,7 +851,7 @@ onBeforeUnmount(() => {
                   <strong>{{ component.label }}</strong>
                   <span>{{ Math.round(component.weight * 100) }}% influence</span>
                 </div>
-                <div class="track" :title="`${component.label}: ${percent(component.percentile)} frozen-reference percentile`">
+                <div class="track" :title="`${component.label}: ${percent(component.percentile)} similar-game percentile`">
                   <span class="fill" :style="{ width: percent(component.percentile) }" />
                   <i class="median" aria-hidden="true" />
                 </div>

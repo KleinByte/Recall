@@ -369,7 +369,7 @@ function augmentDamage(context: RecordContext) {
 }
 
 const DEFINITIONS: RecordDefinition[] = [
-  { key: "grade", label: "Highest RoleFit", category: "Performance", format: "decimal", value: ({ match }) => match.roleFitScore },
+  { key: "grade", label: "Highest Recall Score", category: "Performance", format: "decimal", value: ({ match }) => match.recallScore },
   { key: "kills", label: "Most kills", category: "Combat", value: ({ match }) => positive(match.kills) },
   { key: "assists", label: "Most assists", category: "Combat", value: ({ match }) => positive(match.assists) },
   { key: "damage", label: "Most champion damage", category: "Combat", value: ({ match }) => positive(match.damageToChampions) },
@@ -433,7 +433,7 @@ const DEFINITIONS: RecordDefinition[] = [
   { key: "ally_shielding", label: "Most ally shielding", category: "Special modes", source: "scoreboard", value: (context) => positive(owner(context)?.totalDamageShieldedOnTeammates) },
   { key: "jungle_cs", label: "Most neutral monster CS", category: "Special modes", value: ({ match }) => positive(match.neutralMinions) },
   { key: "augment_damage", label: "Most augment-derived damage", category: "Special modes", source: "scoreboard", value: (context) => context.match.mode === "mayhem" ? augmentDamage(context) : undefined },
-  { key: "augment_game", label: "Strongest augment game", category: "Special modes", format: "decimal", source: "scoreboard", value: (context) => context.match.mode === "mayhem" && context.augmentCount > 0 ? context.match.roleFitScore : undefined },
+  { key: "augment_game", label: "Strongest augment game", category: "Special modes", format: "decimal", source: "scoreboard", value: (context) => context.match.mode === "mayhem" && context.augmentCount > 0 ? context.match.recallScore : undefined },
   { key: "mayhem_tempo", label: "Highest post-augment Tempo swing", category: "Special modes", source: "timeline", value: (context) => context.match.mode === "mayhem" && context.augmentCount > 0 ? postAugmentTempoSwing(context) : undefined },
 ]
 

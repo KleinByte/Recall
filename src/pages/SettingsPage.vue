@@ -13,7 +13,7 @@ import { useApiEvents } from "../helpers/use-api-events"
 import { updatePresentation } from "../helpers/update"
 import type { UpdateStatus } from "../types/update"
 import type {
-  RecallV3CalibrationStatus,
+  PerformanceReferenceStatus,
   RiotHistoryBackfillState,
   StatsMeta,
 } from "../types/stats"
@@ -51,9 +51,9 @@ const launchAtLogin = ref(true)
 const displayTimezone = ref("")
 const resolvedTimezone = ref("UTC")
 const timezoneMessage = ref("")
-const recallV3 = ref<RecallV3CalibrationStatus>()
-const recalibrating = ref(false)
-const recalibrationMessage = ref("")
+const recall = ref<PerformanceReferenceStatus>()
+const rebuildingReference = ref(false)
+const referenceMessage = ref("")
 
 const riotHistoryMessage = computed(() => {
   const history = riotHistory.value
@@ -105,33 +105,33 @@ onMounted(() => {
     displayTimezone.value = value.override ?? ""
     resolvedTimezone.value = value.timeZone
   })
-  void loadRecallV3()
-  events.on("recall-v3:updated", (status: RecallV3CalibrationStatus) => {
-    recallV3.value = status
+  void loadRecall()
+  events.on("performance-reference:updated", (status: PerformanceReferenceStatus) => {
+    recall.value = status
   })
 })
 
-async function loadRecallV3() {
-  recallV3.value = await api.getRecallV3Status()
+async function loadRecall() {
+  recall.value = await api.getPerformanceReferenceStatus()
 }
 
-async function recalibrateRecallV3() {
+async function rebuildPerformanceReference() {
   if (!window.confirm(
-    "Create a backup and rebuild every Grade and RVI v3 result from a new frozen local reference?",
+    "Create a backup, rebuild the comparison baseline, and recalculate every Grade and RVI result?",
   )) return
-  recalibrating.value = true
-  recalibrationMessage.value = ""
+  rebuildingReference.value = true
+  referenceMessage.value = ""
   try {
-    const result = await api.recalibrateRecallV3()
+    const result = await api.rebuildPerformanceReference()
     if (result.canceled) return
-    recalibrationMessage.value = result.errors
+    referenceMessage.value = result.errors
       ? `Rebuilt ${result.processed ?? 0} matches with ${result.errors} errors. Your backup was retained.`
-      : `Rebuilt ${result.processed ?? 0} matches; ${result.ready ?? 0} received complete v3 grades.`
-    await Promise.all([loadRecallV3(), loadMeta(), loadTrust()])
+      : `Rebuilt ${result.processed ?? 0} matches; ${result.ready ?? 0} received complete grades.`
+    await Promise.all([loadRecall(), loadMeta(), loadTrust()])
   } catch (error) {
-    recalibrationMessage.value = (error as Error).message
+    referenceMessage.value = (error as Error).message
   } finally {
-    recalibrating.value = false
+    rebuildingReference.value = false
   }
 }
 
@@ -260,7 +260,7 @@ async function resync() {
       result.inserted > 0
         ? `Recorded ${result.inserted} new game${result.inserted === 1 ? "" : "s"}.`
         : "Already up to date."
-    await Promise.all([loadMeta(), loadRecallV3(), loadTrust()])
+    await Promise.all([loadMeta(), loadRecall(), loadTrust()])
   } finally {
     busy.value = false
   }
@@ -299,7 +299,7 @@ async function clearHistory() {
       result.deleted > 0
         ? `Deleted ${result.deleted} recorded matches.`
         : "Nothing was deleted."
-    await Promise.all([loadMeta(), loadRecallV3(), loadTrust()])
+    await Promise.all([loadMeta(), loadRecall(), loadTrust()])
   } finally {
     busy.value = false
   }
@@ -503,34 +503,34 @@ const formatDate = (value?: number) =>
         older Match-V5 history from this Settings page.
       </p>
 
-      <Surface as="div" variant="inset" padding="compact" class="recall-v3-reference">
+      <Surface as="div" variant="inset" padding="compact" class="performance-reference">
         <div>
-          <strong>Recall v3 grading reference</strong>
-          <span v-if="recallV3?.state === 'frozen'">
-            Frozen from {{ recallV3.referenceMatches ?? 0 }} complete matches on
-            {{ formatDate(recallV3.frozenAt) }} for
-            {{ recallV3.supportedModes.join(", ") || "no modes" }}.
-            New games in those frozen scopes are graded against it and do not change it.
+          <strong>Comparison baseline</strong>
+          <span v-if="recall?.state === 'frozen'">
+            Built from {{ recall.referenceMatches ?? 0 }} complete matches on
+            {{ formatDate(recall.frozenAt) }} for
+            {{ recall.supportedModes.join(", ") || "no modes" }}.
+            New games in those groups use this baseline and do not change it.
           </span>
           <span v-else>
-            Calibrating from this installation: the largest mode/rules scope has
-            {{ recallV3?.largestScopeMatches ?? 0 }} of
-            {{ recallV3?.requiredMatches ?? 10 }} complete matches
-            ({{ recallV3?.eligibleMatches ?? 0 }} across all scopes).
+            Building from this installation: the largest comparable group has
+            {{ recall?.largestScopeMatches ?? 0 }} of
+            {{ recall?.requiredMatches ?? 10 }} complete matches
+            ({{ recall?.eligibleMatches ?? 0 }} across all scopes).
           </span>
           <span>
-            Each Recall installation builds its own local reference; another person who installs the app does not use yours.
+            Every installation uses its own saved matches. Other players never use your baseline.
           </span>
         </div>
         <UiButton
           variant="primary"
-          :disabled="busy || recalibrating || (recallV3?.supportedScopes.length ?? 0) === 0"
-          @click="recalibrateRecallV3"
+          :disabled="busy || rebuildingReference || (recall?.supportedScopes.length ?? 0) === 0"
+          @click="rebuildPerformanceReference"
         >
-          {{ recalibrating ? "Recalibrating…" : "Recalibrate Grade & RVI" }}
+          {{ rebuildingReference ? "Rebuilding…" : "Rebuild comparison baseline" }}
         </UiButton>
       </Surface>
-      <p v-if="recalibrationMessage" class="muted note">{{ recalibrationMessage }}</p>
+      <p v-if="referenceMessage" class="muted note">{{ referenceMessage }}</p>
 
       <div class="actions">
         <UiButton :disabled="busy || !connected" @click="resync">
@@ -680,7 +680,7 @@ const formatDate = (value?: number) =>
 </template>
 
 <style scoped>
-.recall-v3-reference {
+.performance-reference {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -688,12 +688,12 @@ const formatDate = (value?: number) =>
   margin: 1rem 0;
 }
 
-.recall-v3-reference > div {
+.performance-reference > div {
   display: grid;
   gap: 0.3rem;
 }
 
-.recall-v3-reference span {
+.performance-reference span {
   color: var(--text-muted);
   font-size: 0.88rem;
 }

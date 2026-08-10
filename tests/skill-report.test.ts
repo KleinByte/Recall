@@ -14,7 +14,7 @@ import {
 } from "../electron/main/matches/skill-report.js"
 import { computePerGameAxes } from "../electron/main/matches/style.js"
 import type { ModeFamily } from "../electron/main/matches/types.js"
-import { GRADE_FAMILIES } from "../electron/main/matches/grade-v3-recipe.js"
+import { MATCH_GRADE_ARM_KEYS } from "../electron/main/matches/match-grade-recipe.js"
 import { RVI_VECTOR_KEYS } from "../electron/main/matches/rvi-contract.js"
 
 /**
@@ -114,7 +114,7 @@ function observations(
       queueId: family === "sr" ? 420 : family === "aram" ? 450 : 1700,
       win,
       gradeScore,
-      roleFitScore: gradeScore,
+      recallScore: gradeScore,
       championId: 1,
       role,
       durationSecs,
@@ -428,7 +428,7 @@ function champStats(
       kda: 3,
       avgDamageToChampions: 15000,
       avgGradeScore: 50 + i * 3,
-      avgRoleFitScore: 50 + i * 3,
+      averageRecallScore: 50 + i * 3,
       gradedGames: gradedPerChamp,
     })
   }
@@ -449,7 +449,7 @@ function champObservations(count: number, championIds: number[]): InsightObserva
       queueId: 420,
       win: i % 2 === 0,
       gradeScore: champId === 100 ? 70 : champId === 101 ? 30 : 50,
-      roleFitScore: champId === 100 ? 70 : champId === 101 ? 30 : 50,
+      recallScore: champId === 100 ? 70 : champId === 101 ? 30 : 50,
       championId: champId,
       role: "MIDDLE",
       durationSecs: 1800,
@@ -849,7 +849,7 @@ describe("Death map", () => {
   })
 })
 
-describe("SkillReportV3", () => {
+describe("SkillReport", () => {
   const baseInput = () => ({
     modes: ["sr_ranked_solo" as const, "sr_ranked_flex" as const],
     family: "sr" as const,
@@ -860,7 +860,7 @@ describe("SkillReportV3", () => {
       avgDamageToChampions: 15000, avgDamageTaken: 12000, avgGold: 12000,
       avgDurationSecs: 1800, pentaKills: 0, currentStreak: 0,
       longestWinStreak: 3, avgGradeScore: 50, gradedGames: 50,
-      avgRoleFitScore: 50,
+      averageRecallScore: 50,
     },
     style: {
       career: {
@@ -913,7 +913,7 @@ describe("SkillReportV3", () => {
     expect(b.generatedAt).toBe(222)
   })
 
-  it("builds report RVI only from the selected Grade v3 recipe observations", () => {
+  it("builds report RVI only from the selected match Grade recipe observations", () => {
     const recipeId = "recall.grade.v3.test@calibration:test"
     const familyPercentiles = Object.fromEntries(
       RVI_VECTOR_KEYS.map((family, index) => [family, 90 - index * 10]),
@@ -921,7 +921,7 @@ describe("SkillReportV3", () => {
     const familyResponsibilityWeights = Object.fromEntries(
       RVI_VECTOR_KEYS.map((family) => [
         family,
-        family === "protection" ? 0 : 1 / GRADE_FAMILIES.length,
+        family === "protection" ? 0 : 1 / MATCH_GRADE_ARM_KEYS.length,
       ]),
     )
     const report = buildSkillReport({
@@ -930,13 +930,13 @@ describe("SkillReportV3", () => {
         algorithmVersion: 3,
         recipeId,
         calibrationId: "calibration:test",
-        familyKeys: GRADE_FAMILIES,
+        familyKeys: MATCH_GRADE_ARM_KEYS,
         observations: [
           {
             matchId: 1,
             recipeId,
             playedAt: 1_000,
-            roleFitScore: 20,
+            recallScore: 20,
             familyPercentiles,
             familyResponsibilityWeights,
             championId: 84,
@@ -947,7 +947,7 @@ describe("SkillReportV3", () => {
             matchId: 2,
             recipeId,
             playedAt: 2_000,
-            roleFitScore: 80,
+            recallScore: 80,
             familyPercentiles,
             familyResponsibilityWeights,
             championId: 222,
@@ -971,7 +971,7 @@ describe("SkillReportV3", () => {
       algorithmVersion: 3,
       recipeId,
       score: 60,
-      roleFitAverage: 50,
+      recallScoreAverage: 50,
       measuredGames: 2,
       scoringContext: "profile",
       weighting: { kind: "equal" },

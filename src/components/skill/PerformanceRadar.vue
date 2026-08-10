@@ -83,7 +83,7 @@ const option = computed<EChartsCoreOption>(() => {
 <template>
   <BaseEChart
     :option="option"
-    ariaLabel="Recall Vector Index across the displayed performance vectors."
+    ariaLabel="Recall Vector Index across the displayed performance arms."
     :height="height ?? '300px'"
     class="performance-radar"
   />

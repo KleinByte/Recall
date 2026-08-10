@@ -1,6 +1,5 @@
 import type { Database } from "better-sqlite3"
-import type { Grade } from "../matches/grade.js"
-import { GRADES } from "../matches/grade.js"
+import { RECALL_GRADES, type RecallGrade } from "../../../src/shared/recall-grade.js"
 import { canonicalJson } from "./match-source-repo.js"
 
 export const GRADE_STATUSES = [
@@ -20,7 +19,7 @@ export const GRADE_STATUSES = [
   "position_unresolved",
 ] as const
 
-export type GradeStatus = (typeof GRADE_STATUSES)[number]
+export type MatchGradeStatus = (typeof GRADE_STATUSES)[number]
 
 export interface GradeCalibrationRegistration {
   calibrationId: string
@@ -51,11 +50,11 @@ export interface StoredGradeRecipe {
 
 export interface CanonicalGradeResultInput {
   participantId: number
-  grade: Grade
+  grade: RecallGrade
   /** Monotonic frozen-reference normal score retained for compatibility analytics. */
   gradeScore: number
-  /** Authoritative frozen-reference percentile on Recall v3's 0-100 scale. */
-  roleFitScore: number
+  /** Authoritative frozen-reference percentile on Recall's 0-100 scale. */
+  recallScore: number
   /** Lobby percentile retained only for compatibility diagnostics. */
   lobbyPercentile: number
   evidenceCoverage: number
@@ -69,7 +68,7 @@ export interface CanonicalGradeWriteInput {
   recipeId: string
   /** SHA-256 of canonical source inputs, never of the grade outputs. */
   inputFingerprint: string
-  status: GradeStatus
+  status: MatchGradeStatus
   statusReason?: string | null
   evidenceCoverage: number
   referenceSampleCount: number
@@ -84,14 +83,32 @@ export interface CanonicalGradeAttempt {
   algorithmVersion: number
   recipeId: string
   ownerParticipantId: number | null
-  status: GradeStatus
+  status: MatchGradeStatus
   inputFingerprint: string
-  roleFitScore: number | null
+  recallScore: number | null
   evidenceCoverage: number
   referenceSampleCount: number
   referenceMetadata: unknown
   statusReason: string | null
   attemptedAt: number
+}
+
+/**
+ * The breakdown JSON predates the public "Recall Score" name. Its field names
+ * are a storage contract, so translate only at this repository boundary.
+ */
+function persistedGradeBreakdown(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value
+  const persisted = { ...(value as Record<string, unknown>) }
+  if ("recallScore" in persisted) {
+    persisted.roleFitScore = persisted.recallScore
+    delete persisted.recallScore
+  }
+  if ("recallScoreCalibrationSource" in persisted) {
+    persisted.roleFitCalibrationSource = persisted.recallScoreCalibrationSource
+    delete persisted.recallScoreCalibrationSource
+  }
+  return persisted
 }
 
 export interface DerivedGradePurgeOptions {
@@ -149,7 +166,7 @@ export interface GradeRebuildStateUpdate {
 }
 
 const HASH_PATTERN = /^[a-f0-9]{64}$/
-const GRADE_SET = new Set<string>(GRADES)
+const GRADE_SET = new Set<string>(RECALL_GRADES)
 
 function assertHash(value: string, name: string) {
   if (!HASH_PATTERN.test(value)) throw new Error(`${name}_must_be_sha256`)
@@ -170,7 +187,7 @@ function parseJson(value: string): unknown {
 }
 
 /**
- * Owns all Recall v3 grade-derived persistence.
+ * Owns all Recall grade-derived persistence.
  *
  * Artifact primary keys are intentionally still algorithm-version keyed. This
  * repository therefore enforces the v25 invariant: purge a version's derived
@@ -333,7 +350,7 @@ export class GradePersistenceRepository {
       }
       if (!GRADE_SET.has(result.grade)) throw new Error("canonical_grade_letter_invalid")
       assertRange(result.gradeScore, -4, 4, "canonical_grade_score")
-      assertRange(result.roleFitScore, 0, 100, "canonical_role_fit_score")
+      assertRange(result.recallScore, 0, 100, "canonical_role_fit_score")
       assertRange(result.lobbyPercentile, 0, 1, "canonical_grade_lobby_percentile")
       assertRange(result.evidenceCoverage, 0, 1, "canonical_result_evidence_coverage")
       assertIntegerAtLeast(result.referenceSampleCount, 0,
@@ -379,7 +396,7 @@ export class GradePersistenceRepository {
           status_reason = excluded.status_reason
       `).run(gameId, puuid, input.algorithmVersion, ownerParticipantId,
         input.status, input.inputFingerprint, attemptedAt, input.recipeId,
-        ownerResult?.roleFitScore ?? null, input.evidenceCoverage,
+        ownerResult?.recallScore ?? null, input.evidenceCoverage,
         input.referenceSampleCount, referenceMetadataJson, input.statusReason ?? null)
 
       const saveResult = this.db.prepare(`
@@ -412,15 +429,16 @@ export class GradePersistenceRepository {
           input.referenceMetadata ?? {})
         saveResult.run(gameId, puuid, participantId, input.algorithmVersion,
           result.grade, result.gradeScore, result.lobbyPercentile, attemptedAt,
-          input.recipeId, result.roleFitScore, result.evidenceCoverage,
+          input.recipeId, result.recallScore, result.evidenceCoverage,
           result.referenceSampleCount, resultReferenceJson)
         saveBreakdown.run(gameId, puuid, participantId, input.algorithmVersion,
-          result.lobbyPercentile, canonicalJson(result.breakdown), attemptedAt,
-          input.recipeId, result.roleFitScore, result.evidenceCoverage,
+          result.lobbyPercentile, canonicalJson(persistedGradeBreakdown(result.breakdown)),
+          attemptedAt,
+          input.recipeId, result.recallScore, result.evidenceCoverage,
           result.referenceSampleCount, resultReferenceJson)
         if (updateParticipant.run(result.grade, result.gradeScore,
           input.algorithmVersion, result.lobbyPercentile, input.recipeId,
-          result.roleFitScore, result.evidenceCoverage, result.referenceSampleCount,
+          result.recallScore, result.evidenceCoverage, result.referenceSampleCount,
           resultReferenceJson, gameId, puuid, participantId).changes !== 1) {
           throw new Error("canonical_grade_participant_cache_write_failed")
         }
@@ -449,7 +467,7 @@ export class GradePersistenceRepository {
             grade_reference_metadata_json = ?
         WHERE game_id = ? AND puuid = ?
       `).run(ownerResult!.grade, ownerResult!.gradeScore, input.algorithmVersion,
-        ownerResult!.lobbyPercentile, input.recipeId, ownerResult!.roleFitScore,
+        ownerResult!.lobbyPercentile, input.recipeId, ownerResult!.recallScore,
         ownerResult!.evidenceCoverage, ownerResult!.referenceSampleCount,
         canonicalJson(ownerResult!.referenceMetadata ?? input.referenceMetadata ?? {}),
         gameId, puuid) : this.db.prepare(`
@@ -477,7 +495,7 @@ export class GradePersistenceRepository {
       SELECT game_id AS gameId, puuid, algorithm_version AS algorithmVersion,
              recipe_id AS recipeId, owner_participant_id AS ownerParticipantId,
              grade_status AS status, input_fingerprint AS inputFingerprint,
-             role_fit_score AS roleFitScore, evidence_coverage AS evidenceCoverage,
+             role_fit_score AS recallScore, evidence_coverage AS evidenceCoverage,
              reference_sample_count AS referenceSampleCount,
              reference_metadata_json AS referenceMetadataJson,
              status_reason AS statusReason, attempted_at AS attemptedAt

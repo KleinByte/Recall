@@ -12,12 +12,12 @@ import PlayCalendarChart from "./PlayCalendarChart.vue"
 import WeekdayGradeBoxplot from "./WeekdayGradeBoxplot.vue"
 import { findingLabel } from "../../helpers/insight-findings"
 import { formatPercent } from "../../helpers/format"
-import { recallGradeFromRoleFitScore } from "../../shared/recall-grade"
-import type { InsightFinding as InsightFindingType, InsightSection, SkillReportV3 } from "../../types/stats"
+import { recallGradeFromRecallScore } from "../../shared/recall-grade"
+import type { InsightFinding as InsightFindingType, InsightSection, SkillReport } from "../../types/stats"
 import type { Champion } from "../../types/lol"
 
 const props = defineProps<{
-  report: SkillReportV3
+  report: SkillReport
   timezoneLabel: string
   champions: Champion[] | null
 }>()
@@ -25,12 +25,12 @@ const props = defineProps<{
 const summary = computed(() => props.report.overview.summary)
 const history = computed(() => [...props.report.visuals.history]
   .sort((left, right) => left.playedAt - right.playedAt))
-const gradedHistory = computed(() => history.value.filter((game) => Number.isFinite(game.roleFitScore)))
-const averageGrade = computed(() => recallGradeFromRoleFitScore(summary.value.avgRoleFitScore))
+const gradedHistory = computed(() => history.value.filter((game) => Number.isFinite(game.recallScore)))
+const averageGrade = computed(() => recallGradeFromRecallScore(summary.value.averageRecallScore))
 const gradedCoverage = computed(() => summary.value.games ? summary.value.gradedGames / summary.value.games : 0)
 
 const recentShift = computed(() => {
-  const values = gradedHistory.value.map((game) => game.roleFitScore!).slice(-20)
+  const values = gradedHistory.value.map((game) => game.recallScore!).slice(-20)
   if (values.length < 10) return undefined
   const split = Math.floor(values.length / 2)
   const earlier = values.slice(0, split)
@@ -40,7 +40,7 @@ const recentShift = computed(() => {
 })
 
 const consistency = computed(() => {
-  const values = gradedHistory.value.map((game) => game.roleFitScore!).slice(-30)
+  const values = gradedHistory.value.map((game) => game.recallScore!).slice(-30)
   if (values.length < 5) return undefined
   const mean = values.reduce((sum, value) => sum + value, 0) / values.length
   const deviation = Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length)
@@ -98,7 +98,7 @@ const shortDate = (timestamp: number) => new Date(timestamp).toLocaleDateString(
 </script>
 
 <template>
-  <div class="insights-v3">
+  <div class="insights-page">
     <section class="grade-identity" aria-labelledby="recall-grade-title">
       <div class="grade-mark">
         <span class="grade-kicker">Recall</span>
@@ -107,18 +107,18 @@ const shortDate = (timestamp: number) => new Date(timestamp).toLocaleDateString(
         <span class="grade-wordmark">Grade</span>
       </div>
       <div class="identity-copy">
-        <p class="eyebrow">Your performance fingerprint</p>
-        <h2 id="recall-grade-title">One grade. Six responsibilities. Every match in context.</h2>
+        <p class="eyebrow">Your performance</p>
+        <h2 id="recall-grade-title">See what shaped your grades over time.</h2>
         <p>
-          Recall Grade measures fighting, availability, resources, objectives, vision, and control
-          against the frozen local reference for that position and champion archetype. Movement
-          across matches matters more than any single result.
+          Recall scores each match using the parts of play that matter in that mode, then compares
+          it with similar games in your saved history. Use these charts to find patterns across
+          many games, not judge yourself by one result.
         </p>
       </div>
       <dl class="identity-stats">
         <div><dt>Graded</dt><dd>{{ summary.gradedGames }} / {{ summary.games }}</dd></div>
         <div><dt>Coverage</dt><dd>{{ formatPercent(gradedCoverage) }}</dd></div>
-        <div><dt>Average RoleFit</dt><dd>{{ summary.avgRoleFitScore === undefined ? "–" : `${summary.avgRoleFitScore.toFixed(1)} / 100` }}</dd></div>
+        <div><dt>Average Recall Score</dt><dd>{{ summary.averageRecallScore === undefined ? "–" : `${summary.averageRecallScore.toFixed(1)} / 100` }}</dd></div>
         <div><dt>Recent form</dt><dd :class="recentShift && recentShift > 0 ? 'positive' : recentShift && recentShift < 0 ? 'negative' : ''">{{ recentShift === undefined ? "Learning" : signed(recentShift) }}</dd></div>
         <div><dt>Consistency</dt><dd>{{ consistency ?? "Learning" }}</dd></div>
       </dl>
@@ -129,7 +129,7 @@ const shortDate = (timestamp: number) => new Date(timestamp).toLocaleDateString(
         <div>
           <p class="chapter">01 · Form</p>
           <h2>Your Grade Journey</h2>
-          <p>Follow the shape of your performance, not just the latest result. Wins and losses color each match; RoleFit controls the grade.</p>
+          <p>Follow the shape of your performance instead of judging it by the latest result. The score determines the Grade; wins and losses add context.</p>
         </div>
         <span class="sample">{{ gradedHistory.length }} graded games</span>
       </header>
@@ -138,12 +138,12 @@ const shortDate = (timestamp: number) => new Date(timestamp).toLocaleDateString(
         <summary>Show match-by-match data</summary>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Date</th><th>Grade</th><th>RoleFit</th><th>Result</th><th>Duration</th></tr></thead>
+            <thead><tr><th>Date</th><th>Grade</th><th>Recall Score</th><th>Result</th><th>Duration</th></tr></thead>
             <tbody>
               <tr v-for="game in [...gradedHistory].reverse()" :key="game.gameId">
                 <td>{{ shortDate(game.playedAt) }}</td>
                 <td>{{ game.grade ?? "–" }}</td>
-                <td class="numeric">{{ game.roleFitScore?.toFixed(1) }}</td>
+                <td class="numeric">{{ game.recallScore?.toFixed(1) }}</td>
                 <td :class="game.win ? 'positive' : 'negative'">{{ game.win ? "Win" : "Loss" }}</td>
                 <td class="numeric">{{ Math.round(game.durationSecs / 60) }}m</td>
               </tr>
@@ -159,9 +159,8 @@ const shortDate = (timestamp: number) => new Date(timestamp).toLocaleDateString(
           <p class="chapter">02 · Grade DNA</p>
           <h2>What your grades are made of</h2>
           <p>
-            Each cell is a stored Grade family percentile from the frozen reference used for that
-            match. Missing families remain blank; these cells explain the grade and do not rebuild
-            the RVI headline.
+            Each cell shows one part of the Grade for that match. Missing measurements stay blank,
+            and the available cells explain where the final score came from.
           </p>
         </div>
         <div v-if="strongestComponent" class="callout">
@@ -197,7 +196,7 @@ const shortDate = (timestamp: number) => new Date(timestamp).toLocaleDateString(
       <PlayCalendarChart :history="history" />
       <div class="split-chart">
         <div>
-          <h3>Weekday RoleFit range</h3>
+          <h3>Score range by weekday</h3>
           <p class="chart-note">Wider boxes mean less predictable performance. Hover for the median and sample.</p>
           <WeekdayGradeBoxplot :history="history" />
         </div>
@@ -233,7 +232,7 @@ const shortDate = (timestamp: number) => new Date(timestamp).toLocaleDateString(
         <div>
           <p class="chapter">05 · Champion pool</p>
           <h2>Where your games—and grades—live</h2>
-          <p>Tile size is games played. Color tracks average RoleFit, exposing both dependable comfort picks and thin-sample surprises.</p>
+          <p>Tile size is games played. Color tracks average Recall Score, exposing both dependable comfort picks and thin-sample surprises.</p>
         </div>
         <span class="sample">{{ report.visuals.champions.length }} champions</span>
       </header>
@@ -252,7 +251,7 @@ const shortDate = (timestamp: number) => new Date(timestamp).toLocaleDateString(
         <div>
           <p class="chapter">06 · Evidence</p>
           <h2>What repeats in your strongest games</h2>
-          <p>Only clearer, medium-or-high-confidence compatibility-score associations lead this section. This normal score is retained for statistical comparisons; it is not RoleFit points, and the associations do not prove cause.</p>
+          <p>These patterns appeared repeatedly in your stronger games. They can guide review, but they do not prove that one stat caused the result.</p>
         </div>
       </header>
       <EffectChart v-if="evidenceEntries.length" :entries="evidenceEntries" unit="grade" />
@@ -284,7 +283,7 @@ const shortDate = (timestamp: number) => new Date(timestamp).toLocaleDateString(
 </template>
 
 <style scoped>
-.insights-v3 {
+.insights-page {
   display: flex;
   flex-direction: column;
   gap: clamp(34px, 5vw, 68px);

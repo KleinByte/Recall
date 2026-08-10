@@ -9,10 +9,10 @@ import PerformanceFormChart from "./PerformanceFormChart.vue"
 import SessionEnduranceChart from "./SessionEnduranceChart.vue"
 import { classifyRviIdentity } from "../../helpers/rvi-identity"
 import type { Champion } from "../../types/lol"
-import type { SkillReportV3 } from "../../types/stats"
+import type { SkillReport } from "../../types/stats"
 import { groupTimedGames } from "../../helpers/time-contract-core"
 
-const props = defineProps<{ report: SkillReportV3; champions: Champion[] | null }>()
+const props = defineProps<{ report: SkillReport; champions: Champion[] | null }>()
 
 const profile = computed(() => props.report.overview.performance)
 const identity = computed(() => profile.value ? classifyRviIdentity(profile.value) : undefined)
@@ -24,9 +24,9 @@ const averageMovement = computed(() => measuredMovement.value.length
 const form = computed(() => {
   const movement = averageMovement.value
   if (movement === undefined) return { label: "Learning", detail: "More measured games are needed", tone: "neutral" }
-  if (movement >= 3) return { label: "Rising", detail: `+${movement.toFixed(1)} average vector movement`, tone: "positive" }
-  if (movement <= -3) return { label: "Cooling", detail: `${movement.toFixed(1)} average vector movement`, tone: "negative" }
-  return { label: "Holding", detail: `${movement > 0 ? "+" : ""}${movement.toFixed(1)} average vector movement`, tone: "neutral" }
+  if (movement >= 3) return { label: "Rising", detail: `+${movement.toFixed(1)} average arm movement`, tone: "positive" }
+  if (movement <= -3) return { label: "Cooling", detail: `${movement.toFixed(1)} average arm movement`, tone: "negative" }
+  return { label: "Holding", detail: `${movement > 0 ? "+" : ""}${movement.toFixed(1)} average arm movement`, tone: "neutral" }
 })
 const sessionCount = computed(() => {
   return groupTimedGames(props.report.visuals.history)
@@ -41,14 +41,13 @@ const sessionCount = computed(() => {
         <p class="eyebrow">Recall analysis lab</p>
         <h2>Patterns you can act on.</h2>
         <p>
-          These views use only games inside the filters above. RVI form comes from stored Grade v3
-          RoleFit and family percentiles; match signatures use stored family evidence while
-          champion charts use average RoleFit.
+          These views use only the games selected above. They show how your score, RVI arms,
+          champions, and match patterns change across that selection.
         </p>
       </div>
       <dl class="hero-stats">
         <div>
-          <dt>RVI playstyle</dt>
+          <dt>Performance style</dt>
           <dd>{{ identity?.label ?? "Learning" }}</dd>
           <small>{{ profile?.measuredGames ?? 0 }} measured games</small>
         </div>
@@ -78,8 +77,7 @@ const sessionCount = computed(() => {
         class="analysis-panel"
       >
         <p class="chart-copy">
-          Which calibrated RVI families are moving. Missing games remain coverage, not zero,
-          and no small-sample shrink is applied.
+          See which RVI arms are moving. Missing games stay missing instead of counting as zero.
         </p>
         <PerformanceFormChart :profile="profile" />
       </Panel>
@@ -101,9 +99,8 @@ const sessionCount = computed(() => {
         class="analysis-panel wide"
       >
         <p class="chart-copy">
-          Every line is one game's available Recall Grade family evidence. Green is a win, red is
-          a loss; hover a line to isolate its shape. These breakdown values are separate from the
-          RVI headline and its sample diagnostics.
+          Every line shows the Grade arms recorded for one game. Green is a win and red is a loss;
+          hover a line to inspect it.
         </p>
         <MatchSignaturesChart
           :rows="report.visuals.gradeComponents"
@@ -121,7 +118,7 @@ const sessionCount = computed(() => {
         <ChampionQuadrantChart
           :champions="report.visuals.champions"
           :catalog="champions"
-          :baseline="report.overview.summary.avgRoleFitScore"
+          :baseline="report.overview.summary.averageRecallScore"
         />
       </Panel>
 

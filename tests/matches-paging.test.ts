@@ -152,7 +152,7 @@ describe("listMatches", () => {
     expect(page.rows[0].gameId).toBe(1)
   })
 
-  it("filters visible v3 grades by authoritative RoleFit", () => {
+  it("filters visible current grades by authoritative Recall Score", () => {
     repo.insertMany([
       buildMatchRow({ gameId: 1 }),
       buildMatchRow({ gameId: 2 }),
@@ -161,12 +161,12 @@ describe("listMatches", () => {
       "UPDATE matches SET role_fit_score = CASE game_id WHEN 1 THEN 82 ELSE 55 END WHERE puuid = ?",
     ).run(PUUID)
 
-    const page = repo.listMatches({ puuid: PUUID, minRoleFitScore: 81.59 }, 1, 25)
+    const page = repo.listMatches({ puuid: PUUID, minRecallScore: 81.59 }, 1, 25)
 
     expect(page.rows.map((row) => row.gameId)).toEqual([1])
   })
 
-  it("reports an authoritative average RoleFit alongside the compatibility score", () => {
+  it("reports an authoritative average Recall Score alongside the compatibility score", () => {
     repo.insertMany([
       buildMatchRow({ gameId: 1 }),
       buildMatchRow({ gameId: 2 }),
@@ -182,7 +182,7 @@ describe("listMatches", () => {
     const summary = repo.getSummary({ puuid: PUUID })
 
     expect(summary.avgGradeScore).toBeCloseTo(.5)
-    expect(summary.avgRoleFitScore).toBeCloseTo(70)
+    expect(summary.averageRecallScore).toBeCloseTo(70)
   })
 
   it("excludes remakes below a minimum duration", () => {

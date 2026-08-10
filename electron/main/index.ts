@@ -61,7 +61,7 @@ import { LcuClient } from "./lcu-client.js"
 import { LcuDiscovery, type LcuCredentials } from "./lcu-discovery.js"
 import { LcuEvents as LcuEventStream } from "./lcu-events.js"
 import { MatchSync } from "./match-sync.js"
-import { RecallV3Service } from "./matches/recall-v3-service.js"
+import { MatchGradingService } from "./matches/match-grading-service.js"
 import { syncUntilRecorded } from "./post-game-sync.js"
 import { buildStyleProfile } from "./matches/style.js"
 import type {
@@ -247,7 +247,7 @@ let backupManager: BackupManager | undefined
 let dataTrustService: DataTrustService | undefined
 let timelineService: LcuTimelineService | undefined
 let reviewService: ReviewService | undefined
-let recallV3: RecallV3Service | undefined
+let recall: MatchGradingService | undefined
 let startupRestoreError: string | undefined
 let riotBackfillAbort: AbortController | undefined
 let riotBackfillTask: Promise<void> | undefined
@@ -439,14 +439,14 @@ function getBackupManager() {
   return backupManager
 }
 
-function getRecallV3() {
-  if (!recallV3) recallV3 = new RecallV3Service(getDatabase())
-  return recallV3
+function getMatchGradingService() {
+  if (!recall) recall = new MatchGradingService(getDatabase())
+  return recall
 }
 
-function ensureRecallV3Frozen(win?: BrowserWindow) {
-  const service = getRecallV3()
-  const status = service.calibrationStatus()
+function ensureRecallFrozen(win?: BrowserWindow) {
+  const service = getMatchGradingService()
+  const status = service.referenceStatus()
   if (collectionDisabled()) return status
   const needsDirectCutover = service.needsDirectCutover()
   // A recipe cutover must not freeze at process startup, before the signed-in
@@ -468,16 +468,16 @@ function ensureRecallV3Frozen(win?: BrowserWindow) {
   })
   if ("processed" in result) {
     console.log(
-      `Recall v3 rebuilt ${result.processed} matches (${result.ready} ready, ${result.nonready} withheld)`,
+      `Recall rebuilt ${result.processed} matches (${result.ready} ready, ${result.nonready} withheld)`,
     )
     if (win) {
       broadcast(win, "stats:updated", { inserted: 0, regraded: result.processed })
-      broadcast(win, "recall-v3:updated", getRecallV3().calibrationStatus())
+      broadcast(win, "performance-reference:updated", getMatchGradingService().referenceStatus())
       broadcast(win, "data-trust:updated")
     }
   } else if (needsDirectCutover && win) {
     broadcast(win, "stats:updated", { inserted: 0, regraded: 0 })
-    broadcast(win, "recall-v3:updated", result)
+    broadcast(win, "performance-reference:updated", result)
     broadcast(win, "data-trust:updated")
   }
   return result
@@ -566,7 +566,7 @@ function getTimelineService(win: BrowserWindow) {
         const detail = getParticipants().getMatchDetail(gameId, puuid)
         const player = detail.participants.find((entry) => entry.isPlayer === 1)
         if (!player) return
-        getRecallV3().refreshMetricObservations(gameId, puuid)
+        getMatchGradingService().refreshMetricObservations(gameId, puuid)
         const labels = prioritizePerformanceLabels([
           ...evaluateMatchLabels({
             match,
@@ -625,7 +625,7 @@ function getReviewService(win: BrowserWindow) {
       getParticipants(),
       getReviewRepository(),
       getTimelineService(win),
-      getRecallV3(),
+      getMatchGradingService(),
     )
   }
   return reviewService
@@ -783,7 +783,7 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
     getChampSelect(),
     getLiveGameCaptures(),
     new MatchSourceRepository(getDatabase()),
-    getRecallV3(),
+    getMatchGradingService(),
   )
   const challengeSync = new ChallengeSync(
     client,
@@ -841,7 +841,7 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
   // A configured Match-V5 key gives the recipe cutover one chance to enrich
   // the full stored history before its local reference is frozen. This is a
   // one-time cost: the direct-cutover predicate becomes false after rebuild.
-  if (getRecallV3().needsDirectCutover() && regionalRoute && readRiotApiKey()) {
+  if (getMatchGradingService().needsDirectCutover() && regionalRoute && readRiotApiKey()) {
     await startRiotHistoryBackfill(win, true)
   }
   await runSync(win)
@@ -1069,7 +1069,7 @@ async function startRiotHistoryBackfill(
     getRiotBackfills(),
     {
       champSelect: getChampSelect(),
-      recallV3: getRecallV3(),
+      recall: getMatchGradingService(),
       sourceRepository: new MatchSourceRepository(getDatabase()),
       matchPuuid,
       onProgress: (state) => {
@@ -1145,7 +1145,7 @@ async function startRiotHistoryBackfill(
   try {
     await task
     if (completed && revision === riotBackfillRevision && session === active) {
-      ensureRecallV3Frozen(win)
+      ensureRecallFrozen(win)
     }
   } finally {
     if (revision === riotBackfillRevision) {
@@ -1162,7 +1162,7 @@ async function afterSync(
 ) {
   if (collectionDisabled() || !session) return
 
-  const needsDirectCutover = getRecallV3().needsDirectCutover()
+  const needsDirectCutover = getMatchGradingService().needsDirectCutover()
   const timelineTask = getTimelineService(win)
     .queueRecentMatches(session.summoner.puuid)
   if (timelineTask) {
@@ -1188,7 +1188,7 @@ async function afterSync(
     // clearing the optional API key allows the retained/local-only fallback.
     cutoverEnrichmentComplete = enrichment?.status === "complete"
   }
-  if (cutoverEnrichmentComplete) ensureRecallV3Frozen(win)
+  if (cutoverEnrichmentComplete) ensureRecallFrozen(win)
 
   if (result.inserted > 0) {
     broadcast(win, "stats:updated", result)
@@ -1424,6 +1424,10 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
   ipcMain.handle("settings:ui:get", () => settingsStore.getRenderer("settings"))
   ipcMain.handle("settings:ui:set", (_event, value: UiSettings) =>
     settingsStore.setRenderer("settings", value))
+  ipcMain.handle("settings:skill-view:get", () =>
+    settingsStore.getRenderer("skill-view-preferences"))
+  ipcMain.handle("settings:skill-view:set", (_event, value: unknown) =>
+    settingsStore.setRenderer("skill-view-preferences", value))
   ipcMain.handle("settings:recommendation-objective:get", () =>
     settingsStore.getRenderer("recommendation-objective"))
   ipcMain.handle("settings:recommendation-objective:set", (_event, value: unknown) =>
@@ -1642,7 +1646,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
               deaths: match.deaths,
               assists: match.assists,
               gradeScore: match.gradeScore,
-              roleFitScore: match.roleFitScore,
+              recallScore: match.recallScore,
             })),
           }
         }),
@@ -1965,14 +1969,14 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     const repo = getRepository()
 
     // Compatibility scores still feed the legacy/internal signal model, but
-    // the visible ordering is the unshrunk authoritative RoleFit average.
+    // the visible ordering is the unshrunk authoritative Recall Score average.
     const baseline = repo.getSummary(scoped).avgGradeScore ?? 0
     const signals = splitChampionSignals(repo.getChampionStats(scoped), baseline)
-    const byRoleFit = (left: typeof signals.main[number], right: typeof signals.main[number]) =>
-      (right.roleFitScore ?? -Infinity) - (left.roleFitScore ?? -Infinity) ||
+    const byRecallScore = (left: typeof signals.main[number], right: typeof signals.main[number]) =>
+      (right.recallScore ?? -Infinity) - (left.recallScore ?? -Infinity) ||
       right.gradedGames - left.gradedGames || left.championId - right.championId
-    const ranked = [...signals.main].sort(byRoleFit)
-    const earlySignals = [...signals.earlySignals].sort(byRoleFit)
+    const ranked = [...signals.main].sort(byRecallScore)
+    const earlySignals = [...signals.earlySignals].sort(byRecallScore)
 
     return { ranked, earlySignals, ...pickBestAndWorst(ranked, 3) }
   })
@@ -1985,7 +1989,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
       // RVI is a career profile for the selected frozen recipe. At this hobby-
       // project scale, silently truncating it to a recent window is both
       // unnecessary and misleading.
-      const rvi = insightsRepo.getRviV3Observations(scoped)
+      const rvi = insightsRepo.getRviObservations(scoped)
       if (!rvi) return undefined
       return buildPerformanceProfile({
         recipeId: rvi.recipeId,
@@ -1996,13 +2000,13 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     },
   )
 
-  ipcMain.handle("recall-v3:status", () => getRecallV3().calibrationStatus())
+  ipcMain.handle("performance-reference:status", () => getMatchGradingService().referenceStatus())
 
-  ipcMain.handle("recall-v3:recalibrate", async () => {
+  ipcMain.handle("performance-reference:rebuild", async () => {
     if (collectionDisabled()) throw new Error("History collection is disabled")
     const confirmation = await dialog.showMessageBox(win, {
       type: "warning",
-      title: "Recalibrate Recall v3?",
+      title: "Recalibrate Recall?",
       message: "Build a new frozen Grade and RVI reference from the complete matches stored on this computer?",
       detail: "Recall will create a verified backup, replace every derived v3 grade, and keep raw matches, timelines, reviews, and settings unchanged.",
       buttons: ["Recalibrate", "Cancel"],
@@ -2012,7 +2016,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     })
     if (confirmation.response !== 0) return { canceled: true }
 
-    const finishMaintenance = databaseWrites.beginMaintenance("recall-v3-recalibration")
+    const finishMaintenance = databaseWrites.beginMaintenance("performance-reference-rebuild")
     try {
       riotBackfillRevision += 1
       riotBackfillAbort?.abort()
@@ -2023,16 +2027,16 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
       await databaseWrites.drain()
 
       const backup = getBackupManager().create(getDatabase(), "pre-repair")
-      const result = getRecallV3().recalibrate({
+      const result = getMatchGradingService().rebuildReference({
         path: backup.fileName,
         sha256: backup.sha256,
       }, (progress) => {
         if (progress.processed === progress.total || progress.processed % 25 === 0) {
-          broadcast(win, "recall-v3:progress", progress)
+          broadcast(win, "performance-reference:progress", progress)
         }
       })
       broadcast(win, "stats:updated", { inserted: 0, regraded: result.processed })
-      broadcast(win, "recall-v3:updated", getRecallV3().calibrationStatus())
+      broadcast(win, "performance-reference:updated", getMatchGradingService().referenceStatus())
       broadcast(win, "data-trust:updated")
       return result
     } finally {
@@ -2077,7 +2081,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
         championStats: repo.getChampionStats(scoped),
         itemObservations: insightsRepo.getFinalItemObservations(scoped),
         gradeComponentHistory: insightsRepo.getGradeComponentHistory(scoped),
-        rvi: insightsRepo.getRviV3Observations(scoped),
+        rvi: insightsRepo.getRviObservations(scoped),
         performanceTimelineHistory: insightsRepo.getRviTimelineHistory(scoped, 240),
       })
     },
@@ -2292,7 +2296,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
 
     const matches = getRepository().getAllMatches(puuid)
     const columns = ["gameId", "playedAt", "mode", "championId", "win", "kills",
-      "deaths", "assists", "durationSecs", "grade", "gradeScore", "roleFitScore",
+      "deaths", "assists", "durationSecs", "grade", "gradeScore", "recallScore",
       "gradeAlgorithmVersion", "gradeRecipeId", "gradeStatus", "gradeEvidenceCoverage",
       "gradeReferenceSampleCount"] as const
     const csvCell = (value: unknown) => {
@@ -2384,7 +2388,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
         settingsStore.deleteMain("last-puuid")
       }
       broadcast(win, "stats:updated", { fetched: 0, inserted: 0 })
-      broadcast(win, "recall-v3:updated", getRecallV3().calibrationStatus())
+      broadcast(win, "performance-reference:updated", getMatchGradingService().referenceStatus())
       broadcast(win, "data-trust:updated")
       return result
     } catch (error) {
@@ -2513,7 +2517,7 @@ async function main() {
   // handler registered" errors because IPC registration happens afterwards.
   try {
     getRepository()
-    ensureRecallV3Frozen()
+    ensureRecallFrozen()
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     console.error(`Could not initialise Recall's database: ${message}`)

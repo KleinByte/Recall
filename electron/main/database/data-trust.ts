@@ -3,9 +3,9 @@ import { statSync } from "node:fs"
 import type { BackupManager } from "./backup-manager.js"
 import { schedulerForRoute } from "../riot/request-scheduler.js"
 import {
-  GRADE_V3_ALGORITHM_VERSION,
-  GRADE_V3_RECIPE_DEFINITION_ID,
-} from "../matches/grade-v3-recipe.js"
+  MATCH_GRADE_ALGORITHM_VERSION,
+  MATCH_GRADE_RECIPE_DEFINITION_ID,
+} from "../matches/match-grade-recipe.js"
 
 export class DataTrustService {
   private lastIntegrityCheck = Date.now()
@@ -138,20 +138,20 @@ export class DataTrustService {
         AND json_extract(r.definition_json, '$.recipeDefinitionId') = ?
         AND r.recipe_id = ? || '@calibration:' || r.calibration_id
     `).get(
-      GRADE_V3_ALGORITHM_VERSION,
-      GRADE_V3_RECIPE_DEFINITION_ID,
-      GRADE_V3_RECIPE_DEFINITION_ID,
+      MATCH_GRADE_ALGORITHM_VERSION,
+      MATCH_GRADE_RECIPE_DEFINITION_ID,
+      MATCH_GRADE_RECIPE_DEFINITION_ID,
     ) as { recipeId: string } | undefined : undefined
     const gradeEligible = selectedGradeRecipe ? scalar(
       `SELECT COUNT(*) AS count FROM match_grade_attempts
        WHERE puuid = ? AND algorithm_version = ? AND recipe_id = ?
-         AND grade_status = 'ready'`, puuid, GRADE_V3_ALGORITHM_VERSION,
+         AND grade_status = 'ready'`, puuid, MATCH_GRADE_ALGORITHM_VERSION,
       selectedGradeRecipe.recipeId,
     ) : 0
     const currentGrades = selectedGradeRecipe ? scalar(
       `SELECT COUNT(*) AS count FROM matches
        WHERE puuid = ? AND grade_status = 'ready' AND grade_algorithm_version = ?
-         AND grade_recipe_id = ?`, puuid, GRADE_V3_ALGORITHM_VERSION,
+         AND grade_recipe_id = ?`, puuid, MATCH_GRADE_ALGORITHM_VERSION,
       selectedGradeRecipe.recipeId,
     ) : 0
     const selectedRviRecipe = puuid ? this.db.prepare(`
@@ -167,13 +167,13 @@ export class DataTrustService {
         ON grade_recipe.recipe_id = recipe.grade_recipe_id
        AND grade_recipe.calibration_id = recipe.calibration_id
       WHERE selection.algorithm_version = ?
-    `).get(GRADE_V3_ALGORITHM_VERSION) as { recipeId: string } | undefined : undefined
+    `).get(MATCH_GRADE_ALGORITHM_VERSION) as { recipeId: string } | undefined : undefined
     const rviObservationMatches = selectedRviRecipe ? scalar(
       `SELECT COUNT(DISTINCT game_id) AS count
        FROM match_metric_observations
        WHERE puuid = ? AND algorithm_version = ? AND recipe_id = ?`,
       puuid,
-      GRADE_V3_ALGORITHM_VERSION,
+      MATCH_GRADE_ALGORITHM_VERSION,
       selectedRviRecipe.recipeId,
     ) : 0
     const mixedRviObservations = scalar(
@@ -189,20 +189,20 @@ export class DataTrustService {
        WHERE observation.puuid = ? AND observation.algorithm_version = ?
          AND (selection.recipe_id IS NULL OR recipe.recipe_id IS NULL)`,
       puuid,
-      GRADE_V3_ALGORITHM_VERSION,
+      MATCH_GRADE_ALGORITHM_VERSION,
     )
     const invalidRviSelection = puuid && !selectedRviRecipe ? Number((this.db.prepare(`
       SELECT EXISTS (
         SELECT 1 FROM rvi_recipe_selections WHERE algorithm_version = ?
       ) AS count
-    `).get(GRADE_V3_ALGORITHM_VERSION) as { count: number }).count) : 0
+    `).get(MATCH_GRADE_ALGORITHM_VERSION) as { count: number }).count) : 0
     const rviRecipeIntegrityIssues = mixedRviObservations + invalidRviSelection
     const intentionallyUngraded = selectedGradeRecipe ? scalar(
       `SELECT COUNT(*) AS count FROM match_grade_attempts
        WHERE puuid = ? AND algorithm_version = ? AND recipe_id = ?
          AND grade_status IN
          ('unsupported_mode','short_game','terminated','ineligible_for_progression',
-          'unmatched','bot_or_tutorial')`, puuid, GRADE_V3_ALGORITHM_VERSION,
+          'unmatched','bot_or_tutorial')`, puuid, MATCH_GRADE_ALGORITHM_VERSION,
       selectedGradeRecipe.recipeId,
     ) : 0
     const clientStatus = this.lastIntegrity === "failed" || this.startupError || leagueClient.lastError

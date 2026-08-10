@@ -109,7 +109,6 @@ describe("mapRiotMatch", () => {
       firstTower: 1,
       towerKills: 2,
     })
-    expect(result.gradeInputs).toHaveLength(10)
   })
 
   it("flags absent or malformed core fields before numeric fallback coercion", () => {
@@ -249,7 +248,6 @@ describe("mapRiotMatch", () => {
     const result = mapRiotMatch(dto, PUUID)!
 
     expect(result.participants[0].role).toBe("UTILITY")
-    expect(result.gradeInputs[0].role).toBe("UTILITY")
   })
 
   it("keeps a legacy bottom support hint when positions are unavailable", () => {
@@ -267,6 +265,5 @@ describe("mapRiotMatch", () => {
     const result = mapRiotMatch(dto, PUUID)!
 
     expect(result.participants[0].role).toBe("SUPPORT")
-    expect(result.gradeInputs[0].role).toBe("UTILITY")
   })
 })

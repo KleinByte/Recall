@@ -18,7 +18,7 @@ import {
   formatDecimal,
   formatPercent,
 } from "../helpers/format"
-import { recallGradeFromRoleFitScore } from "../shared/recall-grade"
+import { recallGradeFromRecallScore } from "../shared/recall-grade"
 import type { Champion } from "../types/lol"
 import type {
   ChampionNeed,
@@ -195,7 +195,7 @@ const decorated = computed(() => {
       winRate: recorded?.winRate ?? 0,
       kda: recorded?.kda ?? 0,
       adjustedGrade: rank?.adjustedGrade,
-      roleFitScore: rank?.roleFitScore ?? recorded?.avgRoleFitScore,
+      recallScore: rank?.recallScore ?? recorded?.averageRecallScore,
       confidence: rank?.confidence,
       earlySignal,
     }
@@ -214,10 +214,10 @@ const pool = computed(() => {
   const played = decorated.value.filter((row) => row.games > 0)
   const games = played.reduce((total, row) => total + row.games, 0)
   const wins = played.reduce((total, row) => total + row.wins, 0)
-  const graded = decorated.value.filter((row) => row.roleFitScore !== undefined)
-  const roleFitWeight = graded.reduce((total, row) => total + row.gradedGames, 0)
-  const roleFitSum = graded.reduce((total, row) =>
-    total + row.roleFitScore! * row.gradedGames, 0)
+  const graded = decorated.value.filter((row) => row.recallScore !== undefined)
+  const recallScoreWeight = graded.reduce((total, row) => total + row.gradedGames, 0)
+  const recallScoreSum = graded.reduce((total, row) =>
+    total + row.recallScore! * row.gradedGames, 0)
 
   return {
     playedChampions: played.length,
@@ -226,7 +226,7 @@ const pool = computed(() => {
     wins,
     losses: games - wins,
     winRate: games > 0 ? wins / games : 0,
-    averageRoleFit: roleFitWeight > 0 ? roleFitSum / roleFitWeight : undefined,
+    averageRecallScore: recallScoreWeight > 0 ? recallScoreSum / recallScoreWeight : undefined,
     needsTotal: decorated.value.reduce((total, row) => total + row.needCount, 0),
     needsChampions: filterCounts.value.needs,
   }
@@ -254,7 +254,7 @@ const rows = computed(() => {
       case "rank":
         // Champions never played have no ranking and sink to the bottom.
         comparison =
-          (a.roleFitScore ?? -Infinity) - (b.roleFitScore ?? -Infinity)
+          (a.recallScore ?? -Infinity) - (b.recallScore ?? -Infinity)
         break
       case "mastery":
         comparison = a.masteryPoints - b.masteryPoints
@@ -342,9 +342,9 @@ function clearFilters() {
         />
         <StatTile
           density="compact"
-          label="Average RoleFit"
-          :value="pool.averageRoleFit?.toFixed(1) ?? '–'"
-          :hint="recallGradeFromRoleFitScore(pool.averageRoleFit) ?? 'No grade'"
+          label="Average Recall Score"
+          :value="pool.averageRecallScore?.toFixed(1) ?? '–'"
+          :hint="recallGradeFromRecallScore(pool.averageRecallScore) ?? 'No grade'"
         />
         <StatTile
           density="compact"
@@ -488,8 +488,8 @@ function clearFilters() {
                   <span class="champ-name">{{ row.champion.name }}</span>
                 </td>
                 <td>
-                  <span v-if="row.roleFitScore !== undefined" class="own-grade">
-                    <GradeBadge :grade="recallGradeFromRoleFitScore(row.roleFitScore)" />
+                  <span v-if="row.recallScore !== undefined" class="own-grade">
+                    <GradeBadge :grade="recallGradeFromRecallScore(row.recallScore)" />
                     <span
                       v-if="row.confidence"
                       class="confidence"

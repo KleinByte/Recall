@@ -15,13 +15,13 @@ import path from "node:path"
 import {
   BACKUP_RELEASE_SEQUENCE,
   protectionForReason,
-  type ManagedBackupManifestV2,
+  type ManagedBackupManifestLegacy,
   type ManagedBackupReason,
 } from "./retention-service.js"
 
 export type BackupReason = ManagedBackupReason
 
-export type BackupManifest = Omit<ManagedBackupManifestV2, "integrity"> & {
+export type BackupManifest = Omit<ManagedBackupManifestLegacy, "integrity"> & {
   integrity: "ok" | "failed"
 }
 

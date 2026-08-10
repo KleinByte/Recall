@@ -5,7 +5,8 @@ import type {
   TeamRow,
   TrackedMode,
 } from "../matches/types.js"
-import type { GradeResult } from "../matches/grade.js"
+import type { RecallGrade } from "../../../src/shared/recall-grade.js"
+import type { GradeBreakdown } from "../review/types.js"
 import {
   GRADE_CORE_FACT_CONTRACT_VERSION,
   GRADE_CORE_FIELDS,
@@ -25,6 +26,13 @@ export interface LobbyFilter {
   untilMs?: number
   championIds?: number[]
   roles?: string[]
+}
+
+interface LegacyStoredGradeResult {
+  grade: RecallGrade
+  score: number
+  percentile: number
+  breakdown: GradeBreakdown
 }
 
 /** The whole scoreboard for one recorded game. */
@@ -56,8 +64,8 @@ export interface OwnerAugmentSummary {
   lastPlayedAt: number
   /** Legacy/internal compatibility normal score. */
   averageGrade?: number
-  /** Visible authoritative Recall v3 average (0-100). */
-  averageRoleFit?: number
+  /** Visible authoritative Recall average (0-100). */
+  averageRecallScore?: number
   kda: number
   damagePerMinute: number
   champions: { championId: number; games: number }[]
@@ -501,7 +509,7 @@ function toParticipantRow(row: Record<string, never>): ParticipantRow {
     grade: row.grade ?? undefined,
     gradeScore: row.grade_score ?? undefined,
     gradeAlgorithmVersion: row.grade_algorithm_version ?? undefined,
-    roleFitScore: row.role_fit_score ?? undefined,
+    recallScore: row.role_fit_score ?? undefined,
     gradeRecipeId: row.grade_recipe_id ?? undefined,
     gradeStatus: row.grade_status ?? undefined,
     gradeEvidenceCoverage: row.grade_evidence_coverage ?? undefined,
@@ -689,7 +697,7 @@ export class ParticipantsRepository {
     return insertAll(rows)
   }
 
-  setGrades(gameId: number, puuid: string, grades: Map<number, GradeResult>) {
+  setGrades(gameId: number, puuid: string, grades: Map<number, LegacyStoredGradeResult>) {
     if (grades.size === 0) return
     assertLegacyGradeWriterAvailable(this.db)
     const update = this.db.prepare(
@@ -705,7 +713,7 @@ export class ParticipantsRepository {
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
     const save = this.db.transaction(() => {
-      const first = grades.values().next().value as GradeResult | undefined
+      const first = grades.values().next().value as LegacyStoredGradeResult | undefined
       if (!first) return
       const algorithmVersion = first.breakdown.algorithmVersion
       if ([...grades.values()].some((result) =>
@@ -879,7 +887,7 @@ export class ParticipantsRepository {
               MIN(m.played_at) AS firstPlayedAt,
               MAX(m.played_at) AS lastPlayedAt,
               AVG(p.grade_score) AS averageGrade,
-              AVG(p.role_fit_score) AS averageRoleFit,
+              AVG(p.role_fit_score) AS averageRecallScore,
               SUM(p.kills + p.assists) * 1.0 / MAX(1, SUM(p.deaths)) AS kda,
               AVG(p.damage_to_champions * 60.0 / MAX(1, m.duration_secs))
                 AS damagePerMinute
@@ -893,7 +901,7 @@ export class ParticipantsRepository {
        ORDER BY games DESC, a.augment_id`,
     ).all(...params) as Array<Omit<OwnerAugmentSummary, "champions"> & {
       averageGrade: number | null
-      averageRoleFit: number | null
+      averageRecallScore: number | null
     }>
     const championRows = this.db.prepare(
       `SELECT a.augment_id AS augmentId, p.champion_id AS championId,
@@ -914,7 +922,7 @@ export class ParticipantsRepository {
     return rows.map((row) => ({
       ...row,
       averageGrade: row.averageGrade ?? undefined,
-      averageRoleFit: row.averageRoleFit ?? undefined,
+      averageRecallScore: row.averageRecallScore ?? undefined,
       champions: championRows
         .filter((entry) => entry.augmentId === row.augmentId)
         .map(({ championId, games }) => ({ championId, games })),

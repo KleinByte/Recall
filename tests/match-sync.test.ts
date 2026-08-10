@@ -228,7 +228,7 @@ describe("MatchSync", () => {
     })
   })
 
-  it("delegates every newly stored full lobby to Recall v3", async () => {
+  it("delegates every newly stored full lobby to Recall", async () => {
     const client = new FakeClient([1, 2].map((id) => aramGame(id)))
     const gradeStoredMatch = vi.fn(() => "ready" as const)
     const sync = new MatchSync(

@@ -5,18 +5,18 @@ export type ManagedBackupReason =
   | "daily" | "manual" | "pre-update" | "pre-migration"
   | "pre-repair" | "pre-restore" | "pre-clear" | "pre-cleanup"
 
-export type BackupProtectionV2 =
+export type BackupProtectionLegacy =
   | { kind: "none" }
   | { kind: "through_release"; throughReleaseSequence: number }
   | { kind: "until_user_deletes" }
 
-export interface ManagedBackupManifestV2 {
+export interface ManagedBackupManifestLegacy {
   format: "recall-managed-backup"
   manifestVersion: 2
   fileName: string
   createdAt: number
   reason: ManagedBackupReason
-  protection: BackupProtectionV2
+  protection: BackupProtectionLegacy
   appVersion: string
   releaseSequence: number
   sha256: string
@@ -26,7 +26,7 @@ export interface ManagedBackupManifestV2 {
   integrity: "ok"
 }
 
-export interface RetentionCandidate extends Omit<Partial<ManagedBackupManifestV2>,
+export interface RetentionCandidate extends Omit<Partial<ManagedBackupManifestLegacy>,
   "reason" | "integrity" | "manifestVersion" | "fileName" | "createdAt" | "sizeBytes"> {
   fileName: string
   createdAt: number
@@ -51,14 +51,14 @@ export interface BackupRetentionProposal {
 export function protectionForReason(
   reason: ManagedBackupReason,
   releaseSequence = BACKUP_RELEASE_SEQUENCE,
-): BackupProtectionV2 {
+): BackupProtectionLegacy {
   if (reason === "manual" || reason === "pre-clear") return { kind: "until_user_deletes" }
   if (reason === "daily") return { kind: "none" }
   return { kind: "through_release", throughReleaseSequence: releaseSequence + 1 }
 }
 
 export function isProtectionActive(
-  protection: BackupProtectionV2,
+  protection: BackupProtectionLegacy,
   releaseSequence = BACKUP_RELEASE_SEQUENCE,
 ): boolean {
   return protection.kind === "until_user_deletes" ||
