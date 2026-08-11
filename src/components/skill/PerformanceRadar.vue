@@ -59,7 +59,7 @@ const option = computed<EChartsCoreOption>(() => {
     legend: {
       show: hasRecent,
       bottom: 0,
-      textStyle: { color: CHART_COLOURS.textSubtle, fontSize: 10 },
+      textStyle: { color: CHART_COLOURS.textSubtle, fontSize: 11 },
     },
     radar: {
       center: ["50%", hasRecent ? "46%" : "50%"],

@@ -81,6 +81,110 @@ describe("LiveGameCaptureRepository", () => {
     expect(rows.map((row) => row.role)).toEqual(["MIDDLE", "JUNGLE", "SOLO"])
   })
 
+  it("stamps the local bonus shards from Riot's active-player rune page", () => {
+    const db = new Database(":memory:")
+    applyMigrations(db)
+    const repo = new LiveGameCaptureRepository(db as never)
+    repo.record(10, "owner", snapshot(4, {
+      activePlayer: {
+        ...snapshot(4).activePlayer!,
+        runes: {
+          primaryStyleId: 8000,
+          secondaryStyleId: 8300,
+          generalRuneIds: [8005, 9111, 9104, 8014, 8345, 8347],
+          statRuneIds: [5005, 5008, 5001],
+        },
+      },
+    }))
+    const rows = mapParticipants({
+      gameId: 10,
+      participantIdentities: [
+        { participantId: 1, player: { puuid: "owner" } },
+        { participantId: 2, player: { puuid: "enemy" } },
+      ],
+      participants: [
+        {
+          participantId: 1,
+          teamId: 100,
+          stats: {
+            perkPrimaryStyle: 8000,
+            perkSubStyle: 8300,
+            perk0: 8005,
+            perk0Var1: 42,
+            perk1: 9111,
+            perk2: 9104,
+            perk3: 8014,
+            perk4: 8345,
+            perk5: 8347,
+          },
+        },
+        { participantId: 2, teamId: 200, stats: { perk0: 8112 } },
+      ],
+    }, "owner")
+
+    expect(repo.stampRunes(10, "owner", rows)).toBe(1)
+    expect(rows[0].runeSelections).toEqual([
+      expect.objectContaining({ runeId: 8005, slot: 0, var1: 42 }),
+      expect.objectContaining({ runeId: 9111, slot: 1 }),
+      expect.objectContaining({ runeId: 9104, slot: 2 }),
+      expect.objectContaining({ runeId: 8014, slot: 3 }),
+      expect.objectContaining({ runeId: 8345, slot: 4 }),
+      expect.objectContaining({ runeId: 8347, slot: 5 }),
+      expect.objectContaining({ runeId: 5005, slot: 6 }),
+      expect.objectContaining({ runeId: 5008, slot: 7 }),
+      expect.objectContaining({ runeId: 5001, slot: 8 }),
+    ])
+    expect(rows[1].runeSelections).toEqual([
+      expect.objectContaining({ runeId: 8112, slot: 0 }),
+    ])
+    expect(repo.stampRunes(10, "owner", rows)).toBe(0)
+  })
+
+  it("repairs an already-stored local rune page from a durable live snapshot", () => {
+    const db = new Database(":memory:")
+    applyMigrations(db)
+    const repo = new LiveGameCaptureRepository(db as never)
+    const participants = new ParticipantsRepository(db as never)
+    const rows = mapParticipants({
+      gameId: 10,
+      participantIdentities: [{ participantId: 1, player: { puuid: "owner" } }],
+      participants: [{
+        participantId: 1,
+        teamId: 100,
+        stats: {
+          perkPrimaryStyle: 8000,
+          perkSubStyle: 8300,
+          perk0: 8005,
+          perk1: 9111,
+          perk2: 9104,
+          perk3: 8014,
+          perk4: 8345,
+          perk5: 8347,
+        },
+      }],
+    }, "owner")
+    participants.insertMany(rows)
+    repo.record(10, "owner", snapshot(4, {
+      activePlayer: {
+        ...snapshot(4).activePlayer!,
+        runes: {
+          primaryStyleId: 8000,
+          secondaryStyleId: 8300,
+          generalRuneIds: [8005, 9111, 9104, 8014, 8345, 8347],
+          statRuneIds: [5005, 5008, 5001],
+        },
+      },
+    }))
+
+    expect(repo.repairStoredRunes("owner")).toBe(1)
+    expect(
+      participants.getMatchDetail(10, "owner").participants[0].runeSelections
+        ?.filter((selection) => selection.slot >= 6)
+        .map((selection) => selection.runeId),
+    ).toEqual([5005, 5008, 5001])
+    expect(repo.repairStoredRunes("owner")).toBe(0)
+  })
+
   it("repairs positions in lobbies stored before live roles were applied", () => {
     const db = new Database(":memory:")
     applyMigrations(db)

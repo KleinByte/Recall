@@ -536,7 +536,7 @@ const ariaLabel = computed(() =>
 .aside-label {
   margin: 0 0 4px;
   color: var(--cyan, #0acbe6);
-  font-size: 10px;
+  font-size: var(--ui-text-micro);
   letter-spacing: .12em;
   text-transform: uppercase;
 }

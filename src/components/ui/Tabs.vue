@@ -53,8 +53,8 @@ const model = defineModel<string>({ required: true })
   border-right: 1px solid var(--ui-divider);
   background: transparent;
   color: var(--ui-text-muted);
-  font: 11px var(--ui-font-heading);
-  letter-spacing: 1.15px;
+  font: var(--ui-text-label) var(--ui-font-heading);
+  letter-spacing: .9px;
   text-transform: uppercase;
   cursor: pointer;
 }
@@ -71,15 +71,15 @@ const model = defineModel<string>({ required: true })
 .ui-tabs button:focus-visible { z-index: 1; outline: 2px solid var(--ui-focus-ring); outline-offset: -2px; }
 .ui-tabs button:disabled { opacity: .42; cursor: not-allowed; }
 .variant-compact { width: max-content; max-width: 100%; border-radius: var(--ui-radius-sm); }
-.variant-compact button { min-height: var(--ui-control-height-compact); padding: 4px var(--ui-space-3); font-size: 10px; }
+.variant-compact button { min-height: var(--ui-control-height-compact); padding: 4px var(--ui-space-3); font-size: var(--ui-text-label); }
 
 @media (max-width: 560px) {
   .ui-tabs:not(.variant-compact) button {
     flex: 1 1 0;
     min-width: 0;
     padding-inline: var(--ui-space-2);
-    font-size: 10px;
-    letter-spacing: .8px;
+    font-size: var(--ui-text-label);
+    letter-spacing: .65px;
   }
 }
 </style>

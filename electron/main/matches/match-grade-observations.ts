@@ -97,6 +97,8 @@ export interface GradeRawLobby {
   clusterId: string
   /** Local database identity; never used as a calibration cluster key. */
   matchId: number
+  /** Match completion time used only to select a versioned mode baseline. */
+  playedAt?: number
   puuid: string
   durationSecs: number
   context: MatchGradeModeContext

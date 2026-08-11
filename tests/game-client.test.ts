@@ -19,6 +19,13 @@ describe("readLiveGameSnapshot", () => {
         currentGold: 1_245.8,
         level: 11,
         championStats: { abilityHaste: 35 },
+        fullRunes: {
+          primaryRuneTree: { id: 8000 },
+          secondaryRuneTree: { id: 8300 },
+          generalRunes: [8005, 9111, 9104, 8014, 8345, 8347]
+            .map((id) => ({ id })),
+          statRunes: [{ id: 5005 }, { id: 5008 }, { id: 5001 }],
+        },
       },
       "/liveclientdata/playerlist": [
         {
@@ -105,6 +112,12 @@ describe("readLiveGameSnapshot", () => {
     expect(snapshot.enemies[0]).toMatchObject({
       isDead: true,
       respawnTimer: 12.3,
+    })
+    expect(snapshot.activePlayer?.runes).toEqual({
+      primaryStyleId: 8000,
+      secondaryStyleId: 8300,
+      generalRuneIds: [8005, 9111, 9104, 8014, 8345, 8347],
+      statRuneIds: [5005, 5008, 5001],
     })
     expect(snapshot.events[0]).toMatchObject({
       id: 9,

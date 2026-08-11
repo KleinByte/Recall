@@ -7,7 +7,9 @@ import { GradePersistenceRepository } from "../electron/main/database/grade-pers
 import { MatchSourceRepository } from "../electron/main/database/match-source-repo.js"
 import {
   MatchGradingService,
+  selectRecentModeReferenceLobbies,
 } from "../electron/main/matches/match-grading-service.js"
+import type { GradeRawLobby } from "../electron/main/matches/match-grade-observations.js"
 import { MATCH_GRADE_RECIPE_DEFINITION_ID } from "../electron/main/matches/match-grade-recipe.js"
 import { POSITION_RESOLVER_VERSION } from "../electron/main/matches/position.js"
 import {
@@ -318,6 +320,7 @@ describe("MatchGradingService", () => {
       supportedScopes: [],
       supportedModes: [],
     })
+    expect(service.needsAutomaticReferenceUpdate()).toBe(false)
     expect(service.ensureFrozenReference(BACKUP)).toMatchObject({ state: "calibrating" })
     expect(db.prepare("SELECT COUNT(*) AS count FROM grade_calibration_snapshots").get())
       .toEqual({ count: 0 })
@@ -573,7 +576,7 @@ describe("MatchGradingService", () => {
     ])
   })
 
-  it("withholds a later unrepresented mode until explicit recalibration", () => {
+  it("automatically freezes a later mode without changing an existing mode baseline", () => {
     const { db, matches, participants } = databaseWithMatches(10)
     const service = new MatchGradingService(db, () => 10_000)
     const first = service.ensureFrozenReference(BACKUP)
@@ -582,6 +585,11 @@ describe("MatchGradingService", () => {
       supportedModes: ["sr_normal"],
       referenceMatches: 10,
     })
+    const originalSr = db.prepare(`
+      SELECT role_fit_score AS score,
+             grade_reference_metadata_json AS metadata
+      FROM matches WHERE game_id = 1 AND puuid = ?
+    `).get(PUUID) as { score: number; metadata: string }
 
     for (let gameId = 101; gameId <= 110; gameId += 1) {
       matches.insertMany([aramMatch(gameId)])
@@ -593,12 +601,21 @@ describe("MatchGradingService", () => {
       eligibleMatches: 20,
       supportedModes: ["sr_normal"],
       referenceMatches: 10,
+      modeReferences: expect.arrayContaining([{
+        mode: "aram",
+        state: "building",
+        readyToFreeze: true,
+        eligibleMatches: 10,
+        requiredMatches: 10,
+        newMatches: 10,
+      }]),
     })
     expect(db.prepare(`
       SELECT grade_status AS status FROM matches WHERE game_id = 101 AND puuid = ?
     `).get(PUUID)).toEqual({ status: "calibrating" })
 
-    const rebuilt = service.rebuildReference(BACKUP)
+    expect(service.needsAutomaticReferenceUpdate()).toBe(true)
+    const rebuilt = service.ensureFrozenReference(BACKUP)
     expect(rebuilt).toMatchObject({ processed: 20, ready: 20, errors: 0 })
     expect(service.referenceStatus()).toMatchObject({
       supportedModes: ["aram", "sr_normal"],
@@ -607,6 +624,12 @@ describe("MatchGradingService", () => {
     expect(db.prepare(`
       SELECT grade_status AS status FROM matches WHERE game_id = 101 AND puuid = ?
     `).get(PUUID)).toEqual({ status: "ready" })
+    expect(service.needsAutomaticReferenceUpdate()).toBe(false)
+    expect(db.prepare(`
+      SELECT role_fit_score AS score,
+             grade_reference_metadata_json AS metadata
+      FROM matches WHERE game_id = 1 AND puuid = ?
+    `).get(PUUID)).toEqual(originalSr)
   })
 
   it("treats an older v3 recipe definition as a required direct cutover", () => {
@@ -672,23 +695,107 @@ describe("MatchGradingService", () => {
       .toEqual({ count: 0 })
   })
 
-  it("manual recalibration creates a new snapshot and regrades every match", () => {
+  it("manual recalibration preserves old comparisons and activates the new epoch for future games", () => {
     const { db, matches, participants } = databaseWithMatches(12)
     const service = new MatchGradingService(db, () => 10_000)
     service.ensureFrozenReference(BACKUP)
     const first = service.referenceStatus().calibrationId
     matches.insertMany([match(13)])
     participants.insertMany(lobby(13, 500))
+    expect(service.gradeStoredMatch(13, PUUID)).toBe("ready")
+    const before = db.prepare(`
+      SELECT role_fit_score AS score,
+             grade_reference_metadata_json AS metadata
+      FROM matches WHERE game_id = 13 AND puuid = ?
+    `).get(PUUID) as { score: number; metadata: string }
+    // A later timestamp in another, still-underfilled mode must not delay the
+    // new Summoner's Rift epoch.
+    matches.insertMany([aramMatch(500)])
+    participants.insertMany(lobby(500))
 
     const rebuilt = service.rebuildReference(BACKUP)
     const second = service.referenceStatus()
-    expect(rebuilt).toMatchObject({ processed: 13, errors: 0 })
+    expect(rebuilt).toMatchObject({ processed: 14, errors: 0 })
     expect(second.calibrationId).not.toBe(first)
     expect(second.referenceMatches).toBe(13)
     expect(db.prepare(`
       SELECT COUNT(*) AS count FROM match_grade_attempts
       WHERE algorithm_version = 3 AND recipe_id = ?
-    `).get(second.recipeId)).toEqual({ count: 13 })
+    `).get(second.recipeId)).toEqual({ count: 14 })
+    expect(db.prepare(`
+      SELECT role_fit_score AS score,
+             grade_reference_metadata_json AS metadata
+      FROM matches WHERE game_id = 13 AND puuid = ?
+    `).get(PUUID)).toEqual(before)
+
+    matches.insertMany([match(14)])
+    participants.insertMany(lobby(14, 700))
+    expect(service.gradeStoredMatch(14, PUUID)).toBe("ready")
+    const futureMetadata = JSON.parse((db.prepare(`
+      SELECT grade_reference_metadata_json AS metadata
+      FROM matches WHERE game_id = 14 AND puuid = ?
+    `).get(PUUID) as { metadata: string }).metadata) as {
+      modeBaselineEffectiveFrom: number
+    }
+    expect(futureMetadata.modeBaselineEffectiveFrom).toBeGreaterThan(match(13).playedAt)
+    expect(futureMetadata.modeBaselineEffectiveFrom).toBeLessThan(aramMatch(500).playedAt)
+  })
+
+  it("uses the stored creation time when upgrading a legacy v3 snapshot in memory", () => {
+    const { db, matches, participants } = databaseWithMatches(10)
+    const service = new MatchGradingService(db, () => 42_000)
+    service.ensureFrozenReference(BACKUP)
+    const selected = service.referenceStatus()
+    const stored = db.prepare(`
+      SELECT snapshot_json AS snapshotJson
+      FROM grade_calibration_snapshots WHERE calibration_id = ?
+    `).get(selected.calibrationId) as { snapshotJson: string }
+    const legacy = JSON.parse(stored.snapshotJson) as {
+      modeEpochs?: unknown
+      recentMatchLimit?: unknown
+    }
+    delete legacy.modeEpochs
+    delete legacy.recentMatchLimit
+    // Reproduce a row written before immutable snapshot triggers were added.
+    db.exec("DROP TRIGGER grade_calibration_snapshots_immutable_update")
+    db.prepare(`
+      UPDATE grade_calibration_snapshots SET snapshot_json = ?
+      WHERE calibration_id = ?
+    `).run(JSON.stringify(legacy), selected.calibrationId)
+
+    matches.insertMany([match(11)])
+    participants.insertMany(lobby(11))
+    expect(service.gradeStoredMatch(11, PUUID)).toBe("ready")
+    const metadata = JSON.parse((db.prepare(`
+      SELECT grade_reference_metadata_json AS metadata
+      FROM matches WHERE game_id = 11 AND puuid = ?
+    `).get(PUUID) as { metadata: string }).metadata) as {
+      modeBaselineFrozenAt: number
+    }
+    expect(metadata.modeBaselineFrozenAt).toBe(42_000)
+  })
+
+  it("selects the 100 most recent reference games within one exact mode", () => {
+    const lobbies = [
+      ...Array.from({ length: 105 }, (_, index) => ({
+        clusterId: `sr:${index + 1}`,
+        matchId: index + 1,
+        playedAt: 1_000 + index,
+        context: { trackedMode: "sr_normal" },
+      })),
+      {
+        clusterId: "aram:newer",
+        matchId: 999,
+        playedAt: 99_999,
+        context: { trackedMode: "aram" },
+      },
+    ] as unknown as GradeRawLobby[]
+
+    const selected = selectRecentModeReferenceLobbies(lobbies, "sr_normal")
+    expect(selected).toHaveLength(100)
+    expect(selected[0].matchId).toBe(105)
+    expect(selected.at(-1)?.matchId).toBe(6)
+    expect(selected.some((lobby) => lobby.context.trackedMode !== "sr_normal")).toBe(false)
   })
 
   it("rolls the whole rebuild back if recalibration is interrupted", () => {

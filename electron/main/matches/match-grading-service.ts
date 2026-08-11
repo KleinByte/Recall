@@ -91,6 +91,7 @@ import {
 } from "./timeline-source-selector.js"
 
 export const MATCH_GRADE_MINIMUM_SNAPSHOT_MATCHES = MATCH_GRADE_MINIMUM_SCOPE_MATCHES
+export const MATCH_GRADE_MODE_REFERENCE_LIMIT = 100
 
 interface StoredMatchRow {
   gameId: number
@@ -167,6 +168,18 @@ export interface PerformanceReferenceStatus {
   calibrationId?: string
   frozenAt?: number
   referenceMatches?: number
+  modeReferences: PerformanceModeReferenceStatus[]
+}
+
+export interface PerformanceModeReferenceStatus {
+  mode: string
+  state: "building" | "frozen"
+  readyToFreeze: boolean
+  eligibleMatches: number
+  requiredMatches: number
+  referenceMatches?: number
+  frozenAt?: number
+  newMatches: number
 }
 
 export interface PerformanceReferenceRebuildProgress {
@@ -496,6 +509,7 @@ function toRawLobby(
   return {
     clusterId: gradeCalibrationClusterId(match),
     matchId: match.gameId,
+    playedAt: match.playedAt,
     puuid: match.puuid,
     durationSecs: match.durationSecs,
     context,
@@ -540,13 +554,26 @@ interface LoadedTimelineEvidence {
   wardEventsComplete: boolean
 }
 
-function snapshotFromUnknown(value: unknown): GradeCalibrationSnapshot {
+interface ModeCalibrationEpoch {
+  /** Games completed before this instant retain the preceding epoch. */
+  effectiveFrom: number
+  frozenAt: number
+  eligibleMatchesAtFreeze: number
+  snapshot: GradeCalibrationSnapshot
+}
+
+interface VersionedGradeCalibrationSnapshot extends GradeCalibrationSnapshot {
+  modeEpochs?: Record<string, ModeCalibrationEpoch[]>
+  recentMatchLimit?: number
+}
+
+function snapshotFromUnknown(value: unknown): VersionedGradeCalibrationSnapshot {
   if (!value || typeof value !== "object" ||
       (value as GradeCalibrationSnapshot).formatVersion !==
         MATCH_GRADE_CALIBRATION_FORMAT_VERSION) {
     throw new Error("grade_v3_calibration_snapshot_invalid")
   }
-  const snapshot = value as GradeCalibrationSnapshot
+  const snapshot = value as VersionedGradeCalibrationSnapshot
   if (!Array.isArray(snapshot.referencePopulation?.supportedModes) ||
       !Array.isArray(snapshot.referencePopulation?.supportedScopes) ||
       snapshot.referencePopulation.clusterIdentity !==
@@ -558,6 +585,34 @@ function snapshotFromUnknown(value: unknown): GradeCalibrationSnapshot {
        !snapshot.detailObservations || typeof snapshot.detailObservations !== "object" ||
        !Array.isArray(snapshot.compositeObservations)) {
     throw new Error("grade_v3_calibration_snapshot_invalid")
+  }
+  if (snapshot.modeEpochs !== undefined) {
+    if (!snapshot.modeEpochs || typeof snapshot.modeEpochs !== "object" ||
+        Array.isArray(snapshot.modeEpochs)) {
+      throw new Error("grade_v3_calibration_snapshot_invalid")
+    }
+    for (const [mode, epochs] of Object.entries(snapshot.modeEpochs)) {
+      if (!mode || !Array.isArray(epochs) || epochs.length === 0) {
+        throw new Error("grade_v3_calibration_snapshot_invalid")
+      }
+      let previousEffectiveFrom = Number.NEGATIVE_INFINITY
+      for (const epoch of epochs) {
+        if (!epoch.snapshot || typeof epoch.snapshot !== "object" ||
+            !Number.isFinite(epoch.effectiveFrom) || !Number.isFinite(epoch.frozenAt) ||
+            !Number.isSafeInteger(epoch.eligibleMatchesAtFreeze) ||
+            epoch.effectiveFrom < previousEffectiveFrom) {
+          throw new Error("grade_v3_calibration_snapshot_invalid")
+        }
+        const epochSnapshot = snapshotFromUnknown(epoch.snapshot)
+        if (epoch.eligibleMatchesAtFreeze < epochSnapshot.clusterIds.length ||
+            epochSnapshot.modeEpochs !== undefined ||
+            epochSnapshot.referencePopulation.supportedModes.length !== 1 ||
+            epochSnapshot.referencePopulation.supportedModes[0] !== mode) {
+          throw new Error("grade_v3_calibration_snapshot_invalid")
+        }
+        previousEffectiveFrom = epoch.effectiveFrom
+      }
+    }
   }
   return snapshot
 }
@@ -586,6 +641,191 @@ function calibrationScopeStatus(lobbies: readonly GradeRawLobby[]) {
     supportedScopes: supported.map((scope) => scope.scopeKey),
     supportedModes: [...new Set(supported.map((scope) => scope.trackedMode))].sort(),
   }
+}
+
+function snapshotForMode(
+  snapshot: GradeCalibrationSnapshot,
+  mode: string,
+): GradeCalibrationSnapshot {
+  const observations = Object.fromEntries(MATCH_GRADE_METRIC_KEYS.map((metric) => [
+    metric,
+    snapshot.observations[metric].filter((row) => row.trackedMode === mode),
+  ])) as GradeCalibrationSnapshot["observations"]
+  const detailObservations = Object.fromEntries(Object.entries(snapshot.detailObservations)
+    .map(([metric, rows]) => [metric, rows.filter((row) => row.trackedMode === mode)]))
+  const compositeObservations = snapshot.compositeObservations
+    .filter((row) => row.trackedMode === mode)
+  const clusterIds = new Set<string>()
+  for (const rows of Object.values(observations)) {
+    for (const row of rows) clusterIds.add(row.clusterId)
+  }
+  for (const rows of Object.values(detailObservations)) {
+    for (const row of rows) clusterIds.add(row.clusterId)
+  }
+  for (const row of compositeObservations) clusterIds.add(row.clusterId)
+  const supportedScopes = snapshot.referencePopulation.supportedScopes
+    .filter((scope) => scope.startsWith(`${mode}:`))
+  return {
+    formatVersion: MATCH_GRADE_CALIBRATION_FORMAT_VERSION,
+    referencePopulation: {
+      kind: "local_recall_installation",
+      clusterUnit: "match",
+      clusterIdentity: MATCH_GRADE_RECIPE.calibration.clusterIdentity,
+      frozen: true,
+      supportedModes: [mode],
+      supportedScopes,
+      scopeMatchCounts: Object.fromEntries(supportedScopes.map((scope) => [
+        scope,
+        snapshot.referencePopulation.scopeMatchCounts[scope] ?? 0,
+      ])),
+    },
+    clusterIds: [...clusterIds].sort(),
+    observations,
+    detailObservations,
+    compositeObservations,
+  }
+}
+
+function epochsFromSnapshot(
+  snapshot: VersionedGradeCalibrationSnapshot,
+  frozenAt: number,
+): Record<string, ModeCalibrationEpoch[]> {
+  if (snapshot.modeEpochs) {
+    return Object.fromEntries(Object.entries(snapshot.modeEpochs).map(([mode, epochs]) => [
+      mode,
+      epochs.map((epoch) => ({
+        effectiveFrom: epoch.effectiveFrom,
+        frozenAt: epoch.frozenAt,
+        eligibleMatchesAtFreeze: epoch.eligibleMatchesAtFreeze,
+        snapshot: epoch.snapshot,
+      })),
+    ]))
+  }
+  return Object.fromEntries(snapshot.referencePopulation.supportedModes.map((mode) => [
+    mode,
+    [{
+      effectiveFrom: 0,
+      frozenAt,
+      eligibleMatchesAtFreeze: snapshotForMode(snapshot, mode).clusterIds.length,
+      snapshot: snapshotForMode(snapshot, mode),
+    }],
+  ]))
+}
+
+function combineModeEpochs(
+  modeEpochs: Readonly<Record<string, readonly ModeCalibrationEpoch[]>>,
+): VersionedGradeCalibrationSnapshot {
+  const latest = Object.entries(modeEpochs)
+    .filter(([, epochs]) => epochs.length > 0)
+    .map(([mode, epochs]) => [mode, epochs.at(-1)!.snapshot] as const)
+    .sort(([left], [right]) => left.localeCompare(right))
+  const observations = Object.fromEntries(MATCH_GRADE_METRIC_KEYS.map((metric) => [
+    metric,
+    latest.flatMap(([, snapshot]) => snapshot.observations[metric]),
+  ])) as GradeCalibrationSnapshot["observations"]
+  const detailKeys = [...new Set(latest.flatMap(([, snapshot]) =>
+    Object.keys(snapshot.detailObservations)))].sort()
+  const detailObservations = Object.fromEntries(detailKeys.map((metric) => [
+    metric,
+    latest.flatMap(([, snapshot]) => snapshot.detailObservations[metric] ?? []),
+  ]))
+  const supportedScopes = latest.flatMap(([, snapshot]) =>
+    snapshot.referencePopulation.supportedScopes).sort()
+  return {
+    formatVersion: MATCH_GRADE_CALIBRATION_FORMAT_VERSION,
+    referencePopulation: {
+      kind: "local_recall_installation",
+      clusterUnit: "match",
+      clusterIdentity: MATCH_GRADE_RECIPE.calibration.clusterIdentity,
+      frozen: true,
+      supportedModes: latest.map(([mode]) => mode),
+      supportedScopes,
+      scopeMatchCounts: Object.fromEntries(latest.flatMap(([, snapshot]) =>
+        Object.entries(snapshot.referencePopulation.scopeMatchCounts))),
+    },
+    clusterIds: [...new Set(latest.flatMap(([, snapshot]) => snapshot.clusterIds))].sort(),
+    observations,
+    detailObservations,
+    compositeObservations: latest.flatMap(([, snapshot]) =>
+      snapshot.compositeObservations),
+    modeEpochs: Object.fromEntries(Object.entries(modeEpochs)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([mode, epochs]) => [mode, epochs.map((epoch) => ({
+        effectiveFrom: epoch.effectiveFrom,
+        frozenAt: epoch.frozenAt,
+        eligibleMatchesAtFreeze: epoch.eligibleMatchesAtFreeze,
+        snapshot: epoch.snapshot,
+      }))])),
+    recentMatchLimit: MATCH_GRADE_MODE_REFERENCE_LIMIT,
+  }
+}
+
+function epochForMatch(
+  snapshot: VersionedGradeCalibrationSnapshot,
+  mode: string,
+  playedAt: number,
+): ModeCalibrationEpoch | undefined {
+  const epochs = snapshot.modeEpochs?.[mode]
+  if (!epochs?.length) {
+    return snapshot.referencePopulation.supportedModes.includes(mode)
+      ? {
+        effectiveFrom: 0,
+        frozenAt: 0,
+        eligibleMatchesAtFreeze: snapshotForMode(snapshot, mode).clusterIds.length,
+        snapshot: snapshotForMode(snapshot, mode),
+      }
+      : undefined
+  }
+  return [...epochs].reverse().find((epoch) => epoch.effectiveFrom <= playedAt) ?? epochs[0]
+}
+
+/** Pure selection rule shared with calibration contract tests. */
+export function selectRecentModeReferenceLobbies(
+  lobbies: readonly GradeRawLobby[],
+  mode: string,
+): GradeRawLobby[] {
+  return lobbies.filter((lobby) => lobby.context.trackedMode === mode)
+    .sort((left, right) =>
+      (right.playedAt ?? right.matchId) - (left.playedAt ?? left.matchId) ||
+      right.matchId - left.matchId || right.clusterId.localeCompare(left.clusterId))
+    .slice(0, MATCH_GRADE_MODE_REFERENCE_LIMIT)
+}
+
+function modeReferenceStatuses(
+  lobbies: readonly GradeRawLobby[],
+  snapshot?: VersionedGradeCalibrationSnapshot,
+  legacyFrozenAt = 0,
+  readyModes: ReadonlySet<string> = new Set(),
+): PerformanceModeReferenceStatus[] {
+  const eligible = new Map<string, number>()
+  for (const lobby of lobbies) {
+    eligible.set(lobby.context.trackedMode, (eligible.get(lobby.context.trackedMode) ?? 0) + 1)
+  }
+  const modes = new Set([...eligible.keys(), ...Object.keys(snapshot?.modeEpochs ?? {}),
+    ...(snapshot?.referencePopulation.supportedModes ?? [])])
+  const allEpochs = snapshot ? epochsFromSnapshot(snapshot, legacyFrozenAt) : {}
+  return [...modes].sort().map((mode) => {
+    const epochs = allEpochs[mode]
+    const latest = epochs?.at(-1)
+    const eligibleMatches = eligible.get(mode) ?? 0
+    return latest ? {
+      mode,
+      state: "frozen" as const,
+      readyToFreeze: false,
+      eligibleMatches,
+      requiredMatches: MATCH_GRADE_MINIMUM_SCOPE_MATCHES,
+      referenceMatches: latest.snapshot.clusterIds.length,
+      frozenAt: latest.frozenAt,
+      newMatches: Math.max(0, eligibleMatches - latest.eligibleMatchesAtFreeze),
+    } : {
+      mode,
+      state: "building" as const,
+      readyToFreeze: readyModes.has(mode),
+      eligibleMatches,
+      requiredMatches: MATCH_GRADE_MINIMUM_SCOPE_MATCHES,
+      newMatches: eligibleMatches,
+    }
+  })
 }
 
 const GRADE_CACHE_PRESENT_SQL = `(
@@ -629,7 +869,8 @@ function snapshotReferenceMetadata(
 
 /**
  * One authoritative Grade/RVI coordinator for startup, sync, import,
- * review, and explicit recalibration. Frozen snapshots never absorb new games.
+ * review, and explicit recalibration. Each mode keeps immutable baseline
+ * epochs so a recalibration never changes the comparison used by older games.
  */
 export class MatchGradingService {
   private readonly grades: GradePersistenceRepository
@@ -645,12 +886,19 @@ export class MatchGradingService {
 
   referenceStatus(): PerformanceReferenceStatus {
     const selected = this.grades.getSelectedRecipe(MATCH_GRADE_ALGORITHM_VERSION)
-    const liveScopes = calibrationScopeStatus(this.loadEligibleReferenceLobbies())
+    const eligibleLobbies = this.loadEligibleReferenceLobbies()
+    const liveScopes = calibrationScopeStatus(eligibleLobbies)
     if (!selectedRecipeIsCurrent(selected)) {
       return {
         state: "calibrating",
         requiredMatches: MATCH_GRADE_MINIMUM_SNAPSHOT_MATCHES,
         ...liveScopes,
+        modeReferences: modeReferenceStatuses(
+          eligibleLobbies,
+          undefined,
+          0,
+          new Set(liveScopes.supportedModes),
+        ),
       }
     }
     const row = this.db.prepare(`
@@ -669,6 +917,12 @@ export class MatchGradingService {
       calibrationId: selected.calibrationId,
       frozenAt: row.createdAt,
       referenceMatches: row.sampleCount,
+      modeReferences: modeReferenceStatuses(
+        eligibleLobbies,
+        snapshot,
+        row.createdAt,
+        new Set(liveScopes.supportedModes),
+      ),
     }
   }
 
@@ -804,7 +1058,7 @@ export class MatchGradingService {
 
   /**
    * Freezes the first eligible local reference and performs the direct v3
-   * cutover. Once selected, this is a no-op until explicit recalibration.
+   * cutover. Later modes freeze automatically when their own sample is ready.
    */
   ensureFrozenReference(
     backup: VerifiedGradeBackup,
@@ -820,23 +1074,78 @@ export class MatchGradingService {
       this.purgePreDerivedState(backup)
       status = this.referenceStatus()
     }
-    if (status.state === "frozen") return status
+    if (status.state === "frozen") {
+      return this.needsAutomaticReferenceUpdate(status)
+        ? this.rebuildReference(backup, onProgress, false, false)
+        : status
+    }
     if (status.supportedScopes.length === 0) return status
     return this.rebuildReference(backup, onProgress, true)
   }
 
-  /** Explicit user action: build a new immutable snapshot, purge, and regrade. */
+  /** True when an exact mode has reached its first automatic freeze threshold. */
+  needsAutomaticReferenceUpdate(
+    status: PerformanceReferenceStatus = this.referenceStatus(),
+  ): boolean {
+    if (status.state !== "frozen") return status.supportedScopes.length > 0
+    return status.modeReferences.some((reference) =>
+      reference.state === "building" && reference.readyToFreeze)
+  }
+
+  /**
+   * Explicit user action: append one immutable epoch per eligible mode using
+   * its most recent games. Rewriting derived rows keeps older matches on their
+   * original epoch and activates the new epochs only for future matches.
+   */
   rebuildReference(
     backup: VerifiedGradeBackup,
     onProgress?: (progress: PerformanceReferenceRebuildProgress) => void,
     purgeLegacyAlgorithms = false,
+    recalibrateExistingModes = true,
   ): PerformanceReferenceRebuildResult {
     if (!backup.path || !/^[a-f0-9]{64}$/.test(backup.sha256)) {
       throw new Error("verified_grade_rebuild_backup_required")
     }
     backfillGradeCoreFactsFromRawPayloads(this.db)
     const referenceLobbies = this.loadEligibleReferenceLobbies()
-    const snapshot = buildGradeCalibrationSnapshot(referenceLobbies)
+    const liveScopes = calibrationScopeStatus(referenceLobbies)
+    const previousRecipe = this.grades.getSelectedRecipe(MATCH_GRADE_ALGORITHM_VERSION)
+    const previousSnapshot = selectedRecipeIsCurrent(previousRecipe)
+      ? this.loadSnapshot(previousRecipe.calibrationId)
+      : undefined
+    const previousFrozenAt = selectedRecipeIsCurrent(previousRecipe)
+      ? (this.db.prepare(`
+          SELECT created_at AS createdAt FROM grade_calibration_snapshots
+          WHERE calibration_id = ?
+        `).get(previousRecipe.calibrationId) as { createdAt: number } | undefined)?.createdAt ?? 0
+      : 0
+    const modeEpochs = previousSnapshot
+      ? epochsFromSnapshot(previousSnapshot, previousFrozenAt)
+      : {}
+    const frozenAt = this.now()
+    for (const mode of liveScopes.supportedModes) {
+      const existing = modeEpochs[mode]
+      if (existing?.length && !recalibrateExistingModes) continue
+      const allModeLobbies = referenceLobbies
+        .filter((lobby) => lobby.context.trackedMode === mode)
+      const newestModeMatch = Math.max(0, ...allModeLobbies.map((lobby) =>
+        lobby.playedAt ?? 0))
+      const nextEffectiveFrom = Math.max(frozenAt, newestModeMatch + 1)
+      const modeSnapshot = buildGradeCalibrationSnapshot(
+        selectRecentModeReferenceLobbies(referenceLobbies, mode),
+      )
+      if (!modeSnapshot.referencePopulation.supportedModes.includes(mode)) continue
+      modeEpochs[mode] = [
+        ...(existing ?? []),
+        {
+          effectiveFrom: existing?.length ? nextEffectiveFrom : 0,
+          frozenAt,
+          eligibleMatchesAtFreeze: allModeLobbies.length,
+          snapshot: modeSnapshot,
+        },
+      ]
+    }
+    const snapshot = combineModeEpochs(modeEpochs)
     if (snapshot.referencePopulation.supportedScopes.length === 0) {
       throw new Error("grade_v3_reference_population_too_small")
     }
@@ -1041,8 +1350,10 @@ export class MatchGradingService {
     recipeId: string,
     rviRecipeId: string,
     calibrationId: string,
-    snapshot: GradeCalibrationSnapshot,
+    snapshot: VersionedGradeCalibrationSnapshot,
   ): MatchGradeStatus {
+    const activeEpoch = epochForMatch(snapshot, match.mode, match.playedAt)
+    const activeSnapshot = activeEpoch?.snapshot
     const resolved = resolvedLobbyPositions(participants, match.modeFamily)
     const ineligible = gradeEligibility(match, participants, resolved)
     const raw = ineligible ? undefined : this.buildRawLobby(match, participants, resolved)
@@ -1071,8 +1382,11 @@ export class MatchGradingService {
         status,
         statusReason: status,
         evidenceCoverage: 0,
-        referenceSampleCount: snapshot.clusterIds.length,
-        referenceMetadata: snapshotReferenceMetadata(snapshot, gradeContext(match)),
+        referenceSampleCount: activeSnapshot?.clusterIds.length ?? 0,
+        referenceMetadata: snapshotReferenceMetadata(
+          activeSnapshot ?? snapshot,
+          gradeContext(match),
+        ),
         results: new Map(),
       })
       this.replaceMetricObservations(match, rviRecipeId, [])
@@ -1080,8 +1394,8 @@ export class MatchGradingService {
     }
 
     this.persistResolvedPositions(match, participants, resolved)
-    const scopeMetadata = snapshotReferenceMetadata(snapshot, raw.context)
-    if (!scopeMetadata.scopeFrozen) {
+    const scopeMetadata = snapshotReferenceMetadata(activeSnapshot ?? snapshot, raw.context)
+    if (!activeSnapshot || !scopeMetadata.scopeFrozen) {
       this.grades.writeCanonicalGrade(match.gameId, match.puuid, {
         algorithmVersion: MATCH_GRADE_ALGORITHM_VERSION,
         recipeId,
@@ -1093,10 +1407,22 @@ export class MatchGradingService {
         referenceMetadata: scopeMetadata,
         results: new Map(),
       })
-      this.writeMetricObservations(match, raw, rviRecipeId, calibrationId, snapshot)
+      this.writeMetricObservations(
+        match,
+        raw,
+        rviRecipeId,
+        calibrationId,
+        activeSnapshot ?? snapshot,
+      )
       return "calibrating"
     }
-    const prepared = prepareGradeLobbyFromSnapshot(raw, snapshot)
+    const prepared = prepareGradeLobbyFromSnapshot(raw, activeSnapshot)
+    const referenceMetadata = {
+      ...prepared.referenceMetadata,
+      modeBaselineFrozenAt: activeEpoch.frozenAt,
+      modeBaselineEffectiveFrom: activeEpoch.effectiveFrom,
+      modeReferenceLimit: MATCH_GRADE_MODE_REFERENCE_LIMIT,
+    }
     const outcome = scoreMatchLobby({
       players: prepared.players,
       context: raw.context,
@@ -1114,7 +1440,7 @@ export class MatchGradingService {
         statusReason: outcome.reason ?? outcome.status,
         evidenceCoverage: prepared.evidenceCoverage,
         referenceSampleCount: prepared.referenceSampleCount,
-        referenceMetadata: prepared.referenceMetadata,
+        referenceMetadata,
         results: new Map(),
       })
       this.writeMetricObservations(
@@ -1122,7 +1448,7 @@ export class MatchGradingService {
         raw,
         rviRecipeId,
         calibrationId,
-        snapshot,
+        activeSnapshot,
         prepared,
       )
       return outcome.status
@@ -1137,7 +1463,7 @@ export class MatchGradingService {
         lobbyPercentile: result.lobbyPercentile,
         evidenceCoverage: prepared.evidenceCoverage,
         referenceSampleCount: prepared.referenceSampleCount,
-        referenceMetadata: prepared.referenceMetadata,
+        referenceMetadata,
         breakdown: result.breakdown,
       },
     ]))
@@ -1148,7 +1474,7 @@ export class MatchGradingService {
       status: "ready",
       evidenceCoverage: prepared.evidenceCoverage,
       referenceSampleCount: prepared.referenceSampleCount,
-      referenceMetadata: prepared.referenceMetadata,
+      referenceMetadata,
       results,
     })
     this.writeMetricObservations(
@@ -1156,7 +1482,7 @@ export class MatchGradingService {
       raw,
       rviRecipeId,
       calibrationId,
-      snapshot,
+      activeSnapshot,
       prepared,
     )
     return "ready"
@@ -1347,13 +1673,18 @@ export class MatchGradingService {
     }
   }
 
-  private loadSnapshot(calibrationId: string): GradeCalibrationSnapshot {
+  private loadSnapshot(calibrationId: string): VersionedGradeCalibrationSnapshot {
     const row = this.db.prepare(`
-      SELECT snapshot_json AS snapshotJson
+      SELECT snapshot_json AS snapshotJson, created_at AS createdAt
       FROM grade_calibration_snapshots WHERE calibration_id = ?
-    `).get(calibrationId) as { snapshotJson: string } | undefined
+    `).get(calibrationId) as { snapshotJson: string; createdAt: number } | undefined
     if (!row) throw new Error("grade_calibration_snapshot_not_found")
-    return snapshotFromUnknown(JSON.parse(row.snapshotJson))
+    const snapshot = snapshotFromUnknown(JSON.parse(row.snapshotJson))
+    return snapshot.modeEpochs ? snapshot : {
+      ...snapshot,
+      modeEpochs: epochsFromSnapshot(snapshot, row.createdAt),
+      recentMatchLimit: MATCH_GRADE_MODE_REFERENCE_LIMIT,
+    }
   }
 
   private loadEligibleReferenceLobbies(): GradeRawLobby[] {

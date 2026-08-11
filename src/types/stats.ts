@@ -24,6 +24,18 @@ export interface PerformanceReferenceStatus {
   calibrationId?: string
   frozenAt?: number
   referenceMatches?: number
+  modeReferences: PerformanceModeReferenceStatus[]
+}
+
+export interface PerformanceModeReferenceStatus {
+  mode: string
+  state: "building" | "frozen"
+  readyToFreeze: boolean
+  eligibleMatches: number
+  requiredMatches: number
+  referenceMatches?: number
+  frozenAt?: number
+  newMatches: number
 }
 
 export interface PerformanceReferenceRebuildResult {

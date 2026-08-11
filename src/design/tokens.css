@@ -40,7 +40,7 @@
   --ui-text: var(--dial-metal-200);
   --ui-text-heading: var(--dial-metal-100);
   --ui-text-subtle: #aaa493;
-  --ui-text-muted: #718198;
+  --ui-text-muted: #78889f;
   --ui-text-faint: #566479;
   --ui-text-on-accent: var(--dial-ink-950);
   --ui-text-on-status: #ffffff;
@@ -72,9 +72,14 @@
   --ui-font-heading: "BeaufortforLOL Medium", "BeaufortforLOL", serif;
   --ui-font-body: "Spiegel", system-ui, sans-serif;
   --ui-font-numeric: var(--ui-font-display);
-  --ui-label-size: 10px;
-  --ui-body-size: 13px;
-  --ui-title-size: 15px;
+  --ui-text-micro: 11px;
+  --ui-text-label: 12px;
+  --ui-text-support: 13px;
+  --ui-text-body: 14px;
+  --ui-text-control: 14px;
+  --ui-label-size: var(--ui-text-label);
+  --ui-body-size: var(--ui-text-control);
+  --ui-title-size: 16px;
 
   /* Spacing */
   --ui-space-1: 4px;

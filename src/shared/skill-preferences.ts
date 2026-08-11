@@ -13,6 +13,7 @@ export interface SkillViewPreferences {
   role?: "TOP" | "JUNGLE" | "MIDDLE" | "BOTTOM" | "UTILITY"
   championId?: number
   tab: SkillTab
+  rviArmDetailsOpen?: boolean
 }
 
 const SKILL_TABS: readonly SkillTab[] = ["overview", "insights", "analyze"]
@@ -30,11 +31,16 @@ export function validateSkillViewPreferences(value: unknown): SkillViewPreferenc
       (!Number.isSafeInteger(candidate.championId) || (candidate.championId as number) <= 0)) {
     return undefined
   }
+  if (candidate.rviArmDetailsOpen !== undefined &&
+      typeof candidate.rviArmDetailsOpen !== "boolean") return undefined
   return {
     scopeId: candidate.scopeId as SkillScopeId,
     seasonId: candidate.seasonId,
     ...(candidate.role === undefined ? {} : { role: candidate.role as SkillViewPreferences["role"] }),
     ...(candidate.championId === undefined ? {} : { championId: candidate.championId as number }),
     tab: candidate.tab as SkillTab,
+    ...(candidate.rviArmDetailsOpen === undefined
+      ? {}
+      : { rviArmDetailsOpen: candidate.rviArmDetailsOpen }),
   }
 }

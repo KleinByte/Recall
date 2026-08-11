@@ -64,7 +64,7 @@ withDefaults(defineProps<{
 .variant-ghost { border-color: transparent; background: transparent; color: var(--ui-text-subtle); }
 .variant-danger { border-color: color-mix(in srgb, var(--ui-negative) 50%, transparent); color: var(--ui-negative-text); }
 .variant-danger:hover:not(:disabled) { border-color: var(--ui-negative); background: color-mix(in srgb, var(--ui-negative) 12%, var(--ui-canvas)); }
-.size-compact { min-height: var(--ui-control-height-compact); padding-block: 3px; font-size: 11px; }
+.size-compact { min-height: var(--ui-control-height-compact); padding-block: 3px; font-size: var(--ui-text-label); }
 .icon-only { width: var(--ui-control-height); padding-inline: 0; }
 .size-compact.icon-only { width: var(--ui-control-height-compact); }
 .block { width: 100%; }

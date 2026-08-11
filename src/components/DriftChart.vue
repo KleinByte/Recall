@@ -36,13 +36,13 @@ const option = computed<EChartsCoreOption>(() => ({
   xAxis: {
     type: "category",
     data: props.windows.map((window) => window.label),
-    axisLabel: { fontSize: 10, hideOverlap: true },
+    axisLabel: { fontSize: 11, hideOverlap: true },
   },
   yAxis: {
     type: "value",
     min: 0,
     max: 100,
-    axisLabel: { fontSize: 10, formatter: (value: number) => `${value}%` },
+    axisLabel: { fontSize: 11, formatter: (value: number) => `${value}%` },
   },
   series: series.value,
 }))

@@ -27,7 +27,7 @@ export interface PlaybackCoverage {
 
 export interface PlaybackWorldMarker {
   id: string
-  kind: "tower" | "inhibitor" | "nexus" | "camp" | "dragon" | "elder" | "baron"
+  kind: "tower" | "inhibitor" | "nexus" | "camp" | "dragon" | "elder" | "baron" | "herald" | "void-grub"
   state: "alive" | "destroyed" | "dormant" | "respawning" | "location"
   label: string
   position: { x: number; y: number }
@@ -44,6 +44,10 @@ export interface SpreadMapPoint extends OverlapMapPoint {
   sourceLeft: number
   sourceTop: number
   overlapping: boolean
+  clusterId: string
+  clusterIndex: number
+  clusterSize: number
+  expanded: boolean
 }
 
 interface PositionSample {
@@ -99,54 +103,23 @@ function interpolate(
   }
 }
 
-function catmullRom(a: number, b: number, c: number, d: number, progress: number) {
-  const progress2 = progress * progress
-  const progress3 = progress2 * progress
-  return .5 * (
-    2 * b +
-    (-a + c) * progress +
-    (2 * a - 5 * b + 4 * c - d) * progress2 +
-    (-a + 3 * b - 3 * c + d) * progress3
-  )
-}
-
-function smoothPathPosition(
-  samples: PositionSample[],
-  beforeIndex: number,
-  timestamp: number,
-  participantId: number,
-): PlaybackPosition {
-  const from = samples[beforeIndex]
-  const to = samples[beforeIndex + 1]
-  const previous = samples[Math.max(0, beforeIndex - 1)]
-  const next = samples[Math.min(samples.length - 1, beforeIndex + 2)]
-  const duration = Math.max(1, to.timestamp - from.timestamp)
-  const progress = Math.max(0, Math.min(1, (timestamp - from.timestamp) / duration))
-  const bounded = (value: number, start: number, end: number) =>
-    Math.max(Math.min(start, end), Math.min(Math.max(start, end), value))
-  return {
-    participantId,
-    position: {
-      x: bounded(
-        catmullRom(previous.position.x, from.position.x, to.position.x, next.position.x, progress),
-        from.position.x,
-        to.position.x,
-      ),
-      y: bounded(
-        catmullRom(previous.position.y, from.position.y, to.position.y, next.position.y, progress),
-        from.position.y,
-        to.position.y,
-      ),
-    },
-    fromTimestamp: from.timestamp,
-    toTimestamp: to.timestamp,
-    progress,
-    exact: progress === 0 || progress === 1,
-  }
-}
-
 const objectiveToken = (event: TimelineEvent) =>
   (event.objective ?? "").toUpperCase().replaceAll("_", "")
+
+/** Chooses whether an event belongs on the moving map, in its world state, or only on the scrubber. */
+export function playbackMapEventLayer(event: TimelineEvent, mapId: ReviewMapId) {
+  if (event.category === "kill") return "transient" as const
+  if (mapId === 11 && event.category === "objective" && event.type === "ELITE_MONSTER_KILL") {
+    const token = objectiveToken(event)
+    if (
+      token.includes("BARON") || token.includes("DRAGON") || token.includes("ELDER") ||
+      token.includes("HERALD") || token.includes("HORDE") || token.includes("GRUB")
+    ) {
+      return "persistent" as const
+    }
+  }
+  return "timeline-only" as const
+}
 
 type StaticStructure = Omit<PlaybackWorldMarker, "state">
 
@@ -236,12 +209,155 @@ function epicState(timestamp: number, kills: TimelineEvent[], spawnAt: number, r
   return lastKill && timestamp < lastKill.timestamp + respawnAfter ? "respawning" as const : "alive" as const
 }
 
+const MINUTE = 60_000
+
+interface TopPitRules {
+  grubSpawnAt?: number
+  grubsRespawn: boolean
+  heraldSpawnAt?: number
+  heraldRespawns: boolean
+  baronSpawnAt: number
+}
+
+function gamePatch(gameVersion: string) {
+  const match = gameVersion.match(/^(\d+)(?:\D+)(\d+)/)
+  let major = Number(match?.[1] ?? 16)
+  const minor = Number(match?.[2] ?? 1)
+  if (major >= 2020) major -= 2010
+  return major >= 10 ? { major, minor } : { major: 16, minor: 1 }
+}
+
+/** Patch-aware top-pit schedule. Empty versions intentionally use current rules. */
+function topPitRules(mode: string, gameVersion: string): TopPitRules {
+  const patch = gamePatch(gameVersion)
+  const swiftplay = mode.includes("swiftplay")
+  if (swiftplay && patch.major >= 16) {
+    return { grubsRespawn: false, heraldRespawns: false, baronSpawnAt: 12 * MINUTE }
+  }
+
+  if (patch.major < 14) {
+    return {
+      grubsRespawn: false,
+      heraldSpawnAt: 8 * MINUTE,
+      heraldRespawns: true,
+      baronSpawnAt: 20 * MINUTE,
+    }
+  }
+
+  const modernGrubs = patch.major > 15 || patch.major === 15 && patch.minor >= 9
+  const grubSpawnAt = modernGrubs
+    ? 8 * MINUTE
+    : patch.major === 14 && patch.minor < 8 ? 5 * MINUTE : 6 * MINUTE
+  if (swiftplay) {
+    return {
+      grubSpawnAt,
+      grubsRespawn: !modernGrubs,
+      heraldSpawnAt: (patch.major === 15 && patch.minor >= 3 ? 11.5 : 10) * MINUTE,
+      heraldRespawns: false,
+      baronSpawnAt: patch.major === 15 ? 25 * MINUTE : 20 * MINUTE,
+    }
+  }
+  if (patch.major === 15) {
+    return {
+      grubSpawnAt,
+      grubsRespawn: !modernGrubs,
+      heraldSpawnAt: (modernGrubs ? 15 : 16) * MINUTE,
+      heraldRespawns: false,
+      baronSpawnAt: 25 * MINUTE,
+    }
+  }
+  return {
+    grubSpawnAt,
+    grubsRespawn: patch.major === 14,
+    heraldSpawnAt: patch.major === 14 ? 14 * MINUTE : 15 * MINUTE,
+    heraldRespawns: false,
+    baronSpawnAt: 20 * MINUTE,
+  }
+}
+
+function spawnAtOrFirstKill(scheduled: number, kills: TimelineEvent[]) {
+  return Math.min(scheduled, kills[0]?.timestamp ?? Number.POSITIVE_INFINITY)
+}
+
+const VOID_GRUB_POSITIONS = [
+  { x: 4_500, y: 10_150 },
+  { x: 5_000, y: 10_850 },
+  { x: 5_500, y: 10_150 },
+] as const
+
+function topPitMarkers(
+  epicKills: TimelineEvent[],
+  timestamp: number,
+  mode: string,
+  gameVersion: string,
+): PlaybackWorldMarker[] {
+  const rules = topPitRules(mode, gameVersion)
+  const grubKills = epicKills.filter((event) => {
+    const token = objectiveToken(event)
+    return token.includes("HORDE") || token.includes("GRUB")
+  })
+  const heraldKills = epicKills.filter((event) => objectiveToken(event).includes("HERALD"))
+  const baronKills = epicKills.filter((event) => objectiveToken(event).includes("BARON"))
+  const baronSpawnAt = spawnAtOrFirstKill(rules.baronSpawnAt, baronKills)
+  const heraldSpawnAt = rules.heraldSpawnAt === undefined
+    ? Number.POSITIVE_INFINITY
+    : spawnAtOrFirstKill(rules.heraldSpawnAt, heraldKills)
+
+  if (rules.grubSpawnAt !== undefined) {
+    const grubSpawnAt = spawnAtOrFirstKill(rules.grubSpawnAt, grubKills)
+    if (timestamp >= grubSpawnAt && timestamp < heraldSpawnAt) {
+      const killsSoFar = grubKills.filter((event) =>
+        event.timestamp >= grubSpawnAt && event.timestamp <= timestamp)
+      let killedSlots = Math.min(3, killsSoFar.length)
+      if (rules.grubsRespawn && killsSoFar.length >= 3) {
+        const secondSpawnAt = killsSoFar[2].timestamp + 4 * MINUTE
+        if (secondSpawnAt < heraldSpawnAt && timestamp >= secondSpawnAt) {
+          killedSlots = Math.min(3, grubKills.filter((event) =>
+            event.timestamp >= secondSpawnAt && event.timestamp <= timestamp).length)
+        } else {
+          killedSlots = 3
+        }
+      }
+      return VOID_GRUB_POSITIONS.map((position, index): PlaybackWorldMarker => ({
+        id: `objective:void-grub:${index + 1}`,
+        kind: "void-grub",
+        state: index < killedSlots ? "destroyed" : "alive",
+        label: `Void Grub ${index + 1}`,
+        position,
+      }))
+    }
+  }
+
+  if (rules.heraldSpawnAt !== undefined && timestamp >= heraldSpawnAt && timestamp < baronSpawnAt) {
+    const state = rules.heraldRespawns
+      ? epicState(timestamp, heraldKills, heraldSpawnAt, 6 * MINUTE)
+      : heraldKills.some((event) => event.timestamp <= timestamp) ? "destroyed" : "alive"
+    return [{
+      id: "objective:herald-pit",
+      kind: "herald",
+      state,
+      label: "Rift Herald",
+      position: { x: 5_000, y: 10_450 },
+    }]
+  }
+
+  if (timestamp < baronSpawnAt) return []
+  return [{
+    id: "objective:baron-pit",
+    kind: "baron",
+    state: epicState(timestamp, baronKills, baronSpawnAt, 6 * MINUTE),
+    label: "Baron Nashor",
+    position: { x: 5_000, y: 10_450 },
+  }]
+}
+
 /** Returns the fixed Summoner's Rift world model, with timeline events applied as state changes. */
 export function playbackWorldMarkers(
   events: TimelineEvent[],
   timestamp: number,
   mapId: ReviewMapId,
   mode = "",
+  gameVersion = "",
 ): PlaybackWorldMarker[] {
   if (mapId !== 11) return []
 
@@ -263,12 +379,12 @@ export function playbackWorldMarkers(
   }))
 
   const epicKills = events.filter((event) => event.type === "ELITE_MONSTER_KILL")
+    .sort((left, right) => left.timestamp - right.timestamp)
   const elementalKills = epicKills.filter((event) => {
     const token = objectiveToken(event)
     return token.includes("DRAGON") && !token.includes("ELDER")
   })
   const elderKills = epicKills.filter((event) => objectiveToken(event).includes("ELDER"))
-  const baronKills = epicKills.filter((event) => objectiveToken(event).includes("BARON"))
   const swiftplay = mode.includes("swiftplay")
   const dragonSoulThreshold = swiftplay ? 2 : 4
   const dragonKillsByTeam = new Map<number, number>()
@@ -284,34 +400,31 @@ export function playbackWorldMarkers(
     ? 15 * 60_000
     : soulKill ? soulKill.timestamp + 6 * 60_000 : elderKills[0]?.timestamp ?? Number.POSITIVE_INFINITY
   const elderActive = timestamp >= elderSpawn || elderKills.some((event) => event.timestamp <= timestamp)
-  const dragonMarker: PlaybackWorldMarker = {
+  const dragonSpawnAt = spawnAtOrFirstKill(5 * MINUTE, elementalKills)
+  const dragonMarkers: PlaybackWorldMarker[] = timestamp < dragonSpawnAt ? [] : [{
     id: "objective:dragon-pit",
     kind: elderActive ? "elder" : "dragon",
     state: elderActive
-      ? epicState(timestamp, elderKills, elderSpawn, 6 * 60_000)
-      : soulKill && timestamp >= soulKill.timestamp ? "dormant" : epicState(timestamp, elementalKills, 5 * 60_000, 5 * 60_000),
-    label: elderActive ? "Elder Dragon pit" : "Elemental Dragon pit",
+      ? epicState(timestamp, elderKills, elderSpawn, 6 * MINUTE)
+      : soulKill && timestamp >= soulKill.timestamp ? "respawning" : epicState(timestamp, elementalKills, dragonSpawnAt, 5 * MINUTE),
+    label: elderActive ? "Elder Dragon" : "Elemental Dragon",
     position: { x: 9_860, y: 4_410 },
-  }
-  const baronMarker: PlaybackWorldMarker = {
-    id: "objective:baron-pit",
-    kind: "baron",
-    state: epicState(timestamp, baronKills, (swiftplay ? 12 : 20) * 60_000, 6 * 60_000),
-    label: "Baron Nashor pit",
-    position: { x: 5_000, y: 10_450 },
-  }
+  }]
+  const topMarkers = topPitMarkers(epicKills, timestamp, mode, gameVersion)
 
-  return [...structures, ...camps, dragonMarker, baronMarker]
+  return [...structures, ...camps, ...dragonMarkers, ...topMarkers]
 }
 
 /**
- * Separates tokens that would cover one another while preserving their true
- * map coordinates for leader lines. Connected clusters and id sorting make the
- * layout stable from frame to frame.
+ * Finds overlapping token clusters while leaving every token at its measured
+ * map coordinate. Passing a participant id temporarily fans only that
+ * participant's cluster; connected clusters and id sorting keep the result
+ * deterministic as playback advances.
  */
 export function spreadOverlappingMapPoints(
   points: OverlapMapPoint[],
   threshold = 4,
+  expandedParticipantId?: number,
 ): SpreadMapPoint[] {
   const remaining = new Set(points.map((point) => point.id))
   const byId = new Map(points.map((point) => [point.id, point]))
@@ -334,21 +447,34 @@ export function spreadOverlappingMapPoints(
     }
 
     const cluster = [...clusterIds].map((id) => byId.get(id)!).sort((left, right) => left.id - right.id)
-    const center = {
-      left: cluster.reduce((sum, point) => sum + point.left, 0) / cluster.length,
-      top: cluster.reduce((sum, point) => sum + point.top, 0) / cluster.length,
-    }
-    const radius = Math.min(6, 2.5 + cluster.length * .6)
+    const clusterId = cluster.map((point) => point.id).join(":")
+    const anchor = cluster.find((point) => point.id === expandedParticipantId)
+    const expanded = cluster.length > 1 && Boolean(anchor)
+    const fanned = anchor ? cluster.filter((point) => point.id !== anchor.id) : []
+    // Champion portraits need more room than point markers, especially when a
+    // full teamfight resolves to one periodic timeline sample.
+    const radius = Math.min(12, 3 + cluster.length * 1.15)
     cluster.forEach((point, index) => {
-      const angle = -Math.PI / 2 + index * Math.PI * 2 / cluster.length
       const overlapping = cluster.length > 1
+      const fanIndex = fanned.findIndex((candidate) => candidate.id === point.id)
+      const angle = fanIndex < 0
+        ? 0
+        : -Math.PI / 2 + fanIndex * Math.PI * 2 / Math.max(1, fanned.length)
       result.set(point.id, {
         id: point.id,
         sourceLeft: point.left,
         sourceTop: point.top,
-        left: overlapping ? Math.max(1.5, Math.min(98.5, center.left + Math.cos(angle) * radius)) : point.left,
-        top: overlapping ? Math.max(1.5, Math.min(98.5, center.top + Math.sin(angle) * radius)) : point.top,
+        left: expanded && point.id !== anchor!.id
+          ? Math.max(1.5, Math.min(98.5, anchor!.left + Math.cos(angle) * radius))
+          : point.left,
+        top: expanded && point.id !== anchor!.id
+          ? Math.max(1.5, Math.min(98.5, anchor!.top + Math.sin(angle) * radius))
+          : point.top,
         overlapping,
+        clusterId,
+        clusterIndex: index,
+        clusterSize: cluster.length,
+        expanded,
       })
     })
   }
@@ -397,7 +523,10 @@ export function playbackPositionAt(
       position: death.position!,
     }, timestamp, participantId)
   }
-  return smoothPathPosition(samples, afterIndex - 1, timestamp, participantId)
+  // Timeline positions are sparse observations, not a recorded route. Linear
+  // interpolation keeps elapsed time proportional to travel between anchors;
+  // a spline would invent both a path and uneven movement speed.
+  return interpolate(before, after, timestamp, participantId)
 }
 
 export function playbackPositionsAt(

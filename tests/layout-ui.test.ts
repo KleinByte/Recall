@@ -41,7 +41,7 @@ describe("desktop page layout", () => {
     expect(dashboard).toMatch(/\.near-list \{[\s\S]*grid-auto-rows: 1fr/)
   })
 
-  it("publishes The Dial as a reusable instrument design language", () => {
+  it("publishes a reusable instrument design language", () => {
     const baseTokens = read("src/design/tokens.css")
     const dialTokens = read("src/design/dial-tokens.css")
     const spec = read("docs/dial-ui-design-token-spec.md")
@@ -54,7 +54,7 @@ describe("desktop page layout", () => {
     expect(dialTokens).toContain("--instrument-energy:")
     expect(dialTokens).toContain("--dial-score-100: #e7bd55")
     expect(dialTokens).toContain("--dial-tier-master-bright: #e0a4ff")
-    expect(dashboard).toContain("background: var(--instrument-frame)")
+    expect(dashboard).toContain("background: var(--ui-surface-panel-quiet)")
     expect(dial).toContain("var(--instrument-motion-ambient)")
     expect(spec).toContain("## Design principles")
     expect(spec).toContain("## Component recipes")
@@ -88,8 +88,8 @@ describe("desktop page layout", () => {
     expect(hero).toContain('label="Match telemetry"')
     expect(hero).toContain(':columns="5"')
     expect(hero).not.toContain("<StatTile")
-    expect(hero).toMatch(/\.hero-labels article \{[\s\S]*min-height: 27px/)
-    expect(hero).toMatch(/\.record-chips > span \{[\s\S]*min-height: 30px/)
+    expect(hero).toMatch(/\.hero-labels article \{[\s\S]*min-height: 30px/)
+    expect(hero).toMatch(/\.record-chips > span \{[\s\S]*min-height: 34px/)
   })
 
   it("uses distinct champion-select and in-game live layouts", () => {
@@ -204,7 +204,8 @@ describe("desktop page layout", () => {
     expect(runePage).toContain('<Teleport to="body">')
     expect(runePage).toContain("position: fixed")
     expect(runePage).toContain("opensAbove")
-    expect(review).toContain('class="grade-orbit"')
+    expect(review).toContain('class="grade-score"')
+    expect(review).not.toContain("recall-score score")
     expect(review).toContain('class="baseline-axis"')
     expect(scoreboard).toContain("positionIconUrl(role(row))")
   })
@@ -216,11 +217,16 @@ describe("desktop page layout", () => {
 
     expect(dashboard).toContain('class="form-momentum-grid"')
     expect(dashboard).toContain("<MomentumGauge")
-    expect(dashboard).toContain('title="The Dial"')
+    expect(dashboard).toContain('aria-label="Momentum"')
+    expect(dashboard).not.toContain('title="The Dial"')
+    expect(dashboard).not.toContain('class="corner-brace"')
+    expect(dashboard).not.toContain("var(--instrument-lattice)")
     expect(dashboard).toMatch(
       /performanceMomentum\(\s*momentumMatches\.value,\s*momentumClock\.value/,
     )
     expect(gauge).toContain('role="meter"')
+    expect(gauge).toContain('props.title ?? "Momentum"')
+    expect(gauge).not.toContain('props.title ?? "The Dial"')
     expect(gauge).not.toContain("BaseEChart")
     expect(gauge).toContain('class="gauge-svg"')
     expect(gauge).toContain('class="hex-cell"')

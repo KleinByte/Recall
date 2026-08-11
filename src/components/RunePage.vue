@@ -326,7 +326,7 @@ const hideBroken = (event: Event) => { (event.currentTarget as HTMLImageElement)
 .keystones .rune-node img { width: 46px; height: 46px; }
 .secondary-node { width: 36px; height: 36px; }
 .secondary-node img { width: 32px; height: 32px; }
-.shard-divider { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 10px; letter-spacing: .8px; text-transform: uppercase; }
+.shard-divider { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: var(--ui-text-label); letter-spacing: .7px; text-transform: uppercase; }
 .shard-divider::before, .shard-divider::after { content: ""; flex: 1; height: 1px; background: rgba(200,170,109,.18); }
 .shard-row { min-height: 34px; }
 .shard-node { width: 27px; height: 27px; border-width: 1px; }

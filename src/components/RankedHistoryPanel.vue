@@ -181,7 +181,7 @@ const historyMeta = computed(() => {
 .control-label {
   padding-left: 7px;
   color: var(--ui-text-muted);
-  font: 8px var(--font-heading);
+  font: var(--ui-text-micro) var(--font-heading);
   letter-spacing: 1.35px;
   line-height: 1;
   text-transform: uppercase;
@@ -227,7 +227,7 @@ const historyMeta = computed(() => {
   outline: 0;
   background: transparent;
   color: var(--ui-control-text);
-  font: 10px var(--font-heading);
+  font: var(--ui-text-label) var(--font-heading);
   letter-spacing: .55px;
   cursor: pointer;
 }

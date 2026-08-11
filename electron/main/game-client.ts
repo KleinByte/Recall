@@ -18,6 +18,15 @@ export interface LiveGameScores {
   wardScore: number
 }
 
+export interface LiveGameRunePage {
+  primaryStyleId?: number
+  secondaryStyleId?: number
+  /** The six gameplay runes in the order selected by the client. */
+  generalRuneIds: number[]
+  /** The three offense, flex, and defense bonus shards. */
+  statRuneIds: number[]
+}
+
 export interface LiveGamePlayer {
   championName: string
   riotId?: string
@@ -58,6 +67,8 @@ export interface LiveGameSnapshot {
     currentGold: number
     level: number
     abilityHaste: number
+    /** Full local rune page from Riot's in-game Active Player feed. */
+    runes?: LiveGameRunePage
   }
   allies: LiveGamePlayer[]
   enemies: LiveGamePlayer[]
@@ -109,6 +120,18 @@ interface RawActivePlayer {
   currentGold?: number
   level?: number
   championStats?: { abilityHaste?: number }
+  fullRunes?: RawFullRunes
+}
+
+interface RawRune {
+  id?: number
+}
+
+interface RawFullRunes {
+  primaryRuneTree?: RawRune
+  secondaryRuneTree?: RawRune
+  generalRunes?: RawRune[]
+  statRunes?: RawRune[]
 }
 
 interface RawEvent {
@@ -127,6 +150,32 @@ const number = (value: unknown, fallback = 0) =>
 
 const text = (value: unknown) =>
   typeof value === "string" && value.trim() ? value.trim() : undefined
+
+const runeId = (value: unknown) =>
+  typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? value
+    : undefined
+
+function mapRunePage(value?: RawFullRunes): LiveGameRunePage | undefined {
+  if (!value) return undefined
+  const generalRuneIds = (value.generalRunes ?? [])
+    .flatMap((entry) => runeId(entry.id) ?? [])
+  const statRuneIds = (value.statRunes ?? [])
+    .flatMap((entry) => runeId(entry.id) ?? [])
+  const primaryStyleId = runeId(value.primaryRuneTree?.id)
+  const secondaryStyleId = runeId(value.secondaryRuneTree?.id)
+
+  if (!primaryStyleId && !secondaryStyleId &&
+      generalRuneIds.length === 0 && statRuneIds.length === 0) {
+    return undefined
+  }
+  return {
+    primaryStyleId,
+    secondaryStyleId,
+    generalRuneIds,
+    statRuneIds,
+  }
+}
 
 function riotId(value: {
   riotId?: string
@@ -194,6 +243,7 @@ export async function readLiveGameSnapshot(
     client.request<{ Events?: RawEvent[] }>("/liveclientdata/eventdata"),
   ])
   const activeRiotId = riotId(active)
+  const runePage = mapRunePage(active.fullRunes)
   const mappedPlayers = players.map((entry) => mapPlayer(entry, activeRiotId))
   const local = mappedPlayers.find((entry) => entry.isLocal)
   const allies = local
@@ -216,6 +266,7 @@ export async function readLiveGameSnapshot(
       currentGold: number(active.currentGold),
       level: number(active.level),
       abilityHaste: number(active.championStats?.abilityHaste),
+      ...(runePage ? { runes: runePage } : {}),
     },
     allies,
     enemies,

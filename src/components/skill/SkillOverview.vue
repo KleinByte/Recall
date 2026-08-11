@@ -26,6 +26,11 @@ const props = defineProps<{
   family: ModeFamily
   champions: Champion[] | null
   ranked: RankedHistory[]
+  rviArmDetailsOpen: boolean
+}>()
+
+const emit = defineEmits<{
+  "update:rviArmDetailsOpen": [value: boolean]
 }>()
 
 const summary = computed(() => props.overview.summary)
@@ -106,6 +111,14 @@ const rviIdentity = computed(() => props.overview.performance
 
 <template>
   <div class="overview">
+    <PerformanceProfile
+      v-if="overview.performance"
+      :profile="overview.performance"
+      :identity="rviIdentity"
+      :rvi-arm-details-open="rviArmDetailsOpen"
+      @update:rvi-arm-details-open="emit('update:rviArmDetailsOpen', $event)"
+    />
+
     <TelemetryBoard
       label="Scope telemetry"
       :banks="telemetryBanks"
@@ -117,12 +130,6 @@ const rviIdentity = computed(() => props.overview.performance
       :histories="ranked"
       allow-season-selection
       compact
-    />
-
-    <PerformanceProfile
-      v-if="overview.performance"
-      :profile="overview.performance"
-      :identity="rviIdentity"
     />
 
     <Panel

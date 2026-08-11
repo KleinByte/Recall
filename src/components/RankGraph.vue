@@ -68,7 +68,7 @@ const option = computed<EChartsCoreOption>(() => {
       max: timestamps.length === 1 ? onlyTimestamp + DAY_MS * 7 : undefined,
       boundaryGap: ["3%", "3%"],
       axisLabel: {
-        fontSize: 10,
+        fontSize: 11,
         hideOverlap: true,
         formatter: (value: number) => dateLabel(value),
       },
@@ -78,7 +78,7 @@ const option = computed<EChartsCoreOption>(() => {
       min: Math.max(0, lowest - verticalPadding),
       max: highest + verticalPadding,
       axisLabel: {
-        fontSize: 10,
+        fontSize: 11,
         hideOverlap: true,
         formatter: (value: number) => labelFor(value),
       },

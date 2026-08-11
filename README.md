@@ -128,8 +128,10 @@ Riot does not provide a post-game letter grade through the local client API, so
 Recall calculates a 0–100 Recall Score from complete scoreboards. It compares
 the performance with similar games in that installation's saved history.
 Another installation builds its own comparison baseline and never receives
-yours. New games use the saved baseline without changing it; Settings can
-explicitly build a new one and regrade the stored history.
+yours. Each tracked game mode freezes independently. Settings can recalibrate
+all eligible modes from up to their 100 most recent complete games; the new
+baseline applies to future games while older match grades keep the comparison
+they originally used.
 
 Position determines opportunity while the champion's detailed archetype
 determines responsibility. Zac remains a Jungler but is evaluated as a

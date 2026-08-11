@@ -29,7 +29,7 @@ withDefaults(defineProps<{
   text-transform: uppercase;
 }
 .ui-field :deep(input), .ui-field :deep(select), .ui-field :deep(textarea) { width: 100%; min-width: 0; }
-.ui-field-message { color: var(--ui-text-muted); font-size: 10px; line-height: 1.35; }
+.ui-field-message { color: var(--ui-text-muted); font-size: var(--ui-text-label); line-height: 1.4; }
 .ui-field-message.error { color: var(--ui-negative); }
 .invalid :deep(input), .invalid :deep(select), .invalid :deep(textarea) { border-color: var(--ui-negative); }
 .compact { gap: 3px; }

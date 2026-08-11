@@ -133,7 +133,7 @@ function deathTitle(death: typeof allDeaths.value[number]) {
 .death-map-panel { min-width: 0; }
 .death-map-panel > header { display: flex; align-items: end; justify-content: space-between; gap: 10px; min-height: 34px; margin-bottom: 8px; }
 .death-map-panel h3 { margin: 1px 0 0; color: var(--ui-text-heading); font: 16px var(--ui-font-heading); }
-.eyebrow { color: var(--ui-text-muted); font-size: 10px; letter-spacing: .9px; text-transform: uppercase; }
+.eyebrow { color: var(--ui-text-muted); font-size: var(--ui-text-label); letter-spacing: .75px; text-transform: uppercase; }
 .death-total { color: var(--ui-text-muted); font-size: 11px; }
 .death-map {
   position: relative;
@@ -171,8 +171,8 @@ function deathTitle(death: typeof allDeaths.value[number]) {
 .champion-filter button.blue { border-bottom-color: var(--ui-team-blue); }
 .champion-filter button.red { border-bottom-color: var(--ui-team-red); }
 .champion-filter img { display: block; width: 100%; height: 100%; aspect-ratio: 1; border-radius: 50%; object-fit: cover; }
-.champion-filter strong { position: absolute; right: -2px; bottom: -2px; display: grid; place-items: center; min-width: 15px; height: 15px; padding: 0 2px; border: 1px solid var(--ui-border-emphasis); border-radius: var(--ui-radius-pill); background: var(--ui-canvas); color: var(--ui-text); font-size: 9px; font-variant-numeric: tabular-nums; }
+.champion-filter strong { position: absolute; right: -2px; bottom: -2px; display: grid; place-items: center; min-width: 16px; height: 16px; padding: 0 2px; border: 1px solid var(--ui-border-emphasis); border-radius: var(--ui-radius-pill); background: var(--ui-canvas); color: var(--ui-text); font-size: var(--ui-text-micro); font-variant-numeric: tabular-nums; }
 .champion-filter .all-deaths { grid-row: span 2; align-self: center; width: 52px; min-width: 52px; height: 52px; border-radius: 8px; font-size: 11px; }
-.map-note { margin: 7px 0 0; color: var(--ui-text-muted); font-size: 10px; line-height: 1.35; }
+.map-note { margin: 7px 0 0; color: var(--ui-text-muted); font-size: var(--ui-text-label); line-height: 1.4; }
 @media (max-width: 1120px) { .death-map { max-width: 460px; margin-inline: auto; }.champion-filter { max-width: 460px; margin-inline: auto; margin-top: 8px; } }
 </style>

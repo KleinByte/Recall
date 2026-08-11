@@ -50,6 +50,7 @@ const seasonId = ref(defaultSeason.id)
 const role = ref<string | undefined>(undefined)
 const championId = ref<number | undefined>(undefined)
 const tab = ref<SkillTab>("overview")
+const rviArmDetailsOpen = ref(true)
 const tabModel = computed<string>({
   get: () => tab.value,
   set: (value) => {
@@ -176,7 +177,13 @@ function currentPreferences(): SkillViewPreferences {
     ...(role.value ? { role: role.value as SkillViewPreferences["role"] } : {}),
     ...(championId.value ? { championId: championId.value } : {}),
     tab: tab.value,
+    rviArmDetailsOpen: rviArmDetailsOpen.value,
   }
+}
+
+function setRviArmDetailsOpen(value: boolean) {
+  rviArmDetailsOpen.value = value
+  void persistSkillPreferences()
 }
 
 async function persistSkillPreferences() {
@@ -206,6 +213,7 @@ onMounted(async () => {
       role.value = preferences.role
       championId.value = preferences.championId
       tab.value = preferences.tab
+      rviArmDetailsOpen.value = preferences.rviArmDetailsOpen ?? true
     }
     oldestPlayedAt.value = meta.oldestPlayedAt
     playedChampionIds.value = championIds
@@ -329,6 +337,8 @@ onMounted(async () => {
           :family="report.scope.family"
           :champions="champions"
           :ranked="ranked"
+          :rvi-arm-details-open="rviArmDetailsOpen"
+          @update:rvi-arm-details-open="setRviArmDetailsOpen"
         />
         <SkillInsights
           v-else-if="report && tab === 'insights'"

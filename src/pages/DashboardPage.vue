@@ -353,8 +353,7 @@ const championName = (id: number) => championNameById(props.champions, id)
       </section>
 
       <section v-if="form.length" class="form-momentum-grid">
-        <Panel title="The Dial" :meta="momentum.label" class="momentum-panel">
-          <span v-for="corner in ['tl', 'tr', 'bl', 'br']" :key="corner" class="corner-brace" :class="corner" aria-hidden="true" />
+        <Panel aria-label="Momentum" class="momentum-panel">
           <MomentumGauge
             :score="momentum.score"
             :label="momentum.label"
@@ -591,7 +590,7 @@ const championName = (id: number) => championNameById(props.champions, id)
 .deck-kicker,
 .overall-kicker {
   color: var(--dial-readout-muted);
-  font: 10px var(--font-heading);
+  font: var(--ui-text-label) var(--font-heading);
   letter-spacing: 1.7px;
   text-transform: uppercase;
 }
@@ -723,119 +722,15 @@ h1 {
 
 .dashboard-panel :deep(.meta) { color: var(--ui-text-muted); }
 
-/* Hextech reliquary plate: chamfered gold frame over an engraved hex lattice. */
 .momentum-panel {
-  --chamfer: var(--instrument-chamfer-md);
   position: relative;
-  isolation: isolate;
-  padding: 12px 16px 15px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: var(--instrument-shadow-raised);
-  clip-path: polygon(
-    var(--chamfer) 0, calc(100% - var(--chamfer)) 0, 100% var(--chamfer),
-    100% calc(100% - var(--chamfer)), calc(100% - var(--chamfer)) 100%,
-    var(--chamfer) 100%, 0 calc(100% - var(--chamfer)), 0 var(--chamfer)
-  );
-}
-
-.momentum-panel::before {
-  content: "";
-  position: absolute;
-  z-index: -2;
-  inset: 0;
-  background: var(--instrument-frame);
-}
-
-.momentum-panel::after {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  inset: 1.4px;
-  clip-path: polygon(
-    15px 0, calc(100% - 15px) 0, 100% 15px,
-    100% calc(100% - 15px), calc(100% - 15px) 100%,
-    15px 100%, 0 calc(100% - 15px), 0 15px
-  );
-  background:
-    var(--instrument-surface-energized),
-    var(--instrument-lattice),
-    var(--instrument-lattice-reverse),
-    var(--instrument-surface);
-}
-
-.momentum-panel .corner-brace {
-  position: absolute;
-  z-index: 5;
-  width: 24px;
-  height: 24px;
-  background: linear-gradient(135deg, transparent 11.5px, var(--instrument-border-strong) 12px, var(--instrument-border-strong) 13.2px, transparent 13.8px);
-  pointer-events: none;
-}
-
-.momentum-panel .corner-brace.tl { top: 4px; left: 4px; }
-.momentum-panel .corner-brace.tr { top: 4px; right: 4px; transform: scaleX(-1); }
-.momentum-panel .corner-brace.bl { bottom: 4px; left: 4px; transform: scaleY(-1); }
-.momentum-panel .corner-brace.br { bottom: 4px; right: 4px; transform: scale(-1); }
-
-.momentum-panel :deep(.head) {
-  position: relative;
-  z-index: 6;
-  justify-content: center;
-  margin-bottom: 12px;
-}
-
-/* The gauge shows its own label; the plaque only carries the title. */
-.momentum-panel :deep(.head .meta) {
-  display: none;
-}
-
-.momentum-panel :deep(.section-title) {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-  color: var(--instrument-title);
-  font-size: 12px;
-  letter-spacing: 2.4px;
-  text-transform: uppercase;
-}
-
-.momentum-panel :deep(.section-title)::before,
-.momentum-panel :deep(.section-title)::after {
-  content: "";
-  flex: none;
-  width: 36px;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--instrument-border-strong));
-}
-
-.momentum-panel :deep(.section-title)::after {
-  background: linear-gradient(270deg, transparent, var(--instrument-border-strong));
-}
-
-/* Engraved divider under the plaque, anchored by a nexus-crystal stud. */
-.momentum-panel :deep(.head)::after {
-  content: "";
-  position: absolute;
-  right: 10%;
-  bottom: -6px;
-  left: 10%;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--instrument-border) 22%, var(--instrument-border) 78%, transparent);
-}
-
-.momentum-panel :deep(.head)::before {
-  content: "";
-  position: absolute;
-  bottom: -10.5px;
-  left: 50%;
-  width: 9px;
-  height: 9px;
-  border: 1px solid var(--dial-metal-300);
-  background: radial-gradient(circle at 32% 28%, var(--dial-energy-100) 0 14%, var(--dial-energy-400) 36%, var(--dial-energy-600) 64%, var(--dial-energy-800));
-  box-shadow: var(--instrument-shadow-energy);
-  transform: translateX(-50%) rotate(45deg);
+  display: grid;
+  place-items: center;
+  padding: 12px 16px;
+  border-color: var(--ui-border);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-surface-panel-quiet);
+  box-shadow: var(--ui-shadow-panel);
 }
 
 .form-summary {

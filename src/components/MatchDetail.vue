@@ -862,7 +862,7 @@ const kdaOf = (row: ParticipantRow) =>
 .setup-role small,
 .setup-spells small {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--ui-text-label);
   text-transform: uppercase;
   letter-spacing: .6px;
 }

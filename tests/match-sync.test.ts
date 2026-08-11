@@ -5,7 +5,7 @@ import { MatchesRepository } from "../electron/main/database/matches-repo.js"
 import { ParticipantsRepository } from "../electron/main/database/participants-repo.js"
 import { ChampSelectRepository } from "../electron/main/database/champ-select-repo.js"
 import { MatchSync } from "../electron/main/match-sync.js"
-import type { LcuGame } from "../electron/main/matches/types.js"
+import type { LcuGame, ParticipantRow } from "../electron/main/matches/types.js"
 
 const PUUID = "test-puuid"
 
@@ -399,6 +399,40 @@ describe("MatchSync", () => {
     const stored = participants.getMatchDetail(1, PUUID).participants
     expect(stored.find((row) => row.championId === 100)?.assignedPosition).toBe("UTILITY")
     expect(stored.find((row) => row.championId === 105)?.assignedPosition).toBeUndefined()
+  })
+
+  it("merges captured in-game rune shards before storing an LCU lobby", async () => {
+    const client = new FakeClient([riftGame(1)])
+    const liveCaptures = {
+      repairStoredPositions: vi.fn(),
+      repairStoredRunes: vi.fn(),
+      stampPositions: vi.fn(),
+      stampRunes: vi.fn((_gameId: number, _puuid: string, rows: ParticipantRow[]) => {
+        const owner = rows.find((row) => row.isPlayer === 1)!
+        owner.runeSelections = [
+          { runeId: 5005, slot: 6, var1: 0, var2: 0, var3: 0, kind: "modern" },
+          { runeId: 5008, slot: 7, var1: 0, var2: 0, var3: 0, kind: "modern" },
+          { runeId: 5001, slot: 8, var1: 0, var2: 0, var3: 0, kind: "modern" },
+        ]
+        return 1
+      }),
+    }
+
+    await new MatchSync(
+      client as never,
+      repo,
+      PUUID,
+      participants,
+      undefined,
+      liveCaptures as never,
+    ).syncNow()
+
+    expect(liveCaptures.stampRunes).toHaveBeenCalledWith(1, PUUID, expect.any(Array))
+    expect(
+      participants.getMatchDetail(1, PUUID).participants
+        .find((row) => row.isPlayer === 1)?.runeSelections
+        ?.map((selection) => selection.runeId),
+    ).toEqual([5005, 5008, 5001])
   })
 
   it("records the queue name the client reports", async () => {

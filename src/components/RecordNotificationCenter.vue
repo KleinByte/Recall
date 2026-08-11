@@ -130,7 +130,7 @@ function timestamp(value: number) {
 .notification-center { -webkit-app-region: no-drag; position: relative; display: grid; place-items: center; height: 100%; }
 .notification-trigger { position: relative; color: var(--ui-text-subtle); font-size: 13px; transition: filter .15s ease; }
 .notification-trigger.unread { color: var(--ui-live); filter: drop-shadow(0 0 7px color-mix(in srgb, var(--ui-live) 72%, transparent)); animation: bell-arrival .55s ease-out both; }
-.unread-count { position: absolute; top: 0; right: 0; min-width: 14px; height: 14px; padding: 0 3px; border: 1px solid var(--ui-canvas); border-radius: var(--ui-radius-pill); background: var(--ui-negative); color: var(--ui-text-on-status); font: 700 10px/12px var(--ui-font-numeric); text-align: center; }
+.unread-count { position: absolute; top: 0; right: 0; min-width: 16px; height: 16px; padding: 0 3px; border: 1px solid var(--ui-canvas); border-radius: var(--ui-radius-pill); background: var(--ui-negative); color: var(--ui-text-on-status); font: 700 var(--ui-text-micro)/14px var(--ui-font-numeric); text-align: center; }
 .notification-panel { position: absolute; z-index: var(--ui-z-popover); top: calc(100% + 7px); right: -5px; width: min(380px, calc(100vw - 24px)); overflow: hidden; background: radial-gradient(circle at 90% 0%, color-mix(in srgb, var(--ui-live) 9%, transparent), transparent 42%), var(--ui-surface-raised); color: var(--ui-text); }
 .notification-panel > header { display: flex; align-items: center; justify-content: space-between; gap: var(--ui-space-3); padding: 13px 14px; border-bottom: 1px solid var(--ui-divider); background: var(--ui-surface-hover-subtle); }
 .notification-panel > header div { display: flex; flex-direction: column; gap: 2px; }

@@ -178,7 +178,7 @@ a:focus-visible,
   color: var(--ui-text-heading);
   font: clamp(23px, 2vw, 29px)/1.08 var(--ui-font-display);
 }
-.content > .page > .page-head .subtitle { margin: 7px 0 0; color: var(--ui-text-subtle); font-size: 12px; }
+.content > .page > .page-head .subtitle { margin: 7px 0 0; color: var(--ui-text-subtle); font-size: var(--ui-text-support); }
 
 .eyebrow,
 .deck-kicker {
@@ -231,7 +231,7 @@ a:focus-visible,
   border-radius: var(--ui-radius-pill);
   background: var(--ui-surface-inset);
   color: var(--ui-text-subtle);
-  font-size: 10px;
+  font-size: var(--ui-text-label);
   letter-spacing: .55px;
 }
 

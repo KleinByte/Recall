@@ -121,7 +121,7 @@ const time = (timestamp: number) =>
 .probability-panel h2 { margin: 3px 0 2px; color: var(--ui-text-heading); font: 18px var(--ui-font-heading); }
 .probability-panel header p { margin: 0; color: var(--ui-text-muted); font-size: 12px; }
 .final-reading { display: flex; flex-direction: column; align-items: flex-end; }
-.final-reading span { color: var(--ui-text-muted); font-size: 10px; text-transform: uppercase; }
+.final-reading span { color: var(--ui-text-muted); font-size: var(--ui-text-label); text-transform: uppercase; }
 .final-reading strong { color: var(--ui-team-blue); font: 22px var(--ui-font-display); }
 .final-reading small { color: var(--ui-text-subtle); font-size: 11px; }
 .probability-chart {
@@ -146,11 +146,11 @@ const time = (timestamp: number) =>
   vector-effect: non-scaling-stroke;
   filter: drop-shadow(0 0 4px color-mix(in srgb, var(--ui-team-blue) 42%, transparent));
 }
-.axis { position: absolute; left: 8px; z-index: 1; color: var(--ui-text-muted); font-size: 10px; pointer-events: none; }
+.axis { position: absolute; left: 8px; z-index: 1; color: var(--ui-text-muted); font-size: var(--ui-text-micro); pointer-events: none; }
 .axis.blue { top: 7px; color: var(--ui-team-blue); }
 .axis.even { top: 50%; transform: translateY(-50%); }
 .axis.red { bottom: 7px; color: var(--ui-team-red); }
-.time { position: absolute; bottom: 7px; color: var(--ui-text-muted); font-size: 10px; }
+.time { position: absolute; bottom: 7px; color: var(--ui-text-muted); font-size: var(--ui-text-micro); }
 .time.start { left: 8px; }
 .time.end { right: 8px; }
 .crosshair { position: absolute; top: 0; bottom: 0; width: 1px; background: color-mix(in srgb, var(--ui-text) 45%, transparent); pointer-events: none; }

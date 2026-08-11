@@ -91,7 +91,7 @@ const cleanDescription = computed(() => (props.description ?? "")
 .augment-metrics b { color: var(--text-secondary); font-weight: 700; }
 .augment-empty { margin-top: 5px; color: var(--text-muted); font-size: 12px; }
 .augment-tier { display: grid; justify-items: center; min-width: 49px; padding-left: 10px; border-left: 1px solid var(--border-subtle); }
-.augment-tier small { color: var(--text-muted); font-size: 10px; letter-spacing: .7px; text-transform: uppercase; white-space: nowrap; }
+.augment-tier small { color: var(--text-muted); font-size: var(--ui-text-label); letter-spacing: .6px; text-transform: uppercase; white-space: nowrap; }
 .augment-tier strong { margin-top: 3px; color: var(--gold-bright); font: 20px var(--font-display); }
 .augment-tier.grade-s strong { color: #f2cf65; }.augment-tier.grade-a strong { color: #42cfbd; }.augment-tier.grade-b strong { color: #55a9dc; }.augment-tier.grade-c strong, .augment-tier.grade-d strong { color: #d27b78; }
 .augment-card.compact { grid-template-columns: 54px minmax(0, 1fr) auto; min-height: 70px; padding: 8px 9px; }

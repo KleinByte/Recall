@@ -66,8 +66,8 @@ defineProps<{
   padding: 5px 10px 4px;
   border-bottom: 1px solid var(--ui-divider);
   color: var(--ui-text-muted);
-  font: 9px var(--ui-font-heading);
-  letter-spacing: 1.7px;
+  font: var(--ui-text-label) var(--ui-font-heading);
+  letter-spacing: 1.1px;
   text-transform: uppercase;
 }
 
@@ -91,8 +91,8 @@ defineProps<{
 .reading dt {
   overflow: hidden;
   color: var(--ui-text-muted);
-  font: 9px var(--ui-font-heading);
-  letter-spacing: 1.15px;
+  font: var(--ui-text-label) var(--ui-font-heading);
+  letter-spacing: .8px;
   text-overflow: ellipsis;
   text-transform: uppercase;
   white-space: nowrap;
@@ -115,8 +115,8 @@ defineProps<{
   overflow: hidden;
   margin-top: 2px;
   color: var(--ui-text-muted);
-  font-size: 9px;
-  line-height: 1.1;
+  font-size: var(--ui-text-label);
+  line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

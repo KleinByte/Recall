@@ -76,24 +76,25 @@ export const RECALL_CHART_THEME = {
   textStyle: {
     color: CHART_COLOURS.textSubtle,
     fontFamily: "Spiegel, Arial, sans-serif",
+    fontSize: 12,
   },
   categoryAxis: {
     axisLine: { lineStyle: { color: CHART_STYLES.grid } },
     axisTick: { lineStyle: { color: CHART_STYLES.grid } },
-    axisLabel: { color: CHART_COLOURS.textSubtle },
+    axisLabel: { color: CHART_COLOURS.textSubtle, fontSize: 11 },
     splitLine: { lineStyle: { color: CHART_STYLES.gridSoft } },
   },
   valueAxis: {
     axisLine: { lineStyle: { color: CHART_STYLES.grid } },
     axisTick: { lineStyle: { color: CHART_STYLES.grid } },
-    axisLabel: { color: CHART_COLOURS.textSubtle },
+    axisLabel: { color: CHART_COLOURS.textSubtle, fontSize: 11 },
     splitLine: { lineStyle: { color: CHART_STYLES.grid } },
   },
   tooltip: {
     backgroundColor: CHART_COLOURS.surfaceInset,
     borderColor: CHART_STYLES.tooltipBorder,
     borderWidth: 1,
-    textStyle: { color: CHART_COLOURS.text },
+    textStyle: { color: CHART_COLOURS.text, fontSize: 12 },
     padding: 10,
   },
 } as const

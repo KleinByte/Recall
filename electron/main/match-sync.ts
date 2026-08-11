@@ -132,6 +132,7 @@ export class MatchSync {
     }
 
     this.liveCaptures?.repairStoredPositions(this.puuid)
+    this.liveCaptures?.repairStoredRunes(this.puuid)
     const inserted = this.repository.insertMany(rows)
     for (const raw of rawRows) {
       this.sourceRepository?.setMappingResult(raw, "mapped", Date.now(), {
@@ -198,6 +199,7 @@ export class MatchSync {
     }
 
     this.liveCaptures?.stampPositions(detail.gameId, this.puuid, rows)
+    this.liveCaptures?.stampRunes(detail.gameId, this.puuid, rows)
     this.champSelect?.stamp(detail.gameId, this.puuid, rows)
 
     const stored = this.participants.insertMany(rows) > 0

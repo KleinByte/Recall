@@ -96,6 +96,7 @@ describe("typed settings store", () => {
       role: "MIDDLE",
       championId: 8,
       tab: "insights",
+      rviArmDetailsOpen: false,
     }
 
     expect(settings.setRenderer("skill-view-preferences", selection)).toEqual(selection)
@@ -103,6 +104,10 @@ describe("typed settings store", () => {
     expect(() => settings.setRenderer("skill-view-preferences", {
       ...selection,
       scopeId: "made-up-mode",
+    })).toThrow(/invalid_setting_value/)
+    expect(() => settings.setRenderer("skill-view-preferences", {
+      ...selection,
+      rviArmDetailsOpen: "sometimes",
     })).toThrow(/invalid_setting_value/)
   })
 })

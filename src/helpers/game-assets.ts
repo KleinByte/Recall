@@ -2,7 +2,7 @@ import { publicAssetUrl } from "./assets"
 
 const DDRAGON = "https://ddragon.leagueoflegends.com"
 const COMMUNITY = "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global"
-const MATCH_HISTORY = "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-match-history/global/default"
+const OBJECTIVE_ASSETS = "game-data/ui/objectives"
 
 export interface GameAsset {
   name: string
@@ -95,22 +95,30 @@ export function timelineObjectiveIconUrl(
 ) {
   const team = teamId === 200 ? 200 : 100
   const token = (objective ?? "").toUpperCase().replaceAll("_", "")
-  if (type === "TURRET_PLATE_DESTROYED") return `${MATCH_HISTORY}/tower-${team}.png`
+  if (type === "TURRET_PLATE_DESTROYED") return publicAssetUrl(`${OBJECTIVE_ASSETS}/tower-${team}.png`)
   if (type === "BUILDING_KILL") {
-    if (token.includes("INHIBITOR")) return `${MATCH_HISTORY}/inhibitor-${team}.png`
+    if (token.includes("INHIBITOR")) return publicAssetUrl(`${OBJECTIVE_ASSETS}/inhibitor-${team}.png`)
     if (token.includes("NEXUS")) {
-      return `${MATCH_HISTORY}/nexus_building_${team === 100 ? "blue" : "red"}.png`
+      return publicAssetUrl(`${OBJECTIVE_ASSETS}/nexus_building_${team === 100 ? "blue" : "red"}.png`)
     }
-    return `${MATCH_HISTORY}/tower-${team}.png`
+    return publicAssetUrl(`${OBJECTIVE_ASSETS}/tower-${team}.png`)
   }
   if (type !== "ELITE_MONSTER_KILL") return undefined
-  if (token.includes("BARON")) return `${MATCH_HISTORY}/baron-${team}.png`
-  if (token.includes("HERALD")) return `${MATCH_HISTORY}/herald-${team}.png`
-  if (token.includes("ELDER")) return `${MATCH_HISTORY}/elder-${team}.png`
-  if (token.includes("HORDE") || token.includes("GRUB")) return `${MATCH_HISTORY}/right_icons_grub.png`
-  if (token.includes("VILEMAW")) return `${MATCH_HISTORY}/vilemaw-${team}.png`
-  if (token.includes("DRAGON")) return `${MATCH_HISTORY}/dragon-${team}.png`
+  if (token.includes("BARON")) return publicAssetUrl(`${OBJECTIVE_ASSETS}/baron-${team}.png`)
+  if (token.includes("HERALD")) return publicAssetUrl(`${OBJECTIVE_ASSETS}/herald-${team}.png`)
+  if (token.includes("ELDER")) return publicAssetUrl(`${OBJECTIVE_ASSETS}/elder-${team}.png`)
+  if (token.includes("HORDE") || token.includes("GRUB")) return publicAssetUrl(`${OBJECTIVE_ASSETS}/void-grub.png`)
+  if (token.includes("VILEMAW")) return publicAssetUrl(`${OBJECTIVE_ASSETS}/vilemaw-${team}.png`)
+  if (token.includes("DRAGON")) return publicAssetUrl(`${OBJECTIVE_ASSETS}/dragon-${team}.png`)
   return undefined
+}
+
+/** Single-frame objective art for persistent map occupants. */
+export function playbackWorldObjectiveIconUrl(
+  kind: "dragon" | "elder" | "baron" | "herald" | "void-grub",
+) {
+  const file = kind === "void-grub" ? "void-grub.png" : `${kind}-100.png`
+  return publicAssetUrl(`${OBJECTIVE_ASSETS}/${file}`)
 }
 
 /** League-client icons used to keep review feeds visually native to League. */

@@ -680,7 +680,7 @@ const activeRecordGroup = computed(() =>
 
 .record-categories button:hover { background: var(--ui-surface-hover-subtle); color: var(--ui-text); }
 .record-categories button.active { border-color: var(--ui-border-emphasis); background: color-mix(in srgb, var(--ui-accent) 10%, var(--ui-surface-hover)); color: var(--ui-text-heading); }
-.record-categories strong { color: var(--ui-text-muted); font-size: 10px; }
+.record-categories strong { color: var(--ui-text-muted); font-size: var(--ui-text-label); }
 
 .record-ledger {
   display: flex;
@@ -704,7 +704,7 @@ const activeRecordGroup = computed(() =>
   background: var(--ui-surface-hover-subtle);
 }
 
-.record-kicker { color: var(--ui-text-muted); font-size: 8px; letter-spacing: 1.2px; text-transform: uppercase; }
+.record-kicker { color: var(--ui-text-muted); font-size: var(--ui-text-label); letter-spacing: .8px; text-transform: uppercase; }
 .record-ledger h3 { margin: 1px 0 0; color: var(--ui-text-heading); font: 13px var(--ui-font-heading); letter-spacing: .65px; text-transform: uppercase; }
 .record-ledger > header > span { color: var(--ui-text-muted); font-size: 11px; }
 .record-rows {
@@ -736,7 +736,7 @@ const activeRecordGroup = computed(() =>
 .record-row:hover { background: color-mix(in srgb, var(--ui-live) 5%, var(--ui-surface-hover-subtle)); }
 .record-copy { display: flex; flex-direction: column; min-width: 0; }
 .record-copy strong { overflow: hidden; color: var(--ui-text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.record-copy small { overflow: hidden; margin-top: 2px; color: var(--ui-text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.record-copy small { overflow: hidden; margin-top: 2px; color: var(--ui-text-muted); font-size: var(--ui-text-label); text-overflow: ellipsis; white-space: nowrap; }
 .record-value { color: var(--ui-accent-strong); font: 18px var(--ui-font-numeric); white-space: nowrap; }
 .record-open { color: var(--ui-live); opacity: .65; }
 

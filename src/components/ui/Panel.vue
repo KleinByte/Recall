@@ -4,7 +4,7 @@ import ScrollArea from "./ScrollArea.vue"
 import Surface from "./Surface.vue"
 
 withDefaults(defineProps<{
-  title: string
+  title?: string
   meta?: string
   scroll?: boolean
   maxHeight?: string
@@ -23,8 +23,8 @@ const slots = useSlots()
 
 <template>
   <Surface as="section" class="card panel" :variant="variant" :padding="padding">
-    <header class="head">
-      <h2 class="section-title flush">{{ title }}</h2>
+    <header v-if="title || meta || slots.actions" class="head">
+      <h2 v-if="title" class="section-title flush">{{ title }}</h2>
       <span v-if="meta" class="muted meta">{{ meta }}</span>
       <div v-if="slots.actions" class="actions"><slot name="actions" /></div>
     </header>
@@ -56,7 +56,7 @@ const slots = useSlots()
 
 .meta {
   color: var(--ui-text-muted);
-  font-size: 11px;
+  font-size: var(--ui-text-support);
   margin-left: auto;
   text-align: right;
 }

@@ -71,7 +71,7 @@ const option = computed<EChartsCoreOption>(() => ({
     label: {
       show: games.value.length <= 14,
       color: CHART_COLOURS.text,
-      fontSize: 10,
+      fontSize: 11,
       fontWeight: 700,
       backgroundColor: CHART_STYLES.labelBackdrop,
       borderRadius: 2,

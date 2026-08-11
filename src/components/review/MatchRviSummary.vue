@@ -141,7 +141,7 @@ const lobbyValue = computed(() => props.lobbyPlace && props.lobbySize
 .radar-panel,
 .result-panel { min-width: 0; }
 .radar-panel header { margin-bottom: -8px; }
-.eyebrow { margin: 0; color: var(--cyan); font-size: 10px; letter-spacing: .13em; text-transform: uppercase; }
+.eyebrow { margin: 0; color: var(--cyan); font-size: var(--ui-text-label); letter-spacing: .1em; text-transform: uppercase; }
 h2 { margin: 3px 0 0; color: var(--gold-bright); font: 21px var(--font-display); }
 
 .result-panel {
@@ -155,7 +155,7 @@ h2 { margin: 3px 0 0; color: var(--gold-bright); font: 21px var(--font-display);
 
 .grade-result { display: flex; align-items: center; gap: var(--space-3); }
 .grade-result > div { display: grid; grid-template-columns: auto auto; align-items: end; gap: 0 9px; }
-.grade-result span { grid-column: 1 / -1; color: var(--text-muted); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+.grade-result span { grid-column: 1 / -1; color: var(--text-muted); font-size: var(--ui-text-label); letter-spacing: .09em; text-transform: uppercase; }
 .grade-result strong { color: var(--gold-bright); font: 35px/1 var(--font-display); }
 .grade-result small { padding-bottom: 3px; color: var(--text-muted); font-size: 11px; text-transform: uppercase; }
 .comparison-context { margin: 0; color: var(--text-secondary); font: 13px var(--font-heading); }
@@ -163,9 +163,9 @@ h2 { margin: 3px 0 0; color: var(--gold-bright); font: 21px var(--font-display);
 .context-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); overflow: hidden; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
 .context-grid article { display: grid; align-content: start; min-width: 0; gap: 4px; padding: 12px; border-left: 1px solid var(--border-subtle); background: rgba(8, 19, 35, .45); }
 .context-grid article:first-child { border-left: 0; }
-.context-grid span { color: var(--text-muted); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+.context-grid span { color: var(--text-muted); font-size: var(--ui-text-label); letter-spacing: .07em; text-transform: uppercase; }
 .context-grid strong { color: var(--text-primary); font-size: 14px; font-variant-numeric: tabular-nums; }
-.context-grid small { color: var(--text-muted); font-size: 10px; line-height: 1.35; }
+.context-grid small { color: var(--text-muted); font-size: var(--ui-text-label); line-height: 1.4; }
 
 .radar-unavailable { display: grid; gap: 6px; min-height: 245px; align-content: center; padding: var(--space-5); border: 1px dashed var(--border-strong); border-radius: var(--radius-md); color: var(--text-secondary); }
 .radar-unavailable strong { color: var(--gold-bright); }

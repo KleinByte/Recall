@@ -11,6 +11,7 @@ import {
 import { api } from "../helpers/api"
 import { useApiEvents } from "../helpers/use-api-events"
 import { updatePresentation } from "../helpers/update"
+import { modeLabel } from "../helpers/format"
 import type { UpdateStatus } from "../types/update"
 import type {
   PerformanceReferenceStatus,
@@ -116,17 +117,14 @@ async function loadRecall() {
 }
 
 async function rebuildPerformanceReference() {
-  if (!window.confirm(
-    "Create a backup, rebuild the comparison baseline, and recalculate every Grade and RVI result?",
-  )) return
   rebuildingReference.value = true
   referenceMessage.value = ""
   try {
     const result = await api.rebuildPerformanceReference()
     if (result.canceled) return
     referenceMessage.value = result.errors
-      ? `Rebuilt ${result.processed ?? 0} matches with ${result.errors} errors. Your backup was retained.`
-      : `Rebuilt ${result.processed ?? 0} matches; ${result.ready ?? 0} received complete grades.`
+      ? `Recalibrated all eligible modes with ${result.errors} errors. Your backup was retained.`
+      : `Recalibrated all eligible modes. ${result.ready ?? 0} recorded matches have complete grades.`
     await Promise.all([loadRecall(), loadMeta(), loadTrust()])
   } catch (error) {
     referenceMessage.value = (error as Error).message
@@ -506,20 +504,25 @@ const formatDate = (value?: number) =>
       <Surface as="div" variant="inset" padding="compact" class="performance-reference">
         <div>
           <strong>Comparison baseline</strong>
-          <span v-if="recall?.state === 'frozen'">
-            Built from {{ recall.referenceMatches ?? 0 }} complete matches on
-            {{ formatDate(recall.frozenAt) }} for
-            {{ recall.supportedModes.join(", ") || "no modes" }}.
-            New games in those groups use this baseline and do not change it.
-          </span>
-          <span v-else>
-            Building from this installation: the largest comparable group has
-            {{ recall?.largestScopeMatches ?? 0 }} of
-            {{ recall?.requiredMatches ?? 10 }} complete matches
-            ({{ recall?.eligibleMatches ?? 0 }} across all scopes).
-          </span>
+          <span>Each game mode freezes independently after enough complete games.</span>
+          <div v-if="recall?.modeReferences.length" class="mode-references">
+            <span v-for="reference in recall.modeReferences" :key="reference.mode">
+              <strong>{{ modeLabel(reference.mode) }}</strong>
+              <template v-if="reference.state === 'frozen'">
+                {{ reference.referenceMatches }} reference games ·
+                frozen {{ formatDate(reference.frozenAt) }}
+                <template v-if="reference.newMatches"> · {{ reference.newMatches }} added since baseline</template>
+              </template>
+              <template v-else>
+                {{ reference.eligibleMatches }}/{{ reference.requiredMatches }} games
+              </template>
+            </span>
+          </div>
           <span>
             Every installation uses its own saved matches. Other players never use your baseline.
+          </span>
+          <span>
+            Recalibrating an already-frozen mode uses up to 100 recent games. Its new baseline applies only to games played afterward.
           </span>
         </div>
         <UiButton
@@ -527,7 +530,7 @@ const formatDate = (value?: number) =>
           :disabled="busy || rebuildingReference || (recall?.supportedScopes.length ?? 0) === 0"
           @click="rebuildPerformanceReference"
         >
-          {{ rebuildingReference ? "Rebuilding…" : "Rebuild comparison baseline" }}
+          {{ rebuildingReference ? "Recalibrating…" : "Recalibrate all modes" }}
         </UiButton>
       </Surface>
       <p v-if="referenceMessage" class="muted note">{{ referenceMessage }}</p>
@@ -697,6 +700,23 @@ const formatDate = (value?: number) =>
   color: var(--text-muted);
   font-size: 0.88rem;
 }
+
+.mode-references {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 3px;
+}
+
+.mode-references > span {
+  padding: 5px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  font-size: 11px;
+}
+
+.mode-references strong { color: var(--text-secondary); }
 
 .page {
   display: flex;

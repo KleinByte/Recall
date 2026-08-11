@@ -30,8 +30,8 @@ defineProps<{
 
 .label {
   font-family: var(--ui-font-heading);
-  font-size: 10px;
-  letter-spacing: 1.3px;
+  font-size: var(--ui-text-label);
+  letter-spacing: .9px;
   text-transform: uppercase;
   color: var(--ui-text-muted);
   white-space: nowrap;
@@ -54,7 +54,7 @@ defineProps<{
 }
 
 .hint {
-  font-size: 11px;
+  font-size: var(--ui-text-support);
   color: var(--ui-text-muted);
 }
 

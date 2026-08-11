@@ -6,18 +6,26 @@ import { RECALL_GRADES, recallGradeFromScore } from "../shared/recall-grade"
 
 const offlineChampionNames = championCatalog as Record<string, string>
 
+/** League Classic stores the original roster as 60000 + the canonical champion id. */
+export function canonicalChampionId(championId: number) {
+  return championId > 60_000 && championId < 61_000
+    ? championId - 60_000
+    : championId
+}
+
 export const championIconUrl = (championId: number) =>
   championId > 0
-    ? `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-icons/${championId}.png`
+    ? `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-icons/${canonicalChampionId(championId)}.png`
     : publicAssetUrl("recall-icon.png")
 
 export function championNameById(
   champions: Champion[] | null,
   championId: number,
 ): string {
+  const canonicalId = canonicalChampionId(championId)
   return (
-    champions?.find((champion) => champion.id === championId)?.name ??
-    offlineChampionNames[String(championId)] ??
+    champions?.find((champion) => champion.id === championId || champion.id === canonicalId)?.name ??
+    offlineChampionNames[String(canonicalId)] ??
     `Champion ${championId}`
   )
 }
@@ -84,6 +92,8 @@ export const modeLabel = (mode: string) => {
       return "Swiftplay"
     case "sr_normal":
       return "Normal"
+    case "urf":
+      return "URF"
     case "league_classic":
       return "League Classic"
     case "other":

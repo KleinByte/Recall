@@ -21,6 +21,15 @@ function note(
 /** Shipped releases, newest first. */
 export const patchNotes: readonly PatchNoteRelease[] = [
   note(
+    "3.0.3",
+    "2026-08-11",
+    "Sharper playback and RVI",
+    "Playback, RVI, and text are easier to use.",
+    "Improved map playback, objective icons, and movement.",
+    "Refined RVI profiles, recalibration, and small-window layouts.",
+    "Added local rune capture and clearer text throughout Recall.",
+  ),
+  note(
     "3.0.2",
     "2026-08-10",
     "Clearer performance reports",
@@ -58,7 +67,7 @@ export const patchNotes: readonly PatchNoteRelease[] = [
     "2026-08-04",
     "Match playback",
     "Review games as they unfolded and track longer-term form more clearly.",
-    "Added map playback, improved The Dial, and kept records in chronological context.",
+    "Added map playback, improved the momentum gauge, and kept records in chronological context.",
   ),
   note(
     "2.0.30",
@@ -190,7 +199,7 @@ export const patchNotes: readonly PatchNoteRelease[] = [
     "2.0.7",
     "2026-08-01",
     "Momentum and timelines",
-    "The Dial and richer timeline events make match stories easier to follow.",
+    "The momentum gauge and richer timeline events make match stories easier to follow.",
     "Added momentum states and clearer champion, item, ability, and objective events.",
   ),
   note(

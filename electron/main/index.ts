@@ -456,8 +456,9 @@ function ensureRecallFrozen(win?: BrowserWindow) {
   if (needsDirectCutover && !win) return status
   const hasRecoverableRawReferenceData = status.state === "calibrating" &&
     status.supportedScopes.length === 0 && service.hasRecoverableRawReferenceData()
+  const needsAutomaticModeFreeze = service.needsAutomaticReferenceUpdate(status)
   if (!needsDirectCutover &&
-      (status.state === "frozen" ||
+      ((status.state === "frozen" && !needsAutomaticModeFreeze) ||
        (status.supportedScopes.length === 0 && !hasRecoverableRawReferenceData))) {
     return status
   }
@@ -2007,8 +2008,8 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     const confirmation = await dialog.showMessageBox(win, {
       type: "warning",
       title: "Recalibrate Recall?",
-      message: "Build a new frozen Grade and RVI reference from the complete matches stored on this computer?",
-      detail: "Recall will create a verified backup, replace every derived v3 grade, and keep raw matches, timelines, reviews, and settings unchanged.",
+      message: "Refresh every eligible game mode from its recent complete matches?",
+      detail: "Recall creates one verified backup, recalibrates each mode independently from up to its latest 100 games, and preserves the baseline used by older matches.",
       buttons: ["Recalibrate", "Cancel"],
       defaultId: 1,
       cancelId: 1,

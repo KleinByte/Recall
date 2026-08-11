@@ -288,7 +288,7 @@ const navSections: NavigationSection[] = [
 
 .brand-name {
   font-family: var(--ui-font-heading);
-  font-size: 11px;
+  font-size: var(--ui-text-label);
   letter-spacing: 1.6px;
   text-transform: uppercase;
   color: var(--ui-text-subtle);
@@ -372,9 +372,9 @@ const navSections: NavigationSection[] = [
   align-items: center;
   gap: 8px;
   margin: 0 8px 4px;
-  color: var(--ui-text-faint);
-  font: 9px var(--ui-font-heading);
-  letter-spacing: 1.7px;
+  color: var(--ui-text-muted);
+  font: var(--ui-text-label) var(--ui-font-heading);
+  letter-spacing: 1.05px;
   text-transform: uppercase;
 }
 
@@ -517,7 +517,7 @@ const navSections: NavigationSection[] = [
 .nav-copy small {
   overflow: hidden;
   color: var(--ui-text-muted);
-  font: 9px var(--ui-font-body);
+  font: var(--ui-text-label) var(--ui-font-body);
   letter-spacing: .25px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -708,8 +708,8 @@ const navSections: NavigationSection[] = [
 }
 
 .status-text {
-  font-size: 11px;
   color: var(--ui-text-subtle);
+  font-size: var(--ui-text-label);
 }
 
 .summoner {

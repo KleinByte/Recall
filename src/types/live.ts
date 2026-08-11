@@ -54,6 +54,13 @@ export interface LiveGameEvent {
   multiKill?: number
 }
 
+export interface LiveGameRunePage {
+  primaryStyleId?: number
+  secondaryStyleId?: number
+  generalRuneIds: number[]
+  statRuneIds: number[]
+}
+
 export interface LiveResourceAnalysis {
   allyGold: number
   enemyGold: number
@@ -97,6 +104,7 @@ export interface LiveGameSnapshot {
     currentGold: number
     level: number
     abilityHaste: number
+    runes?: LiveGameRunePage
   }
   allies: LiveGamePlayer[]
   enemies: LiveGamePlayer[]

@@ -362,7 +362,7 @@ const gaugeClass = computed(() => [
   },
 ])
 
-const ariaLabel = computed(() => `${props.title ?? "The Dial"} ${props.score} out of 100, ${props.label}`)
+const ariaLabel = computed(() => `${props.title ?? "Momentum"} ${props.score} out of 100, ${props.label}`)
 const tierAccessibleName: Record<Tier, string> = {
   gold: "Gold",
   emerald: "Emerald",
@@ -541,14 +541,8 @@ const streakText = computed(() =>
   position: relative;
   width: min(100%, 320px);
   height: 170px;
-  margin: -8px auto 0;
+  margin: 0 auto;
   isolation: isolate;
-  background: radial-gradient(
-    ellipse 48% 62% at 50% 56.5%,
-    rgba(11, 45, 61, .34) 0 34%,
-    rgba(5, 15, 26, .18) 56%,
-    transparent 72%
-  );
 }
 
 .gauge-svg {
@@ -608,7 +602,7 @@ const streakText = computed(() =>
 
 .tick-label {
   fill: var(--dial-readout-muted);
-  font: 10px var(--font-heading);
+  font: var(--ui-text-label) var(--font-heading);
   text-anchor: middle;
 }
 

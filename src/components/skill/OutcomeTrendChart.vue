@@ -26,7 +26,7 @@ const option = computed<EChartsCoreOption>(() => ({
     type: "category",
     data: props.rows.map((row) => row.label),
     axisTick: { alignWithLabel: true },
-    axisLabel: { fontSize: 10 },
+    axisLabel: { fontSize: 11 },
   },
   yAxis: [
     {

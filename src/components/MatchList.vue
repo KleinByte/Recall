@@ -290,7 +290,7 @@ const itemName = (itemId: number) => itemAsset(itemId).name
   display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px;
   border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--surface-0) 74%, transparent); color: var(--text-secondary);
-  font-size: 10px; line-height: 1; white-space: nowrap;
+  font-size: var(--ui-text-label); line-height: 1; white-space: nowrap;
 }
 .game-label { border-color: rgba(200, 170, 110, .3); color: var(--gold-bright); }
 .place-chip { color: var(--text-primary); }

@@ -48,8 +48,8 @@ function itemCounts(player: LiveGamePlayer) {
 
 /** Only changes that need sub-15-second timing force an immediate snapshot. */
 function stateFingerprint(snapshot: Omit<LiveGameSnapshot, "events">) {
-  return JSON.stringify(
-    [...snapshot.allies, ...snapshot.enemies]
+  return JSON.stringify({
+    players: [...snapshot.allies, ...snapshot.enemies]
       .map((player) => ({
         id: playerIdentity(player),
         position: player.position,
@@ -57,8 +57,17 @@ function stateFingerprint(snapshot: Omit<LiveGameSnapshot, "events">) {
         items: [...itemCounts(player)].sort((left, right) => left[0] - right[0]),
       }))
       .sort((left, right) => left.id.localeCompare(right.id)),
-  )
+    // Full runes are exposed only for the active player. Including their ids
+    // makes the first complete page durable even if the port initially came
+    // online with a partial Active Player response.
+    runes: snapshot.activePlayer?.runes,
+  })
 }
+
+type RuneStampParticipant = Pick<
+  ParticipantRow,
+  "isPlayer" | "perkPrimaryStyle" | "perkSubStyle" | "perks" | "runeSelections"
+>
 
 function withoutEvents(snapshot: LiveGameSnapshot): Omit<LiveGameSnapshot, "events"> {
   const { events: _events, ...stored } = snapshot
@@ -207,6 +216,64 @@ export class LiveGameCaptureRepository {
     return stamped
   }
 
+  /**
+   * Adds the local player's full in-game rune page to an LCU scoreboard row.
+   *
+   * LCU match history supplies the six normal runes and their counters, but
+   * omits the three bonus shards. Riot's documented Active Player feed keeps
+   * the exact general and stat rune ids, so merge only missing slots and never
+   * displace richer Match-V5 selections.
+   */
+  stampRunes(
+    gameId: number | undefined,
+    puuid: string,
+    rows: RuneStampParticipant[],
+  ) {
+    if (!gameId || rows.length === 0) return 0
+
+    const runePages = [...this.listSnapshots(gameId, puuid)]
+      .reverse()
+      .map((snapshot) => snapshot.activePlayer?.runes)
+      .filter((runes): runes is NonNullable<typeof runes> => Boolean(runes &&
+        (runes.generalRuneIds.length > 0 || runes.statRuneIds.length > 0)))
+    const runePage = runePages.find((runes) => runes.statRuneIds.length > 0) ??
+      runePages[0]
+    const owner = rows.find((row) => row.isPlayer === 1)
+    if (!runePage || !owner) return 0
+
+    let changed = false
+    if (owner.perkPrimaryStyle <= 0 && runePage.primaryStyleId) {
+      owner.perkPrimaryStyle = runePage.primaryStyleId
+      changed = true
+    }
+    if (owner.perkSubStyle <= 0 && runePage.secondaryStyleId) {
+      owner.perkSubStyle = runePage.secondaryStyleId
+      changed = true
+    }
+
+    const perks = Array.from({ length: 6 }, (_, index) => owner.perks[index] ?? 0)
+    for (const [slot, id] of runePage.generalRuneIds.slice(0, 6).entries()) {
+      if (perks[slot] > 0 || id <= 0) continue
+      perks[slot] = id
+      changed = true
+    }
+    owner.perks = perks
+
+    const selections = [...(owner.runeSelections ?? [])]
+    const occupiedSlots = new Set(selections.map((selection) => selection.slot))
+    const addSelection = (runeId: number, slot: number) => {
+      if (runeId <= 0 || occupiedSlots.has(slot)) return
+      selections.push({ runeId, slot, var1: 0, var2: 0, var3: 0, kind: "modern" })
+      occupiedSlots.add(slot)
+      changed = true
+    }
+    runePage.generalRuneIds.slice(0, 6).forEach((id, slot) => addSelection(id, slot))
+    runePage.statRuneIds.slice(0, 3).forEach((id, slot) => addSelection(id, 6 + slot))
+    if (changed) owner.runeSelections = selections.sort((left, right) => left.slot - right.slot)
+
+    return changed ? 1 : 0
+  }
+
   /** Repairs lobbies captured before live positions were promoted post-game. */
   repairStoredPositions(puuid: string) {
     const games = this.db.prepare(
@@ -238,6 +305,90 @@ export class LiveGameCaptureRepository {
           if (!row.role || row.role === previous.get(row.participantId)) continue
           repaired += update.run(row.role, gameId, puuid, row.participantId).changes
         }
+      }
+      return repaired
+    })()
+  }
+
+  /** Repairs a lobby that was stored before its captured in-game rune page. */
+  repairStoredRunes(puuid: string) {
+    const games = this.db.prepare(
+      `SELECT DISTINCT snapshot.game_id AS gameId
+       FROM live_game_snapshots snapshot
+       JOIN match_participants participant
+         ON participant.game_id = snapshot.game_id
+        AND participant.puuid = snapshot.puuid
+        AND participant.is_player = 1
+       WHERE snapshot.puuid = ?
+         AND json_valid(snapshot.snapshot_json)
+         AND json_array_length(
+           json_extract(snapshot.snapshot_json, '$.activePlayer.runes.statRuneIds')
+         ) > 0
+         AND (
+           participant.rune_selections_json NOT LIKE '%"slot":6%'
+           OR participant.rune_selections_json NOT LIKE '%"slot":7%'
+           OR participant.rune_selections_json NOT LIKE '%"slot":8%'
+         )`,
+    ).all(puuid) as { gameId: number }[]
+    const read = this.db.prepare(
+      `SELECT participant_id AS participantId,
+              is_player AS isPlayer,
+              perk_primary_style AS perkPrimaryStyle,
+              perk_sub_style AS perkSubStyle,
+              perk0, perk1, perk2, perk3, perk4, perk5,
+              rune_selections_json AS runeSelectionsJson
+       FROM match_participants
+       WHERE game_id = ? AND puuid = ?`,
+    )
+    const update = this.db.prepare(
+      `UPDATE match_participants
+       SET perk_primary_style = ?, perk_sub_style = ?,
+           perk0 = ?, perk1 = ?, perk2 = ?, perk3 = ?, perk4 = ?, perk5 = ?,
+           rune_selections_json = ?
+       WHERE game_id = ? AND puuid = ? AND participant_id = ?`,
+    )
+
+    return this.db.transaction(() => {
+      let repaired = 0
+      for (const { gameId } of games) {
+        const stored = read.all(gameId, puuid) as Array<{
+          participantId: number
+          isPlayer: number
+          perkPrimaryStyle: number
+          perkSubStyle: number
+          perk0: number
+          perk1: number
+          perk2: number
+          perk3: number
+          perk4: number
+          perk5: number
+          runeSelectionsJson: string
+        }>
+        const rows = stored.map((row) => {
+          let runeSelections: ParticipantRow["runeSelections"] = []
+          try {
+            runeSelections = JSON.parse(row.runeSelectionsJson) as ParticipantRow["runeSelections"]
+          } catch {
+            runeSelections = []
+          }
+          return {
+            ...row,
+            perks: [row.perk0, row.perk1, row.perk2, row.perk3, row.perk4, row.perk5],
+            runeSelections,
+          }
+        })
+        if (this.stampRunes(gameId, puuid, rows) === 0) continue
+        const owner = rows.find((row) => row.isPlayer === 1)
+        if (!owner) continue
+        repaired += update.run(
+          owner.perkPrimaryStyle,
+          owner.perkSubStyle,
+          ...owner.perks,
+          JSON.stringify(owner.runeSelections ?? []),
+          gameId,
+          puuid,
+          owner.participantId,
+        ).changes
       }
       return repaired
     })()
