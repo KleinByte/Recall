@@ -1,4 +1,5 @@
 import { Agent, request } from "node:https"
+import { assertLoopbackLcuCredentials } from "./lcu-discovery.js"
 import type { LcuCredentials } from "./lcu-discovery.js"
 
 export function buildAuthHeader(credentials: LcuCredentials): string {
@@ -25,8 +26,11 @@ export class LcuRequestError extends Error {
  */
 export class LcuClient {
   private readonly agent = new Agent({ rejectUnauthorized: false })
+  private readonly credentials: LcuCredentials
 
-  constructor(private readonly credentials: LcuCredentials) {}
+  constructor(credentials: LcuCredentials) {
+    this.credentials = assertLoopbackLcuCredentials(credentials)
+  }
 
   request<T>(path: string): Promise<T> {
     const { address, port } = this.credentials

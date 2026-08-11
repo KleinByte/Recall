@@ -1,5 +1,5 @@
 import fs from "node:fs"
-import { defineConfig } from "vite"
+import { defineConfig, type Plugin } from "vite"
 import vue from "@vitejs/plugin-vue"
 import electron from "vite-plugin-electron/simple"
 import pkg from "./package.json"
@@ -9,6 +9,43 @@ import { nodePolyfills } from "vite-plugin-node-polyfills"
 // transitive dependency trees cannot be pruned by the desktop packager. Keep
 // only native or intentionally external runtime modules here.
 const mainProcessExternals = ["better-sqlite3", "electron", "ws"]
+const rendererEntryBudgetBytes = 250 * 1024
+
+function rendererEntryBudget(): Plugin {
+  return {
+    name: "recall-renderer-entry-budget",
+    generateBundle(_options, bundle) {
+      const entry = Object.values(bundle).find((item) =>
+        item.type === "chunk" &&
+        item.isEntry &&
+        item.facadeModuleId?.replaceAll("\\", "/").endsWith("/src/main.ts"))
+      if (!entry || entry.type !== "chunk") return
+
+      const bytes = Buffer.byteLength(entry.code)
+      if (bytes > rendererEntryBudgetBytes) {
+        this.error(
+          `Renderer startup entry is ${Math.ceil(bytes / 1024)} kB; ` +
+          `keep it below ${rendererEntryBudgetBytes / 1024} kB by lazy-loading feature pages.`,
+        )
+      }
+    },
+  }
+}
+
+/**
+ * Keep the renderer's long-lived framework dependencies independently
+ * cacheable. Page components remain Vite-managed async chunks; these groups
+ * are intentionally limited to stable library boundaries so a small feature
+ * edit does not produce a fragile graph of vendor micro-chunks.
+ */
+function rendererChunk(id: string): string | undefined {
+  if (!id.includes("node_modules")) return undefined
+  if (id.includes("/zrender/")) return "chart-renderer"
+  if (id.includes("/echarts/")) return "chart-engine"
+  if (id.includes("/@fortawesome/")) return "icons"
+  if (id.includes("/vue/") || id.includes("/@vue/")) return "vue"
+  return undefined
+}
 
 // https://vitejs.dev/config/
 export default defineConfig(({ command }) => {
@@ -22,6 +59,7 @@ export default defineConfig(({ command }) => {
     base: isServe ? "/" : "./",
     plugins: [
       vue(),
+      rendererEntryBudget(),
       nodePolyfills({
         globals: {
           Buffer: true,
@@ -82,5 +120,16 @@ export default defineConfig(({ command }) => {
         }
       })(),
     clearScreen: false,
+    build: {
+      // ECharts is deliberately isolated and loaded with chart-bearing pages.
+      // Its engine is larger than Vite's generic 500 kB warning threshold,
+      // while the actual startup entry remains well below this budget.
+      chunkSizeWarningLimit: 700,
+      rollupOptions: {
+        output: {
+          manualChunks: rendererChunk,
+        },
+      },
+    },
   }
 })

@@ -1,11 +1,9 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue"
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref } from "vue"
 import ChallengeDetailModal from "../components/ChallengeDetailModal.vue"
 import FormStrip from "../components/FormStrip.vue"
 import GradeBadge from "../components/GradeBadge.vue"
 import MomentumGauge from "../components/MomentumGauge.vue"
-import RankedHistoryPanel from "../components/RankedHistoryPanel.vue"
-import PerformanceRadar from "../components/skill/PerformanceRadar.vue"
 import EmptyState from "../components/ui/EmptyState.vue"
 import MiniBar from "../components/ui/MiniBar.vue"
 import Panel from "../components/ui/Panel.vue"
@@ -39,6 +37,16 @@ import type {
   RankedHistory,
   StatsSummary,
 } from "../types/stats"
+
+// The dashboard shell and text telemetry render before the chart engine is
+// needed. These components are already guarded by data-dependent v-if blocks,
+// so their shared ECharts runtime can load only when there is a chart to show.
+const RankedHistoryPanel = defineAsyncComponent(
+  () => import("../components/RankedHistoryPanel.vue"),
+)
+const PerformanceRadar = defineAsyncComponent(
+  () => import("../components/skill/PerformanceRadar.vue"),
+)
 
 const props = defineProps<{
   champions: Champion[] | null

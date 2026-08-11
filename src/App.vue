@@ -7,7 +7,6 @@ import PostGameBanner from "./components/PostGameBanner.vue"
 import UpdateRecallAnimation from "./components/UpdateRecallAnimation.vue"
 import UpdateReadyBanner from "./components/UpdateReadyBanner.vue"
 import WindowTitleBar from "./components/WindowTitleBar.vue"
-import DashboardPage from "./pages/DashboardPage.vue"
 import {
   currentAppVersion,
   hasUnseenPatchNotes,
@@ -32,6 +31,7 @@ import type { UpdateStatus } from "./types/update"
 const ChampionDetail = defineAsyncComponent(() => import("./components/ChampionDetail.vue"))
 const ChallengesPage = defineAsyncComponent(() => import("./pages/ChallengesPage.vue"))
 const ChampionsPage = defineAsyncComponent(() => import("./pages/ChampionsPage.vue"))
+const DashboardPage = defineAsyncComponent(() => import("./pages/DashboardPage.vue"))
 const LiveGamePage = defineAsyncComponent(() => import("./pages/LiveGamePage.vue"))
 const MatchesPage = defineAsyncComponent(() => import("./pages/MatchesPage.vue"))
 const ProgressPage = defineAsyncComponent(() => import("./pages/ProgressPage.vue"))

@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events"
 import { WebSocket } from "ws"
 import { buildAuthHeader } from "./lcu-client.js"
+import { assertLoopbackLcuCredentials } from "./lcu-discovery.js"
 import type { LcuCredentials } from "./lcu-discovery.js"
 import {
   LCUEvents,
@@ -40,9 +41,11 @@ export class LcuEvents extends EventEmitter {
   private timer?: NodeJS.Timeout
   private stopped = true
   private inGame = false
+  private readonly credentials: LcuCredentials
 
-  constructor(private readonly credentials: LcuCredentials) {
+  constructor(credentials: LcuCredentials) {
     super()
+    this.credentials = assertLoopbackLcuCredentials(credentials)
   }
 
   start() {

@@ -188,9 +188,13 @@ Recall never restarts itself, and app updates preserve the local database.
 
 ## Build from source
 
-You will need Node.js and pnpm.
+Recall's development toolchain is pinned to Node.js 22.23.1 and pnpm 9.15.9.
+Version managers can read `.node-version`; Corepack reads the exact pnpm version
+from `package.json`.
 
 ```sh
+corepack enable
+corepack prepare pnpm@9.15.9 --activate
 pnpm install
 pnpm dev
 ```
@@ -200,12 +204,34 @@ Useful commands:
 ```sh
 pnpm typecheck
 pnpm test
+pnpm test:e2e # run after build:renderer
+pnpm verify
 pnpm build
 ```
 
 `better-sqlite3` is a native dependency. The application copy is compiled for
 Electron, while `better-sqlite3-node` provides the regular Node ABI used by the
-test suite.
+test suite. Both entries are pinned to the same package version and pnpm keeps
+their files separate so rebuilding one ABI cannot overwrite the other. A normal
+install prepares both copies; use these commands to diagnose or repair a
+native-runtime mismatch:
+
+```sh
+pnpm doctor:native
+pnpm rebuild:electron
+pnpm rebuild:node
+```
+
+`pnpm verify` runs repository hygiene checks, both typecheckers, the complete
+test suite, the renderer/main/preload build, and both native-runtime probes.
+`pnpm verify:ci` additionally launches the built app through Playwright at the
+minimum window size and common display scaling, then creates an unpacked
+application and runs the packaged-runtime inspection used by CI.
+
+`node-abi` is intentionally listed directly because electron-builder's pnpm
+dependency walker needs that install-time transitive dependency at the project
+root while assembling the external native module. Recall does not import it at
+runtime.
 
 ### Isolated Docker development profile
 

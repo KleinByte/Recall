@@ -43,11 +43,11 @@ function observations(
 
   for (let i = 0; i < count; i++) {
     let playedAt = baseTime + i * 60 * 60 * 1000 // 1 hour apart by default
-    
+
     if (options.daysApart && i > 0) {
       playedAt = baseTime + i * 2 * 24 * 60 * 60 * 1000 // 2 days apart
     }
-    
+
     if (options.fixedHour !== undefined) {
       const date = new Date(playedAt)
       date.setHours(options.fixedHour, 0, 0, 0)
@@ -143,7 +143,7 @@ function observations(
 describe("Strong game pattern", () => {
   it("requires 30 graded games and eight games on each side", () => {
     expect(buildBestGamePattern(observations(29)).eligible).toBe(false)
-    
+
     // 30 games with split that has >=8 on both sides should be eligible
     const thirtyObs = observations(30)
     const report30 = buildBestGamePattern(thirtyObs)
@@ -168,11 +168,11 @@ describe("Strong game pattern", () => {
     // All observations with same role should use same-role history when count >=20
     const sameRoleReport = buildBestGamePattern(observations(32, { sameRole: true }))
     expect(sameRoleReport.eligible).toBe(true)
-    
+
     // Mixed roles where each role has <20 should fall back to all selected-scope
     const mixedReport = buildBestGamePattern(observations(32, { mixedRoles: true }))
     expect(mixedReport.eligible).toBe(true)
-    
+
     // The key difference: with mixed roles each observation uses all-scope normalization
     // because no single role has >=20 graded games
   })
@@ -185,7 +185,7 @@ describe("Strong game pattern", () => {
 
   it("generates no directional copy when interval includes zero", () => {
     const report = buildBestGamePattern(observations(32))
-    const findingWithZero = report.findings.find((f) => 
+    const findingWithZero = report.findings.find((f) =>
       f.interval && f.interval.low <= 0 && f.interval.high >= 0
     )
     if (findingWithZero) {
@@ -198,7 +198,7 @@ describe("Playing conditions", () => {
   it("requires 30 graded games overall", () => {
     const report29 = buildPlayingConditions(observations(29))
     expect(report29.sections.every(s => !s.eligible)).toBe(true)
-    
+
     const report30 = buildPlayingConditions(observations(30))
     expect(report30.sections.some(s => s.eligible)).toBe(true)
   })
@@ -213,10 +213,10 @@ describe("Playing conditions", () => {
       }
       return o
     })
-    
+
     const report = buildPlayingConditions(obs)
     const afterWinSection = report.sections.find((s) => s.key === "previousResult")
-    
+
     // With session breaks, after-win/loss buckets should be empty or very small
     const afterWinFinding = afterWinSection?.findings.find(f => f.key.includes("After win"))
     expect(afterWinFinding === undefined || afterWinFinding.games === 0).toBe(true)
@@ -227,7 +227,7 @@ describe("Playing conditions", () => {
     const timeSection = report.sections.find((s) => s.key === "timeOfDay")
     expect(timeSection).toBeDefined()
     expect(timeSection?.method).toContain("local")
-    
+
     // Should have potential for 8 buckets (0-3, 3-6, 6-9, 9-12, 12-15, 15-18, 18-21, 21-24)
     // Not all will be eligible with only 100 games, but structure should support 8
   })
@@ -236,7 +236,7 @@ describe("Playing conditions", () => {
     const report = buildPlayingConditions(observations(50))
     const sessionSection = report.sections.find((s) => s.key === "sessionGame")
     expect(sessionSection).toBeDefined()
-    
+
     // Should have structure for 4 buckets
     const possibleLabels = ["First game", "Second game", "Third game", "Fourth+ game"]
     // At least some of these should exist in findings
@@ -246,7 +246,7 @@ describe("Playing conditions", () => {
     const report = buildPlayingConditions(observations(50))
     const restSection = report.sections.find((s) => s.key === "restTime")
     expect(restSection).toBeDefined()
-    
+
     // Should support 4 rest categories
   })
 
@@ -263,7 +263,7 @@ describe("Playing conditions", () => {
       }
       return o
     })
-    
+
     const report = buildPlayingConditions(obs)
     // Boundaries should be handled consistently (<15, 15-45, 45-90, >90)
     expect(report.sections).toBeDefined()
@@ -272,7 +272,7 @@ describe("Playing conditions", () => {
   it("requires at least 8 graded games per bucket for directional copy", () => {
     const report = buildPlayingConditions(observations(15))
     const sections = report.sections.filter((s) => s.eligible)
-    
+
     sections.forEach(section => {
       section.findings.forEach(finding => {
         if (finding.games < 8) {
@@ -286,7 +286,7 @@ describe("Playing conditions", () => {
   it("includes Wilson interval and adjusted win rate in findings", () => {
     const report = buildPlayingConditions(observations(50))
     const section = report.sections.find(s => s.eligible && s.findings.length > 0)
-    
+
     if (section?.findings[0]) {
       const finding = section.findings[0]
       // Should have rateInterval (Wilson) separate from interval (grade bootstrap)
@@ -297,7 +297,7 @@ describe("Playing conditions", () => {
   it("uses grade deltas with bootstrap intervals for condition findings", () => {
     const report = buildPlayingConditions(observations(50))
     const section = report.sections.find(s => s.eligible && s.findings.length > 0)
-    
+
     if (section?.findings[0]) {
       const finding = section.findings[0]
       expect(finding.unit).toBe("grade")
@@ -320,19 +320,19 @@ describe("Playing conditions", () => {
     const sparse1 = observations(3, { fixedHour: 2 }) // 3 games in 0-3 block
     const sparse2 = observations(2, { fixedHour: 15 }) // 2 games in 15-18 block
     const combined = [...obs, ...sparse1, ...sparse2]
-    
+
     const report = buildPlayingConditions(combined)
     const timeSection = report.sections.find((s) => s.key === "timeOfDay")
-    
+
     expect(timeSection?.eligible).toBe(true) // >=1 bucket has >=8 games
-    
+
     // Should find sparse buckets in findings
     const sparseFinding1 = timeSection?.findings.find((f) => f.games === 3)
     const sparseFinding2 = timeSection?.findings.find((f) => f.games === 2)
-    
+
     expect(sparseFinding1).toBeDefined()
     expect(sparseFinding2).toBeDefined()
-    
+
     // Sparse findings must have:
     if (sparseFinding1) {
       expect(sparseFinding1.games).toBe(3)
@@ -341,7 +341,7 @@ describe("Playing conditions", () => {
       expect(sparseFinding1.summary).not.toMatch(/higher|lower|associated with.*grade/i)
       expect(sparseFinding1.scope).toMatch(/raw rate|adjusted rate/i)
     }
-    
+
     if (sparseFinding2) {
       expect(sparseFinding2.games).toBe(2)
       expect(sparseFinding2.rateInterval).toBeDefined()

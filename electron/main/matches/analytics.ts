@@ -26,13 +26,13 @@ export function wilsonInterval(wins: number, games: number, z = 1.95996398454005
   if (games === 0) {
     return { low: 0, high: 1, level: 0.95 }
   }
-  
+
   const p = wins / games
   const z2 = z * z
   const denominator = 1 + z2 / games
   const center = (p + z2 / (2 * games)) / denominator
   const margin = (z * Math.sqrt(p * (1 - p) / games + z2 / (4 * games * games))) / denominator
-  
+
   return {
     low: Math.max(0, center - margin),
     high: Math.min(1, center + margin),
@@ -52,13 +52,13 @@ export function shrinkRate(wins: number, games: number, baseline: number, priorW
  */
 export function quantile(values: number[], probability: number): number | undefined {
   if (values.length === 0) return undefined
-  
+
   const sorted = [...values].sort((a, b) => a - b)
   const index = probability * (sorted.length - 1)
   const lower = Math.floor(index)
   const upper = Math.ceil(index)
   const weight = index - lower
-  
+
   return sorted[lower] * (1 - weight) + sorted[upper] * weight
 }
 
@@ -67,15 +67,15 @@ export function quantile(values: number[], probability: number): number | undefi
  */
 export function empiricalPercentile(values: number[], value: number): number {
   if (values.length === 0) return 0
-  
+
   let below = 0
   let equal = 0
-  
+
   for (const v of values) {
     if (v < value) below++
     else if (v === value) equal++
   }
-  
+
   return (below + equal / 2) / values.length
 }
 
@@ -127,7 +127,7 @@ export function seededRandom(seed: string): () => number {
     hash ^= seed.charCodeAt(i)
     hash = Math.imul(hash, 16777619)
   }
-  
+
   // Linear congruential generator
   let state = hash >>> 0
   return () => {
@@ -199,16 +199,16 @@ export function bootstrapDifference(left: number[], right: number[], seed: strin
   const differences: number[] = []
   const sortedLeft = [...left].sort((a, b) => a - b)
   const sortedRight = [...right].sort((a, b) => a - b)
-  
+
   for (let i = 0; i < resamples; i++) {
     differences.push(
       sampleBootstrapMedian(sortedLeft, rng) - sampleBootstrapMedian(sortedRight, rng),
     )
   }
-  
+
   const low = quantile(differences, 0.025) ?? 0
   const high = quantile(differences, 0.975) ?? 0
-  
+
   return { low, high, level: 0.95 }
 }
 
@@ -217,9 +217,9 @@ export function bootstrapDifference(left: number[], right: number[], seed: strin
  */
 export function confidenceForFinding(games: number, interval: Interval | undefined, unit: "grade" | "probability"): EvidenceConfidence {
   if (!interval || games < 10) return "insufficient"
-  
+
   const width = interval.high - interval.low
-  
+
   if (unit === "probability") {
     if (games >= 50 && width < 0.15) return "high"
     if (games >= 30 && width < 0.25) return "medium"

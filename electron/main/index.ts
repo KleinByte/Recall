@@ -2568,6 +2568,4 @@ async function main() {
   })
 }
 
-app.commandLine.appendSwitch("ignore-certificate-errors")
-
 void main()

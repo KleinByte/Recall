@@ -4,6 +4,8 @@ node_modules
 dist
 dist-electron
 release
+playwright-report
+test-results
 logs
 tmp
 *.log

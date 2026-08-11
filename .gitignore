@@ -13,6 +13,8 @@ dist
 dist-ssr
 dist-electron
 release
+playwright-report
+test-results
 *.local
 *.tsbuildinfo
 
@@ -29,5 +31,8 @@ release
 # lockfile
 package-lock.json
 yarn.lock
-# Local documentation and design specs
-/docs/
+# Local documentation and design specs. README screenshots are release assets,
+# while local plans and working notes remain outside the repository.
+/docs/*
+!/docs/screenshots/
+!/docs/screenshots/**

@@ -1,0 +1,47 @@
+* text=auto
+
+# Keep source and configuration deterministic across Windows and CI.
+.dockerignore text eol=lf
+.editorconfig text eol=lf
+.gitattributes text eol=lf
+.gitignore text eol=lf
+.node-version text eol=lf
+.npmrc text eol=lf
+Dockerfile* text eol=lf
+*.cjs text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.mjs text eol=lf
+*.ps1 text eol=lf
+*.py text eol=lf
+*.sh text eol=lf
+*.svg text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.vue text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# Windows command scripts are consumed by cmd.exe.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Never normalize or diff binary release and application assets as text.
+*.7z -text
+*.db -text
+*.exe -text
+*.gif -text
+*.ico -text
+*.jpeg -text
+*.jpg -text
+*.pdf -text
+*.png -text
+*.sqlite -text
+*.ttf -text
+*.webp -text
+*.woff -text
+*.woff2 -text
+*.zip -text

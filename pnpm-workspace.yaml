@@ -1,0 +1,10 @@
+packages:
+  - "."
+
+# The application and test aliases need independent native binaries because
+# Electron and Node use different ABIs.
+packageImportMethod: copy
+
+onlyBuiltDependencies:
+  - better-sqlite3
+  - electron

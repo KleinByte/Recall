@@ -13,8 +13,10 @@
     "esModuleInterop": true
   },
   "include": [
+    "playwright.config.ts",
     "vite.config.ts",
     "electron",
+    "tests/e2e/**/*.ts",
     "src/helpers/time-contract-core.ts",
     "src/shared/measurement.ts",
     "src/shared/performance-vocabulary.ts",

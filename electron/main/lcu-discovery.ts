@@ -14,6 +14,22 @@ export interface LcuCredentials {
   protocol: string
 }
 
+const LCU_LOOPBACK_ADDRESS = "127.0.0.1"
+
+/**
+ * Riot's local APIs use self-signed certificates. Any caller that disables
+ * certificate verification must prove the destination is a numeric loopback
+ * address first so credentials can never be sent to an arbitrary host.
+ */
+export function assertLoopbackLcuCredentials(
+  credentials: LcuCredentials,
+): LcuCredentials {
+  if (credentials.address !== LCU_LOOPBACK_ADDRESS) {
+    throw new Error("League Client credentials must target a loopback address.")
+  }
+  return credentials
+}
+
 export function parseLeagueClientInstallPath(commandLine: string) {
   const match = commandLine.match(
     /"--install-directory=([^"]+)"|--install-directory="([^"]+)"|--install-directory=([^\s]+)/,
