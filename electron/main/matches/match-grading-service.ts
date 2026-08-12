@@ -156,6 +156,11 @@ interface StoredParticipantRow {
   gradeCoreContractVersion: number
 }
 
+interface StoredParticipantWithMatch extends StoredParticipantRow {
+  gameId: number
+  ownerPuuid: string
+}
+
 export interface PerformanceReferenceStatus {
   state: "calibrating" | "frozen"
   requiredMatches: number
@@ -1690,10 +1695,19 @@ export class MatchGradingService {
   private loadEligibleReferenceLobbies(): GradeRawLobby[] {
     const lobbies: GradeRawLobby[] = []
     const independentMatches = new Set<string>()
+    const participantsByMatch = new Map<string, StoredParticipantRow[]>()
+    for (const participant of this.loadAllParticipants()) {
+      const key = `${participant.gameId}\u0000${participant.ownerPuuid}`
+      const group = participantsByMatch.get(key)
+      if (group) group.push(participant)
+      else participantsByMatch.set(key, [participant])
+    }
     for (const match of this.loadAllMatches()) {
       const clusterId = gradeCalibrationClusterId(match)
       if (independentMatches.has(clusterId)) continue
-      const participants = this.loadParticipants(match.gameId, match.puuid)
+      const participants = participantsByMatch.get(
+        `${match.gameId}\u0000${match.puuid}`,
+      ) ?? []
       const resolved = resolvedLobbyPositions(participants, match.modeFamily)
       if (gradeEligibility(match, participants, resolved)) continue
       const lobby = this.buildRawLobby(match, participants, resolved)
@@ -1778,6 +1792,46 @@ export class MatchGradingService {
       WHERE game_id = ? AND puuid = ?
       ORDER BY participant_id
     `).all(gameId, puuid) as StoredParticipantRow[]
+  }
+
+  private loadAllParticipants(): StoredParticipantWithMatch[] {
+    return this.db.prepare(`
+      SELECT game_id AS gameId, puuid AS ownerPuuid,
+             participant_id AS participantId, team_id AS teamId,
+             is_player AS isPlayer, champion_id AS championId,
+             spell1_id AS spell1Id, spell2_id AS spell2Id,
+             kills, deaths, assists, damage_to_champions AS damageToChampions,
+             damage_taken AS damageTaken,
+             damage_self_mitigated AS damageSelfMitigated,
+             gold_earned AS goldEarned,
+             total_minions_killed AS totalMinionsKilled,
+             neutral_minions AS neutralMinions,
+             damage_objectives AS damageObjectives,
+             damage_turrets AS damageTurrets,
+             time_ccing_others AS timeCcingOthers,
+             vision_score AS visionScore,
+             wards_placed AS wardsPlaced, wards_killed AS wardsKilled,
+             eligible_for_progression AS eligibleForProgression,
+             control_wards_purchased AS controlWardsPurchased,
+             detector_wards_placed AS detectorWardsPlaced,
+             total_heals_on_teammates AS totalHealsOnTeammates,
+             total_damage_shielded_on_teammates AS totalDamageShieldedOnTeammates,
+             damage_dealt_to_buildings AS damageDealtToBuildings,
+             assigned_position AS assignedPosition,
+             lcu_lane AS lcuLane, lcu_role AS lcuRole,
+             lane AS legacyLane, role AS legacyRole,
+             match_v5_team_position AS matchV5TeamPosition,
+             match_v5_individual_position AS matchV5IndividualPosition,
+             resolved_position AS resolvedPosition,
+             position_resolver_version AS positionResolverVersion,
+             extended_metrics_json AS extendedMetricsJson,
+             grade_core_complete AS gradeCoreComplete,
+             grade_core_source AS gradeCoreSource,
+             grade_core_missing_fields_json AS gradeCoreMissingFieldsJson,
+             grade_core_contract_version AS gradeCoreContractVersion
+      FROM match_participants
+      ORDER BY puuid, game_id, participant_id
+    `).all() as StoredParticipantWithMatch[]
   }
 
   private persistResolvedPositions(

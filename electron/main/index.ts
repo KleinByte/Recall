@@ -265,6 +265,7 @@ let startupRestoreError: string | undefined
 let riotBackfillAbort: AbortController | undefined
 let riotBackfillTask: Promise<void> | undefined
 let riotBackfillRevision = 0
+let dailyBackupTask: Promise<void> | undefined
 const databaseWrites = new DatabaseWriteCoordinator()
 let shutdownPrepared = false
 let shutdownPreparing: Promise<void> | undefined
@@ -457,7 +458,7 @@ function getMatchGradingService() {
   return recall
 }
 
-function ensureRecallFrozen(win?: BrowserWindow) {
+async function ensureRecallFrozen(win?: BrowserWindow) {
   const service = getMatchGradingService()
   const status = service.referenceStatus()
   if (collectionDisabled()) return status
@@ -475,7 +476,7 @@ function ensureRecallFrozen(win?: BrowserWindow) {
        (status.supportedScopes.length === 0 && !hasRecoverableRawReferenceData))) {
     return status
   }
-  const backup = getBackupManager().create(getDatabase(), "pre-repair")
+  const backup = await getBackupManager().createAsync(getDatabase(), "pre-repair")
   const result = service.ensureFrozenReference({
     path: backup.fileName,
     sha256: backup.sha256,
@@ -1343,7 +1344,7 @@ async function startRiotHistoryBackfill(
   try {
     await task
     if (completed && revision === riotBackfillRevision && session === active) {
-      ensureRecallFrozen(win)
+      await ensureRecallFrozen(win)
     }
   } finally {
     if (revision === riotBackfillRevision) {
@@ -1386,7 +1387,7 @@ async function afterSync(
     // clearing the optional API key allows the retained/local-only fallback.
     cutoverEnrichmentComplete = enrichment?.status === "complete"
   }
-  if (cutoverEnrichmentComplete) ensureRecallFrozen(win)
+  if (cutoverEnrichmentComplete) await ensureRecallFrozen(win)
 
   if (result.inserted > 0) {
     broadcast(win, "stats:updated", result)
@@ -1691,8 +1692,10 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
   })
 
   ipcMain.handle("backups:list", () => getBackupManager().list())
-  ipcMain.handle("backups:create", () => {
-    const backup = getBackupManager().create(getDatabase(), "manual")
+  ipcMain.handle("backups:create", async () => {
+    const backup = await trackDatabaseTask(
+      getBackupManager().createAsync(getDatabase(), "manual"),
+    )
     broadcast(win, "data-trust:updated")
     return backup
   })
@@ -1703,11 +1706,11 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     broadcast(win, "data-trust:updated")
     return deleted
   })
-  ipcMain.handle("backups:restore", (_event, fileName: unknown) => {
-    getBackupManager().prepareRestore(
+  ipcMain.handle("backups:restore", async (_event, fileName: unknown) => {
+    await trackDatabaseTask(getBackupManager().prepareRestoreAsync(
       getDatabase(),
       limitedString(fileName, "Backup name", 180),
-    )
+    ))
     setImmediate(() => {
       quitting = true
       app.relaunch()
@@ -2232,7 +2235,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
       riotBackfillTask = undefined
       await databaseWrites.drain()
 
-      const backup = getBackupManager().create(getDatabase(), "pre-repair")
+      const backup = await getBackupManager().createAsync(getDatabase(), "pre-repair")
       const result = getMatchGradingService().rebuildReference({
         path: backup.fileName,
         sha256: backup.sha256,
@@ -2588,7 +2591,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
       await databaseWrites.drain()
       riotBackfillTask = undefined
 
-      const backup = getBackupManager().create(getDatabase(), "pre-clear")
+      const backup = await getBackupManager().createAsync(getDatabase(), "pre-clear")
       const result = new ClearHistoryService(getDatabase()).clear(puuid, backup)
       if (settingsStore.getMain("last-puuid") === puuid) {
         settingsStore.deleteMain("last-puuid")
@@ -2609,10 +2612,19 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
 
 function createDailyBackupIfNeeded(win: BrowserWindow) {
   const today = new Date().toISOString().slice(0, 10)
-  if (settingsStore.getMain("last-daily-backup") === today) return
-  getBackupManager().create(getDatabase(), "daily")
-  settingsStore.setMain("last-daily-backup", today)
-  broadcast(win, "data-trust:updated")
+  if (settingsStore.getMain("last-daily-backup") === today || dailyBackupTask) return
+  const task = getBackupManager().createAsync(getDatabase(), "daily")
+    .then(() => {
+      settingsStore.setMain("last-daily-backup", today)
+      broadcast(win, "data-trust:updated")
+    })
+    .catch((error) => {
+      console.warn("Could not create daily backup", error)
+    })
+    .finally(() => {
+      dailyBackupTask = undefined
+    })
+  dailyBackupTask = trackDatabaseTask(task)
 }
 
 function integer(value: unknown, label: string, minimum = 1) {
@@ -2667,7 +2679,7 @@ async function prepareShutdown(
 
   try {
     if (database?.open && createSnapshot) {
-      getBackupManager().create(database, "pre-update")
+      await getBackupManager().createAsync(database, "pre-update")
       createUpdateSnapshot(
         database,
         getDatabasePath(),
@@ -2723,7 +2735,7 @@ async function main() {
   // handler registered" errors because IPC registration happens afterwards.
   try {
     getRepository()
-    ensureRecallFrozen()
+    await ensureRecallFrozen()
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     console.error(`Could not initialise Recall's database: ${message}`)

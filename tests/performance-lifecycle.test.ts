@@ -55,6 +55,19 @@ describe("performance and resource lifecycle", () => {
     expect(review).toContain("refreshCurrent")
   })
 
+  it("keeps Settings trust refreshes coalesced and backup work off the main thread", () => {
+    const settings = read("src/pages/SettingsPage.vue")
+    const main = read("electron/main/index.ts")
+    const backups = read("electron/main/database/backup-manager.ts")
+
+    expect(settings).toContain("useCoalescedTask")
+    expect(settings).toContain("events.on(\"data-trust:updated\", () => void refreshTrust())")
+    expect(main).toContain("createAsync(getDatabase(), \"manual\")")
+    expect(main).toContain("prepareRestoreAsync(")
+    expect(backups).toContain("await db.backup(staging)")
+    expect(backups).not.toContain("integrity: sha256(database)")
+  })
+
   it("refreshes only the dashboard data affected by each client event", () => {
     const dashboard = read("src/pages/DashboardPage.vue")
     const main = read("electron/main/index.ts")

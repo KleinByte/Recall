@@ -15,9 +15,6 @@ importers:
         specifier: ^8.18.0
         version: 8.21.1
     devDependencies:
-      '@electron/rebuild':
-        specifier: ^4.2.0
-        version: 4.2.0
       '@fortawesome/fontawesome-svg-core':
         specifier: ^6.6.0
         version: 6.7.2
@@ -157,11 +154,6 @@ packages:
 
   '@electron/rebuild@4.0.3':
     resolution: {integrity: sha512-u9vpTHRMkOYCs/1FLiSVAFZ7FbjsXK+bQuzviJZa+lG7BHZl1nz52/IcGvwa3sk80/fc3llutBkbCq10Vh8WQA==}
-    engines: {node: '>=22.12.0'}
-    hasBin: true
-
-  '@electron/rebuild@4.2.0':
-    resolution: {integrity: sha512-RKL/O+jGoXJMxrx/5771y1n0xTKmFuOYGO3gMmwypBM6rsH0kou0mswwdXA2JrhIkE4xyC7v9vGk0n6NPzgOxQ==}
     engines: {node: '>=22.12.0'}
     hasBin: true
 
@@ -2745,17 +2737,6 @@ snapshots:
       semver: 7.8.5
       tar: 7.5.22
       yargs: 17.7.3
-    transitivePeerDependencies:
-      - supports-color
-
-  '@electron/rebuild@4.2.0':
-    dependencies:
-      '@malept/cross-spawn-promise': 2.0.0
-      debug: 4.4.3
-      node-abi: 4.33.0
-      node-api-version: 0.2.1
-      node-gyp: 12.4.0
-      read-binary-file-arch: 1.0.6
     transitivePeerDependencies:
       - supports-color
 

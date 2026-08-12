@@ -37,7 +37,6 @@ const prebuilt = execute(process.execPath, [
   prebuildInstall,
   "--runtime=node",
   `--target=${process.versions.node}`,
-  "--force",
 ])
 
 if (prebuilt.error) throw prebuilt.error

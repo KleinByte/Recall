@@ -1,6 +1,7 @@
 import Database from "better-sqlite3"
 import {
   copyFileSync,
+  createReadStream,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -10,10 +11,20 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs"
+import {
+  mkdir,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises"
 import { createHash } from "node:crypto"
+import { createRequire } from "node:module"
 import path from "node:path"
+import { Worker } from "node:worker_threads"
 import {
   BACKUP_RELEASE_SEQUENCE,
+  proposeBackupRetention,
   protectionForReason,
   type ManagedBackupManifestLegacy,
   type ManagedBackupReason,
@@ -22,7 +33,12 @@ import {
 export type BackupReason = ManagedBackupReason
 
 export type BackupManifest = Omit<ManagedBackupManifestLegacy, "integrity"> & {
-  integrity: "ok" | "failed"
+  integrity: "ok" | "failed" | "unknown"
+}
+
+interface BackupDetails {
+  schemaVersion: number
+  matchCount: number
 }
 
 interface RestoreIntent {
@@ -38,7 +54,17 @@ function sha256(filePath: string) {
   return createHash("sha256").update(readFileSync(filePath)).digest("hex")
 }
 
-function inspect(filePath: string, DatabaseClass: typeof Database) {
+function sha256Async(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash("sha256")
+    const input = createReadStream(filePath)
+    input.on("data", (chunk) => hash.update(chunk))
+    input.once("error", reject)
+    input.once("end", () => resolve(hash.digest("hex")))
+  })
+}
+
+function inspect(filePath: string, DatabaseClass: typeof Database): BackupDetails {
   const db = new DatabaseClass(filePath, { readonly: true, fileMustExist: true })
   try {
     const integrity = db.pragma("quick_check", { simple: true })
@@ -55,7 +81,52 @@ function inspect(filePath: string, DatabaseClass: typeof Database) {
     }
   } finally {
     db.close()
+    rmSync(`${filePath}-wal`, { force: true })
+    rmSync(`${filePath}-shm`, { force: true })
   }
+}
+
+const inspectWorkerSource = String.raw`
+  const { parentPort, workerData } = require("node:worker_threads")
+  const { rmSync } = require("node:fs")
+  try {
+    const Database = require(workerData.databaseModulePath)
+    const db = new Database(workerData.filePath, { readonly: true, fileMustExist: true })
+    try {
+      const integrity = db.pragma("quick_check", { simple: true })
+      if (integrity !== "ok") throw new Error("Backup failed SQLite integrity verification")
+      const hasMatches = db.prepare(
+        "SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table' AND name='matches'",
+      ).get().count
+      parentPort.postMessage({
+        schemaVersion: db.pragma("user_version", { simple: true }),
+        matchCount: hasMatches
+          ? db.prepare("SELECT COUNT(*) AS count FROM matches").get().count
+          : 0,
+      })
+    } finally {
+      db.close()
+      rmSync(workerData.filePath + "-wal", { force: true })
+      rmSync(workerData.filePath + "-shm", { force: true })
+    }
+  } catch (error) {
+    throw error
+  }
+`
+
+function inspectAsync(filePath: string): Promise<BackupDetails> {
+  const databaseModulePath = createRequire(import.meta.url).resolve("better-sqlite3")
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(inspectWorkerSource, {
+      eval: true,
+      workerData: { databaseModulePath, filePath },
+    })
+    worker.once("message", (details: BackupDetails) => resolve(details))
+    worker.once("error", reject)
+    worker.once("exit", (code) => {
+      if (code !== 0) reject(new Error(`Backup verification worker exited with code ${code}`))
+    })
+  })
 }
 
 function resolvedChild(root: string, fileName: string) {
@@ -75,8 +146,13 @@ export class BackupManager {
       now?: () => number
       appVersion?: string
       releaseSequence?: number
+      hashFile?: (filePath: string) => string
+      hashFileAsync?: (filePath: string) => Promise<string>
+      inspectAsync?: (filePath: string) => Promise<BackupDetails>
     } = {},
   ) {}
+
+  private asyncQueue: Promise<void> = Promise.resolve()
 
   private get DatabaseClass() {
     return this.options.DatabaseClass ?? Database
@@ -84,6 +160,18 @@ export class BackupManager {
 
   private get now() {
     return this.options.now ?? Date.now
+  }
+
+  private get hashFile() {
+    return this.options.hashFile ?? sha256
+  }
+
+  private get hashFileAsync() {
+    return this.options.hashFileAsync ?? sha256Async
+  }
+
+  private get inspectAsync() {
+    return this.options.inspectAsync ?? inspectAsync
   }
 
   get intentPath() {
@@ -113,7 +201,7 @@ export class BackupManager {
           this.options.releaseSequence ?? BACKUP_RELEASE_SEQUENCE),
         appVersion: this.options.appVersion ?? "development",
         releaseSequence: this.options.releaseSequence ?? BACKUP_RELEASE_SEQUENCE,
-        sha256: sha256(staging),
+        sha256: this.hashFile(staging),
         schemaVersion: details.schemaVersion,
         sizeBytes: statSync(staging).size,
         matchCount: details.matchCount,
@@ -122,10 +210,64 @@ export class BackupManager {
       writeFileSync(manifestStaging, JSON.stringify(manifest, null, 2), "utf8")
       renameSync(staging, destination)
       renameSync(manifestStaging, manifestPath)
+      this.applyRetentionSafely()
       return manifest
     } finally {
       rmSync(staging, { force: true })
       rmSync(manifestStaging, { force: true })
+    }
+  }
+
+  createAsync(db: Database.Database, reason: BackupReason): Promise<BackupManifest> {
+    const task = this.asyncQueue.then(() => this.createAsyncNow(db, reason))
+    this.asyncQueue = task.then(() => undefined, () => undefined)
+    return task
+  }
+
+  private async createAsyncNow(
+    db: Database.Database,
+    reason: BackupReason,
+  ): Promise<BackupManifest> {
+    const createdAt = this.now()
+    await mkdir(this.backupDir, { recursive: true })
+    const fileName = `stats-${reason}-${createdAt}.db`
+    const destination = resolvedChild(this.backupDir, fileName)
+    const staging = `${destination}.tmp-${process.pid}`
+    const manifestPath = `${destination}${MANIFEST_SUFFIX}`
+    const manifestStaging = `${manifestPath}.tmp-${process.pid}`
+    try {
+      await db.backup(staging)
+      const [details, digest, fileStats] = await Promise.all([
+        this.inspectAsync(staging),
+        this.hashFileAsync(staging),
+        stat(staging),
+      ])
+      const manifest: BackupManifest = {
+        format: "recall-managed-backup",
+        manifestVersion: 2,
+        fileName,
+        createdAt,
+        reason,
+        protection: protectionForReason(reason,
+          this.options.releaseSequence ?? BACKUP_RELEASE_SEQUENCE),
+        appVersion: this.options.appVersion ?? "development",
+        releaseSequence: this.options.releaseSequence ?? BACKUP_RELEASE_SEQUENCE,
+        sha256: digest,
+        schemaVersion: details.schemaVersion,
+        sizeBytes: fileStats.size,
+        matchCount: details.matchCount,
+        integrity: "ok",
+      }
+      await writeFile(manifestStaging, JSON.stringify(manifest, null, 2), "utf8")
+      await rename(staging, destination)
+      await rename(manifestStaging, manifestPath)
+      await this.applyRetentionSafelyAsync()
+      return manifest
+    } finally {
+      await rm(staging, { force: true })
+      await rm(`${staging}-wal`, { force: true })
+      await rm(`${staging}-shm`, { force: true })
+      await rm(manifestStaging, { force: true })
     }
   }
 
@@ -140,9 +282,13 @@ export class BackupManager {
           ) as BackupManifest
           const database = resolvedChild(this.backupDir, raw.fileName)
           if (!existsSync(database)) return []
+          const sizeMatches = statSync(database).size === raw.sizeBytes
           const entry: BackupManifest = {
             ...raw,
-            integrity: sha256(database) === raw.sha256 ? "ok" : "failed",
+            // Creation verifies both SQLite and SHA-256. Routine listings use
+            // immutable manifest metadata plus a cheap size check; restore
+            // re-hashes and re-inspects the selected file before it is trusted.
+            integrity: sizeMatches && raw.integrity === "ok" ? "ok" : "failed",
           }
           return [entry]
         } catch {
@@ -165,7 +311,7 @@ export class BackupManager {
     const manifest = this.list().find((entry) => entry.fileName === fileName)
     if (!manifest || !existsSync(sourcePath)) throw new Error("Backup not found")
     if (manifest.integrity !== "ok") throw new Error("Backup integrity check failed")
-    if (sha256(sourcePath) !== manifest.sha256) throw new Error("Backup hash mismatch")
+    if (this.hashFile(sourcePath) !== manifest.sha256) throw new Error("Backup hash mismatch")
     inspect(sourcePath, this.DatabaseClass)
     this.create(db, "pre-restore")
     const intent: RestoreIntent = {
@@ -174,6 +320,25 @@ export class BackupManager {
       expectedHash: manifest.sha256,
     }
     writeFileSync(this.intentPath, JSON.stringify(intent), "utf8")
+  }
+
+  async prepareRestoreAsync(db: Database.Database, fileName: string): Promise<void> {
+    const sourcePath = resolvedChild(this.backupDir, fileName)
+    const manifest = this.list().find((entry) => entry.fileName === fileName)
+    if (!manifest || !existsSync(sourcePath)) throw new Error("Backup not found")
+    if (manifest.integrity !== "ok") throw new Error("Backup integrity check failed")
+    const [digest] = await Promise.all([
+      this.hashFileAsync(sourcePath),
+      this.inspectAsync(sourcePath),
+    ])
+    if (digest !== manifest.sha256) throw new Error("Backup hash mismatch")
+    await this.createAsync(db, "pre-restore")
+    const intent: RestoreIntent = {
+      sourcePath,
+      databasePath: path.resolve(this.databasePath),
+      expectedHash: manifest.sha256,
+    }
+    await writeFile(this.intentPath, JSON.stringify(intent), "utf8")
   }
 
   applyRestoreIntent(latestSupportedSchema: number): boolean {
@@ -215,43 +380,42 @@ export class BackupManager {
   }
 
   private applyRetention() {
+    for (const backup of this.retentionProposal().delete) this.delete(backup.fileName)
+  }
+
+  private retentionProposal() {
     const all = this.list()
-    const keep = new Set(
-      all.filter((backup) => backup.reason === "manual").map((backup) => backup.fileName),
+    const currentDatabaseBytes = existsSync(this.databasePath)
+      ? statSync(this.databasePath).size
+      : 0
+    return proposeBackupRetention(
+      all,
+      currentDatabaseBytes,
+      this.options.releaseSequence ?? BACKUP_RELEASE_SEQUENCE,
     )
-    const daily = new Set<string>()
-    const monthly = new Set<string>()
-    const now = this.now()
-    const current = new Date(now)
-    const allowedMonths = new Set(
-      Array.from({ length: 6 }, (_, index) =>
-        new Date(Date.UTC(
-          current.getUTCFullYear(),
-          current.getUTCMonth() - index - 1,
-          1,
-        )).toISOString().slice(0, 7),
-      ),
-    )
-    for (const backup of all.filter((entry) => entry.reason === "daily")) {
-      const date = new Date(backup.createdAt)
-      const dayKey = date.toISOString().slice(0, 10)
-      const monthKey = date.toISOString().slice(0, 7)
-      const ageDays = (now - backup.createdAt) / 86_400_000
-      if (ageDays <= 14 && !daily.has(dayKey)) {
-        daily.add(dayKey)
-        keep.add(backup.fileName)
-      } else if (allowedMonths.has(monthKey) && !monthly.has(monthKey)) {
-        monthly.add(monthKey)
-        keep.add(backup.fileName)
-      }
+  }
+
+  private applyRetentionSafely() {
+    try {
+      this.applyRetention()
+    } catch (error) {
+      // A verified backup has already been published. Retention failure must
+      // never make that successful recovery point appear to have failed.
+      console.warn("Could not apply backup retention", error)
     }
-    for (const reason of ["pre-update", "pre-migration", "pre-repair", "pre-restore", "pre-cleanup"] as const) {
-      all.filter((backup) => backup.reason === reason)
-        .slice(0, 3)
-        .forEach((backup) => keep.add(backup.fileName))
-    }
-    for (const backup of all) {
-      if (!keep.has(backup.fileName)) this.delete(backup.fileName)
+  }
+
+  private async applyRetentionSafelyAsync() {
+    try {
+      await Promise.all(this.retentionProposal().delete.flatMap((backup) => {
+        const database = resolvedChild(this.backupDir, backup.fileName)
+        return [
+          rm(database, { force: true }),
+          rm(`${database}${MANIFEST_SUFFIX}`, { force: true }),
+        ]
+      }))
+    } catch (error) {
+      console.warn("Could not apply backup retention", error)
     }
   }
 }

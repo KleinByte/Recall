@@ -1,5 +1,5 @@
 import Database from "better-sqlite3-node"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { applyMigrations } from "../electron/main/database/migrations.js"
 import { MatchesRepository } from "../electron/main/database/matches-repo.js"
 import { ParticipantsRepository } from "../electron/main/database/participants-repo.js"
@@ -170,6 +170,8 @@ beforeEach(() => {
   participants = new ParticipantsRepository(db)
 })
 
+afterEach(() => vi.restoreAllMocks())
+
 describe("MatchSync", () => {
   it("stores every mode without losing Arena or rotating games", () => {
     const games = [
@@ -215,6 +217,7 @@ describe("MatchSync", () => {
   })
 
   it("reports an empty result instead of throwing when the client is unreachable", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined)
     const failing = {
       request: () => Promise.reject(new Error("ECONNREFUSED")),
     }
@@ -226,6 +229,8 @@ describe("MatchSync", () => {
       graded: 0,
       lobbies: 0,
     })
+    expect(warning).toHaveBeenCalledWith("Could not read queue metadata: ECONNREFUSED")
+    expect(warning).toHaveBeenCalledWith("Match history sync skipped: ECONNREFUSED")
   })
 
   it("delegates every newly stored full lobby to Recall", async () => {

@@ -47,12 +47,19 @@ describe("development environment contract", () => {
     // pnpm 9 reads this policy from package.json; newer pnpm releases read
     // the workspace copy. Keep both until the pinned package manager changes.
     expect([...(packageJson.pnpm?.onlyBuiltDependencies ?? [])].sort())
-      .toEqual(["better-sqlite3", "electron"])
+      .toEqual(["better-sqlite3", "electron", "electron-winstaller", "esbuild"])
 
     const workspace = read("pnpm-workspace.yaml")
     expect(workspace).toContain("onlyBuiltDependencies:")
     expect(workspace).toContain("  - better-sqlite3")
     expect(workspace).toContain("  - electron")
+    expect(workspace).toContain("  - electron-winstaller")
+    expect(workspace).toContain("  - esbuild")
+
+    expect(packageJson.scripts["rebuild:electron"])
+      .toBe("electron-builder install-app-deps")
+    expect(packageJson.devDependencies).not.toHaveProperty("@electron/rebuild")
+    expect(read("scripts/rebuild-node-native.mjs")).not.toContain('"--force"')
 
     const applicationVersion = packageJson.dependencies["better-sqlite3"]
     expect(applicationVersion).toMatch(/^\d+\.\d+\.\d+$/)

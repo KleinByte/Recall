@@ -1,5 +1,5 @@
 import Database from "better-sqlite3-node"
-import { beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { applyMigrations } from "../electron/main/database/migrations.js"
 import { ChallengesRepository } from "../electron/main/database/challenges-repo.js"
 import { ChallengeSync } from "../electron/main/challenges/challenge-sync.js"
@@ -56,6 +56,8 @@ beforeEach(() => {
   applyMigrations(db)
   repo = new ChallengesRepository(db)
 })
+
+afterEach(() => vi.restoreAllMocks())
 
 describe("ChallengeSync", () => {
   it("stores every challenge the client reports", async () => {
@@ -133,6 +135,7 @@ describe("ChallengeSync", () => {
   })
 
   it("does not throw when the client is unavailable", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined)
     const failing = {
       request: () => Promise.reject(new Error("ECONNREFUSED")),
     }
@@ -140,5 +143,6 @@ describe("ChallengeSync", () => {
     await expect(
       new ChallengeSync(failing as never, repo, PUUID).syncNow(),
     ).resolves.toEqual({ total: 0, changed: 0 })
+    expect(warning).toHaveBeenCalledWith("Challenge sync skipped: ECONNREFUSED")
   })
 })

@@ -1,6 +1,7 @@
 import Database from "better-sqlite3-node"
 import {
   appendFileSync,
+  existsSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -36,10 +37,30 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true })
 })
 
-function manager() {
+type ManagerOptions = NonNullable<ConstructorParameters<typeof BackupManager>[2]>
+
+function inspectBackup(filePath: string) {
+  const backup = new Database(filePath, { readonly: true, fileMustExist: true })
+  try {
+    const integrity = backup.pragma("quick_check", { simple: true })
+    if (integrity !== "ok") throw new Error("Backup failed SQLite integrity verification")
+    return Promise.resolve({
+      schemaVersion: backup.pragma("user_version", { simple: true }) as number,
+      matchCount: (backup.prepare("SELECT COUNT(*) AS count FROM matches").get() as {
+        count: number
+      }).count,
+    })
+  } finally {
+    backup.close()
+  }
+}
+
+function manager(options: ManagerOptions = {}) {
   return new BackupManager(databasePath, backupDir, {
     DatabaseClass: Database as never,
     now: () => 1_700_000_000_000,
+    inspectAsync: inspectBackup,
+    ...options,
   })
 }
 
@@ -54,6 +75,38 @@ describe("BackupManager", () => {
     })
     expect(backup.sha256).toMatch(/^[a-f0-9]{64}$/)
     expect(manager().list()).toEqual([backup])
+  })
+
+  it("lists backup metadata without reading every backup body", () => {
+    const selected = manager().create(db as never, "manual")
+    const listings = manager({
+      hashFile: () => {
+        throw new Error("routine listings must not hash backup files")
+      },
+    }).list()
+
+    expect(listings).toEqual([selected])
+  })
+
+  it("creates and verifies backups asynchronously without leaving SQLite sidecars", async () => {
+    const selected = await manager().createAsync(db as never, "manual")
+    const backupPath = path.join(backupDir, selected.fileName)
+
+    expect(selected).toMatchObject({ integrity: "ok", matchCount: 1 })
+    expect(existsSync(backupPath)).toBe(true)
+    expect(existsSync(`${backupPath}-wal`)).toBe(false)
+    expect(existsSync(`${backupPath}-shm`)).toBe(false)
+  })
+
+  it("applies automatic retention after publishing an asynchronous backup", async () => {
+    let timestamp = 1_700_000_000_000
+    const backups = manager({ now: () => timestamp++ })
+
+    await backups.createAsync(db as never, "daily")
+    await backups.createAsync(db as never, "daily")
+    await backups.createAsync(db as never, "daily")
+
+    expect(backups.list()).toHaveLength(1)
   })
 
   it("creates a pre-restore generation and restores after restart", () => {

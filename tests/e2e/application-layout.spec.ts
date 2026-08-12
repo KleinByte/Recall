@@ -58,12 +58,20 @@ test("the real Electron shell remains readable without page-level overflow", asy
     const surfaces = [
       { name: "dashboard", navLabel: "Dashboard", heading: "Performance dashboard" },
       { name: "skill", navLabel: "Skill", heading: "Skill" },
+      { name: "settings", navLabel: "Settings", heading: "Settings" },
     ] as const
 
     for (const surface of surfaces) {
       await page.locator(".nav-item").filter({ hasText: surface.navLabel }).click()
       await expect(page.getByRole("heading", { name: surface.heading, exact: true }))
         .toBeVisible()
+
+      if (surface.name === "settings") {
+        const createBackup = page.getByRole("button", { name: "Create backup" })
+        await expect(createBackup).toBeEnabled()
+        await createBackup.click()
+        await expect(page.locator(".backup-row")).toHaveCount(1)
+      }
 
       for (const sample of layoutMatrix) {
         await application.evaluate(

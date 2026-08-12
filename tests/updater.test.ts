@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   createUpdaterService,
   registerUpdaterIpc,
@@ -15,6 +15,8 @@ function client(): UpdaterClient & EventEmitter {
   value.quitAndInstall = vi.fn()
   return value
 }
+
+afterEach(() => vi.restoreAllMocks())
 
 describe("createUpdaterService", () => {
   it("does not contact GitHub in a development build", async () => {
@@ -86,6 +88,7 @@ describe("createUpdaterService", () => {
   })
 
   it("refuses to install when the database cannot be safely closed", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined)
     const updater = client()
     const publish = vi.fn()
     const service = createUpdaterService({
@@ -105,6 +108,10 @@ describe("createUpdaterService", () => {
       kind: "error",
       message: expect.stringContaining("safely close"),
     })
+    expect(errorLog).toHaveBeenCalledWith(
+      "[updater] could not prepare database for install:",
+      expect.objectContaining({ message: "database is busy" }),
+    )
   })
 
   it("waits for background database work before installing", async () => {
@@ -131,6 +138,7 @@ describe("createUpdaterService", () => {
   })
 
   it("publishes a safe error and retries the feed check", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined)
     const updater = client()
     const service = createUpdaterService({
       updater,
@@ -146,6 +154,10 @@ describe("createUpdaterService", () => {
     })
     await service.retry()
     expect(updater.checkForUpdates).toHaveBeenCalledTimes(2)
+    expect(warning).toHaveBeenCalledWith(
+      "[updater] error:",
+      expect.objectContaining({ message: "socket reset" }),
+    )
   })
 
   it("allows a manual check from any current state", async () => {
@@ -188,6 +200,7 @@ describe("createUpdaterService", () => {
   })
 
   it("sets status to checking immediately when retry() is called", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined)
     const updater = client()
     const publish = vi.fn()
     const service = createUpdaterService({ updater, isPackaged: true, publish })
@@ -199,9 +212,14 @@ describe("createUpdaterService", () => {
     expect(service.status()).toEqual({ kind: "checking" })
     expect(publish).toHaveBeenLastCalledWith({ kind: "checking" })
     await retryPromise
+    expect(warning).toHaveBeenCalledWith(
+      "[updater] error:",
+      expect.objectContaining({ message: "socket reset" }),
+    )
   })
 
   it("does not propagate a rejected checkForUpdates() from retry()", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined)
     const updater = client()
     const service = createUpdaterService({
       updater,
@@ -214,6 +232,10 @@ describe("createUpdaterService", () => {
       new Error("retry failure"),
     )
     await expect(service.retry()).resolves.toBeUndefined()
+    expect(warning).toHaveBeenCalledWith(
+      "[updater] error:",
+      expect.objectContaining({ message: "first failure" }),
+    )
   })
 
   it("forwards updater state through the main-window publisher", async () => {

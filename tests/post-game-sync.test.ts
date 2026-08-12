@@ -1,5 +1,7 @@
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { retryDelays, syncUntilRecorded } from "../electron/main/post-game-sync.js"
+
+afterEach(() => vi.restoreAllMocks())
 
 describe("retryDelays", () => {
   it("starts almost immediately", () => {
@@ -71,6 +73,7 @@ describe("syncUntilRecorded", () => {
   })
 
   it("keeps trying when a sync throws", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined)
     // A client that is still writing the game can refuse the request.
     const sync = vi
       .fn()
@@ -81,5 +84,6 @@ describe("syncUntilRecorded", () => {
     const attempts = await syncUntilRecorded(sync, wait)
 
     expect(attempts).toBe(2)
+    expect(warning).toHaveBeenCalledWith("Post-game sync attempt failed: ECONNREFUSED")
   })
 })

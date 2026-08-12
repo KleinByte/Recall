@@ -10,6 +10,7 @@ import {
 } from "../components/ui"
 import { api } from "../helpers/api"
 import { useApiEvents } from "../helpers/use-api-events"
+import { useCoalescedTask } from "../helpers/use-coalesced-task"
 import { updatePresentation } from "../helpers/update"
 import { modeLabel } from "../helpers/format"
 import type { UpdateStatus } from "../types/update"
@@ -86,6 +87,8 @@ async function loadMeta() {
   meta.value = await api.getStatsMeta()
 }
 
+const refreshTrust = useCoalescedTask(() => loadTrust())
+
 onMounted(() => {
   void loadMeta()
   events.on("stats:updated", () => void loadMeta())
@@ -99,8 +102,8 @@ onMounted(() => {
   events.on("riot-history:updated", (status: RiotHistoryBackfillState) => {
     riotHistory.value = status
   })
-  void loadTrust()
-  events.on("data-trust:updated", () => void loadTrust())
+  void refreshTrust()
+  events.on("data-trust:updated", () => void refreshTrust())
   void api.getLaunchAtLogin().then((value) => {
     launchAtLogin.value = value !== false
   })
@@ -135,7 +138,7 @@ async function rebuildPerformanceReference() {
     referenceMessage.value = result.errors
       ? `Recalibrated all eligible modes with ${result.errors} errors. Your backup was retained.`
       : `Recalibrated all eligible modes. ${result.ready ?? 0} recorded matches have complete grades.`
-    await Promise.all([loadRecall(), loadMeta(), loadTrust()])
+    await Promise.all([loadRecall(), loadMeta()])
   } catch (error) {
     referenceMessage.value = (error as Error).message
   } finally {
@@ -188,7 +191,6 @@ async function createBackup() {
   trustBusy.value = true
   try {
     await api.createBackup()
-    await loadTrust()
   } finally {
     trustBusy.value = false
   }
@@ -197,7 +199,6 @@ async function createBackup() {
 async function deleteBackup(fileName: string) {
   if (!window.confirm("Delete this database backup? This cannot be undone.")) return
   await api.deleteBackup(fileName)
-  await loadTrust()
 }
 
 async function restoreBackup(fileName: string) {
@@ -276,7 +277,7 @@ async function resync() {
       result.inserted > 0
         ? `Recorded ${result.inserted} new game${result.inserted === 1 ? "" : "s"}.`
         : "Already up to date."
-    await Promise.all([loadMeta(), loadRecall(), loadTrust()])
+    await Promise.all([loadMeta(), loadRecall(), refreshTrust()])
   } finally {
     busy.value = false
   }
@@ -315,7 +316,7 @@ async function clearHistory() {
       result.deleted > 0
         ? `Deleted ${result.deleted} recorded matches.`
         : "Nothing was deleted."
-    await Promise.all([loadMeta(), loadRecall(), loadTrust()])
+    await Promise.all([loadMeta(), loadRecall()])
   } finally {
     busy.value = false
   }

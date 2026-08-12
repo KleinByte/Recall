@@ -1,6 +1,6 @@
 {
   "name": "recall",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "main": "dist-electron/main/index.js",
   "description": "League of Legends challenge and ARAM stat tracker that remembers what the client forgets.",
   "author": "KleinByte",
@@ -18,7 +18,9 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "electron",
-      "better-sqlite3"
+      "better-sqlite3",
+      "electron-winstaller",
+      "esbuild"
     ]
   },
   "type": "module",
@@ -40,14 +42,13 @@
     "sync:classic-items": "node scripts/sync-classic-items.mjs",
     "sync:rune-assets": "node scripts/sync-rune-assets.mjs",
     "sync:champion-classes": "node scripts/sync-champion-classes.mjs",
-    "rebuild:electron": "electron-rebuild -f -w better-sqlite3",
+    "rebuild:electron": "electron-builder install-app-deps",
     "rebuild:node": "node scripts/rebuild-node-native.mjs",
     "rebuild:native": "pnpm rebuild:electron && pnpm rebuild:node",
     "postinstall": "pnpm rebuild:native",
     "test": "vitest run"
   },
   "devDependencies": {
-    "@electron/rebuild": "^4.2.0",
     "@fortawesome/fontawesome-svg-core": "^6.6.0",
     "@fortawesome/free-brands-svg-icons": "^6.6.0",
     "@fortawesome/free-regular-svg-icons": "^6.6.0",
