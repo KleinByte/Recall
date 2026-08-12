@@ -25,6 +25,7 @@ function makeObservation(
 ): InsightObservation {
   const baseTime = 1700000000000
   const playedAt = baseTime + index * 3600_000 // 1h apart
+  const recallScore = overrides.recallScore ?? overrides.gradeScore ?? 40 + (index % 60)
   return {
     gameId: 1000 + index,
     playedAt,
@@ -34,6 +35,7 @@ function makeObservation(
     queueId: 420,
     win: index % 2 === 0,
     gradeScore: 40 + (index % 60),
+    recallScore,
     championId: 1 + (index % 5),
     role: "MIDDLE",
     durationSecs: 1800,
@@ -101,6 +103,7 @@ function historyWithExtremeHoldout(): InsightObservation[] {
   const holdoutStart = Math.floor(250 * 0.8)
   for (let i = holdoutStart; i < obs.length; i++) {
     obs[i].gradeScore = 95
+    obs[i].recallScore = 95
   }
   return obs
 }
@@ -111,7 +114,8 @@ function randomLabelHistory(count: number): InsightObservation[] {
   let seed = 42
   return obs.map((o) => {
     seed = (seed * 1103515245 + 12345) & 0x7fffffff
-    return { ...o, gradeScore: 30 + (seed % 70) }
+    const score = 30 + (seed % 70)
+    return { ...o, gradeScore: score, recallScore: score }
   })
 }
 
@@ -257,6 +261,7 @@ describe("Eligibility requirements", () => {
     const holdoutStart = Math.floor(200 * 0.8)
     for (let i = holdoutStart; i < obs.length; i++) {
       obs[i].gradeScore = 99
+      obs[i].recallScore = 99
     }
     const section = buildPredictiveSection(obs)
     // Should be insufficient because holdout doesn't have both classes

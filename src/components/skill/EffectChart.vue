@@ -78,7 +78,7 @@ const option = computed<EChartsCoreOption>(() => ({
   <div class="effect-chart" :style="{ height: chartHeight }">
     <BaseEChart
       :option="option"
-      :ariaLabel="`Estimated ${unit === 'grade' ? 'Recall grade' : 'win-rate'} effects`"
+      :ariaLabel="`Estimated ${unit === 'grade' ? 'Recall Score point differences' : 'top-quartile Recall Score probability effects'}`"
       :height="chartHeight"
     />
   </div>

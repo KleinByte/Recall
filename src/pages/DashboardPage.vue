@@ -11,7 +11,11 @@ import TelemetryBoard from "../components/ui/TelemetryBoard.vue"
 import { api } from "../helpers/api"
 import { useApiEvents } from "../helpers/use-api-events"
 import { useCoalescedTask } from "../helpers/use-coalesced-task"
-import { challengeTierProgress } from "../helpers/challenges"
+import {
+  challengeRemaining,
+  challengeTierProgress,
+  selectIncompleteChallenges,
+} from "../helpers/challenges"
 import { openChampion, openMatch } from "../helpers/navigation"
 import { performanceMomentum } from "../helpers/momentum"
 import {
@@ -290,19 +294,20 @@ const categories = computed<CategoryProgress[]>(() => {
  * Retired challenges are excluded because no amount of play advances them.
  */
 const nearlyThere = computed(() =>
-  challenges.value
+  selectIncompleteChallenges(challenges.value)
     .filter(
       (challenge) =>
         challenge.category !== "LEGACY" &&
-        challenge.isRetired === 0 &&
-        challenge.nextThreshold !== null &&
-        challenge.nextThreshold > challenge.currentValue,
+        challenge.isRetired === 0,
     )
-    .map((challenge) => ({
-      ...challenge,
-      remaining: challenge.nextThreshold! - challenge.currentValue,
-      progress: challengeTierProgress(challenge),
-    }))
+    .flatMap((challenge) => {
+      const remaining = challengeRemaining(challenge)
+      return remaining === null ? [] : [{
+        ...challenge,
+        remaining,
+        progress: challengeTierProgress(challenge),
+      }]
+    })
     .sort((a, b) => b.progress - a.progress)
     .slice(0, 6),
 )
@@ -493,7 +498,7 @@ const championName = (id: number) => championNameById(props.champions, id)
           <span class="deck-kicker">Progression archive</span>
           <h2 id="challenge-deck-title">Challenge objectives</h2>
         </div>
-        <span class="muted">Long-term progress and nearest upgrades</span>
+        <span class="muted">Open an objective to see exactly what it requires.</span>
       </header>
       <div class="challenge-grid">
         <Panel v-if="categories.length" title="Challenge categories" class="dashboard-panel categories-panel">
@@ -514,22 +519,26 @@ const championName = (id: number) => championNameById(props.champions, id)
           </div>
         </Panel>
 
-        <Panel v-if="nearlyThere.length" title="Closest to the next tier" class="dashboard-panel near-panel">
+        <Panel v-if="nearlyThere.length" title="Next challenge milestones" class="dashboard-panel near-panel">
           <div class="near-list">
             <button
               v-for="entry in nearlyThere"
               :key="entry.challengeId"
               class="near"
-              :title="`View details for ${entry.name}`"
+              :title="`View objective for ${entry.name}`"
+              :aria-label="`${entry.name}: ${entry.description}. ${formatDecimal(entry.remaining, 0)} remaining${entry.nextLevel ? ` for ${entry.nextLevel}` : ''}.`"
               @click="selectedChallenge = entry"
             >
               <GradeBadge :grade="entry.currentLevel.slice(0, 1)" />
               <div class="near-body">
                 <div class="near-name">{{ entry.name }}</div>
+                <p class="near-objective">{{ entry.description }}</p>
                 <MiniBar :value="entry.progress" />
               </div>
-              <div class="muted numeric small">
-                {{ formatDecimal(entry.remaining, 0) }} to go
+              <div class="near-target">
+                <span v-if="entry.nextLevel">Next · {{ entry.nextLevel }}</span>
+                <strong class="numeric">{{ formatDecimal(entry.remaining, 0) }}</strong>
+                <small>remaining</small>
               </div>
             </button>
           </div>
@@ -1086,7 +1095,37 @@ h1 {
 .near-name {
   color: var(--text-primary);
   font: 13px var(--font-heading);
-  margin-bottom: var(--space-1);
+}
+
+.near-objective {
+  display: -webkit-box;
+  margin: 2px 0 var(--space-2);
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.near-target {
+  display: grid;
+  justify-items: end;
+  gap: 1px;
+  min-width: 72px;
+}
+
+.near-target span,
+.near-target small {
+  color: var(--text-muted);
+  font-size: var(--ui-text-micro);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+.near-target strong {
+  color: var(--gold-bright);
+  font-size: 14px;
 }
 
 .notice {
@@ -1134,7 +1173,7 @@ h1 {
 
 @media (max-width: 500px) {
   .near { grid-template-columns: 34px minmax(0, 1fr); }
-  .near > .small { grid-column: 2; }
+  .near-target { grid-column: 2; grid-template-columns: auto auto auto; align-items: baseline; justify-content: start; gap: 5px; }
 }
 
 </style>

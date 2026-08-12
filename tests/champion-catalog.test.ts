@@ -40,6 +40,40 @@ describe("persistent champion catalog", () => {
       isVisibleInClient: false,
     }
 
-    expect(mergeChampionCatalog([], [hidden])).toEqual([hidden])
+    expect(mergeChampionCatalog([], [hidden])).toEqual([
+      { ...hidden, primaryArchetype: "specialist" },
+    ])
+  })
+
+  it("enriches live and legacy cached entries from the current Grade taxonomy", () => {
+    const catalog = mergeChampionCatalog([
+      {
+        id: 103,
+        alias: "Ahri",
+        name: "Ahri",
+        roles: ["mage", "assassin"],
+        primaryArchetype: "specialist",
+        isVisibleInClient: true,
+      },
+    ])
+
+    expect(catalog).toEqual([
+      expect.objectContaining({
+        id: 103,
+        primaryArchetype: "burst_mage",
+      }),
+    ])
+  })
+
+  it("canonicalizes League Classic ids when enriching the catalog", () => {
+    const [tristana] = mergeChampionCatalog([], [{
+      id: 60_018,
+      alias: "Tristana",
+      name: "Tristana",
+      roles: ["marksman"],
+      isVisibleInClient: true,
+    }])
+
+    expect(tristana.primaryArchetype).toBe("marksman")
   })
 })

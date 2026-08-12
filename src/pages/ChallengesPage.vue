@@ -19,6 +19,7 @@ import {
   challengeMatchesGameMode,
   challengeMatchesMap,
   isChallengeCompleted,
+  selectIncompleteChallenges,
   sortChallenges,
   type ChallengeSortDirection,
   type ChallengeSortKey,
@@ -160,19 +161,19 @@ watch(
   { immediate: true },
 )
 
+const incompleteChallenges = computed(() =>
+  selectIncompleteChallenges(challenges.value),
+)
+
 const filtered = computed(() => {
   const needle = search.value.toLowerCase()
+  const source = hideCompleted.value
+    ? incompleteChallenges.value
+    : challenges.value
 
-  const matches = challenges.value.filter((challenge) => {
+  const matches = source.filter((challenge) => {
     const retired = challenge.isRetired === 1
     if (showRetired.value !== retired) return false
-    if (
-      hideCompleted.value &&
-      !retired &&
-      isChallengeCompleted(challenge)
-    ) {
-      return false
-    }
 
     if (!challengeMatchesCategory(challenge, category.value)) return false
     if (level.value !== "All" && challenge.currentLevel !== level.value) {
@@ -209,11 +210,10 @@ const mapOptions = computed(() => {
 })
 
 const pinnedChallenges = computed(() =>
-  challenges.value.filter(
+  (hideCompleted.value ? incompleteChallenges.value : challenges.value).filter(
     (challenge) =>
       pinned.value.includes(challenge.challengeId) &&
-      challengeMatchesCategory(challenge, category.value) &&
-      (!hideCompleted.value || !isChallengeCompleted(challenge)),
+      challengeMatchesCategory(challenge, category.value),
   ),
 )
 
@@ -270,8 +270,8 @@ const splitChampions = (challenge: ChallengeRow) => {
   <div class="page">
     <PageHeader
       title="Challenges"
-      eyebrow="Collection objectives"
-      :description="`Showing ${filtered.length} of ${challenges.length} tracked challenges`"
+      eyebrow="League challenge tracker"
+      :description="`See what each challenge asks for, its next target, and what remains. Showing ${filtered.length} of ${challenges.length}.`"
     >
       <template #actions>
         <Field label="Search challenges" compact class="search-field">
@@ -486,8 +486,10 @@ const splitChampions = (challenge: ChallengeRow) => {
     <EmptyState
       v-if="filtered.length === 0 && challenges.length > 0"
       compact
-      title="No challenges match these filters"
-      description="Adjust the category, tier, mode, map, or completion filters to widen the list."
+      :title="hideCompleted ? 'No unfinished challenges match' : 'No challenges match these filters'"
+      :description="hideCompleted
+        ? 'The matching challenges are complete, retired, or outside the selected filters. Turn off Hide completed to review finished objectives.'
+        : 'Adjust the category, tier, mode, or map filters to widen the list.'"
     />
   </div>
 </template>

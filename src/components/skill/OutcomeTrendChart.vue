@@ -5,9 +5,12 @@ import BaseEChart from "../charts/BaseEChart.vue"
 import { escapeTooltip } from "../../charts/formatters"
 import { CHART_COLOURS, CHART_STYLES } from "../../charts/recall-chart-theme"
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   rows: Array<{ label: string; games: number; wins?: number; winRate: number }>
-}>()
+  ariaLabel?: string
+}>(), {
+  ariaLabel: "Games played and recorded win rate across the selected groups",
+})
 
 const option = computed<EChartsCoreOption>(() => ({
   animationDuration: 520,
@@ -81,7 +84,7 @@ const option = computed<EChartsCoreOption>(() => ({
 
 <template>
   <div class="outcome-trend">
-    <BaseEChart :option="option" ariaLabel="Games played and win rate by Recall grade band" />
+    <BaseEChart :option="option" :ariaLabel="ariaLabel" />
   </div>
   <ul class="outcome-key">
     <li v-for="row in rows" :key="row.label" :class="{ empty: !row.games }">

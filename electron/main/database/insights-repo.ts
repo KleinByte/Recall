@@ -35,6 +35,7 @@ import {
   GRADE_CORE_FACT_CONTRACT_VERSION,
   isGradeCoreSource,
 } from "../matches/grade-core-facts.js"
+import { sessionize } from "../matches/analytics.js"
 
 export interface BucketRow {
   label: string
@@ -110,6 +111,13 @@ export interface InsightObservation {
   championId: number
   role?: string
   durationSecs: number
+  /** Stable account-history session identity, computed before page filters. */
+  session?: number
+  /** Stable ordinal within the account-history session, computed before page filters. */
+  sessionGame?: number
+  restMinutes?: number
+  previousWin?: boolean
+  priorChampionGames?: number
   completeLobby: boolean
   metrics: InsightMetrics
   styleAxes: Record<string, number>
@@ -118,8 +126,17 @@ export interface InsightObservation {
 export interface GradeComponentObservation {
   gameId: number
   playedAt: number
+  win?: boolean
+  championId?: number
+  role?: string
   grade?: string
+  /** Authoritative Recall score on a fixed 0-100 scale. */
+  recallScore?: number
+  /** @deprecated Internal normal score retained for old consumers. */
   gradeScore?: number
+  session?: number
+  sessionGame?: number
+  restMinutes?: number
   compositePercentile: number
   components: GradeComponent[]
 }
@@ -141,6 +158,9 @@ export interface FinalItemObservation {
   gameId: number
   championId: number
   role?: string
+  /** Authoritative Recall score on a fixed 0-100 scale. */
+  recallScore?: number
+  /** @deprecated Internal normal score retained for old consumers. */
   gradeScore?: number
   itemIds: number[]
 }
@@ -168,6 +188,9 @@ const BUILD_SLOTS = ["item0", "item1", "item2", "item3", "item4", "item5"]
 function normalizedRole(alias = ""): string {
   const prefix = alias ? `${alias}.` : ""
   return `CASE
+    WHEN UPPER(COALESCE(${prefix}resolved_position, '')) IN
+        ('TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY')
+      THEN UPPER(${prefix}resolved_position)
     WHEN UPPER(COALESCE(${prefix}role, '')) IN ('TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY')
       THEN UPPER(${prefix}role)
     WHEN UPPER(COALESCE(${prefix}role, '')) IN ('SUPPORT', 'DUO_SUPPORT') THEN 'UTILITY'
@@ -175,6 +198,15 @@ function normalizedRole(alias = ""): string {
     WHEN UPPER(COALESCE(${prefix}lane, '')) IN ('TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM')
       THEN UPPER(${prefix}lane)
     ELSE NULL
+  END`
+}
+
+function canonicalParticipantRole(participantAlias = "p", matchAlias = "m"): string {
+  return `CASE
+    WHEN UPPER(COALESCE(${participantAlias}.resolved_position, '')) IN
+        ('TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY')
+      THEN UPPER(${participantAlias}.resolved_position)
+    ELSE ${normalizedRole(matchAlias)}
   END`
 }
 
@@ -279,6 +311,20 @@ interface SelectedGradeRecipe {
   calibrationId: string
 }
 
+interface SelectedGradeResult {
+  grade: string
+  gradeScore: number
+  recallScore: number
+}
+
+interface AccountSessionContext {
+  session: number
+  sessionGame: number
+  restMinutes?: number
+  previousWin?: boolean
+  priorChampionGames: number
+}
+
 function selectedGradeRecipe(db: Database): SelectedGradeRecipe | undefined {
   return db.prepare(
     `SELECT r.recipe_id AS recipeId, r.calibration_id AS calibrationId
@@ -296,6 +342,92 @@ function selectedGradeRecipe(db: Database): SelectedGradeRecipe | undefined {
     MATCH_GRADE_RECIPE_DEFINITION_ID,
     MATCH_GRADE_RECIPE_DEFINITION_ID,
   ) as SelectedGradeRecipe | undefined
+}
+
+/**
+ * Reads only ready owner results for the selected calibrated recipe. The
+ * denormalized match columns are a display cache; analyses use the immutable
+ * result table so an interrupted rebuild cannot mix recipes in one sample.
+ */
+function selectedGradeResults(
+  db: Database,
+  filter: StatsFilter,
+  selected: SelectedGradeRecipe | undefined,
+): Map<number, SelectedGradeResult> {
+  if (!selected) return new Map()
+  const { conditions, params } = lobbyScope(filter)
+  const rows = db.prepare(
+    `SELECT m.game_id AS gameId, r.grade, r.grade_score AS gradeScore,
+            r.role_fit_score AS recallScore
+     FROM match_participants p
+     JOIN matches m
+       ON m.game_id = p.game_id AND m.puuid = p.puuid
+     JOIN match_grade_attempts a
+       ON a.game_id = p.game_id AND a.puuid = p.puuid
+      AND a.owner_participant_id = p.participant_id
+      AND a.algorithm_version = ? AND a.recipe_id = ?
+      AND a.grade_status = 'ready'
+     JOIN match_grade_results r
+       ON r.game_id = p.game_id AND r.puuid = p.puuid
+      AND r.participant_id = p.participant_id
+      AND r.algorithm_version = a.algorithm_version
+      AND r.recipe_id = a.recipe_id
+      AND r.grade_status = 'ready'
+      AND r.role_fit_score IS NOT NULL
+      AND a.role_fit_score = r.role_fit_score
+     WHERE ${[...conditions, "p.is_player = 1"].join(" AND ")}`,
+  ).all(
+    MATCH_GRADE_ALGORITHM_VERSION,
+    selected.recipeId,
+    ...params,
+  ) as Array<{ gameId: number; grade: string; gradeScore: number; recallScore: number }>
+
+  return new Map(rows.flatMap((row): Array<[number, SelectedGradeResult]> =>
+    finiteInRange(row.recallScore, 0, 100) && Number.isFinite(row.gradeScore)
+      ? [[row.gameId, {
+          grade: row.grade,
+          gradeScore: row.gradeScore,
+          recallScore: row.recallScore,
+        }]]
+      : []))
+}
+
+/**
+ * Session identity is account chronology, not filtered-page chronology.
+ * Intervening modes, champions, and positions therefore still advance the
+ * physical play session before a selected report is sliced.
+ */
+function accountSessionContexts(db: Database, puuid: string): Map<number, AccountSessionContext> {
+  const rows = db.prepare(
+    `SELECT game_id AS gameId, played_at AS startedAt,
+            duration_secs AS durationSecs, win, champion_id AS championId
+     FROM matches
+     WHERE puuid = ? AND is_matched = 1
+     ORDER BY played_at ASC, game_id ASC`,
+  ).all(puuid) as Array<{
+    gameId: number
+    startedAt: number
+    durationSecs: number
+    win: number
+    championId: number
+  }>
+  const sessions = sessionize(rows)
+  const contexts = new Map<number, AccountSessionContext>()
+  const championCounts = new Map<number, number>()
+  for (let index = 0; index < sessions.length; index++) {
+    const current = sessions[index]
+    const previous = sessions[index - 1]
+    const priorChampionGames = championCounts.get(current.championId) ?? 0
+    contexts.set(current.gameId, {
+      session: current.session,
+      sessionGame: current.sessionGame,
+      restMinutes: current.restMinutes,
+      previousWin: previous?.session === current.session ? previous.win === 1 : undefined,
+      priorChampionGames,
+    })
+    championCounts.set(current.championId, priorChampionGames + 1)
+  }
+  return contexts
 }
 
 interface ParsedGradeBreakdown {
@@ -886,12 +1018,15 @@ export class InsightsRepository {
    */
   getObservations(filter: StatsFilter): InsightObservation[] {
     const { where, params } = scope(filter)
+    const activeGrades = selectedGradeResults(this.db, filter, selectedGradeRecipe(this.db))
+    const sessionContexts = accountSessionContexts(this.db, filter.puuid)
 
     // One query for all local metrics ordered by played_at, game_id
     const matchRows = this.db
       .prepare(
         `SELECT game_id, played_at, mode, mode_family, queue_id, win,
-                grade, grade_score, role_fit_score, champion_id, role, duration_secs,
+                grade, grade_score, role_fit_score, champion_id,
+                ${normalizedRole()} AS resolved_role, duration_secs,
                 kills, deaths, assists,
                 damage_to_champions, damage_taken, damage_self_mitigated,
                 total_heal, gold_earned,
@@ -911,7 +1046,7 @@ export class InsightsRepository {
       grade_score: number | null
       role_fit_score: number | null
       champion_id: number
-      role: string | null
+      resolved_role: string | null
       duration_secs: number
       kills: number
       deaths: number
@@ -989,6 +1124,8 @@ export class InsightsRepository {
 
     return matchRows.map((m) => {
       const lobby = lobbyMap.get(m.game_id)
+      const activeGrade = activeGrades.get(m.game_id)
+      const sessionContext = sessionContexts.get(m.game_id)
       const completeLobby = !!lobby && lobby.total_participants >= 10 && lobby.team_count >= 2
       const durationMins = Math.max(1, m.duration_secs) / 60
 
@@ -1039,12 +1176,13 @@ export class InsightsRepository {
         family: m.mode_family,
         queueId: m.queue_id,
         win: m.win === 1,
-        grade: m.grade ?? undefined,
-        gradeScore: m.grade_score ?? undefined,
-        recallScore: m.role_fit_score ?? undefined,
+        grade: activeGrade?.grade,
+        gradeScore: activeGrade?.gradeScore,
+        recallScore: activeGrade?.recallScore,
         championId: m.champion_id,
-        role: m.role ?? undefined,
+        role: m.resolved_role ?? undefined,
         durationSecs: m.duration_secs,
+        ...sessionContext,
         completeLobby,
         metrics: {
           kda: m.deaths === 0 ? m.kills + m.assists : (m.kills + m.assists) / m.deaths,
@@ -1202,7 +1340,7 @@ export class InsightsRepository {
       params.push(...filter.championIds)
     }
     if (filter.roles?.length) {
-      conditions.push(`UPPER(COALESCE(p.resolved_position, '')) IN (${filter.roles
+      conditions.push(`${canonicalParticipantRole("p", "m")} IN (${filter.roles
         .map(() => "?").join(", ")})`)
       params.push(...filter.roles.map((role) => role.toUpperCase()))
     }
@@ -1214,7 +1352,7 @@ export class InsightsRepository {
       `SELECT m.game_id AS gameId, m.played_at AS playedAt,
               p.participant_id AS participantId,
               p.champion_id AS championId,
-              p.resolved_position AS resolvedPosition,
+              ${canonicalParticipantRole("p", "m")} AS resolvedPosition,
               r.role_fit_score AS recallScore,
               b.components_json AS breakdownJson
        FROM matches m
@@ -1308,6 +1446,7 @@ export class InsightsRepository {
     limit: number,
     recipeId: string,
   ): GradeComponentObservation[] {
+    const sessionContexts = accountSessionContexts(this.db, filter.puuid)
     const conditions = [
       "m.puuid = ?",
       "m.is_matched = 1",
@@ -1355,7 +1494,7 @@ export class InsightsRepository {
       params.push(...filter.championIds)
     }
     if (filter.roles?.length) {
-      conditions.push(`UPPER(COALESCE(p.resolved_position, '')) IN (${filter.roles
+      conditions.push(`${canonicalParticipantRole("p", "m")} IN (${filter.roles
         .map(() => "?").join(", ")})`)
       params.push(...filter.roles.map((role) => role.toUpperCase()))
     }
@@ -1363,6 +1502,8 @@ export class InsightsRepository {
     const rowLimit = Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : 60
     const rows = this.db.prepare(
       `SELECT m.game_id AS gameId, m.played_at AS playedAt,
+              m.win, p.champion_id AS championId,
+              ${canonicalParticipantRole("p", "m")} AS role,
               r.grade, r.grade_score AS gradeScore,
               r.role_fit_score AS recallScore,
               b.components_json AS breakdownJson
@@ -1385,6 +1526,9 @@ export class InsightsRepository {
     ).all(...params, rowLimit) as Array<{
       gameId: number
       playedAt: number
+      win: number
+      championId: number
+      role: string | null
       grade: string
       gradeScore: number
       recallScore: number
@@ -1398,8 +1542,13 @@ export class InsightsRepository {
       return [{
         gameId: row.gameId,
         playedAt: row.playedAt,
+        win: row.win === 1,
+        championId: row.championId,
+        role: row.role ?? undefined,
         grade: row.grade,
         gradeScore: row.gradeScore,
+        recallScore: row.recallScore,
+        ...sessionContexts.get(row.gameId),
         compositePercentile: row.recallScore / 100,
         components: breakdown.components,
       }]
@@ -1415,15 +1564,18 @@ export class InsightsRepository {
   getFinalItemObservations(filter: StatsFilter): FinalItemObservation[] {
     const { conditions, params } = lobbyScope(filter)
     const all = [...conditions, "p.is_player = 1"].join(" AND ")
+    const activeGrades = selectedGradeResults(this.db, filter, selectedGradeRecipe(this.db))
 
     const rows = this.db
       .prepare(
-        `SELECT m.game_id, m.champion_id, m.role, m.grade_score,
+        `SELECT m.game_id, m.champion_id,
+                ${normalizedRole("m")} AS role, m.grade_score,
                 p.item0, p.item1, p.item2, p.item3, p.item4, p.item5
          FROM match_participants p
          LEFT JOIN matches m
            ON m.game_id = p.game_id AND m.puuid = p.puuid
-         WHERE ${all}`,
+         WHERE ${all}
+         ORDER BY m.played_at ASC, m.game_id ASC`,
       )
       .all(...params) as {
       game_id: number
@@ -1439,6 +1591,7 @@ export class InsightsRepository {
     }[]
 
     return rows.map((row) => {
+      const activeGrade = activeGrades.get(row.game_id)
       const slots = [row.item0, row.item1, row.item2, row.item3, row.item4, row.item5]
       const itemIds = [...new Set(slots.filter((id) => id > 0))]
 
@@ -1446,7 +1599,8 @@ export class InsightsRepository {
         gameId: row.game_id,
         championId: row.champion_id,
         role: row.role ?? undefined,
-        gradeScore: row.grade_score ?? undefined,
+        recallScore: activeGrade?.recallScore,
+        gradeScore: activeGrade?.gradeScore,
         itemIds,
       }
     })

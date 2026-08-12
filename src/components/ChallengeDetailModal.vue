@@ -3,7 +3,13 @@ import { computed } from "vue"
 import MiniBar from "./ui/MiniBar.vue"
 import Button from "./ui/Button.vue"
 import Dialog from "./ui/Dialog.vue"
-import { challengeTierProgress } from "../helpers/challenges"
+import {
+  challengeGameModeLabel,
+  challengeGameModes,
+  challengeRemaining,
+  challengeTierProgress,
+  isChallengeCompleted,
+} from "../helpers/challenges"
 import { formatDecimal } from "../helpers/format"
 import type { ChallengeRow } from "../types/stats"
 
@@ -15,11 +21,8 @@ const emit = defineEmits<{
   (event: "close"): void
 }>()
 
-const remaining = computed(() =>
-  props.challenge.nextThreshold === null
-    ? null
-    : Math.max(0, props.challenge.nextThreshold - props.challenge.currentValue),
-)
+const completed = computed(() => isChallengeCompleted(props.challenge))
+const remaining = computed(() => challengeRemaining(props.challenge))
 
 const completedCount = computed(() => {
   try {
@@ -30,16 +33,8 @@ const completedCount = computed(() => {
   }
 })
 
-const gameModes = computed(() => {
-  try {
-    const modes = JSON.parse(props.challenge.gameModes) as unknown
-    return Array.isArray(modes)
-      ? modes.filter((mode): mode is string => typeof mode === "string")
-      : []
-  } catch {
-    return []
-  }
-})
+const gameModes = computed(() => challengeGameModes(props.challenge)
+  .map(challengeGameModeLabel))
 
 </script>
 
@@ -62,7 +57,9 @@ const gameModes = computed(() => {
             <h2 :id="`challenge-dialog-${challenge.challengeId}`">
               {{ challenge.name }}
             </h2>
-            <p class="muted description">{{ challenge.description }}</p>
+            <p class="muted context">
+              {{ completed ? "Challenge complete" : challenge.nextLevel ? `Working toward ${challenge.nextLevel}` : "Challenge progress" }}
+            </p>
           </div>
           <Button
             class="close"
@@ -77,14 +74,22 @@ const gameModes = computed(() => {
           </Button>
         </header>
 
+        <section class="objective-block" aria-label="Challenge objective">
+          <span>Objective</span>
+          <p>{{ challenge.description || "League did not provide an objective description for this challenge." }}</p>
+        </section>
+
         <div class="progress-block">
           <div class="progress-head">
-            <span>
+            <span class="milestone-label">
+              {{ completed ? "Completed milestone" : "Next milestone" }}
+            </span>
+            <strong>
               {{ challenge.currentLevel }}
               <template v-if="challenge.nextLevel">
                 → {{ challenge.nextLevel }}
               </template>
-            </span>
+            </strong>
             <span class="numeric">
               {{ formatDecimal(challenge.currentValue, 0) }}
               <template v-if="challenge.nextThreshold !== null">
@@ -93,7 +98,10 @@ const gameModes = computed(() => {
             </span>
           </div>
           <MiniBar :value="challengeTierProgress(challenge)" />
-          <p v-if="remaining !== null" class="muted remaining">
+          <p v-if="completed" class="remaining complete">
+            Target reached
+          </p>
+          <p v-else-if="remaining !== null" class="muted remaining">
             {{ formatDecimal(remaining, 0) }} remaining to the next tier
           </p>
           <p v-else class="muted remaining">Highest available tier reached</p>
@@ -159,7 +167,7 @@ const gameModes = computed(() => {
   letter-spacing: 0.5px;
 }
 
-.description {
+.context {
   margin: var(--ui-space-1) 0 0;
   font-size: 13px;
 }
@@ -167,6 +175,29 @@ const gameModes = computed(() => {
 .close {
   font-size: 25px;
   line-height: 1;
+}
+
+.objective-block {
+  padding: var(--ui-space-3);
+  border-left: 3px solid var(--ui-accent);
+  border-radius: 0 var(--ui-radius-sm) var(--ui-radius-sm) 0;
+  background: color-mix(in srgb, var(--ui-accent) 7%, var(--ui-surface-inset));
+}
+
+.objective-block span,
+.milestone-label {
+  color: var(--ui-accent);
+  font-size: var(--ui-text-micro);
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.objective-block p {
+  margin: 5px 0 0;
+  color: var(--ui-text);
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .progress-block {
@@ -177,16 +208,30 @@ const gameModes = computed(() => {
 }
 
 .progress-head {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
   gap: var(--ui-space-3);
   margin-bottom: var(--ui-space-2);
   font-size: 13px;
 }
 
+.progress-head .milestone-label {
+  grid-column: 1 / -1;
+}
+
+.progress-head strong {
+  color: var(--ui-text-heading);
+}
+
 .remaining {
   margin: var(--ui-space-2) 0 0;
   font-size: 11px;
+}
+
+.remaining.complete {
+  color: var(--win);
+  font-weight: 700;
 }
 
 .facts {

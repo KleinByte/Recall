@@ -18,6 +18,7 @@
     "electron",
     "tests/e2e/**/*.ts",
     "src/helpers/time-contract-core.ts",
+    "src/shared/champion-archetypes.ts",
     "src/shared/measurement.ts",
     "src/shared/performance-vocabulary.ts",
     "src/shared/recall-grade.ts",

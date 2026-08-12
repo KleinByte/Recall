@@ -2,12 +2,18 @@
 import { computed, ref, watch } from "vue"
 import PerformanceRadar from "./PerformanceRadar.vue"
 import RviMetricList from "./RviMetricList.vue"
+import {
+  performanceScopeAriaLabel,
+  performanceScopeEvidenceLabel,
+  performanceScopeLabel as scopeLabel,
+  performanceScoreLabel,
+  rankPerformanceScopes,
+} from "../../helpers/rvi-contexts"
 import type {
   PerformanceConfidence,
   PerformanceDimensionScore,
   PerformanceMetricScore,
   PerformanceProfile as PerformanceProfileType,
-  PerformanceScopeSummary,
 } from "../../types/stats"
 
 const props = defineProps<{
@@ -127,9 +133,9 @@ const confidenceLabel = (confidence: PerformanceConfidence | null) => confidence
 })[confidence]
 
 const deltaLabel = (dimension: PerformanceDimensionScore) => {
-  if (dimension.delta === undefined) return "Recent form learning"
-  if (Math.abs(dimension.delta) < 1) return "Holding steady"
-  return `${dimension.delta > 0 ? "+" : ""}${dimension.delta} recent`
+  if (dimension.delta === undefined) return "Recent comparison building"
+  if (Math.abs(dimension.delta) < 1) return "Recent · steady"
+  return `Recent · ${dimension.delta > 0 ? "+" : ""}${dimension.delta} vs career`
 }
 
 const scoreLabel = (score: number | null) => {
@@ -159,56 +165,28 @@ const evidenceLabel = (metric: PerformanceMetricScore) => ({
   missing: "Missing evidence",
 })[metric.evidenceState]
 
-const positionLabels = {
-  TOP: "Top",
-  JUNGLE: "Jungle",
-  MIDDLE: "Mid",
-  BOTTOM: "Bot",
-  UTILITY: "Support",
-} as const
-
-const titleCase = (value: string) => value
-  .split("_")
-  .map((part) => part[0]?.toUpperCase() + part.slice(1))
-  .join(" ")
-
-const scopeLabel = (scope: PerformanceScopeSummary) => {
-  if (scope.kind === "overall") return "All matches"
-  if (scope.kind === "position" && scope.position) return positionLabels[scope.position]
-  if (scope.kind === "primary_archetype" && scope.primaryArchetype) {
-    return titleCase(scope.primaryArchetype)
-  }
-  return scope.key
-}
-
-const armCountLabel = (scope: PerformanceScopeSummary) =>
-  scope.headline.source === "career_arm_mean"
-    ? `${scope.headline.availableArms} of ${scope.headline.totalArms} arms`
-    : `${scope.measuredGames} graded`
-
-const scopeGroups = computed(() => [
-  { key: "overall", label: "Overall", items: [props.profile.scopes.overall] },
-  { key: "position", label: "By position", items: props.profile.scopes.positions },
+const contextGroups = computed(() => [
+  {
+    key: "position",
+    label: "Positions",
+    bestLabel: "Best position",
+    items: rankPerformanceScopes(props.profile.scopes.positions),
+  },
   {
     key: "primary-archetype",
     label: "Primary archetypes",
-    items: props.profile.scopes.primaryArchetypes.slice(0, 2),
+    bestLabel: "Best primary archetype",
+    items: rankPerformanceScopes(props.profile.scopes.primaryArchetypes),
   },
 ].filter((group) => group.items.length))
 
-const hasScopeComparisons = computed(() =>
-  props.profile.scopes.positions.length > 0 ||
-  props.profile.scopes.primaryArchetypes.length > 0)
+const bestContextGroups = computed(() => contextGroups.value.map((group) => ({
+  ...group,
+  label: group.bestLabel,
+  items: group.items.slice(0, 1),
+})))
 
-const scopeComparisonDescription = computed(() => {
-  const hasPositions = props.profile.scopes.positions.length > 0
-  const hasArchetypes = props.profile.scopes.primaryArchetypes.length > 0
-  if (hasPositions && hasArchetypes) {
-    return "See your overall score beside each position and primary archetype in this selection."
-  }
-  if (hasPositions) return "See your overall score beside each position in this selection."
-  return "See your overall score beside each primary archetype in this selection."
-})
+const hasScopeComparisons = computed(() => contextGroups.value.length > 0)
 
 const gameCountLabel = (games: number) => `${games} ${games === 1 ? "game" : "games"}`
 
@@ -220,233 +198,210 @@ const selectDimension = (key: string) => {
 
 <template>
   <section
-    class="dimensions card"
-    :class="{ 'career-profile': !detailOnly, 'match-profile': detailOnly }"
+    class="dimensions"
+    :class="detailOnly ? ['match-profile', 'card'] : 'career-profile'"
     aria-labelledby="rvi-title"
   >
     <template v-if="!detailOnly">
-      <header class="dimensions-head">
-        <div>
+      <header class="rvi-profile-header">
+        <div class="rvi-identity">
           <p class="eyebrow">RVI profile</p>
-          <h2 id="rvi-title">Your RVI</h2>
-          <p class="intro">Select an arm to explore the measurements behind your profile.</p>
+          <div class="rvi-identity-title">
+            <h2 id="rvi-title">{{ identity?.label ?? 'Your RVI' }}</h2>
+            <span v-if="identity">Performance style</span>
+          </div>
+          <p>{{ identity?.description ?? 'Your measured strengths across recorded games.' }}</p>
         </div>
-        <div class="profile-meta">
-          <span>Career RVI</span>
-          <strong class="numeric">{{ profile.score }}</strong>
+        <div class="rvi-overall" aria-label="Career RVI summary">
+          <span class="rvi-overall-label">Career RVI</span>
+          <div class="rvi-overall-score">
+            <strong class="numeric" :aria-label="`Career RVI ${profile.score} out of 100`">
+              {{ profile.score }}
+            </strong>
+            <span>{{ scoreLabel(profile.score) }}</span>
+          </div>
           <small>
             {{ confidenceLabel(profile.confidence) }} ·
             <template v-if="profile.headline.source === 'career_arm_mean'">
-              {{ profile.headline.availableArms }}/{{ profile.headline.totalArms }} arms ·
+              {{ profile.headline.availableArms }} of {{ profile.headline.totalArms }} arms ·
             </template>
-            {{ profile.measuredGames }} graded games
+            {{ gameCountLabel(profile.measuredGames) }}
           </small>
         </div>
       </header>
 
       <section
         v-if="hasScopeComparisons"
-        class="scope-rail"
-        aria-labelledby="rvi-scopes-title"
-        aria-describedby="rvi-scopes-description"
+        class="rvi-context"
+        aria-labelledby="rvi-context-title"
+        aria-describedby="rvi-context-description"
       >
-        <header class="scope-rail-head">
-          <h3 id="rvi-scopes-title">Compare RVI</h3>
-          <p id="rvi-scopes-description">{{ scopeComparisonDescription }}</p>
+        <header class="rvi-section-heading">
+          <h3 id="rvi-context-title">RVI by context</h3>
+          <p id="rvi-context-description">Your highest-scoring position and primary archetype in this selection.</p>
         </header>
-        <div class="scope-groups">
+        <div
+          class="rvi-context-groups rvi-context-best"
+          :class="{ 'single-group': bestContextGroups.length === 1 }"
+        >
           <section
-            v-for="group in scopeGroups"
+            v-for="group in bestContextGroups"
             :key="group.key"
-            class="scope-group"
-            :class="`scope-${group.key}`"
-            :style="{ '--scope-count': group.items.length }"
-            :aria-labelledby="`rvi-scope-${group.key}`"
+            class="rvi-context-group"
+            :aria-labelledby="`rvi-context-best-${group.key}`"
           >
-            <h4 :id="`rvi-scope-${group.key}`">{{ group.label }}</h4>
-            <ul class="scope-items" role="list">
-              <li
-                v-for="scope in group.items"
-                :key="`${group.key}:${scope.key}`"
-                class="scope-card"
-              >
-                <div class="scope-card-main">
-                  <div class="scope-identity">
-                    <strong>{{ scopeLabel(scope) }}</strong>
-                    <small>{{ scoreLabel(scope.score) }}</small>
-                  </div>
-                  <strong class="scope-score numeric" :aria-label="`RVI score ${scope.score}`">
+            <h4 :id="`rvi-context-best-${group.key}`">{{ group.label }}</h4>
+            <ul role="list">
+              <li v-for="scope in group.items" :key="`${group.key}:${scope.key}`">
+                <strong class="rvi-context-name">{{ scopeLabel(scope) }}</strong>
+                <span class="rvi-context-score">
+                  <strong class="numeric" :aria-label="performanceScopeAriaLabel(scope)">
                     {{ scope.score }}
                   </strong>
-                </div>
-                <span class="scope-meter" aria-hidden="true">
-                  <i :style="{ width: `${Math.max(0, Math.min(100, scope.score))}%` }" />
+                  <small>{{ performanceScoreLabel(scope.score) }}</small>
                 </span>
-                <div class="scope-evidence">
-                  <span class="scope-confidence" :data-confidence="scope.confidence">
-                    {{ confidenceLabel(scope.confidence) }} data
-                  </span>
-                  <span>{{ armCountLabel(scope) }} · {{ gameCountLabel(scope.games) }}</span>
-                </div>
+                <small class="rvi-context-meta">{{ performanceScopeEvidenceLabel(scope) }}</small>
               </li>
             </ul>
           </section>
         </div>
       </section>
 
-      <div class="profile-lead">
-        <PerformanceRadar
-          v-if="canRenderRadar"
-          class="profile-radar"
-          :dimensions="profile.dimensions"
-          primary-label="Career profile"
-          secondary-label="Recent form"
-          height="clamp(300px, 30cqi, 380px)"
-        />
-        <div v-else class="partial-radar-note">
-          <strong>Radar is still building</strong>
-          <p>More recorded games are needed for a complete radar. Available arms remain selectable.</p>
+      <section class="rvi-stage" aria-labelledby="rvi-shape-title">
+        <div class="rvi-radar-panel">
+          <header class="rvi-section-heading">
+            <h3 id="rvi-shape-title">Profile shape</h3>
+            <p>Career profile and your most recent {{ profile.recentGames }} measured games.</p>
+          </header>
+          <PerformanceRadar
+            v-if="canRenderRadar"
+            class="profile-radar"
+            :dimensions="profile.dimensions"
+            primary-label="Career profile"
+            secondary-label="Recent form"
+            height="clamp(250px, 27cqi, 330px)"
+          />
+          <div v-else class="partial-radar-note">
+            <strong>Radar is still building</strong>
+            <p>More recorded games are needed for a complete radar. Available arms remain selectable.</p>
+          </div>
         </div>
 
-        <section class="profile-story" aria-label="RVI profile highlights">
-          <article
-            v-if="identity"
-            class="story-card identity"
-            aria-labelledby="rvi-style-title"
-          >
-            <span class="story-label">Performance style</span>
-            <h3 id="rvi-style-title">{{ identity.label }}</h3>
-            <p>{{ identity.description }}</p>
+        <div class="rvi-highlights" aria-label="RVI profile highlights">
+          <article v-if="strongest" class="rvi-signal">
+            <div>
+              <span class="rvi-signal-label">Strongest arm</span>
+              <h3>{{ strongest.label }}</h3>
+              <p>{{ strongest.description }}</p>
+            </div>
+            <div class="rvi-signal-value">
+              <strong class="numeric" :aria-label="`${strongest.label} score ${strongest.score} out of 100`">
+                {{ strongest.score }}
+              </strong>
+              <small>{{ scoreLabel(strongest.score) }}</small>
+            </div>
           </article>
-          <article
-            v-if="strongest"
-            class="story-card strongest"
-            aria-labelledby="rvi-strongest-title"
-          >
-            <span class="story-label">Top arm</span>
-            <h3 id="rvi-strongest-title">{{ strongest.label }}</h3>
-            <span class="story-score numeric" :aria-label="`Arm score ${strongest.score}`">
-              {{ strongest.score }}
-            </span>
-            <p>{{ strongest.description }}</p>
-          </article>
-          <article class="story-card movement" aria-labelledby="rvi-movement-title">
-            <span class="story-label">Recent movement</span>
-            <template v-if="growth">
-              <h3 id="rvi-movement-title">{{ growth.label }}</h3>
-              <span
-                class="story-score numeric positive"
+          <article class="rvi-signal">
+            <div>
+              <span class="rvi-signal-label">Largest recent gain</span>
+              <template v-if="growth">
+                <h3>{{ growth.label }}</h3>
+                <p>Recent measured games compared with your full career profile.</p>
+              </template>
+              <template v-else>
+                <h3>No clear recent gain</h3>
+                <p>Recent arm scores are level with or below your full profile.</p>
+              </template>
+            </div>
+            <div class="rvi-signal-value">
+              <strong
+                v-if="growth"
+                class="numeric positive"
                 :aria-label="`Recent movement plus ${growth.delta}`"
               >
                 +{{ growth.delta }}
-              </span>
-              <p>Recent measured games are running above your recorded profile.</p>
-            </template>
-            <template v-else>
-              <h3 id="rvi-movement-title">Profile holding steady</h3>
-              <span class="story-score numeric" aria-label="No recent movement">—</span>
-              <p>No arm has enough positive movement to call out yet.</p>
-            </template>
+              </strong>
+              <strong v-else class="numeric" aria-label="No recent gain">—</strong>
+              <small>{{ growth ? 'vs career' : 'Recent form' }}</small>
+            </div>
           </article>
-          <p class="comparison-note">{{ profile.comparison }}.</p>
-        </section>
-      </div>
+          <p class="rvi-reference"><span>Reference</span>{{ profile.comparison }}.</p>
+        </div>
+      </section>
 
-      <div
-        class="dimension-grid career-dimension-grid"
-        role="group"
-        aria-label="RVI performance arms"
-      >
-        <button
-          v-for="dimension in profile.dimensions"
-          :key="dimension.key"
-          type="button"
-          class="dimension-card"
-          :class="{ selected: selected?.key === dimension.key }"
-          :aria-pressed="selected?.key === dimension.key"
-          aria-controls="career-arm-details"
-          @click="selectDimension(dimension.key)"
-        >
-          <span class="dimension-mark" aria-hidden="true">{{ dimension.shortLabel.slice(0, 2) }}</span>
-          <span class="dimension-copy">
-            <strong>{{ dimension.label }}</strong>
-            <small v-if="dimension.careerOnly">
-              Career only · {{ dimension.games >= 20 ? `${dimension.games} measured games` : `${Math.max(0, 20 - dimension.games)} more games needed` }}
-            </small>
-            <small v-else-if="dimension.headlineEligible">
-              {{ confidenceLabel(dimension.confidence) }} · {{ dimension.games }}/{{ dimension.eligibleGames }} games ·
-              {{ Math.round(dimension.responsibilityWeight * 100) }}% average Grade share
-            </small>
-            <small v-else>Shown for detail only</small>
-          </span>
-          <span class="dimension-result">
-            <strong class="dimension-score numeric">{{ dimension.score ?? '—' }}</strong>
-            <small>{{ scoreLabel(dimension.score) }}</small>
-          </span>
-          <span
-            class="dimension-delta"
-            :class="{ positive: (dimension.delta ?? 0) > 0, negative: (dimension.delta ?? 0) < 0 }"
+      <section class="rvi-arms" aria-labelledby="rvi-arms-title">
+        <header class="rvi-section-heading">
+          <h3 id="rvi-arms-title">Performance arms</h3>
+          <p>Select an arm to view its measurements.</p>
+        </header>
+        <div class="career-arm-grid" role="group" aria-labelledby="rvi-arms-title">
+          <button
+            v-for="dimension in profile.dimensions"
+            :key="dimension.key"
+            type="button"
+            class="career-arm"
+            :class="{ selected: selected?.key === dimension.key }"
+            :aria-pressed="selected?.key === dimension.key"
+            aria-controls="career-arm-details"
+            @click="selectDimension(dimension.key)"
           >
-            {{ deltaLabel(dimension) }}
+            <span class="career-arm-name">
+              <strong>{{ dimension.label }}</strong>
+              <small v-if="dimension.careerOnly">
+                Career only · {{ dimension.games >= 20 ? gameCountLabel(dimension.games) : `${Math.max(0, 20 - dimension.games)} more games needed` }}
+              </small>
+              <small v-else-if="dimension.headlineEligible">
+                {{ confidenceLabel(dimension.confidence) }} · {{ dimension.games }}/{{ dimension.eligibleGames }} games ·
+                {{ Math.round(dimension.responsibilityWeight * 100) }}% Grade share
+              </small>
+              <small v-else>Additional context only</small>
+            </span>
+            <span class="career-arm-result">
+              <strong class="numeric" :aria-label="`${dimension.label} score ${dimension.score ?? 'unavailable'} out of 100`">
+                {{ dimension.score ?? '—' }}
+              </strong>
+              <small>{{ scoreLabel(dimension.score) }}</small>
+            </span>
+            <span
+              class="career-arm-trend"
+              :class="{ positive: (dimension.delta ?? 0) > 0, negative: (dimension.delta ?? 0) < 0 }"
+            >
+              {{ deltaLabel(dimension) }}
+            </span>
+          </button>
+        </div>
+
+        <button
+          v-if="selected"
+          type="button"
+          class="career-inspector-toggle"
+          :aria-expanded="careerDetailsOpen"
+          aria-controls="career-arm-details"
+          @click="careerDetailsOpen = !careerDetailsOpen"
+        >
+          <span><strong>{{ selected.label }}</strong> measurements</span>
+          <span class="inspector-toggle-action">
+            <span>{{ careerDetailsOpen ? 'Hide details' : 'Show details' }}</span>
+            <span class="inspector-chevron" :class="{ open: careerDetailsOpen }" aria-hidden="true">
+              <svg viewBox="0 0 20 20" focusable="false"><path d="m5 7.5 5 5 5-5" /></svg>
+            </span>
           </span>
         </button>
-      </div>
 
-      <button
-        v-if="selected"
-        type="button"
-        class="career-inspector-toggle"
-        :aria-expanded="careerDetailsOpen"
-        aria-controls="career-arm-details"
-        @click="careerDetailsOpen = !careerDetailsOpen"
-      >
-        <span class="inspector-toggle-copy">
-          <small>How RVI measures it</small>
-          <strong>{{ selected.label }}</strong>
-        </span>
-        <span class="inspector-toggle-score">
-          <strong class="numeric">{{ selected.score ?? '—' }}</strong>
-          <small>arm score</small>
-        </span>
-        <span class="inspector-toggle-action">
-          <span class="inspector-action-long">
-            {{ careerDetailsOpen ? 'Hide measurements' : 'Show measurements' }}
-          </span>
-          <span class="inspector-action-short">
-            {{ careerDetailsOpen ? 'Hide' : 'Show' }}
-          </span>
-          <span class="inspector-chevron" :class="{ open: careerDetailsOpen }" aria-hidden="true">
-            <svg viewBox="0 0 20 20" focusable="false"><path d="m5 7.5 5 5 5-5" /></svg>
-          </span>
-        </span>
-      </button>
-
-      <section
-        v-if="selected"
-        v-show="careerDetailsOpen"
-        id="career-arm-details"
-        class="career-inspector"
-        :aria-labelledby="`career-arm-${selected.key}`"
-      >
-        <header class="inspector-head">
-          <div>
-            <p class="eyebrow">Arm details</p>
-            <h3 :id="`career-arm-${selected.key}`">{{ selected.label }}</h3>
-            <p>{{ selected.description }}</p>
-          </div>
-          <div class="inspector-score">
-            <strong class="numeric">{{ selected.score ?? '—' }}</strong>
-            <small>{{ scoreLabel(selected.score) }}</small>
-          </div>
-        </header>
-        <div class="inspector-context">
-          <span v-if="selected.careerOnly">Career only · available after 20 graded games</span>
-          <span v-else-if="selected.headlineEligible">
-            {{ confidenceLabel(selected.confidence) }} · {{ selected.games }}/{{ selected.eligibleGames }} games ·
-            {{ Math.round(selected.responsibilityWeight * 100) }}% average Grade share
-          </span>
-          <span v-else>Shown for additional context; no Grade influence.</span>
-        </div>
+        <section
+          v-if="selected"
+          v-show="careerDetailsOpen"
+          id="career-arm-details"
+          class="career-inspector"
+          :aria-labelledby="`career-arm-${selected.key}`"
+        >
+          <header class="inspector-head">
+            <div>
+              <p class="eyebrow">Selected arm</p>
+              <h3 :id="`career-arm-${selected.key}`">{{ selected.label }} measurements</h3>
+              <p>{{ selected.description }}</p>
+            </div>
+          </header>
 
         <template v-if="careerMetricGroups.length">
           <div class="metric-group-picker" role="group" aria-label="Measurement groups">
@@ -487,6 +442,7 @@ const selectDimension = (key: string) => {
             the arms with enough data. Missing optional stats do not lower your score.
           </p>
         </details>
+        </section>
       </section>
     </template>
 
@@ -680,188 +636,6 @@ const selectDimension = (key: string) => {
   margin: var(--space-2) 0 0;
 }
 
-.dimensions-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-5);
-  padding-bottom: var(--space-4);
-  border-bottom: 1px solid var(--border-subtle);
-}
-.dimensions-head > div:first-child { min-width: 0; }
-.dimensions-head h2 {
-  margin: 0;
-  color: var(--gold-bright);
-  font: 500 clamp(21px, 2.3cqi, 28px) var(--font-display);
-}
-.profile-meta { display: grid; flex: 0 0 auto; justify-items: end; min-width: 150px; }
-.profile-meta > span { color: var(--cyan); font-size: var(--ui-text-label); letter-spacing: .08em; text-transform: uppercase; }
-.profile-meta > strong { color: var(--gold-bright); font: 30px/1.1 var(--font-display); }
-.profile-meta > small {
-  max-width: 240px;
-  color: var(--text-muted);
-  font-size: var(--ui-text-label);
-  line-height: 1.4;
-  text-align: right;
-}
-
-.scope-rail {
-  display: grid;
-  gap: var(--space-2);
-  margin-top: var(--space-3);
-  padding: 0;
-}
-.scope-rail-head { display: grid; gap: 2px; }
-.scope-rail-head h3 {
-  margin: 0;
-  color: var(--cyan);
-  font-size: var(--ui-text-label);
-  font-weight: 500;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-.scope-rail-head p { margin: 0; color: var(--text-muted); font-size: var(--ui-text-support); }
-.scope-groups {
-  display: flex;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-.scope-group {
-  display: grid;
-  align-self: flex-start;
-  align-content: start;
-  flex: var(--scope-count) 1 170px;
-  min-width: min(100%, 170px);
-  gap: 6px;
-  padding: 8px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: rgba(8, 19, 35, .34);
-}
-.scope-group > h4 {
-  margin: 0;
-  padding: 0 2px 6px;
-  border-bottom: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-  font-size: var(--ui-text-label);
-  font-weight: 500;
-  letter-spacing: .08em;
-  line-height: 1.35;
-  text-transform: uppercase;
-}
-.scope-overall {
-  border-color: color-mix(in srgb, var(--gold) 28%, var(--border-subtle));
-  background: rgba(200, 170, 109, .025);
-}
-.scope-overall > h4 { color: var(--gold); }
-.scope-items {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
-  min-width: 0;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.scope-card {
-  --scope-tone: var(--cyan);
-  display: grid;
-  align-content: start;
-  min-width: 0;
-  min-height: 0;
-  gap: 5px;
-  padding: 8px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: linear-gradient(145deg, rgba(255, 255, 255, .018), transparent 55%), rgba(8, 19, 35, .52);
-}
-.scope-overall .scope-card {
-  --scope-tone: var(--gold);
-  border-color: color-mix(in srgb, var(--gold) 38%, var(--border-subtle));
-  background: linear-gradient(145deg, rgba(200, 170, 109, .07), transparent 58%), rgba(8, 19, 35, .58);
-}
-.scope-card-main {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-}
-.scope-identity { display: grid; min-width: 0; gap: 2px; }
-.scope-identity > strong { color: var(--text-primary); font: var(--ui-text-support) var(--font-heading); overflow-wrap: break-word; }
-.scope-identity > small { color: var(--scope-tone); font-size: var(--ui-text-micro); letter-spacing: .04em; text-transform: uppercase; }
-.scope-score { color: var(--gold-bright); font: 24px/1 var(--font-display); text-align: right; }
-.scope-meter {
-  display: block;
-  height: 2px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: rgba(76, 87, 105, .28);
-}
-.scope-meter i {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--scope-tone) 62%, #073846), var(--scope-tone));
-}
-.scope-evidence {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  flex-wrap: wrap;
-  gap: 2px;
-  color: var(--text-muted);
-  font-size: var(--ui-text-micro);
-}
-.scope-confidence {
-  flex: 0 0 auto;
-  line-height: 1.25;
-}
-.scope-evidence > span + span::before { color: var(--text-muted); content: "· "; }
-.scope-confidence[data-confidence="provisional"] { color: var(--gold); }
-.scope-confidence[data-confidence="established"] { color: var(--win); }
-
-.profile-lead {
-  display: grid;
-  grid-template-columns: minmax(330px, .9fr) minmax(0, 1.1fr);
-  align-items: center;
-  min-width: 0;
-  gap: clamp(var(--space-4), 2vw, var(--space-5));
-  padding-block: var(--space-3) var(--space-4);
-}
-.profile-story {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  min-width: 0;
-  gap: var(--space-3);
-}
-.story-card {
-  display: grid;
-  align-content: start;
-  min-width: 0;
-  padding: var(--space-4);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: rgba(8, 19, 35, .62);
-}
-.story-card.identity {
-  grid-column: 1 / -1;
-  border-left: 3px solid var(--cyan);
-  background: linear-gradient(105deg, rgba(10, 203, 230, .08), rgba(8, 19, 35, .62) 45%);
-}
-.story-card.strongest { border-top-color: var(--gold); }
-.story-card.movement { border-top-color: var(--cyan); }
-.story-label { color: var(--text-muted); font-size: var(--ui-text-label); letter-spacing: .08em; text-transform: uppercase; }
-.story-card h3 {
-  margin: var(--space-1) 0 0;
-  color: var(--text-primary);
-  font: var(--ui-text-body) var(--font-heading);
-}
-.story-card.identity h3 { color: var(--cyan); font: 500 20px var(--font-display); }
-.story-score { margin-top: var(--space-2); color: var(--gold-bright); font-size: 26px; }
-.story-card p { margin: var(--space-2) 0 0; color: var(--text-secondary); font-size: var(--ui-text-support); line-height: 1.5; }
-.profile-story > .comparison-note { grid-column: 1 / -1; margin: 0; }
-
 .metric-group-picker button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
 
 .career-inspector-toggle {
@@ -886,18 +660,7 @@ const selectDimension = (key: string) => {
   background: rgba(10, 203, 230, .055);
 }
 .career-inspector-toggle:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
-.inspector-toggle-copy,
-.inspector-toggle-score {
-  display: grid;
-  min-width: 0;
-}
-.inspector-toggle-copy small { color: var(--cyan); font-size: var(--ui-text-label); letter-spacing: .08em; text-transform: uppercase; }
-.inspector-toggle-copy strong { overflow: hidden; color: var(--gold-bright); font: 500 17px var(--font-display); text-overflow: ellipsis; white-space: nowrap; }
-.inspector-toggle-score { justify-items: end; }
-.inspector-toggle-score strong { color: var(--gold-bright); font-size: 20px; line-height: 1; }
-.inspector-toggle-score small { margin-top: 3px; color: var(--text-muted); font-size: var(--ui-text-label); }
 .inspector-toggle-action { display: flex; align-items: center; flex: 0 0 auto; gap: var(--space-2); color: var(--text-secondary); font-size: var(--ui-text-label); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
-.inspector-action-short { display: none; }
 .inspector-chevron {
   display: grid;
   place-items: center;
@@ -924,10 +687,6 @@ const selectDimension = (key: string) => {
 .inspector-head > div:first-child { min-width: 0; }
 .inspector-head h3 { margin: 0; color: var(--gold-bright); font: 500 20px var(--font-display); }
 .inspector-head p:last-child { max-width: 720px; margin: 4px 0 0; color: var(--text-secondary); font-size: var(--ui-text-support); line-height: 1.5; }
-.inspector-score { display: grid; flex: 0 0 auto; justify-items: end; }
-.inspector-score strong { color: var(--gold-bright); font: 25px/1 var(--font-display); }
-.inspector-score small { margin-top: 2px; color: var(--text-muted); font-size: var(--ui-text-label); letter-spacing: .05em; text-transform: uppercase; }
-.inspector-context { margin-top: 8px; color: var(--text-muted); font-size: var(--ui-text-label); }
 .metric-group-picker { display: flex; min-width: 0; gap: 5px; margin: var(--space-3) 0 7px; overflow-x: auto; }
 .metric-group-picker button {
   flex: 0 0 auto;
@@ -1013,12 +772,6 @@ const selectDimension = (key: string) => {
 .dimension-card.selected { box-shadow: inset 2px 0 var(--cyan); }
 .dimension-card:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 
-.career-dimension-grid .dimension-card {
-  grid-template-rows: auto 1fr;
-  min-height: 124px;
-  align-content: start;
-}
-
 .dimension-mark {
   display: grid;
   place-items: center;
@@ -1053,13 +806,6 @@ const selectDimension = (key: string) => {
   text-overflow: ellipsis;
   text-transform: uppercase;
   white-space: nowrap;
-}
-
-.dimension-delta {
-  grid-column: 1 / -1;
-  align-self: end;
-  color: var(--text-muted);
-  font-size: var(--ui-text-support);
 }
 
 .dimension-detail {
@@ -1205,424 +951,662 @@ const selectDimension = (key: string) => {
 .measurement-influence small { color: var(--text-muted); font-size: var(--ui-text-label); text-align: right; }
 .method-note { margin: var(--space-3) 0 0; }
 
-/* Career profile finish: quiet instrument surfaces with clear selection state. */
+/* Career overview: one instrument panel with internal hierarchy, not nested cards. */
 .career-profile {
-  position: relative;
-  isolation: isolate;
-  padding: clamp(20px, 2.35cqi, 32px);
-  border-color: color-mix(in srgb, var(--gold) 28%, var(--border-subtle));
-  background:
-    radial-gradient(circle at 13% 24%, rgba(200, 170, 109, .055), transparent 27%),
-    radial-gradient(circle at 88% 39%, rgba(10, 203, 230, .035), transparent 31%),
-    var(--ui-surface-panel);
-  box-shadow: var(--shadow-card), inset 0 1px rgba(255, 255, 255, .025);
+  display: grid;
+  gap: 16px;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  background: none;
+  box-shadow: none;
 }
 
-.career-profile::before {
-  position: absolute;
-  z-index: 0;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(115deg, rgba(255, 255, 255, .018), transparent 24% 78%, rgba(200, 170, 109, .018));
-  content: "";
-  pointer-events: none;
+.rvi-profile-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  min-width: 0;
+  gap: 18px;
+  padding: 4px 4px 16px;
+  border-bottom: 1px solid var(--ui-divider);
 }
 
-.career-profile > * {
-  position: relative;
-  z-index: 1;
+.rvi-identity,
+.rvi-identity-title {
+  min-width: 0;
 }
 
-.career-profile .dimensions-head {
-  align-items: center;
-  padding-bottom: clamp(16px, 1.7cqi, 24px);
-  border-bottom-color: color-mix(in srgb, var(--gold) 34%, transparent);
+.rvi-identity-title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px 12px;
 }
 
-.career-profile .dimensions-head h2 {
-  font-size: clamp(26px, 2.4cqi, 34px);
+.rvi-identity-title h2 {
+  margin: 0;
+  color: var(--gold-bright);
+  font: 500 clamp(25px, 2.5cqi, 34px)/1.05 var(--font-display);
   letter-spacing: -.015em;
 }
 
-.career-profile .intro {
-  max-width: 620px;
-  margin-top: 7px;
+.rvi-identity-title span,
+.rvi-overall-label,
+.rvi-signal-label {
+  color: var(--cyan);
+  font-size: var(--ui-text-label);
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
 }
 
-.career-profile .profile-meta {
-  min-width: 190px;
-  padding: 5px 0 5px clamp(18px, 2cqi, 28px);
-  border-left: 1px solid color-mix(in srgb, var(--gold) 40%, transparent);
+.rvi-identity > p:last-child {
+  max-width: 68ch;
+  margin: 7px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--ui-text-support);
+  line-height: 1.5;
 }
 
-.career-profile .profile-meta > strong {
-  margin-block: 2px;
-  font-size: clamp(36px, 3.1cqi, 44px);
-  letter-spacing: -.025em;
-  text-shadow: 0 0 24px rgba(200, 170, 109, .09);
+.rvi-overall {
+  display: grid;
+  justify-items: end;
+  min-width: 210px;
+  padding: 2px 0 2px 20px;
+  border-left: 1px solid var(--ui-border);
 }
 
-.career-profile .scope-rail {
-  gap: 10px;
-  margin-top: clamp(14px, 1.5cqi, 20px);
-  padding-bottom: clamp(16px, 1.7cqi, 22px);
-  border-bottom: 1px solid rgba(200, 170, 109, .12);
-}
-
-.career-profile .scope-rail-head {
-  grid-template-columns: auto minmax(0, 1fr);
+.rvi-overall-score {
+  display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: 9px;
+  margin-top: 2px;
 }
 
-.career-profile .scope-group {
-  border-color: rgba(200, 170, 109, .2);
-  background: linear-gradient(145deg, rgba(255, 255, 255, .014), transparent 58%), rgba(7, 16, 29, .5);
-  box-shadow: inset 0 1px rgba(255, 255, 255, .018);
+.rvi-overall-score strong {
+  color: var(--gold-bright);
+  font: 42px/1 var(--font-display);
+  letter-spacing: -.025em;
 }
 
-.career-profile .scope-card {
-  border-color: rgba(200, 170, 109, .18);
-  box-shadow: inset 0 1px rgba(255, 255, 255, .02);
+.rvi-overall-score span {
+  color: var(--text-secondary);
+  font-size: var(--ui-text-label);
+  letter-spacing: .05em;
+  text-transform: uppercase;
 }
 
-.career-profile .profile-lead {
-  --profile-lead-gap: clamp(24px, 3cqi, 44px);
-  position: relative;
-  grid-template-columns: minmax(360px, .88fr) minmax(0, 1.12fr);
-  align-items: stretch;
-  gap: var(--profile-lead-gap);
-  padding-block: clamp(24px, 3cqi, 40px);
-  background: radial-gradient(ellipse at 22% 50%, rgba(200, 170, 109, .045), transparent 34%);
+.rvi-overall > small {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: var(--ui-text-label);
+  line-height: 1.35;
+  text-align: right;
 }
 
-.career-profile .profile-radar {
-  align-self: center;
+.rvi-section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
   min-width: 0;
-  filter: drop-shadow(0 14px 26px rgba(0, 0, 0, .18));
+  gap: 8px 16px;
 }
 
-.career-profile .profile-story {
-  position: relative;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  align-content: stretch;
-  gap: clamp(10px, 1.1cqi, 14px);
-}
-
-.career-profile .profile-story::before {
-  position: absolute;
-  top: 5%;
-  bottom: 5%;
-  left: calc(var(--profile-lead-gap) / -2);
-  width: 1px;
-  background: linear-gradient(transparent, rgba(200, 170, 109, .2) 16% 84%, transparent);
-  content: "";
-  pointer-events: none;
-}
-
-.career-profile .story-card {
-  position: relative;
-  overflow: hidden;
-  padding: clamp(16px, 1.55cqi, 22px);
-  border-color: rgba(200, 170, 109, .24);
-  background:
-    linear-gradient(145deg, rgba(255, 255, 255, .018), transparent 48%),
-    rgba(7, 17, 31, .72);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, .12), inset 0 1px rgba(255, 255, 255, .025);
-}
-
-.career-profile .story-card.identity {
-  min-height: 112px;
-  border-color: color-mix(in srgb, var(--cyan) 28%, var(--border-subtle));
-  border-left-width: 3px;
-  background:
-    radial-gradient(circle at 94% 20%, rgba(10, 203, 230, .08), transparent 27%),
-    linear-gradient(105deg, rgba(10, 203, 230, .09), rgba(7, 17, 31, .74) 48%);
-}
-
-.career-profile .story-card.strongest,
-.career-profile .story-card.movement {
-  min-height: 176px;
-}
-
-.career-profile .story-card.strongest {
-  border-top-color: color-mix(in srgb, var(--gold) 70%, var(--border-subtle));
-}
-
-.career-profile .story-card.movement {
-  border-top-color: color-mix(in srgb, var(--cyan) 62%, var(--border-subtle));
-}
-
-.career-profile .story-card h3 {
-  font-size: 15px;
+.rvi-section-heading h3 {
+  flex: 0 0 auto;
+  margin: 0;
+  color: var(--gold-bright);
+  font: 600 var(--ui-text-body)/1.2 var(--font-heading);
   letter-spacing: .01em;
 }
 
-.career-profile .story-card.identity h3 {
-  font-size: clamp(21px, 1.9cqi, 27px);
-  letter-spacing: -.01em;
+.rvi-section-heading p {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--ui-text-label);
+  line-height: 1.4;
+  text-align: right;
 }
 
-.career-profile .story-score {
-  margin-top: 10px;
-  font: 30px/1 var(--font-display);
-  letter-spacing: -.02em;
-}
-
-.career-profile .story-card p {
-  max-width: 62ch;
-}
-
-.career-profile .profile-story > .comparison-note {
-  padding-left: 11px;
-  border-left: 1px solid color-mix(in srgb, var(--gold) 48%, transparent);
-}
-
-.career-profile .career-dimension-grid {
-  gap: clamp(8px, .9cqi, 12px);
-  padding-top: clamp(14px, 1.6cqi, 22px);
-  border-top: 1px solid rgba(200, 170, 109, .13);
-}
-
-.career-profile .career-dimension-grid .dimension-card {
-  position: relative;
-  isolation: isolate;
-  grid-template-columns: 42px minmax(0, 1fr) minmax(76px, max-content);
-  min-height: 138px;
+.rvi-stage {
+  display: grid;
+  grid-template-columns: minmax(300px, .94fr) minmax(320px, 1.06fr);
+  min-width: 0;
   overflow: hidden;
-  gap: 10px;
-  padding: 14px;
-  border-color: rgba(200, 170, 109, .22);
-  background:
-    linear-gradient(145deg, rgba(255, 255, 255, .018), transparent 50%),
-    rgba(9, 21, 38, .78);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, .1), inset 0 1px rgba(255, 255, 255, .02);
-  transition: transform 150ms ease, border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-md);
+  background: rgba(6, 15, 27, .48);
 }
 
-.career-profile .career-dimension-grid .dimension-card::after {
-  position: absolute;
-  z-index: -1;
-  inset: 0;
-  background: radial-gradient(circle at 8% 10%, rgba(10, 203, 230, .1), transparent 38%);
-  content: "";
-  opacity: 0;
-  transition: opacity 150ms ease;
-  pointer-events: none;
+.rvi-radar-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: start;
+  min-width: 0;
+  padding: 14px 16px 8px;
 }
 
-.career-profile .career-dimension-grid .dimension-card > * {
-  position: relative;
-  z-index: 1;
+.rvi-radar-panel .profile-radar {
+  align-self: center;
+  min-width: 0;
 }
 
-.career-profile .career-dimension-grid .dimension-mark {
-  width: 38px;
-  height: 38px;
-  border-color: color-mix(in srgb, var(--gold) 58%, transparent);
-  background: rgba(3, 11, 21, .34);
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .24);
-  transition: color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+.rvi-highlights {
+  display: grid;
+  grid-template-rows: repeat(2, minmax(0, 1fr)) auto;
+  min-width: 0;
+  border-left: 1px solid var(--ui-divider);
+  background: rgba(9, 21, 37, .46);
 }
 
-.career-profile .career-dimension-grid .dimension-copy strong {
+.rvi-signal {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  min-width: 0;
+  gap: 14px;
+  padding: 16px 18px;
+}
+
+.rvi-signal + .rvi-signal {
+  border-top: 1px solid var(--ui-divider);
+}
+
+.rvi-signal > div:first-child {
+  min-width: 0;
+}
+
+.rvi-signal h3 {
+  margin: 4px 0 0;
+  color: var(--text-primary);
+  font: 500 18px/1.2 var(--font-heading);
+}
+
+.rvi-signal p {
+  max-width: 54ch;
+  margin: 7px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--ui-text-support);
+  line-height: 1.45;
+}
+
+.rvi-signal-value {
+  display: grid;
+  justify-items: end;
+  min-width: 68px;
+}
+
+.rvi-signal-value strong {
   color: var(--gold-bright);
-  font-size: var(--ui-text-body);
-}
-
-.career-profile .career-dimension-grid .dimension-score {
-  font: 25px/1 var(--font-display);
+  font: 30px/1 var(--font-display);
   letter-spacing: -.015em;
 }
 
-.career-profile .career-dimension-grid .dimension-delta {
-  padding-top: 8px;
-  border-top: 1px solid rgba(200, 170, 109, .11);
+.rvi-signal-value small {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: var(--ui-text-label);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.career-profile .career-dimension-grid .dimension-card.selected {
-  border-color: color-mix(in srgb, var(--cyan) 58%, var(--border-subtle));
-  background: linear-gradient(105deg, rgba(10, 203, 230, .075), rgba(11, 25, 44, .9) 48%, rgba(200, 170, 109, .025));
-  box-shadow: inset 3px 0 var(--cyan), 0 14px 32px rgba(0, 0, 0, .18), 0 0 0 1px rgba(10, 203, 230, .06);
+.rvi-reference {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+  margin: 0;
+  padding: 10px 18px;
+  border-top: 1px solid var(--ui-divider);
+  background: rgba(2, 9, 17, .22);
+  color: var(--text-muted);
+  font-size: var(--ui-text-label);
+  line-height: 1.4;
 }
 
-.career-profile .career-dimension-grid .dimension-card.selected::after {
-  opacity: 1;
+.rvi-reference span {
+  color: var(--gold);
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
 }
 
-.career-profile .career-dimension-grid .dimension-card.selected .dimension-mark {
-  border-color: color-mix(in srgb, var(--cyan) 72%, var(--gold));
-  color: var(--cyan);
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .24), 0 0 16px rgba(10, 203, 230, .1);
+.rvi-context,
+.rvi-arms {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
 }
 
-@media (hover: hover) {
-  .career-profile .career-dimension-grid .dimension-card:hover {
-    z-index: 2;
-    border-color: color-mix(in srgb, var(--gold) 54%, var(--border-strong));
-    background-color: rgba(14, 29, 49, .94);
-    box-shadow: 0 15px 34px rgba(0, 0, 0, .2), inset 0 1px rgba(255, 255, 255, .03);
-    transform: translateY(-2px);
-  }
+.rvi-context-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-md);
+  background: rgba(6, 15, 27, .42);
+}
 
-  .career-profile .career-dimension-grid .dimension-card:hover::after {
-    opacity: .5;
-  }
+.rvi-context-groups.single-group {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.rvi-context-group {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  align-content: start;
+  min-width: 0;
+  padding: 10px 12px 8px;
+}
+
+.rvi-context-group + .rvi-context-group {
+  border-left: 1px solid var(--ui-divider);
+}
+
+.rvi-context-group > h4 {
+  margin: 0 0 4px;
+  color: var(--text-secondary);
+  font-size: var(--ui-text-label);
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.rvi-context-group ul {
+  display: grid;
+  grid-auto-rows: 1fr;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rvi-context-group li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "name score"
+    "meta score";
+  align-items: center;
+  min-width: 0;
+  gap: 2px 12px;
+  padding: 8px 2px;
+}
+
+.rvi-context-group li + li {
+  border-top: 1px solid var(--ui-divider);
+}
+
+.rvi-context-name {
+  grid-area: name;
+  min-width: 0;
+  color: var(--text-primary);
+  font: 600 var(--ui-text-support)/1.3 var(--font-heading);
+  overflow-wrap: break-word;
+}
+
+.rvi-context-score {
+  display: grid;
+  grid-area: score;
+  justify-items: end;
+  min-width: 62px;
+}
+
+.rvi-context-score strong {
+  color: var(--gold-bright);
+  font: 24px/1 var(--font-display);
+}
+
+.rvi-context-score small {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: var(--ui-text-label);
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.rvi-context-meta {
+  grid-area: meta;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--ui-text-label);
+  line-height: 1.35;
+  overflow-wrap: break-word;
+}
+
+.career-arm-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
+  min-width: 0;
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-divider);
+}
+
+.career-arm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(64px, auto);
+  grid-template-areas:
+    "name result"
+    "trend trend";
+  align-content: start;
+  min-width: 0;
+  height: 100%;
+  min-height: 94px;
+  gap: 8px 10px;
+  padding: 11px 12px 9px;
+  border: 0;
+  border-radius: 0;
+  background: #0b182a;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 140ms ease, box-shadow 140ms ease;
+}
+
+.career-arm:hover {
+  background: #10223a;
+}
+
+.career-arm.selected {
+  background: linear-gradient(90deg, rgba(10, 203, 230, .09), #102039 58%);
+  box-shadow: inset 3px 0 var(--cyan);
+}
+
+.career-arm:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--cyan);
+  outline-offset: -3px;
+}
+
+.career-arm-name {
+  display: grid;
+  grid-area: name;
+  min-width: 0;
+  align-content: start;
+}
+
+.career-arm-name strong {
+  color: var(--gold-bright);
+  font: 600 var(--ui-text-body)/1.25 var(--font-heading);
+}
+
+.career-arm-name small {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: var(--ui-text-label);
+  line-height: 1.35;
+  overflow-wrap: break-word;
+}
+
+.career-arm-result {
+  display: grid;
+  grid-area: result;
+  justify-items: end;
+  min-width: 64px;
+}
+
+.career-arm-result strong {
+  color: var(--gold-bright);
+  font: 25px/1 var(--font-display);
+}
+
+.career-arm-result small {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: var(--ui-text-label);
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.career-arm-trend {
+  grid-area: trend;
+  align-self: end;
+  padding-top: 6px;
+  border-top: 1px solid var(--ui-divider);
+  color: var(--text-muted);
+  font-size: var(--ui-text-label);
+  line-height: 1.3;
 }
 
 .career-profile .career-inspector-toggle {
-  position: relative;
-  overflow: hidden;
-  min-height: 72px;
-  margin-top: clamp(14px, 1.5cqi, 20px);
-  padding: 14px 16px;
-  border-color: rgba(200, 170, 109, .3);
-  background:
-    linear-gradient(100deg, rgba(200, 170, 109, .035), transparent 38%),
-    rgba(7, 17, 31, .72);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, .12), inset 0 1px rgba(255, 255, 255, .02);
-  transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 54px;
+  gap: 12px;
+  margin-top: 0;
+  padding: 9px 12px 9px 14px;
+  border-color: var(--ui-border);
+  border-radius: var(--ui-radius-md);
+  background: rgba(7, 17, 30, .62);
+  box-shadow: none;
 }
 
 .career-profile .career-inspector-toggle::before {
-  position: absolute;
-  inset: 10px auto 10px 0;
-  width: 2px;
-  border-radius: 999px;
-  background: var(--cyan);
-  content: "";
-  opacity: .55;
-}
-
-.career-profile .career-inspector-toggle > * {
-  position: relative;
-  z-index: 1;
+  display: none;
 }
 
 .career-profile .career-inspector-toggle:hover {
-  border-color: color-mix(in srgb, var(--cyan) 48%, var(--border-subtle));
-  background-color: rgba(10, 203, 230, .035);
-  box-shadow: 0 15px 32px rgba(0, 0, 0, .16), inset 0 1px rgba(255, 255, 255, .025);
+  border-color: color-mix(in srgb, var(--cyan) 38%, var(--ui-border));
+  background: rgba(10, 203, 230, .035);
 }
 
-.career-profile .career-inspector-toggle[aria-expanded="true"] {
-  border-color: color-mix(in srgb, var(--cyan) 42%, var(--border-subtle));
-  border-radius: var(--radius-md) var(--radius-md) 0 0;
-  background: linear-gradient(100deg, rgba(10, 203, 230, .07), rgba(8, 19, 35, .72) 42%);
-  box-shadow: inset 0 1px rgba(255, 255, 255, .025);
+.career-profile .career-inspector-toggle > span:first-child {
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: var(--ui-text-support);
+  overflow-wrap: break-word;
+}
+
+.career-profile .career-inspector-toggle > span:first-child strong {
+  color: var(--gold-bright);
+  font-family: var(--font-heading);
+}
+
+.career-profile .inspector-toggle-action {
+  align-self: center;
+  font-size: var(--ui-text-label);
+  white-space: nowrap;
 }
 
 .career-profile .inspector-chevron {
-  background: linear-gradient(145deg, rgba(255, 255, 255, .035), rgba(8, 19, 35, .76));
-  box-shadow: inset 0 1px rgba(255, 255, 255, .04);
+  width: 30px;
+  height: 30px;
+  background: var(--ui-surface-inset);
+  box-shadow: none;
+}
+
+.career-profile .career-inspector-toggle[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--cyan) 40%, var(--ui-border));
+  border-radius: var(--ui-radius-md) var(--ui-radius-md) 0 0;
+  background: rgba(10, 203, 230, .045);
 }
 
 .career-profile .career-inspector {
-  margin-top: -1px;
-  padding: clamp(16px, 1.8cqi, 24px);
-  border-color: color-mix(in srgb, var(--cyan) 30%, var(--border-subtle));
-  border-radius: 0 0 var(--radius-md) var(--radius-md);
-  background:
-    linear-gradient(145deg, rgba(10, 203, 230, .025), transparent 34%),
-    rgba(7, 17, 31, .68);
-  box-shadow: 0 18px 38px rgba(0, 0, 0, .15), inset 0 1px rgba(255, 255, 255, .018);
+  margin-top: -9px;
+  padding: 14px 16px 16px;
+  border-color: color-mix(in srgb, var(--cyan) 28%, var(--ui-border));
+  border-radius: 0 0 var(--ui-radius-md) var(--ui-radius-md);
+  background: rgba(7, 17, 30, .56);
+  box-shadow: none;
 }
 
 .career-profile .inspector-head {
-  padding-bottom: 12px;
-  border-bottom: 1px solid rgba(200, 170, 109, .13);
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--ui-divider);
 }
 
-.career-profile .inspector-score strong {
-  font-size: 30px;
+.career-profile .inspector-head h3 {
+  font-size: 19px;
 }
 
 .career-profile .metric-group-picker {
-  gap: 7px;
-  margin-top: 16px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  overflow: visible;
 }
 
 .career-profile .metric-group-picker button {
-  padding: 7px 11px;
-  background: rgba(3, 11, 21, .38);
-  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+  min-height: 36px;
+  padding: 6px 10px;
+  background: rgba(3, 11, 21, .32);
 }
 
-.career-profile .metric-group-picker button:hover {
-  border-color: color-mix(in srgb, var(--cyan) 42%, var(--border-subtle));
-  color: var(--text-primary);
-}
-
-@container rvi-profile (min-width: 1360px) {
-  .career-profile .profile-lead {
-    --profile-lead-gap: 48px;
-  }
-
-  .career-profile .career-dimension-grid .dimension-card {
-    min-height: 146px;
-    padding: 16px;
-  }
+.career-profile .method-detail summary {
+  width: fit-content;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 @container rvi-profile (max-width: 1199px) {
-  .career-dimension-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .career-arm-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
-@container rvi-profile (max-width: 740px) {
-  .career-profile .profile-lead {
+@container rvi-profile (max-width: 900px) {
+  .rvi-stage {
     grid-template-columns: minmax(0, 1fr);
-    padding-block: 22px;
-    background-position: 50% 22%;
   }
-  .career-profile .profile-radar { width: min(100%, 640px); justify-self: center; }
-  .career-profile .profile-story::before { display: none; }
-  .scope-group { flex-basis: 100%; }
+
+  .rvi-highlights {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: auto auto;
+    border-top: 1px solid var(--ui-divider);
+    border-left: 0;
+  }
+
+  .rvi-signal + .rvi-signal {
+    border-top: 0;
+    border-left: 1px solid var(--ui-divider);
+  }
+
+  .rvi-reference {
+    grid-column: 1 / -1;
+  }
 }
 
 @container rvi-profile (max-width: 620px) {
-  .dimensions-head { flex-direction: column; }
-  .profile-meta { justify-items: start; }
-  .profile-meta small { text-align: left; }
-  .career-profile .profile-meta {
+  .career-profile {
+    gap: 14px;
+  }
+
+  .rvi-profile-header {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    padding-inline: 2px;
+  }
+
+  .rvi-overall {
+    grid-template-columns: auto auto minmax(0, 1fr);
+    align-items: baseline;
+    justify-items: start;
     width: 100%;
     min-width: 0;
-    padding: 12px 0 0;
-    border-top: 1px solid rgba(200, 170, 109, .14);
+    gap: 8px 12px;
+    padding: 11px 0 0;
+    border-top: 1px solid var(--ui-divider);
     border-left: 0;
   }
-  .career-profile .scope-rail-head { grid-template-columns: minmax(0, 1fr); gap: 2px; }
-  .scope-items { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
-  .career-dimension-grid { grid-template-columns: minmax(0, 1fr); }
-  .career-profile .career-dimension-grid .dimension-card { min-height: 126px; }
-  .inspector-head { align-items: center; }
-  .inspector-head p:last-child { font-size: var(--ui-text-support); }
-  .metric-group-picker { margin-top: var(--space-2); }
-  .inspector-action-long { display: none; }
-  .inspector-action-short { display: inline; }
+
+  .rvi-overall-score {
+    margin: 0;
+  }
+
+  .rvi-overall-score strong {
+    font-size: 34px;
+  }
+
+  .rvi-overall > small {
+    justify-self: end;
+    margin: 0;
+  }
+
+  .rvi-context-groups {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rvi-context-group + .rvi-context-group {
+    border-top: 1px solid var(--ui-divider);
+    border-left: 0;
+  }
+
+  .career-arm-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: auto;
+  }
+
+  .career-arm {
+    min-height: 82px;
+  }
 }
 
-@container rvi-profile (max-width: 480px) {
-  .profile-story { grid-template-columns: minmax(0, 1fr); }
-  .story-card.identity,
-  .profile-story > .comparison-note { grid-column: 1; }
-  .career-profile .story-card.strongest,
-  .career-profile .story-card.movement { min-height: 0; }
-  .scope-items { grid-template-columns: minmax(0, 1fr); }
-  .career-profile .career-inspector-toggle { gap: 9px; padding-inline: 12px; }
-  .career-profile .inspector-toggle-score strong { font-size: 18px; }
+@container rvi-profile (max-width: 520px) {
+  .rvi-highlights {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+  }
+
+  .rvi-signal + .rvi-signal {
+    border-top: 1px solid var(--ui-divider);
+    border-left: 0;
+  }
+
+  .rvi-reference {
+    grid-column: 1;
+  }
+
+  .rvi-section-heading {
+    display: grid;
+    justify-content: stretch;
+  }
+
+  .rvi-section-heading p {
+    text-align: left;
+  }
+}
+
+@container rvi-profile (max-width: 400px) {
+  .rvi-overall {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .rvi-overall-label {
+    grid-column: 1 / -1;
+  }
+
+  .rvi-radar-panel,
+  .rvi-signal,
+  .career-profile .career-inspector {
+    padding-inline: 12px;
+  }
+
+  .rvi-context-group {
+    padding-inline: 10px;
+  }
+
+  .career-profile .career-inspector-toggle {
+    padding-inline: 11px;
+  }
+
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .career-profile .career-dimension-grid .dimension-card,
-  .career-profile .career-dimension-grid .dimension-card::after,
-  .career-profile .career-dimension-grid .dimension-mark,
+  .career-arm,
   .career-profile .career-inspector-toggle,
   .career-profile .metric-group-picker button {
     transition: none;
-  }
-
-  .career-profile .career-dimension-grid .dimension-card:hover {
-    transform: none;
   }
 }
 

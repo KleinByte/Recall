@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest"
 import { applyMigrations } from "../electron/main/database/migrations.js"
 import { MatchesRepository } from "../electron/main/database/matches-repo.js"
 import { ParticipantsRepository } from "../electron/main/database/participants-repo.js"
-import type { ParticipantRow } from "../electron/main/matches/types.js"
+import type { ParticipantRow, TeamRow } from "../electron/main/matches/types.js"
 import { buildMatchRow } from "./fixtures/matches.js"
 
 const PUUID = "test-puuid"
@@ -72,6 +72,26 @@ const participant = (overrides: Partial<ParticipantRow> = {}): ParticipantRow =>
   firstTower: 0,
   lane: "MIDDLE",
   role: "SOLO",
+  ...overrides,
+})
+
+const team = (overrides: Partial<TeamRow> = {}): TeamRow => ({
+  gameId: 1,
+  puuid: PUUID,
+  teamId: 100,
+  win: 0,
+  bans: "[]",
+  baronKills: 0,
+  dragonKills: 0,
+  heraldKills: 0,
+  hordeKills: 0,
+  towerKills: 0,
+  inhibitorKills: 0,
+  firstBlood: 0,
+  firstTower: 0,
+  firstBaron: 0,
+  firstDragon: 0,
+  firstInhibitor: 0,
   ...overrides,
 })
 
@@ -276,6 +296,47 @@ describe("ParticipantsRepository", () => {
     expect(detail.participants).toHaveLength(10)
     expect(detail.teams).toHaveLength(1)
     expect(detail.teams[0].dragonKills).toBe(3)
+  })
+
+  it("repairs partial team rows without letting a later partial retry erase facts", () => {
+    repo.insertMany(lobby(1, 30000))
+    repo.insertTeams([team()])
+
+    repo.insertTeams([team({
+      win: 1,
+      bans: "[12,34,56]",
+      baronKills: 1,
+      dragonKills: 3,
+      heraldKills: 1,
+      hordeKills: 6,
+      towerKills: 8,
+      inhibitorKills: 2,
+      firstBlood: 1,
+      firstTower: 1,
+      firstBaron: 1,
+      firstDragon: 1,
+      firstInhibitor: 1,
+    })])
+
+    // A narrower reread can happen after the richer payload. Monotonic final
+    // scoreboard facts must survive it as well.
+    repo.insertTeams([team()])
+
+    expect(repo.getMatchDetail(1, PUUID).teams[0]).toMatchObject({
+      win: 1,
+      bans: "[12,34,56]",
+      baronKills: 1,
+      dragonKills: 3,
+      heraldKills: 1,
+      hordeKills: 6,
+      towerKills: 8,
+      inhibitorKills: 2,
+      firstBlood: 1,
+      firstTower: 1,
+      firstBaron: 1,
+      firstDragon: 1,
+      firstInhibitor: 1,
+    })
   })
 
   it("reads back a player's build and identity", () => {

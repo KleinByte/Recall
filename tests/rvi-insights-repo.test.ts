@@ -485,8 +485,13 @@ describe("InsightsRepository.getRviObservations", () => {
     const gradeHistory = insights.getGradeComponentHistory({ puuid: PUUID })
     expect(gradeHistory.map((row) => row.gameId)).toEqual([1, 2])
     expect(gradeHistory[1]).toMatchObject({
+      win: true,
+      championId: 222,
+      role: "BOTTOM",
       grade: "A",
       gradeScore: 0.5,
+      recallScore: 84.5,
+      sessionGame: 2,
       compositePercentile: 0.845,
     })
     expect(gradeHistory[1].components.map((component) => component.key)).toEqual([
@@ -505,6 +510,32 @@ describe("InsightsRepository.getRviObservations", () => {
       contribution: 0.83 / 6,
       scope: "role",
     })
+
+    // Analyses read the selected immutable results, not a possibly interrupted
+    // denormalized display cache.
+    db.prepare("UPDATE matches SET role_fit_score = 1, grade_score = -3 WHERE puuid = ?")
+      .run(PUUID)
+    const analyticHistory = insights.getObservations({ puuid: PUUID })
+    expect(analyticHistory.map((row) => row.recallScore)).toEqual([42, 84.5])
+    expect(analyticHistory.map((row) => row.sessionGame)).toEqual([1, 2])
+    expect(insights.getFinalItemObservations({ puuid: PUUID })
+      .map((row) => row.recallScore)).toEqual([42, 84.5])
+    expect(matches.getSummary({ puuid: PUUID })).toMatchObject({
+      gradedGames: 2,
+      avgGradeScore: 0.5,
+      averageRecallScore: 63.25,
+    })
+    expect(matches.getChampionStats({ puuid: PUUID }).map((row) => ({
+      championId: row.championId,
+      gradedGames: row.gradedGames,
+      averageRecallScore: row.averageRecallScore,
+    })).sort((left, right) => left.championId - right.championId)).toEqual([
+      { championId: 84, gradedGames: 1, averageRecallScore: 42 },
+      { championId: 222, gradedGames: 1, averageRecallScore: 84.5 },
+    ])
+    expect(matches.getGradeDistribution({ puuid: PUUID })).toEqual([
+      { grade: "A", count: 2 },
+    ])
   })
 
   it("keeps exact raw observations while Grade components authoritatively explain arm scores", () => {

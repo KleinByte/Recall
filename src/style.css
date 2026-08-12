@@ -42,6 +42,14 @@ body {
   background: var(--ui-canvas);
 }
 
+html.tempo-overlay-surface,
+html.tempo-overlay-surface body,
+html.tempo-overlay-surface #app {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
 button, select, input, textarea { font: inherit; accent-color: var(--ui-accent); }
 
 button:focus-visible,

@@ -18,8 +18,17 @@ import {
   formatDecimal,
   formatPercent,
 } from "../helpers/format"
+import {
+  PRIMARY_ARCHETYPES,
+  PRIMARY_ARCHETYPE_LABELS,
+  type PrimaryArchetype,
+} from "../shared/champion-archetypes"
 import { recallGradeFromRecallScore } from "../shared/recall-grade"
-import type { Champion } from "../types/lol"
+import {
+  ChampionRoles,
+  type Champion,
+  type ChampionRole,
+} from "../types/lol"
 import type {
   ChampionNeed,
   ChampionRanking,
@@ -47,6 +56,8 @@ type SortKey =
 type SortDirection = "asc" | "desc"
 
 type FilterKey = "all" | "played" | "untouched" | "needs"
+type ArchetypeFilter = "all" | PrimaryArchetype
+type ClassFilter = "all" | ChampionRole
 
 const RIOT_GRADE_ORDER = [
   "D-", "D", "D+",
@@ -77,6 +88,15 @@ const FILTERS: { value: FilterKey; label: string }[] = [
   { value: "needs", label: "Has challenges" },
 ]
 
+const CHAMPION_ROLE_LABELS: Readonly<Record<ChampionRole, string>> = Object.freeze({
+  assassin: "Assassin",
+  fighter: "Fighter",
+  mage: "Mage",
+  marksman: "Marksman",
+  support: "Support",
+  tank: "Tank",
+})
+
 const stats = ref<ChampionStatRow[]>([])
 const profile = ref<ProfileSummary | null>(null)
 const needs = ref<Record<number, ChampionNeed[]>>({})
@@ -85,6 +105,8 @@ const sortKey = ref<SortKey>("rank")
 const sortDirection = ref<SortDirection>("desc")
 const search = ref("")
 const filter = ref<FilterKey>("all")
+const archetype = ref<ArchetypeFilter>("all")
+const championClass = ref<ClassFilter>("all")
 
 function setSort(key: SortKey) {
   if (sortKey.value === key) {
@@ -202,12 +224,78 @@ const decorated = computed(() => {
   })
 })
 
-const filterCounts = computed(() => ({
-  all: decorated.value.length,
-  played: decorated.value.filter((row) => row.games > 0).length,
-  untouched: decorated.value.filter((row) => row.games === 0).length,
-  needs: decorated.value.filter((row) => row.needCount > 0).length,
-}))
+type DecoratedChampion = typeof decorated.value[number]
+
+const archetypeLabel = (value?: PrimaryArchetype) => value
+  ? PRIMARY_ARCHETYPE_LABELS[value]
+  : "Unclassified"
+
+const roleLabel = (value: ChampionRole) => CHAMPION_ROLE_LABELS[value]
+
+const championTaxonomyLabel = (champion: Champion) => [
+  archetypeLabel(champion.primaryArchetype),
+  champion.roles.map(roleLabel).join(" / "),
+].filter(Boolean).join(" · ")
+
+function matchesSearch(row: DecoratedChampion, needle: string) {
+  if (!needle) return true
+  const searchable = [
+    row.champion.name,
+    row.champion.alias,
+    archetypeLabel(row.champion.primaryArchetype),
+    ...row.champion.roles.map(roleLabel),
+  ].join(" ").toLowerCase()
+  return searchable.includes(needle)
+}
+
+function matchesStatus(row: DecoratedChampion, value: FilterKey) {
+  if (value === "played") return row.games > 0
+  if (value === "untouched") return row.games === 0
+  if (value === "needs") return row.needCount > 0
+  return true
+}
+
+function matchesArchetype(row: DecoratedChampion, value: ArchetypeFilter) {
+  return value === "all" || row.champion.primaryArchetype === value
+}
+
+function matchesClass(row: DecoratedChampion, value: ClassFilter) {
+  return value === "all" || row.champion.roles.includes(value)
+}
+
+const searchNeedle = computed(() => search.value.trim().toLowerCase())
+
+/** Each facet count respects every active control except its own dimension. */
+const filterCounts = computed(() => {
+  const candidates = decorated.value.filter((row) =>
+    matchesSearch(row, searchNeedle.value) &&
+    matchesArchetype(row, archetype.value) &&
+    matchesClass(row, championClass.value))
+  return {
+    all: candidates.length,
+    played: candidates.filter((row) => matchesStatus(row, "played")).length,
+    untouched: candidates.filter((row) => matchesStatus(row, "untouched")).length,
+    needs: candidates.filter((row) => matchesStatus(row, "needs")).length,
+  }
+})
+
+const archetypeCounts = computed(() => Object.fromEntries(PRIMARY_ARCHETYPES.map((value) => [
+  value,
+  decorated.value.filter((row) =>
+    matchesSearch(row, searchNeedle.value) &&
+    matchesStatus(row, filter.value) &&
+    matchesClass(row, championClass.value) &&
+    matchesArchetype(row, value)).length,
+])))
+
+const classCounts = computed(() => Object.fromEntries(ChampionRoles.map((value) => [
+  value,
+  decorated.value.filter((row) =>
+    matchesSearch(row, searchNeedle.value) &&
+    matchesStatus(row, filter.value) &&
+    matchesArchetype(row, archetype.value) &&
+    matchesClass(row, value)).length,
+])))
 
 /** The headline numbers describe the whole collection, never the filtered view. */
 const pool = computed(() => {
@@ -233,14 +321,11 @@ const pool = computed(() => {
 })
 
 const rows = computed(() => {
-  const needle = search.value.trim().toLowerCase()
-
   const combined = decorated.value.filter((row) => {
-    if (needle && !row.champion.name.toLowerCase().includes(needle)) return false
-    if (filter.value === "played") return row.games > 0
-    if (filter.value === "untouched") return row.games === 0
-    if (filter.value === "needs") return row.needCount > 0
-    return true
+    return matchesSearch(row, searchNeedle.value) &&
+      matchesStatus(row, filter.value) &&
+      matchesArchetype(row, archetype.value) &&
+      matchesClass(row, championClass.value)
   })
 
   const direction = sortDirection.value === "asc" ? 1 : -1
@@ -284,10 +369,14 @@ const rows = computed(() => {
   })
 })
 
-const isFiltered = computed(() => filter.value !== "all" || search.value !== "")
+const isFiltered = computed(() =>
+  filter.value !== "all" || archetype.value !== "all" ||
+  championClass.value !== "all" || search.value !== "")
 
 function clearFilters() {
   filter.value = "all"
+  archetype.value = "all"
+  championClass.value = "all"
   search.value = ""
 }
 </script>
@@ -361,7 +450,7 @@ function clearFilters() {
         class="toolbar"
         aria-label="Champion table controls"
       >
-        <div class="chip-row" role="group" aria-label="Filter champions">
+        <div class="chip-row" role="group" aria-label="Filter champions by collection status">
           <Button
             v-for="option in FILTERS"
             :key="option.value"
@@ -375,6 +464,25 @@ function clearFilters() {
             {{ option.label }}
             <span class="chip-count numeric">{{ filterCounts[option.value] }}</span>
           </Button>
+        </div>
+
+        <div class="taxonomy-filters">
+          <Field label="Archetype" compact>
+            <select v-model="archetype" class="league-select" aria-label="Filter by archetype">
+              <option value="all">Any archetype</option>
+              <option v-for="value in PRIMARY_ARCHETYPES" :key="value" :value="value">
+                {{ PRIMARY_ARCHETYPE_LABELS[value] }} · {{ archetypeCounts[value] }}
+              </option>
+            </select>
+          </Field>
+          <Field label="Riot class" compact>
+            <select v-model="championClass" class="league-select" aria-label="Filter by Riot class">
+              <option value="all">Any class</option>
+              <option v-for="value in ChampionRoles" :key="value" :value="value">
+                {{ CHAMPION_ROLE_LABELS[value] }} · {{ classCounts[value] }}
+              </option>
+            </select>
+          </Field>
         </div>
 
         <p class="muted result-count">
@@ -485,7 +593,10 @@ function clearFilters() {
                     :alt="row.champion.name"
                     loading="lazy"
                   />
-                  <span class="champ-name">{{ row.champion.name }}</span>
+                  <span class="champ-copy">
+                    <span class="champ-name">{{ row.champion.name }}</span>
+                    <small>{{ championTaxonomyLabel(row.champion) }}</small>
+                  </span>
                 </td>
                 <td>
                   <span v-if="row.recallScore !== undefined" class="own-grade">
@@ -630,6 +741,17 @@ function clearFilters() {
 
 .chip.active .chip-count {
   color: var(--gold);
+}
+
+.taxonomy-filters {
+  display: flex;
+  align-items: end;
+  gap: var(--ui-space-2);
+  flex-wrap: wrap;
+}
+
+.taxonomy-filters :deep(.league-select) {
+  min-width: 154px;
 }
 
 .result-count {
@@ -797,6 +919,20 @@ td.champ-col {
   transition: color 0.12s ease, opacity 0.12s ease;
 }
 
+.champ-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.champ-copy small {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .own-grade {
   display: inline-flex;
   align-items: center;
@@ -947,6 +1083,9 @@ td.champ-col {
   .search-field { width: 100%; }
   .toolbar { align-items: stretch; }
   .chip-row { flex: 1 1 100%; }
+  .taxonomy-filters { flex: 1 1 100%; }
+  .taxonomy-filters :deep(.ui-field) { flex: 1 1 180px; }
+  .taxonomy-filters :deep(.league-select) { width: 100%; }
   .result-count { display: flex; align-items: center; margin-left: 0; }
 }
 

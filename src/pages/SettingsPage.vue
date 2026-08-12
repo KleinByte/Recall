@@ -13,6 +13,7 @@ import { useApiEvents } from "../helpers/use-api-events"
 import { updatePresentation } from "../helpers/update"
 import { modeLabel } from "../helpers/format"
 import type { UpdateStatus } from "../types/update"
+import type { TempoOverlayStatus } from "../types/app"
 import type {
   PerformanceReferenceStatus,
   RiotHistoryBackfillState,
@@ -55,6 +56,11 @@ const timezoneMessage = ref("")
 const recall = ref<PerformanceReferenceStatus>()
 const rebuildingReference = ref(false)
 const referenceMessage = ref("")
+const tempoOverlay = ref<TempoOverlayStatus>({
+  visible: false,
+  locked: false,
+  shortcutRegistered: false,
+})
 
 const riotHistoryMessage = computed(() => {
   const history = riotHistory.value
@@ -106,6 +112,10 @@ onMounted(() => {
     displayTimezone.value = value.override ?? ""
     resolvedTimezone.value = value.timeZone
   })
+  void api.getTempoOverlayStatus().then((status) => { tempoOverlay.value = status })
+  events.on("tempo-overlay:status", (status: TempoOverlayStatus) => {
+    tempoOverlay.value = status
+  })
   void loadRecall()
   events.on("performance-reference:updated", (status: PerformanceReferenceStatus) => {
     recall.value = status
@@ -155,6 +165,14 @@ async function useSystemTimezone() {
   displayTimezone.value = ""
   resolvedTimezone.value = result.timeZone
   timezoneMessage.value = "Using the system timezone."
+}
+
+async function toggleTempoOverlay() {
+  tempoOverlay.value = await api.toggleTempoOverlay()
+}
+
+async function resetTempoOverlayPosition() {
+  tempoOverlay.value = await api.resetTempoOverlayPosition()
 }
 
 async function loadTrust(check = false) {
@@ -376,6 +394,30 @@ const formatDate = (value?: number) =>
         </div>
         <span class="muted hint">Current: {{ resolvedTimezone }}</span>
         <span v-if="timezoneMessage" class="muted hint">{{ timezoneMessage }}</span>
+      </div>
+
+      <div class="tempo-overlay-setting">
+        <div>
+          <strong>In-game Tempo overlay</strong>
+          <span class="muted hint">
+            {{ tempoOverlay.shortcutRegistered
+              ? "Press Alt+T from anywhere to show or hide the dial. Use Borderless mode in League."
+              : "Alt+T is unavailable because another app owns it. Use this button or the tray menu instead." }}
+          </span>
+          <span v-if="tempoOverlay.visible" class="muted hint">
+            {{ tempoOverlay.locked
+              ? "Visible and click-through. Press Alt+T twice to reopen it for placement."
+              : "Visible in placement mode. Drag its bezel, then choose Lock on the overlay." }}
+          </span>
+        </div>
+        <div class="actions">
+          <UiButton type="button" @click="toggleTempoOverlay">
+            {{ tempoOverlay.visible ? "Hide overlay" : "Show overlay" }}
+          </UiButton>
+          <UiButton type="button" variant="ghost" @click="resetTempoOverlayPosition">
+            Reset position
+          </UiButton>
+        </div>
       </div>
     </Panel>
 
@@ -745,6 +787,26 @@ const formatDate = (value?: number) =>
   font-size: 11px;
 }
 
+.tempo-overlay-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-4);
+  margin-top: var(--ui-space-3);
+  padding-top: var(--ui-space-3);
+  border-top: 1px solid var(--ui-divider);
+}
+
+.tempo-overlay-setting > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.tempo-overlay-setting strong {
+  color: var(--ui-text-heading);
+  font: 13px var(--ui-font-heading);
+}
+
 .meta {
   margin: 0 0 var(--space-3);
   display: grid;
@@ -868,6 +930,7 @@ const formatDate = (value?: number) =>
 
 @container recall-content (max-width: 620px) {
   .key-row { align-items: stretch; flex-direction: column; }
+  .tempo-overlay-setting { align-items: stretch; flex-direction: column; }
   .portal-callout { grid-template-columns: 1fr; }
   .portal-link { width: 100%; }
 }

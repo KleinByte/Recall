@@ -1,7 +1,7 @@
 import type { AramStats, Challenge, Champion, Summoner } from "../types/lol"
 import type { RawChallenge } from "../types/lcu"
 import type { UpdateStatus } from "../types/update"
-import type { StoredSettings } from "../types/app"
+import type { StoredSettings, TempoOverlayStatus } from "../types/app"
 import type { SkillViewPreferences } from "../shared/skill-preferences"
 import type {
   ChallengeFilter,
@@ -16,6 +16,7 @@ import type {
   GradeCount,
   InsightsReport,
   LobbyComparison,
+  LifetimeTotals,
   MatchDetail,
   MatchPage,
   MatchQuery,
@@ -158,6 +159,22 @@ export const api = {
     return invoke("window:is-maximized")
   },
 
+  getTempoOverlayStatus(): Promise<TempoOverlayStatus> {
+    return invoke("tempo-overlay:status")
+  },
+
+  toggleTempoOverlay(): Promise<TempoOverlayStatus> {
+    return invoke("tempo-overlay:toggle")
+  },
+
+  lockTempoOverlay(): Promise<TempoOverlayStatus> {
+    return invoke("tempo-overlay:lock")
+  },
+
+  resetTempoOverlayPosition(): Promise<TempoOverlayStatus> {
+    return invoke("tempo-overlay:reset-position")
+  },
+
   getStatus(): Promise<{ connected: boolean; summoner: Summoner | null }> {
     return invoke("lcu:status")
   },
@@ -273,6 +290,10 @@ export const api = {
 
   getSummary(filter: Partial<MatchQuery>): Promise<StatsSummary> {
     return invoke("stats:summary", filter)
+  },
+
+  getLifetimeTotals(): Promise<LifetimeTotals> {
+    return invoke("stats:lifetime-totals")
   },
 
   getChampionStats(filter: Partial<StatsFilter>): Promise<ChampionStatRow[]> {

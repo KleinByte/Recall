@@ -3,3 +3,9 @@ export interface StoredSettings {
   showChampionNames: boolean
   sidebarCollapsed: boolean
 }
+
+export interface TempoOverlayStatus {
+  visible: boolean
+  locked: boolean
+  shortcutRegistered: boolean
+}

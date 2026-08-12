@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
 import GradeBadge from "./GradeBadge.vue"
-import StyleRadar from "./StyleRadar.vue"
+import PerformanceRadar from "./skill/PerformanceRadar.vue"
 import {
   Button as UiButton,
   Dialog as UiDialog,
@@ -28,87 +28,159 @@ import type {
   ChampionNeed,
   GradeCount,
   MatchRow,
-  ModeFamily,
+  PerformanceProfile,
   StatsSummary,
-  StyleAxis,
-  StyleProfile,
 } from "../types/stats"
+
+type PerformanceFamily = "sr" | "aram" | "classic"
+
+interface FamilyOption {
+  family: PerformanceFamily
+  label: string
+  games: number
+}
+
+const FAMILY_OPTIONS: ReadonlyArray<Omit<FamilyOption, "games">> = [
+  { family: "sr", label: "Summoner's Rift" },
+  { family: "aram", label: "ARAM" },
+  { family: "classic", label: "League Classic" },
+]
 
 const props = defineProps<{
   championId: number
   champions: Champion[] | null
 }>()
 
-/** A gap this size against your own average is worth pointing out. */
-const NOTABLE_GAP = 0.04
-
 const summary = ref<StatsSummary | null>(null)
 const grades = ref<GradeCount[]>([])
-const championStyle = ref<StyleProfile | undefined>(undefined)
-const overallStyle = ref<StyleProfile | undefined>(undefined)
+const performance = ref<PerformanceProfile | undefined>(undefined)
 const best = ref<MatchRow[]>([])
 const worst = ref<MatchRow[]>([])
 const needs = ref<ChampionNeed[]>([])
-const family = ref<ModeFamily>("aram")
+const family = ref<PerformanceFamily>("aram")
+const availableFamilies = ref<FamilyOption[]>([])
 const loading = ref(true)
+const loadFailed = ref(false)
+let requestGeneration = 0
 
-async function load(championId: number) {
-  loading.value = true
-  try {
-    const filter = { championIds: [championId] }
+function clearPerformance() {
+  summary.value = null
+  grades.value = []
+  performance.value = undefined
+  best.value = []
+  worst.value = []
+}
 
-    // A champion may be played in any supported family, so the breakdown follows
-    // wherever it has actually been played most.
-    const [aram, rift, classic] = await Promise.all([
-      api.getStyleReport({ ...filter, modeFamily: "aram" }, "aram"),
-      api.getStyleReport({ ...filter, modeFamily: "sr" }, "sr"),
-      api.getStyleReport({ ...filter, modeFamily: "classic" }, "classic"),
+async function loadPerformanceScope(
+  championId: number,
+  selectedFamily: PerformanceFamily,
+  request: number,
+) {
+  const filter = { championIds: [championId], modeFamily: selectedFamily }
+  const [nextSummary, nextGrades, nextPerformance, bestGames, worstGames] =
+    await Promise.all([
+      api.getSummary(filter),
+      api.getGradeDistribution(filter),
+      api.getRviProfile(filter, selectedFamily),
+      api.listMatches({ ...filter, sortBy: "grade", sortDir: "desc" }, 1, 3),
+      api.listMatches({ ...filter, sortBy: "grade", sortDir: "asc" }, 1, 3),
     ])
 
-    const styles = [
-      { family: "aram" as const, report: aram },
-      { family: "sr" as const, report: rift },
-      { family: "classic" as const, report: classic },
-    ]
-    const selected = styles.reduce((best, entry) =>
-      (entry.report.career?.games ?? 0) > (best.report.career?.games ?? 0) ? entry : best,
-    )
-    family.value = selected.family
-    championStyle.value = selected.report.career
+  if (request !== requestGeneration) return
+  summary.value = nextSummary
+  grades.value = nextGrades
+  performance.value = nextPerformance
+  best.value = bestGames.rows.filter((row) => row.grade)
+  worst.value = worstGames.rows.filter((row) => row.grade)
+}
 
-    const [nextSummary, nextGrades, overall, bestGames, worstGames, championNeeds] =
-      await Promise.all([
-        api.getSummary(filter),
-        api.getGradeDistribution(filter),
-        api.getStyleReport({ modeFamily: family.value }, family.value),
-        api.listMatches(
-          { ...filter, sortBy: "grade", sortDir: "desc" },
-          1,
-          3,
-        ),
-        api.listMatches({ ...filter, sortBy: "grade", sortDir: "asc" }, 1, 3),
-        api.getChampionNeeds([championId]),
-      ])
+async function loadChampion(championId: number) {
+  const request = ++requestGeneration
+  loading.value = true
+  loadFailed.value = false
+  clearPerformance()
+  needs.value = []
+  availableFamilies.value = []
 
-    summary.value = nextSummary
-    grades.value = nextGrades
-    overallStyle.value = overall.career
-    best.value = bestGames.rows.filter((row) => row.grade)
-    worst.value = worstGames.rows.filter((row) => row.grade)
+  try {
+    const baseFilter = { championIds: [championId] }
+    const [summaries, championNeeds] = await Promise.all([
+      Promise.all(FAMILY_OPTIONS.map(async (option) => ({
+        ...option,
+        games: (await api.getSummary({
+          ...baseFilter,
+          modeFamily: option.family,
+        })).games,
+      }))),
+      api.getChampionNeeds([championId]),
+    ])
+
+    if (request !== requestGeneration) return
     needs.value = championNeeds[championId] ?? []
-  } catch {
-    summary.value = null
+    availableFamilies.value = summaries.filter((option) => option.games > 0)
+    const selected = summaries.reduce((leader, option) =>
+      option.games > leader.games ? option : leader)
+    family.value = selected.family
+
+    await loadPerformanceScope(championId, selected.family, request)
+  } catch (error) {
+    if (request !== requestGeneration) return
+    console.warn("Could not load champion performance", error)
+    clearPerformance()
+    loadFailed.value = true
   } finally {
-    loading.value = false
+    if (request === requestGeneration) loading.value = false
   }
 }
 
-watch(() => props.championId, load, { immediate: true })
+async function changeFamily() {
+  const request = ++requestGeneration
+  loading.value = true
+  loadFailed.value = false
+  clearPerformance()
+  try {
+    await loadPerformanceScope(props.championId, family.value, request)
+  } catch (error) {
+    if (request !== requestGeneration) return
+    console.warn("Could not load champion mode", error)
+    clearPerformance()
+    loadFailed.value = true
+  } finally {
+    if (request === requestGeneration) loading.value = false
+  }
+}
+
+watch(() => props.championId, loadChampion, { immediate: true })
 
 const name = computed(() => championNameById(props.champions, props.championId))
-const detail = computed(() => championStyle.value?.detail)
+const familyLabel = computed(() =>
+  FAMILY_OPTIONS.find((option) => option.family === family.value)?.label ?? "League")
 const averageGrade = computed(() => recallGradeFromRecallScore(summary.value?.averageRecallScore))
 const hasGames = computed(() => (summary.value?.games ?? 0) > 0)
+const championDimensions = computed(() =>
+  (performance.value?.dimensions ?? []).filter((dimension) => !dimension.careerOnly))
+const measuredDimensions = computed(() =>
+  championDimensions.value.filter((dimension) => dimension.score !== null))
+const canRenderRadar = computed(() => measuredDimensions.value.length >= 3)
+const championRadarDimensions = computed(() => {
+  const profile = performance.value
+  if (!profile || profile.games > profile.recentGames) return championDimensions.value
+  return championDimensions.value.map((dimension) => ({
+    ...dimension,
+    recentScore: undefined,
+  }))
+})
+
+const confidenceLabel = computed(() => ({
+  learning: "Learning confidence",
+  provisional: "Provisional confidence",
+  established: "Established confidence",
+})[performance.value?.confidence ?? "learning"])
+
+const measuredGameLabel = computed(() => {
+  const games = performance.value?.measuredGames ?? 0
+  return `${games} measured ${games === 1 ? "game" : "games"}`
+})
 
 type TelemetryReading = {
   label: string
@@ -136,39 +208,11 @@ const telemetryReadings = computed<TelemetryReading[]>(() => {
       hint: `${averageGrade.value ?? "No grade"} · ${summary.value.gradedGames} graded`,
     },
     { label: "KDA", value: formatDecimal(summary.value.kda, 2) },
-    ...(detail.value ? [
-      { label: "Damage / min", value: formatCompact(detail.value.damagePerMin) },
-      { label: "Gold / min", value: formatCompact(detail.value.goldPerMin) },
-      { label: "Deaths / game", value: formatDecimal(detail.value.avgDeaths, 1) },
-    ] : []),
+    { label: "Damage / game", value: formatCompact(summary.value.avgDamageToChampions) },
+    { label: "Gold / game", value: formatCompact(summary.value.avgGold) },
+    { label: "Deaths / game", value: formatDecimal(summary.value.avgDeaths, 1) },
   ]
 })
-
-/**
- * How this champion differs from the way you play everything else.
- *
- * Comparing against your own average is the only honest yardstick available,
- * and it answers the useful question: is this champion pulling your game in a
- * direction, and is that on purpose?
- */
-const differences = computed(() => {
-  const mine = championStyle.value?.axes
-  const baseline = overallStyle.value?.axes
-  if (!mine || !baseline) return []
-
-  return mine
-    .map((axis: StyleAxis) => {
-      const other = baseline.find((entry) => entry.key === axis.key)
-      return { ...axis, delta: axis.value - (other?.value ?? axis.value) }
-    })
-    .filter((axis) => Math.abs(axis.delta) >= NOTABLE_GAP)
-    .sort((a, b) => b.delta - a.delta)
-})
-
-const strengths = computed(() => differences.value.filter((a) => a.delta > 0))
-const weaknesses = computed(() =>
-  differences.value.filter((a) => a.delta < 0).reverse(),
-)
 
 const gradeBars = computed(() => {
   const byGrade = new Map(grades.value.map((entry) => [entry.grade, entry.count]))
@@ -195,7 +239,8 @@ const gradeBars = computed(() => {
         <img :src="championIconUrl(championId)" :alt="name" class="portrait" />
         <div>
           <h2 id="champion-detail-title" class="name">{{ name }}</h2>
-          <p v-if="summary && hasGames" class="muted line">
+          <p v-if="loading" class="muted line">Reading recorded games…</p>
+          <p v-else-if="summary && hasGames" class="muted line">
             {{ summary.games }} games · {{ summary.wins }}W {{ summary.losses }}L
             · {{ formatPercent(summary.winRate) }} win rate
           </p>
@@ -220,67 +265,97 @@ const gradeBars = computed(() => {
         :description="`Recall is assembling your ${name} profile.`"
       />
 
+      <EmptyState
+        v-else-if="loadFailed"
+        compact
+        tone="warning"
+        title="Champion profile unavailable"
+        description="The recorded games are still intact. Close this view and try opening the champion again."
+      />
+
       <template v-else-if="hasGames">
+        <Surface
+          v-if="availableFamilies.length"
+          as="section"
+          variant="toolbar"
+          padding="compact"
+          class="scope-toolbar"
+          aria-label="Champion performance scope"
+        >
+          <label>
+            <span>Game mode</span>
+            <select v-model="family" class="league-select" @change="changeFamily">
+              <option
+                v-for="option in availableFamilies"
+                :key="option.family"
+                :value="option.family"
+              >
+                {{ option.label }} · {{ option.games }}
+              </option>
+            </select>
+          </label>
+          <p class="muted">
+            Every performance value below uses {{ familyLabel }} games only.
+          </p>
+        </Surface>
+
         <TelemetryGrid label="Champion telemetry" :readings="telemetryReadings" />
 
-        <div class="body">
-          <Surface as="section" variant="inset" padding="compact" class="chart-side">
-            <StyleRadar
-              v-if="championStyle && overallStyle"
-              :axes="championStyle.axes"
-              :recent="overallStyle.axes"
-              :primary-label="name"
-              secondary-label="You, overall"
+        <Surface v-if="performance" as="section" variant="inset" padding="compact" class="rvi-shell">
+          <header class="rvi-head">
+            <div>
+              <p class="rvi-eyebrow">RVI profile</p>
+              <h3>{{ name }} performance shape</h3>
+              <p>
+                {{ familyLabel }} · {{ measuredGameLabel }} · {{ confidenceLabel }}
+              </p>
+            </div>
+          </header>
+
+          <div class="rvi-compact">
+            <PerformanceRadar
+              v-if="canRenderRadar"
+              :dimensions="championRadarDimensions"
+              :primary-label="`${name} profile`"
+              :secondary-label="`Recent ${name} form`"
+              height="280px"
             />
-            <p class="muted footnote">
-              Gold is {{ name }}. Blue is how you play
-              {{ family === "sr" ? "Summoner's Rift" : family === "classic" ? "League Classic" : "ARAM" }} overall.
-            </p>
-          </Surface>
-
-          <Surface as="section" variant="quiet" padding="compact" class="reading-side">
-            <div v-if="strengths.length" class="block">
-              <h3 class="block-title">Better than your usual</h3>
-              <ul class="delta-list">
-                <li v-for="axis in strengths" :key="axis.key">
-                  <span class="axis-label">{{ axis.label }}</span>
-                  <span class="numeric delta up">
-                    +{{ Math.round(axis.delta * 100) }}
-                  </span>
-                </li>
-              </ul>
+            <div v-else class="partial-radar-note">
+              <strong>Radar is still building</strong>
+              <p>At least three measured RVI areas are needed to draw the profile.</p>
             </div>
 
-            <div v-if="weaknesses.length" class="block">
-              <h3 class="block-title">Where you slip</h3>
-              <ul class="delta-list">
-                <li v-for="axis in weaknesses" :key="axis.key">
-                  <span class="axis-label">{{ axis.label }}</span>
-                  <span class="numeric delta down">
-                    {{ Math.round(axis.delta * 100) }}
-                  </span>
-                </li>
-              </ul>
-            </div>
+            <ul class="rvi-arm-list" aria-label="Champion RVI area scores">
+              <li v-for="dimension in championDimensions" :key="dimension.key">
+                <strong>{{ dimension.label }}</strong>
+                <strong class="numeric">{{ dimension.score ?? '—' }}</strong>
+              </li>
+            </ul>
+          </div>
 
-            <p v-if="!differences.length" class="muted note">
-              You play this champion much as you play everything else.
-            </p>
+          <p class="rvi-reference muted">
+            {{ performance.comparison }}. Missing evidence is unavailable, never zero.
+          </p>
+        </Surface>
+        <EmptyState
+          v-else
+          compact
+          title="RVI is still building"
+          :description="`Recall has ${name} games in ${familyLabel}, but this selection does not yet have enough measured Grade and RVI evidence for a profile.`"
+        />
 
-            <div v-if="gradeBars.length" class="block">
-              <h3 class="block-title">Grades</h3>
-              <div class="grades">
-                <div v-for="bar in gradeBars" :key="bar.grade" class="grade-row">
-                  <GradeBadge :grade="bar.grade" />
-                  <span class="track">
-                    <span class="fill" :style="{ width: `${bar.share}%` }" />
-                  </span>
-                  <span class="muted numeric count">{{ bar.count }}</span>
-                </div>
-              </div>
+        <Surface v-if="gradeBars.length" as="section" variant="quiet" padding="compact" class="block grades-block">
+          <h3 class="block-title">Grade distribution</h3>
+          <div class="grades">
+            <div v-for="bar in gradeBars" :key="bar.grade" class="grade-row">
+              <GradeBadge :grade="bar.grade" />
+              <span class="track">
+                <span class="fill" :style="{ width: `${bar.share}%` }" />
+              </span>
+              <span class="muted numeric count">{{ bar.count }}</span>
             </div>
-          </Surface>
-        </div>
+          </div>
+        </Surface>
 
         <div class="split">
           <Surface v-if="best.length" as="section" variant="inset" padding="compact" class="block game-block">
@@ -393,28 +468,109 @@ const gradeBars = computed(() => {
   line-height: 1;
 }
 
-.note {
-  font-size: 12px;
+.scope-toolbar {
+  display: flex;
+  align-items: end;
+  gap: var(--ui-space-4);
+}
+
+.scope-toolbar label {
+  display: grid;
+  min-width: 210px;
+  gap: 5px;
+}
+
+.scope-toolbar label > span {
+  color: var(--ui-text-muted);
+  font: var(--ui-label-size) var(--ui-font-heading);
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+
+.scope-toolbar p {
+  margin: 0 0 7px;
+  font-size: 11px;
+}
+
+.rvi-shell {
+  overflow: hidden;
+}
+
+.rvi-head {
+  margin-bottom: var(--ui-space-2);
+  padding-bottom: var(--ui-space-2);
+  border-bottom: 1px solid var(--ui-divider);
+}
+
+.rvi-head h3,
+.rvi-head p {
   margin: 0;
 }
 
-.body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.9fr);
-  gap: var(--ui-space-4);
-  align-items: start;
+.rvi-head h3 {
+  color: var(--ui-text-heading);
+  font: 16px var(--ui-font-heading);
 }
 
-.footnote {
+.rvi-head p:last-child {
+  margin-top: 3px;
+  color: var(--ui-text-muted);
   font-size: 11px;
-  margin: var(--ui-space-2) 0 0;
+}
+
+.rvi-eyebrow {
+  color: var(--ui-accent);
+  font: 11px var(--ui-font-heading);
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+
+.rvi-compact {
+  display: grid;
+  grid-template-columns: minmax(340px, 1.25fr) minmax(240px, .75fr);
+  align-items: center;
+  gap: var(--ui-space-4);
+}
+
+.rvi-arm-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rvi-arm-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-3);
+  min-height: 34px;
+  border-bottom: 1px solid var(--ui-divider);
+  color: var(--ui-text-subtle);
+  font-size: 12px;
+}
+
+.rvi-arm-list li:last-child {
+  border-bottom: 0;
+}
+
+.rvi-arm-list .numeric {
+  color: var(--ui-text-heading);
+  font-size: 16px;
+}
+
+.partial-radar-note {
+  padding: var(--ui-space-5);
   text-align: center;
 }
 
-.reading-side {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ui-space-4);
+.partial-radar-note p,
+.rvi-reference {
+  margin: var(--ui-space-2) 0 0;
+  font-size: 11px;
+}
+
+.grades-block {
   box-shadow: none;
 }
 
@@ -428,7 +584,6 @@ const gradeBars = computed(() => {
   margin: 0 0 var(--ui-space-2);
 }
 
-.delta-list,
 .game-list,
 .need-list {
   list-style: none;
@@ -440,24 +595,14 @@ const gradeBars = computed(() => {
   font-size: 12px;
 }
 
-.delta-list li,
 .need-list li {
   display: flex;
   justify-content: space-between;
   gap: var(--ui-space-3);
 }
 
-.axis-label,
 .need-name {
   color: var(--ui-text-subtle);
-}
-
-.delta.up {
-  color: var(--ui-positive);
-}
-
-.delta.down {
-  color: var(--ui-negative);
 }
 
 .grades {
@@ -496,12 +641,12 @@ const gradeBars = computed(() => {
 }
 
 @container champion-detail (max-width: 720px) {
-  .body {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .sheet-head { align-items: flex-start; flex-wrap: wrap; }
   .sheet-head .close { margin-left: auto; }
+  .scope-toolbar { align-items: stretch; flex-direction: column; gap: var(--ui-space-2); }
+  .scope-toolbar label { min-width: 0; }
+  .scope-toolbar p { margin: 0; }
+  .rvi-compact { grid-template-columns: minmax(0, 1fr); }
 }
 
 @container champion-detail (max-width: 480px) {

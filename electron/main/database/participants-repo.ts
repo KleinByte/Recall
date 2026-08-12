@@ -278,9 +278,31 @@ function participantInsertSql(columns: readonly ParticipantColumn[]): string {
   `
 }
 
+/**
+ * Objective totals and first-event flags are monotonic within a completed
+ * game. Keep the richest fact seen for each field so a full Match-V5/LCU
+ * reread repairs an early partial row without a later partial retry erasing it.
+ */
 const INSERT_TEAM_SQL = `
-  INSERT OR IGNORE INTO match_teams (${TEAM_COLUMNS.join(", ")})
+  INSERT INTO match_teams (${TEAM_COLUMNS.join(", ")})
   VALUES (${TEAM_COLUMNS.map(() => "?").join(", ")})
+  ON CONFLICT(game_id, puuid, team_id) DO UPDATE SET
+    win = MAX(match_teams.win, excluded.win),
+    bans = CASE
+      WHEN excluded.bans <> '[]' THEN excluded.bans
+      ELSE match_teams.bans
+    END,
+    baron_kills = MAX(match_teams.baron_kills, excluded.baron_kills),
+    dragon_kills = MAX(match_teams.dragon_kills, excluded.dragon_kills),
+    herald_kills = MAX(match_teams.herald_kills, excluded.herald_kills),
+    horde_kills = MAX(match_teams.horde_kills, excluded.horde_kills),
+    tower_kills = MAX(match_teams.tower_kills, excluded.tower_kills),
+    inhibitor_kills = MAX(match_teams.inhibitor_kills, excluded.inhibitor_kills),
+    first_blood = MAX(match_teams.first_blood, excluded.first_blood),
+    first_tower = MAX(match_teams.first_tower, excluded.first_tower),
+    first_baron = MAX(match_teams.first_baron, excluded.first_baron),
+    first_dragon = MAX(match_teams.first_dragon, excluded.first_dragon),
+    first_inhibitor = MAX(match_teams.first_inhibitor, excluded.first_inhibitor)
 `
 
 /**

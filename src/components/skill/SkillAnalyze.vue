@@ -7,59 +7,66 @@ import DeathHeatmap from "./DeathHeatmap.vue"
 import MatchSignaturesChart from "./MatchSignaturesChart.vue"
 import PerformanceFormChart from "./PerformanceFormChart.vue"
 import SessionEnduranceChart from "./SessionEnduranceChart.vue"
-import { classifyRviIdentity } from "../../helpers/rvi-identity"
+import {
+  armFormComparisons,
+  championAnalysisPoints,
+  gradeSessionPositionAnalysis,
+} from "../../helpers/analyze-adapters"
 import type { Champion } from "../../types/lol"
 import type { SkillReport } from "../../types/stats"
-import { groupTimedGames } from "../../helpers/time-contract-core"
 
 const props = defineProps<{ report: SkillReport; champions: Champion[] | null }>()
 
-const profile = computed(() => props.report.overview.performance)
-const identity = computed(() => profile.value ? classifyRviIdentity(profile.value) : undefined)
-const measuredMovement = computed(() => profile.value?.dimensions
-  .flatMap((dimension) => dimension.delta === undefined ? [] : [dimension.delta]) ?? [])
+const armForm = computed(() => armFormComparisons(props.report.visuals.gradeComponents))
+const measuredMovement = computed(() => armForm.value.map((dimension) => dimension.delta))
 const averageMovement = computed(() => measuredMovement.value.length
   ? measuredMovement.value.reduce((sum, value) => sum + value, 0) / measuredMovement.value.length
   : undefined)
 const form = computed(() => {
   const movement = averageMovement.value
   if (movement === undefined) return { label: "Learning", detail: "More measured games are needed", tone: "neutral" }
-  if (movement >= 3) return { label: "Rising", detail: `+${movement.toFixed(1)} average arm movement`, tone: "positive" }
-  if (movement <= -3) return { label: "Cooling", detail: `${movement.toFixed(1)} average arm movement`, tone: "negative" }
-  return { label: "Holding", detail: `${movement > 0 ? "+" : ""}${movement.toFixed(1)} average arm movement`, tone: "neutral" }
+  const sample = armForm.value[0]
+  const window = sample ? `${sample.recentGames} latest vs ${sample.priorGames} prior` : "Separate windows"
+  if (movement >= 3) return { label: "Higher", detail: `+${movement.toFixed(1)} arm points · ${window}`, tone: "positive" }
+  if (movement <= -3) return { label: "Lower", detail: `${movement.toFixed(1)} arm points · ${window}`, tone: "negative" }
+  return { label: "Similar", detail: `${movement > 0 ? "+" : ""}${movement.toFixed(1)} arm points · ${window}`, tone: "neutral" }
 })
-const sessionCount = computed(() => {
-  return groupTimedGames(props.report.visuals.history)
-    .filter((session) => session.kind === "analytical").length
-})
+const sessionAnalysis = computed(() => gradeSessionPositionAnalysis(
+  props.report.visuals.gradeComponents,
+  props.report.visuals.history,
+))
+const sessionCount = computed(() => sessionAnalysis.value.sessions)
+const championPoints = computed(() => championAnalysisPoints(props.report.visuals.champions))
+const formMeta = computed(() => armForm.value[0]
+  ? `${armForm.value[0].recentGames} latest vs ${armForm.value[0].priorGames} prior measured games`
+  : "Two separate measured windows")
+const componentWindow = computed(() => props.report.visuals.windows.gradeComponents)
+const historyWindow = computed(() => props.report.visuals.windows.history)
 </script>
 
 <template>
   <div class="analyze-page">
-    <section class="analysis-hero card">
-      <div>
-        <p class="eyebrow">Recall analysis lab</p>
-        <h2>Patterns you can act on.</h2>
-        <p>
-          These views use only the games selected above. They show how your score, RVI arms,
-          champions, and match patterns change across that selection.
-        </p>
-      </div>
-      <dl class="hero-stats">
+    <section class="analysis-header card">
+      <header>
+        <p class="eyebrow">Analysis</p>
+        <h2>Explore the games behind your profile</h2>
+        <p>Use these charts to compare recent arms, champions, match Grades, and play sessions inside the filters above.</p>
+      </header>
+      <dl class="analysis-facts">
         <div>
-          <dt>Performance style</dt>
-          <dd>{{ identity?.label ?? "Learning" }}</dd>
-          <small>{{ profile?.measuredGames ?? 0 }} measured games</small>
+          <dt>Selection</dt>
+          <dd>{{ report.visuals.gradeComponents.length }} recent Grades</dd>
+          <small>{{ componentWindow.label }} · {{ historyWindow.shownGames }} of {{ historyWindow.totalGames }} selected matches shown</small>
         </div>
         <div>
-          <dt>Current form</dt>
+          <dt>Arm comparison</dt>
           <dd :class="form.tone">{{ form.label }}</dd>
           <small>{{ form.detail }}</small>
         </div>
         <div>
-          <dt>Recorded rhythm</dt>
-          <dd>{{ sessionCount }} sessions</dd>
-          <small>{{ report.visuals.history.length }} recent games analyzed</small>
+          <dt>Session context</dt>
+          <dd>{{ sessionCount }} play sessions</dd>
+          <small>{{ sessionAnalysis.usesStableOrdinal ? "Uses each game's original session order" : "Uses order within this selection" }}</small>
         </div>
       </dl>
     </section>
@@ -71,64 +78,81 @@ const sessionCount = computed(() => {
 
     <section class="analysis-grid">
       <Panel
-        v-if="profile"
-        title="Performance form"
-        :meta="`Recent ${profile.recentGames} vs recorded profile`"
+        v-if="report.visuals.gradeComponents.length"
+        title="Grade arm form"
+        :meta="`${formMeta} · ${componentWindow.label}`"
         class="analysis-panel"
       >
         <p class="chart-copy">
-          See which RVI arms are moving. Missing games stay missing instead of counting as zero.
+          Each bar compares an arm in your latest measured games with the group immediately before
+          them. Right means the recent score was higher; left means it was lower. Career-only Range is not included.
         </p>
-        <PerformanceFormChart :profile="profile" />
-      </Panel>
-
-      <Panel
-        v-if="report.visuals.history.length"
-        title="Session endurance"
-        :meta="`${sessionCount} recorded sessions`"
-        class="analysis-panel"
-      >
-        <p class="chart-copy">See whether results or Recall form change as a session gets longer.</p>
-        <SessionEnduranceChart :history="report.visuals.history" />
+        <PerformanceFormChart :rows="report.visuals.gradeComponents" />
       </Panel>
 
       <Panel
         v-if="report.visuals.gradeComponents.length"
-        title="Match signatures"
-        meta="Last 24 measured games"
-        class="analysis-panel wide"
+        title="Score by session position"
+        :meta="`${sessionCount} play sessions · ${componentWindow.label}`"
+        class="analysis-panel"
       >
         <p class="chart-copy">
-          Every line shows the Grade arms recorded for one game. Green is a win and red is a loss;
-          hover a line to inspect it.
+          Groups games by whether they were your first, second, or later game in a play session.
+          The gold marker is the typical score, the shaded bar is where the middle half landed,
+          and the dashed line is the recorded win rate.
         </p>
-        <MatchSignaturesChart
+        <SessionEnduranceChart
           :rows="report.visuals.gradeComponents"
           :history="report.visuals.history"
         />
       </Panel>
 
       <Panel
+        v-if="report.visuals.gradeComponents.length"
+        title="Match Grade inspector"
+        :meta="`${Math.min(24, report.visuals.gradeComponents.length)} most recent from ${componentWindow.label.toLowerCase()}`"
+        class="analysis-panel wide"
+      >
+        <p class="chart-copy">
+          Pick a game to see which arms made up its Grade. A larger share means that arm had more
+          influence on the mix Recall later compared with your saved reference.
+        </p>
+        <MatchSignaturesChart
+          :rows="report.visuals.gradeComponents"
+          :history="report.visuals.history"
+          :catalog="champions"
+        />
+      </Panel>
+
+      <Panel
         v-if="report.visuals.champions.length"
-        title="Champion efficiency"
-        meta="Experience × Recall performance"
+        title="Champion results"
+        :meta="`${championPoints.length} champions with 3+ graded games`"
         class="analysis-panel"
       >
-        <p class="chart-copy">Find established mains, promising hidden gems, and comfort picks that may not be paying off.</p>
+        <p class="chart-copy">
+          Move right for more graded games and up for a higher average Recall Score. Each champion
+          portrait marks that champion's result; champions with fewer than three graded games stay hidden.
+          <template v-if="report.scope.family === 'aram'"> Random-pick modes are descriptive, not recommendations.</template>
+        </p>
         <ChampionQuadrantChart
           :champions="report.visuals.champions"
           :catalog="champions"
           :baseline="report.overview.summary.averageRecallScore"
+          :randomized="report.scope.family === 'aram'"
         />
       </Panel>
 
       <Panel
         v-if="report.visuals.history.length"
-        title="Champion learning curve"
-        meta="Five-game moving form"
+        title="Champion score history"
+        :meta="`${historyWindow.label} · recent average starts after 5 games`"
         class="analysis-panel"
       >
-        <p class="chart-copy">Separate early volatility from the point where your performance begins to settle.</p>
+        <p class="chart-copy">
+          Each dot is one recorded game on a champion. After five games, the line shows that
+          champion's recent five-game average. It describes the selected history; it does not prove improvement.
+        </p>
         <ChampionLearningCurve :history="report.visuals.history" :catalog="champions" />
       </Panel>
     </section>
@@ -136,22 +160,22 @@ const sessionCount = computed(() => {
 </template>
 
 <style scoped>
-.analyze-page { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
-.analysis-hero { display: grid; grid-template-columns: minmax(280px, 1.2fr) minmax(380px, 1fr); align-items: center; gap: clamp(24px, 4vw, 52px); padding: clamp(22px, 3.5vw, 38px); overflow: hidden; background: radial-gradient(circle at 0 50%, rgba(10, 203, 230, .1), transparent 38%), linear-gradient(120deg, rgba(15, 28, 51, .98), rgba(8, 18, 34, .98)); }
+.analyze-page { container: analyze-page / inline-size; display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
+.analysis-header { display: grid; grid-template-columns: minmax(220px, .72fr) minmax(440px, 1.28fr); align-items: center; gap: var(--space-4); padding: var(--space-4); overflow: hidden; background: linear-gradient(120deg, rgba(15, 28, 51, .98), rgba(8, 18, 34, .98)); }
 .eyebrow { margin: 0 0 var(--space-2); color: var(--cyan); font-size: 11px; font-weight: 700; letter-spacing: .15em; text-transform: uppercase; }
-.analysis-hero h2 { margin: 0; color: var(--gold-bright); font-family: var(--font-display); font-size: clamp(22px, 3vw, 34px); font-weight: 500; }
-.analysis-hero > div > p:last-child { max-width: 680px; margin: var(--space-3) 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.65; }
-.hero-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); margin: 0; }
-.hero-stats div { min-width: 0; padding-left: var(--space-3); border-left: 1px solid rgba(200, 170, 109, .25); }
-.hero-stats dt { color: var(--text-muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
-.hero-stats dd { overflow: hidden; margin: 6px 0 3px; color: var(--text-primary); font-family: var(--font-heading); font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }
-.hero-stats small { display: block; color: var(--text-muted); font-size: 11px; line-height: 1.4; }
+.analysis-header h2 { margin: 0; color: var(--gold-bright); font-family: var(--font-heading); font-size: 20px; font-weight: 600; }
+.analysis-header header > p:last-child { max-width: 540px; margin: 5px 0 0; color: var(--text-secondary); font-size: var(--ui-text-support); line-height: 1.5; }
+.analysis-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin: 0; }
+.analysis-facts div { min-width: 0; padding: 2px var(--space-3); border-left: 1px solid rgba(200, 170, 109, .2); }
+.analysis-facts dt { color: var(--text-muted); font-size: var(--ui-text-micro); letter-spacing: .08em; text-transform: uppercase; }
+.analysis-facts dd { overflow: hidden; margin: 4px 0 2px; color: var(--text-primary); font-family: var(--font-heading); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.analysis-facts small { display: block; color: var(--text-muted); font-size: var(--ui-text-micro); line-height: 1.4; }
 .positive { color: var(--win) !important; }
 .negative { color: var(--loss) !important; }
 .analysis-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); align-items: stretch; }
 .analysis-panel { display: flex; flex-direction: column; min-width: 0; height: 100%; }
 .wide { grid-column: 1 / -1; }
 .chart-copy { max-width: 720px; margin: -4px 0 var(--space-2); color: var(--text-muted); font-size: 12px; line-height: 1.5; }
-@media (max-width: 900px) { .analysis-hero { grid-template-columns: minmax(0, 1fr); } .analysis-grid { grid-template-columns: minmax(0, 1fr); } .wide { grid-column: auto; } }
-@media (max-width: 560px) { .hero-stats { grid-template-columns: minmax(0, 1fr); } .hero-stats div { padding: var(--space-2) 0 0; border-top: 1px solid rgba(200, 170, 109, .18); border-left: 0; } }
+@container analyze-page (max-width: 900px) { .analysis-header { grid-template-columns: minmax(0, 1fr); } .analysis-grid { grid-template-columns: minmax(0, 1fr); } .wide { grid-column: auto; } }
+@container analyze-page (max-width: 560px) { .analysis-header { gap: var(--space-3); padding: var(--space-3); } .analysis-facts { grid-template-columns: minmax(0, 1fr); gap: 0; } .analysis-facts div { display: grid; grid-template-columns: minmax(100px, .7fr) minmax(0, 1fr); gap: 3px var(--space-2); padding: 7px 0; border-top: 1px solid rgba(200, 170, 109, .18); border-left: 0; } .analysis-facts dt { grid-row: 1 / span 2; align-self: center; } .analysis-facts dd { margin: 0; } }
 </style>

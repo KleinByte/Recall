@@ -24,6 +24,7 @@ describe("typed settings store", () => {
       "display-timezone",
       "last-seen-patch-notes-version",
       "launch-at-login",
+      "tempo-overlay-position",
       "last-puuid",
       "riot-api-key-encrypted",
       "champion-catalog",
@@ -67,6 +68,7 @@ describe("typed settings store", () => {
       "aram-stats",
       "last-daily-backup",
       "collection-mode",
+      "tempo-overlay-position",
       "unknown",
     ]
 
@@ -85,6 +87,18 @@ describe("typed settings store", () => {
     settings.setMain("pinned-challenges", [9, 2, 9])
     expect(raw.values.get("pinned-challenges")).toEqual([2, 9])
     expect(() => settings.setRenderer("launch-at-login", 1)).toThrow(/invalid_setting_value/)
+  })
+
+  it("stores only finite on-screen-scale Tempo overlay coordinates", () => {
+    const raw = fakeStore()
+    const settings = new SettingsStore(raw)
+
+    expect(settings.setMain("tempo-overlay-position", { x: 91.6, y: -42.4 }))
+      .toEqual({ x: 92, y: -42 })
+    expect(() => settings.setMain("tempo-overlay-position", { x: Infinity, y: 0 }))
+      .toThrow(/invalid_setting_value/)
+    expect(() => settings.setMain("tempo-overlay-position", { x: 0, y: 0, width: 300 }))
+      .toThrow(/invalid_setting_value/)
   })
 
   it("persists a validated Skill selection", () => {

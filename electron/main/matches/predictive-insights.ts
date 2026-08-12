@@ -39,6 +39,8 @@ export interface PredictiveSection {
   state: "insufficient" | "no-signal" | "ready" | "error"
   message?: string
   neededGames?: number
+  observedGames?: number
+  window?: { label: string; trainingGames?: number; holdoutGames?: number }
   signals?: PredictiveSignal[]
 }
 
@@ -88,14 +90,23 @@ export function buildPregameRows(observations: InsightObservation[]): PregameRow
   )
 
   // Sessionize for session context
-  const sessionized = sessionize(
-    sorted.map((obs) => ({
-      gameId: obs.gameId,
-      startedAt: obs.playedAt,
-      durationSecs: obs.durationSecs,
-      observation: obs,
-    })),
-  )
+  const sessionized = sorted.every((obs) =>
+    Number.isSafeInteger(obs.session) && Number.isSafeInteger(obs.sessionGame))
+    ? sorted.map((obs) => ({
+        gameId: obs.gameId,
+        startedAt: obs.playedAt,
+        durationSecs: obs.durationSecs,
+        observation: obs,
+        session: obs.session!,
+        sessionGame: obs.sessionGame!,
+        restMinutes: obs.restMinutes,
+      }))
+    : sessionize(sorted.map((obs) => ({
+        gameId: obs.gameId,
+        startedAt: obs.playedAt,
+        durationSecs: obs.durationSecs,
+        observation: obs,
+      })))
 
   // Track champion game counts strictly before each row
   const championCounts = new Map<number, number>()
@@ -105,20 +116,23 @@ export function buildPregameRows(observations: InsightObservation[]): PregameRow
   for (let i = 0; i < sessionized.length; i++) {
     const entry = sessionized[i]
     const obs = entry.observation
-    if (obs.gradeScore === undefined) continue
-
-    const priorChampionGames = championCounts.get(obs.championId) ?? 0
+    const inferredPriorChampionGames = championCounts.get(obs.championId) ?? 0
+    const priorChampionGames = obs.priorChampionGames ?? inferredPriorChampionGames
+    if (obs.recallScore === undefined) {
+      championCounts.set(obs.championId, inferredPriorChampionGames + 1)
+      continue
+    }
 
     // Session context
     const sessionGame = entry.sessionGame
-    let previousWin: boolean | undefined
-    let restMinutes: number | undefined
+    let previousWin: boolean | undefined = obs.previousWin
+    let restMinutes: number | undefined = obs.restMinutes
 
     if (sessionGame > 1 && i > 0) {
       const prev = sessionized[i - 1]
       if (prev.session === entry.session) {
-        previousWin = prev.observation.win
-        restMinutes = entry.restMinutes
+        previousWin ??= prev.observation.win
+        restMinutes ??= entry.restMinutes
       }
     }
 
@@ -181,13 +195,15 @@ export function buildPregameRows(observations: InsightObservation[]): PregameRow
 
     rows.push({
       playedAt: obs.playedAt,
-      gradeScore: obs.gradeScore,
+      // Keep the legacy field name in this internal modeling row for API
+      // compatibility; the value is the authoritative 0-100 Recall Score.
+      gradeScore: obs.recallScore,
       features: sortedFeatures,
       raw: { priorChampionGames, sessionGame, previousWin, restMinutes },
     })
 
     // Update champion count AFTER creating the row
-    championCounts.set(obs.championId, priorChampionGames + 1)
+    championCounts.set(obs.championId, inferredPriorChampionGames + 1)
   }
 
   return rows
@@ -572,7 +588,7 @@ export function validatePredictiveSignals(
 
 export function buildPredictiveSection(observations: InsightObservation[]): PredictiveSection {
   try {
-    const graded = observations.filter((obs) => obs.gradeScore !== undefined)
+    const graded = observations.filter((obs) => obs.recallScore !== undefined)
 
     if (graded.length < MIN_GRADED) {
       return {

@@ -14,9 +14,24 @@ const props = defineProps<{
   secondaryLabel?: string
 }>()
 
+const recentValues = computed(() => completeRecentRadar(props.dimensions))
+const ariaLabel = computed(() => {
+  const primary = props.dimensions
+    .map((dimension) => `${dimension.label} ${dimension.score ?? "unavailable"}`)
+    .join(", ")
+  const recent = recentValues.value
+  if (!recent) return `${props.primaryLabel ?? "Recorded profile"}. ${primary}.`
+
+  const recentSummary = props.dimensions
+    .map((dimension, index) => `${dimension.label} ${recent[index] ?? "unavailable"}`)
+    .join(", ")
+  return `${props.primaryLabel ?? "Recorded profile"}. ${primary}. ` +
+    `${props.secondaryLabel ?? "Recent form"}. ${recentSummary}.`
+})
+
 const option = computed<EChartsCoreOption>(() => {
-  const recentValues = completeRecentRadar(props.dimensions)
-  const hasRecent = recentValues !== undefined
+  const recent = recentValues.value
+  const hasRecent = recent !== undefined
   const series: Array<{
     name: string
     value: Array<number | null>
@@ -34,7 +49,7 @@ const option = computed<EChartsCoreOption>(() => {
   if (hasRecent) {
     series.push({
       name: props.secondaryLabel ?? "Recent form",
-      value: recentValues!,
+      value: recent!,
       lineStyle: { color: CHART_COLOURS.live, width: 1.5 },
       itemStyle: { color: CHART_COLOURS.live },
       areaStyle: { color: CHART_STYLES.liveArea },
@@ -65,7 +80,7 @@ const option = computed<EChartsCoreOption>(() => {
       center: ["50%", hasRecent ? "46%" : "50%"],
       radius: hasRecent ? "62%" : "68%",
       splitNumber: 4,
-      indicator: props.dimensions.map((dimension) => ({ name: dimension.shortLabel, max: 100 })),
+      indicator: props.dimensions.map((dimension) => ({ name: dimension.label, max: 100 })),
       axisName: {
         color: CHART_COLOURS.text,
         fontFamily: "BeaufortforLOL Medium, serif",
@@ -83,7 +98,7 @@ const option = computed<EChartsCoreOption>(() => {
 <template>
   <BaseEChart
     :option="option"
-    ariaLabel="Recall Vector Index across the displayed performance arms."
+    :ariaLabel="ariaLabel"
     :height="height ?? '300px'"
     class="performance-radar"
   />

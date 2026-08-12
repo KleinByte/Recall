@@ -7,6 +7,7 @@ import {
   challengeMatchesCategory,
   challengeTierProgress,
   isChallengeCompleted,
+  selectIncompleteChallenges,
   sortChallenges,
 } from "../src/helpers/challenges.js"
 import type { ChallengeRow } from "../src/types/stats.js"
@@ -51,6 +52,25 @@ describe("challenge presentation helpers", () => {
       ),
     ).toBe(true)
     expect(isChallengeCompleted(challenge())).toBe(false)
+  })
+
+  it("treats exact-target and over-completed challenges as completed", () => {
+    const oneOfOne = challenge({ currentValue: 1, currentThreshold: 0, nextThreshold: 1 })
+    const overCompleted = challenge({ currentValue: 3, currentThreshold: 0, nextThreshold: 1 })
+
+    expect(isChallengeCompleted(oneOfOne)).toBe(true)
+    expect(isChallengeCompleted(overCompleted)).toBe(true)
+    expect(isChallengeCompleted(challenge({ currentValue: 0, nextThreshold: 1 }))).toBe(false)
+  })
+
+  it("selects unfinished challenges through the shared completion rule", () => {
+    const unfinished = challenge({ challengeId: 1, currentValue: 4, nextThreshold: 5 })
+    const exact = challenge({ challengeId: 2, currentValue: 1, nextThreshold: 1 })
+    const over = challenge({ challengeId: 3, currentValue: 2, nextThreshold: 1 })
+    const highestTier = challenge({ challengeId: 4, nextLevel: null, nextThreshold: null })
+
+    expect(selectIncompleteChallenges([unfinished, exact, over, highestTier]))
+      .toEqual([unfinished])
   })
 
   it("sorts the closest challenge first", () => {

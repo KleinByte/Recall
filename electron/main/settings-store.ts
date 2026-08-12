@@ -9,6 +9,11 @@ export interface UiSettings {
   sidebarCollapsed: boolean
 }
 
+export interface TempoOverlayPosition {
+  x: number
+  y: number
+}
+
 export type RecommendationObjective =
   | "best_overall"
   | "recent_form"
@@ -23,6 +28,7 @@ export interface SettingsValues {
   "display-timezone": string
   "last-seen-patch-notes-version": string
   "launch-at-login": boolean
+  "tempo-overlay-position": TempoOverlayPosition
   "last-puuid": string
   "riot-api-key-encrypted": string
   "champion-catalog": unknown[]
@@ -97,6 +103,17 @@ const parsedRecord = (value: unknown): Record<string, unknown> | undefined => {
   return exactObject(parsed) && JSON.stringify(parsed).length <= 5_000_000 ? parsed : undefined
 }
 
+const tempoOverlayPosition = (value: unknown): TempoOverlayPosition | undefined => {
+  if (!exactObject(value) || Object.keys(value).some((key) => !["x", "y"].includes(key))) {
+    return undefined
+  }
+  if (!Number.isFinite(value.x) || !Number.isFinite(value.y)) return undefined
+  const x = Math.round(value.x as number)
+  const y = Math.round(value.y as number)
+  if (Math.abs(x) > 100_000 || Math.abs(y) > 100_000) return undefined
+  return { x, y }
+}
+
 export const SETTINGS_REGISTRY: { [K in SettingsKey]: RegistryEntry<SettingsValues[K]> } = {
   settings: {
     class: "user_preference", rendererRead: true, rendererWrite: true, fullBackup: true,
@@ -131,6 +148,10 @@ export const SETTINGS_REGISTRY: { [K in SettingsKey]: RegistryEntry<SettingsValu
   "launch-at-login": {
     class: "machine_preference", rendererRead: true, rendererWrite: true, fullBackup: false,
     validate: (value) => typeof value === "boolean" ? value : undefined,
+  },
+  "tempo-overlay-position": {
+    class: "machine_preference", rendererRead: false, rendererWrite: false, fullBackup: false,
+    validate: tempoOverlayPosition,
   },
   "last-puuid": {
     class: "identity_pointer", rendererRead: false, rendererWrite: false, fullBackup: false,

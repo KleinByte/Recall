@@ -47,6 +47,20 @@ describe("toPlainPayload", () => {
     expect(invoke).toHaveBeenCalledWith("app:refresh-all")
   })
 
+  it("routes Tempo overlay controls through narrow IPC endpoints", async () => {
+    const status = { visible: true, locked: false, shortcutRegistered: true }
+    const invoke = vi.fn().mockResolvedValue(status)
+    vi.stubGlobal("window", { ipcRenderer: { invoke } })
+
+    await expect(api.toggleTempoOverlay()).resolves.toEqual(status)
+    await api.lockTempoOverlay()
+    await api.resetTempoOverlayPosition()
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "tempo-overlay:toggle")
+    expect(invoke).toHaveBeenNthCalledWith(2, "tempo-overlay:lock")
+    expect(invoke).toHaveBeenNthCalledWith(3, "tempo-overlay:reset-position")
+  })
+
   it("makes a reactive array cloneable", () => {
     const selectedModes = ref<string[]>([])
     selectedModes.value = ["mayhem"]
@@ -142,5 +156,16 @@ describe("getSkillReport", () => {
       "sr",
       "match",
     )
+  })
+})
+
+describe("getLifetimeTotals", () => {
+  it("uses the account-wide Progress endpoint without renderer filters", async () => {
+    const invoke = vi.fn().mockResolvedValue({ recordedGames: 0 })
+    vi.stubGlobal("window", { ipcRenderer: { invoke } })
+
+    await api.getLifetimeTotals()
+
+    expect(invoke).toHaveBeenCalledWith("stats:lifetime-totals")
   })
 })

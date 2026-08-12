@@ -11,6 +11,7 @@ import {
   Tabs as UiTabs,
 } from "../components/ui"
 import { api } from "../helpers/api"
+import { selectIncompleteChallenges } from "../helpers/challenges"
 import { useApiEvents } from "../helpers/use-api-events"
 import { useCoalescedTask } from "../helpers/use-coalesced-task"
 import { reviewMatch } from "../helpers/navigation"
@@ -27,6 +28,7 @@ import type { Champion } from "../types/lol"
 import type {
   ChallengeRow,
   Goal,
+  LifetimeTotals,
   PersonalRecord,
   RankedHistory,
   StatsFilter,
@@ -105,6 +107,7 @@ const records = ref<PersonalRecord[]>([])
 const recordScope = ref<RecordScopeId>("rankedSolo")
 const recordCategory = ref<PersonalRecord["category"] | null>(null)
 const recordsLoading = ref(false)
+const lifetime = ref<LifetimeTotals | null>(null)
 const goals = ref<Goal[]>([])
 const challenges = ref<ChallengeRow[]>([])
 
@@ -157,17 +160,19 @@ async function selectRecordScope(scope: RecordScopeId) {
 
 async function load() {
   try {
-    const [nextRanked, nextGoals, nextChallenges] =
+    const [nextRanked, nextGoals, nextChallenges, nextLifetime] =
       await Promise.all([
         api.getRankedHistory(),
         api.listGoals(),
         api.listChallenges({ includeRetired: false }),
+        api.getLifetimeTotals(),
         loadRecords(),
       ])
 
     ranked.value = nextRanked
     goals.value = nextGoals
     challenges.value = nextChallenges
+    lifetime.value = nextLifetime
   } catch {
     // No account seen yet; the empty states cover this.
   }
@@ -201,7 +206,7 @@ const challengeMatches = computed(() => {
   const needle = challengeSearch.value.trim().toLowerCase()
   if (needle.length < 2) return []
 
-  return challenges.value
+  return selectIncompleteChallenges(challenges.value)
     .filter((challenge) => challenge.name.toLowerCase().includes(needle))
     .slice(0, 6)
 })
@@ -258,6 +263,116 @@ const canSave = computed(
 
 const championName = (id: number) => championNameById(props.champions, id)
 
+function formatLifetimeDuration(totalSeconds: number) {
+  const totalMinutes = Math.floor(Math.max(0, totalSeconds) / 60)
+  const totalHours = Math.floor(totalMinutes / 60)
+  const days = Math.floor(totalHours / 24)
+  const hours = totalHours % 24
+  const minutes = totalMinutes % 60
+  if (days > 0) return hours > 0 ? `${formatCompact(days)}d ${hours}h` : `${formatCompact(days)}d`
+  if (totalHours > 0) return minutes > 0 ? `${totalHours}h ${minutes}m` : `${totalHours}h`
+  return `${minutes}m`
+}
+
+const playerLifetimeGroups = computed(() => {
+  const totals = lifetime.value
+  if (!totals) return []
+  const detailCoverage = totals.recordedGames
+    ? `${formatCompact(totals.detailContext.measuredGames)} of ${formatCompact(totals.recordedGames)} games have detailed scoreboards`
+    : "No detailed scoreboards yet"
+  return [
+    {
+      key: "combat",
+      kicker: "Combat",
+      title: "Fighting and durability",
+      description: "Your credited combat totals from every stored match.",
+      metrics: [
+        { label: "Champion takedowns", value: formatCompact(totals.championTakedowns), hint: "Kills + assists" },
+        { label: "Kills", value: formatCompact(totals.kills) },
+        { label: "Deaths", value: formatCompact(totals.deaths) },
+        { label: "Assists", value: formatCompact(totals.assists) },
+        { label: "Largest killing spree", value: formatCompact(totals.largestKillingSpree), hint: "Best single match" },
+        { label: "Largest multikill", value: formatCompact(totals.largestMultiKill), hint: "Best single fight" },
+        { label: "Double kills", value: formatCompact(totals.doubleKills) },
+        { label: "Triple kills", value: formatCompact(totals.tripleKills) },
+        { label: "Quadra kills", value: formatCompact(totals.quadraKills) },
+        { label: "Pentakills", value: formatCompact(totals.pentaKills) },
+        { label: "Champion damage dealt", value: formatCompact(totals.damageToChampions) },
+        { label: "Damage taken", value: formatCompact(totals.damageTaken) },
+        { label: "Damage mitigated", value: formatCompact(totals.damageSelfMitigated) },
+        { label: "Total healing", value: formatCompact(totals.totalHeal), hint: "Self and allied healing" },
+        { label: "Units healed", value: formatCompact(totals.totalUnitsHealed) },
+        { label: "Crowd control time", value: formatLifetimeDuration(totals.crowdControlSecs) },
+        { label: "Surrenders", value: formatCompact(totals.surrenders) },
+        { label: "Early surrenders", value: formatCompact(totals.earlySurrenders) },
+      ],
+    },
+    {
+      key: "economy",
+      kicker: "Economy and vision",
+      title: "Resources gathered",
+      description: `Farm, gold, and vision work. ${detailCoverage}.`,
+      metrics: [
+        { label: "Recorded CS", value: formatCompact(totals.totalCs), hint: "Lane minions plus measured monsters" },
+        { label: "Neutral monsters", value: formatCompact(totals.detailContext.neutralMinions), hint: "Detailed games" },
+        { label: "Gold earned", value: formatCompact(totals.goldEarned) },
+        { label: "Gold spent", value: formatCompact(totals.detailContext.goldSpent), hint: "Detailed games" },
+        { label: "Vision score", value: formatCompact(totals.visionScore) },
+        { label: "Wards placed", value: formatCompact(totals.wardsPlaced) },
+        { label: "Wards cleared", value: formatCompact(totals.wardsKilled) },
+        { label: "Control wards bought", value: formatCompact(totals.controlWards) },
+      ],
+    },
+    {
+      key: "detail",
+      kicker: "Detailed scoreboards",
+      title: "Additional combat totals",
+      description: `${detailCoverage}. These values exclude games without detailed owner data.`,
+      metrics: [
+        { label: "All damage dealt", value: formatCompact(totals.detailContext.totalDamageDealt), hint: "Champions, units, and objectives" },
+        { label: "Magic champion damage", value: formatCompact(totals.detailContext.magicDamageToChampions) },
+        { label: "Physical champion damage", value: formatCompact(totals.detailContext.physicalDamageToChampions) },
+        { label: "True champion damage", value: formatCompact(totals.detailContext.trueDamageToChampions) },
+        { label: "Healing to teammates", value: formatCompact(totals.detailContext.teammateHealing) },
+        { label: "Shields to teammates", value: formatCompact(totals.detailContext.teammateShielding) },
+        { label: "Longest life", value: formatLifetimeDuration(totals.detailContext.longestLifeSecs), hint: "Best single match" },
+      ],
+    },
+    {
+      key: "objectives",
+      kicker: "Objectives and structures",
+      title: "Your direct contribution",
+      description: `Damage and finishing credit attributed directly to you. ${detailCoverage}.`,
+      metrics: [
+        { label: "Neutral objective damage", value: formatCompact(totals.neutralObjectiveDamage), hint: "Excludes structures" },
+        { label: "Structure damage", value: formatCompact(totals.structureDamage), hint: "Damage to turrets" },
+        { label: "Turret kills", value: formatCompact(totals.turretKills), hint: "Scoreboard credit" },
+        { label: "Inhibitor kills", value: formatCompact(totals.inhibitorKills), hint: "Scoreboard credit" },
+        { label: "First bloods", value: formatCompact(totals.firstBloods) },
+      ],
+    },
+  ]
+})
+
+const teamLifetimeMetrics = computed(() => {
+  const totals = lifetime.value?.teamContext
+  if (!totals || totals.measuredGames === 0) return []
+  return [
+    { label: "Dragons", value: formatCompact(totals.dragons) },
+    { label: "Barons", value: formatCompact(totals.barons) },
+    { label: "Heralds", value: formatCompact(totals.heralds) },
+    { label: "Void grubs", value: formatCompact(totals.voidGrubs) },
+    { label: "Turrets", value: formatCompact(totals.turrets) },
+    { label: "Inhibitors", value: formatCompact(totals.inhibitors) },
+  ]
+})
+
+const teamContextCoverage = computed(() => {
+  const totals = lifetime.value
+  if (!totals?.recordedGames) return "0% coverage"
+  return `${Math.round(totals.teamContext.measuredGames / totals.recordedGames * 100)}% coverage`
+})
+
 const RECORD_CATEGORY_ORDER: PersonalRecord["category"][] = [
   "Performance",
   "Combat",
@@ -284,6 +399,103 @@ const activeRecordGroup = computed(() =>
       eyebrow="Long-term archive"
       description="Where you are heading, and the best you have managed so far."
     />
+
+    <Panel
+      v-if="lifetime"
+      title="Lifetime totals"
+      meta="All recorded modes"
+      class="lifetime-panel"
+    >
+      <EmptyState
+        v-if="lifetime.recordedGames === 0"
+        compact
+        title="No completed games yet"
+        description="Lifetime totals begin with the first completed matched game Recall stores."
+      />
+
+      <div v-else class="lifetime-board">
+        <section class="lifetime-hero" aria-label="Recorded match archive">
+          <div class="archive-anchor">
+            <span class="archive-kicker">Complete match archive</span>
+            <strong class="numeric archive-total">{{ formatCompact(lifetime.recordedGames) }}</strong>
+            <span class="archive-unit">games stored</span>
+          </div>
+          <dl class="archive-summary">
+            <div>
+              <dt>Wins</dt>
+              <dd class="numeric positive">{{ formatCompact(lifetime.wins) }}</dd>
+              <span>Completed-match wins</span>
+            </div>
+            <div>
+              <dt>Win rate</dt>
+              <dd class="numeric">{{ Math.round(lifetime.winRate * 100) }}%</dd>
+              <span>Across the archive</span>
+            </div>
+            <div>
+              <dt>Time played</dt>
+              <dd class="numeric">{{ formatLifetimeDuration(lifetime.timePlayedSecs) }}</dd>
+              <span>Completed matches</span>
+            </div>
+          </dl>
+        </section>
+
+        <details class="lifetime-details">
+          <summary>
+            <span>
+              <strong>All lifetime totals</strong>
+              <small>Combat, farming, vision, and objectives</small>
+            </span>
+            <span class="details-action">
+              <span class="show-copy">Show all</span>
+              <span class="hide-copy">Hide</span>
+              <span class="details-chevron" aria-hidden="true" />
+            </span>
+          </summary>
+
+          <div class="lifetime-detail-body">
+            <section
+              v-for="group in playerLifetimeGroups"
+              :key="group.key"
+              class="lifetime-row player-row"
+              :aria-labelledby="`player-totals-${group.key}`"
+            >
+              <header class="lifetime-row-label">
+                <span class="archive-kicker">{{ group.kicker }}</span>
+                <strong :id="`player-totals-${group.key}`">{{ group.title }}</strong>
+                <small>{{ group.description }}</small>
+              </header>
+              <dl class="lifetime-readings player-readings" :class="`${group.key}-readings`">
+                <div v-for="metric in group.metrics" :key="metric.label">
+                  <dt>{{ metric.label }}</dt>
+                  <dd class="numeric">{{ metric.value }}</dd>
+                  <span v-if="metric.hint">{{ metric.hint }}</span>
+                </div>
+              </dl>
+            </section>
+
+            <section class="lifetime-row team-row" aria-labelledby="team-totals-title">
+              <header class="lifetime-row-label">
+                <span class="archive-kicker team-kicker">Team context</span>
+                <strong id="team-totals-title">Objectives secured</strong>
+                <small v-if="lifetime.teamContext.measuredGames">
+                  {{ formatCompact(lifetime.teamContext.measuredGames) }} games · {{ teamContextCoverage }} · not individual credit.
+                </small>
+                <small v-else>No stored team scoreboard is available yet.</small>
+              </header>
+              <dl v-if="teamLifetimeMetrics.length" class="lifetime-readings team-readings">
+                <div v-for="metric in teamLifetimeMetrics" :key="metric.label">
+                  <dt>{{ metric.label }}</dt>
+                  <dd class="numeric">{{ metric.value }}</dd>
+                </div>
+              </dl>
+              <div v-else class="team-unavailable muted">
+                Team objective totals appear when Recall stores the owner's full team scoreboard.
+              </div>
+            </section>
+          </div>
+        </details>
+      </div>
+    </Panel>
 
     <Panel v-if="rankedQueues.length" title="Ranked" class="ranked-panel">
       <div class="queues">
@@ -509,6 +721,191 @@ const activeRecordGroup = computed(() =>
   flex-direction: column;
   gap: var(--ui-space-4);
   container: recall-content / inline-size;
+}
+
+.lifetime-board {
+  overflow: hidden;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-inset);
+  box-shadow: var(--ui-shadow-inset);
+}
+
+.lifetime-hero {
+  display: grid;
+  grid-template-columns: minmax(180px, .7fr) minmax(0, 1.3fr);
+  min-width: 0;
+}
+
+.archive-anchor {
+  display: grid;
+  align-content: center;
+  min-width: 0;
+  padding: 12px 14px;
+  border-right: 1px solid var(--ui-divider);
+  background: linear-gradient(120deg, color-mix(in srgb, var(--ui-accent) 8%, transparent), transparent 68%);
+}
+
+.archive-kicker {
+  color: var(--ui-text-muted);
+  font: var(--ui-text-label) var(--ui-font-heading);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.archive-total {
+  margin-top: 2px;
+  color: var(--ui-accent-strong);
+  font-size: clamp(25px, 4cqi, 34px);
+  line-height: 1;
+}
+
+.archive-unit {
+  margin-top: 3px;
+  color: var(--ui-text-subtle);
+  font-size: 11px;
+}
+
+.archive-summary,
+.lifetime-readings {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+}
+
+.archive-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+.archive-summary > div,
+.lifetime-readings > div {
+  display: grid;
+  align-content: center;
+  min-width: 0;
+  padding: 9px 11px;
+}
+
+.archive-summary > div + div,
+.lifetime-readings > div + div { border-left: 1px solid var(--ui-divider); }
+
+.archive-summary dt,
+.lifetime-readings dt {
+  overflow: hidden;
+  color: var(--ui-text-muted);
+  font: var(--ui-text-label) var(--ui-font-heading);
+  letter-spacing: .7px;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.archive-summary dd,
+.lifetime-readings dd {
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: var(--ui-text);
+  font-size: 18px;
+  line-height: 1.05;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archive-summary dd.positive { color: var(--ui-positive); }
+
+.archive-summary span,
+.lifetime-readings span {
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--ui-text-muted);
+  font-size: var(--ui-text-label);
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifetime-details {
+  border-top: 1px solid var(--ui-divider);
+}
+
+.lifetime-details > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 54px;
+  gap: var(--ui-space-3);
+  padding: 9px 12px;
+  color: var(--ui-text);
+  cursor: pointer;
+  list-style: none;
+}
+
+.lifetime-details > summary::-webkit-details-marker { display: none; }
+.lifetime-details > summary:hover { background: var(--ui-surface-hover-subtle); }
+.lifetime-details > summary:focus-visible { outline: 2px solid var(--ui-live); outline-offset: -2px; }
+.lifetime-details > summary > span:first-child { display: grid; min-width: 0; }
+.lifetime-details > summary strong { font: 12px var(--ui-font-heading); letter-spacing: .45px; text-transform: uppercase; }
+.lifetime-details > summary small { margin-top: 2px; color: var(--ui-text-muted); font-size: var(--ui-text-label); }
+
+.details-action {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 8px;
+  color: var(--ui-accent-strong);
+  font-size: var(--ui-text-label);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.hide-copy { display: none; }
+.lifetime-details[open] .show-copy { display: none; }
+.lifetime-details[open] .hide-copy { display: inline; }
+.details-chevron { width: 8px; height: 8px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: translateY(-2px) rotate(45deg); transition: transform .16s ease; }
+.lifetime-details[open] .details-chevron { transform: translateY(2px) rotate(225deg); }
+.lifetime-detail-body { border-top: 1px solid var(--ui-divider); }
+
+.lifetime-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 210px) minmax(0, 1fr);
+  min-width: 0;
+  border-top: 1px solid var(--ui-divider);
+}
+
+.lifetime-row-label {
+  display: grid;
+  align-content: center;
+  min-width: 0;
+  padding: 10px 12px;
+  border-right: 1px solid var(--ui-divider);
+  background: var(--ui-surface-hover-subtle);
+}
+
+.lifetime-row-label strong {
+  margin-top: 2px;
+  color: var(--ui-text-heading);
+  font: 12px var(--ui-font-heading);
+  letter-spacing: .45px;
+  text-transform: uppercase;
+}
+
+.lifetime-row-label small {
+  margin-top: 3px;
+  color: var(--ui-text-muted);
+  font-size: var(--ui-text-label);
+  line-height: 1.35;
+}
+
+.player-readings { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.player-readings > div { border-top: 1px solid var(--ui-divider); border-left: 1px solid var(--ui-divider); }
+.player-readings > div:nth-child(-n + 5) { border-top: 0; }
+.player-readings > div:nth-child(5n + 1) { border-left: 0; }
+.team-readings { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.team-kicker { color: var(--ui-live); }
+
+.team-unavailable {
+  display: grid;
+  place-items: center start;
+  min-height: 54px;
+  padding: 10px 12px;
+  font-size: 11px;
 }
 
 .queues {
@@ -748,6 +1145,15 @@ const activeRecordGroup = computed(() =>
 }
 
 @container recall-content (max-width: 720px) {
+  .lifetime-row { grid-template-columns: minmax(0, 1fr); }
+  .lifetime-row-label { border-right: 0; border-bottom: 1px solid var(--ui-divider); }
+  .player-readings { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .player-readings > div:nth-child(n) { border-top: 1px solid var(--ui-divider); border-left: 1px solid var(--ui-divider); }
+  .player-readings > div:nth-child(-n + 3) { border-top: 0; }
+  .player-readings > div:nth-child(3n + 1) { border-left: 0; }
+  .team-readings { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .team-readings > div:nth-child(4) { border-left: 0; }
+  .team-readings > div:nth-child(n + 4) { border-top: 1px solid var(--ui-divider); }
   .records-card :deep(.head) { align-items: flex-start; flex-direction: column; }
   .record-scope-field { width: 100%; }
   .record-browser { grid-template-columns: minmax(0, 1fr); }
@@ -756,6 +1162,16 @@ const activeRecordGroup = computed(() =>
 }
 
 @container recall-content (max-width: 480px) {
+  .lifetime-hero { grid-template-columns: minmax(0, 1fr); }
+  .archive-anchor { border-right: 0; border-bottom: 1px solid var(--ui-divider); }
+  .archive-summary > div { padding-inline: 8px; }
+  .archive-summary dd, .lifetime-readings dd { font-size: 16px; }
+  .lifetime-readings dt,
+  .lifetime-readings span { overflow: visible; text-overflow: clip; white-space: normal; }
+  .player-readings, .team-readings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .player-readings > div:nth-child(n), .team-readings > div:nth-child(n) { border-top: 0; border-left: 1px solid var(--ui-divider); }
+  .player-readings > div:nth-child(odd), .team-readings > div:nth-child(odd) { border-left: 0; }
+  .player-readings > div:nth-child(n + 3), .team-readings > div:nth-child(n + 3) { border-top: 1px solid var(--ui-divider); }
   .queue-head { flex-direction: column; }
   .queue-meta { text-align: left; }
   .kind-tabs { width: 100%; }
@@ -763,5 +1179,9 @@ const activeRecordGroup = computed(() =>
   .record-row { grid-template-columns: 30px minmax(0, 1fr) auto; }
   .record-open { display: none; }
   .record-value { font-size: 15px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .details-chevron { transition: none; }
 }
 </style>

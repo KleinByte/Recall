@@ -19,6 +19,7 @@ import {
   PERSONAL_RECORD_RIFT_QUEUE_IDS,
 } from "../matches/eligibility.js"
 import { MAX_ANALYTIC_MATCH_DURATION_SECS } from "../../../src/helpers/time-contract-core.js"
+import { MATCH_GRADE_ALGORITHM_VERSION } from "../matches/match-grade-recipe.js"
 
 export interface StatsFilter {
   puuid: string
@@ -110,16 +111,219 @@ export interface MatchPage {
   pageSize: number
 }
 
-function assertLegacyGradeWriterAvailable(db: Database): void {
+function hasSelectedGradeRecipe(db: Database): boolean {
   const table = db.prepare(`
     SELECT 1 FROM sqlite_master
     WHERE type = 'table' AND name = 'grade_recipe_selections'
   `).get()
-  if (!table) return
-  const selected = db.prepare(
-    "SELECT 1 FROM grade_recipe_selections WHERE algorithm_version = 3 LIMIT 1",
-  ).get()
-  if (selected) throw new Error("legacy_grade_writer_disabled_after_v3_cutover")
+  if (!table) return false
+  return !!db.prepare(
+    "SELECT 1 FROM grade_recipe_selections WHERE algorithm_version = ? LIMIT 1",
+  ).get(MATCH_GRADE_ALGORITHM_VERSION)
+}
+
+function assertLegacyGradeWriterAvailable(db: Database): void {
+  if (hasSelectedGradeRecipe(db)) {
+    throw new Error("legacy_grade_writer_disabled_after_v3_cutover")
+  }
+}
+
+interface GradeAggregate {
+  avgGradeScore?: number
+  averageRecallScore?: number
+  gradedGames: number
+}
+
+/**
+ * Account-wide totals from completed, matched games stored by Recall.
+ *
+ * Player fields come from the owner row in `matches`. Team objectives are
+ * deliberately nested because they describe the owner's team, not individual
+ * credit, and are only summed where a complete team scoreboard identifies the
+ * owner's team.
+ */
+export interface LifetimeTotals {
+  recordedGames: number
+  wins: number
+  losses: number
+  winRate: number
+  timePlayedSecs: number
+  championTakedowns: number
+  kills: number
+  deaths: number
+  assists: number
+  largestKillingSpree: number
+  largestMultiKill: number
+  doubleKills: number
+  tripleKills: number
+  quadraKills: number
+  surrenders: number
+  earlySurrenders: number
+  totalCs: number
+  damageToChampions: number
+  damageTaken: number
+  damageSelfMitigated: number
+  totalHeal: number
+  totalUnitsHealed: number
+  crowdControlSecs: number
+  goldEarned: number
+  visionScore: number
+  wardsPlaced: number
+  wardsKilled: number
+  controlWards: number
+  neutralObjectiveDamage: number
+  structureDamage: number
+  turretKills: number
+  inhibitorKills: number
+  firstBloods: number
+  pentaKills: number
+  detailContext: {
+    measuredGames: number
+    neutralMinions: number
+    goldSpent: number
+    totalDamageDealt: number
+    magicDamageToChampions: number
+    physicalDamageToChampions: number
+    trueDamageToChampions: number
+    controlWardsPurchased: number
+    teammateHealing: number
+    teammateShielding: number
+    longestLifeSecs: number
+  }
+  teamContext: {
+    measuredGames: number
+    dragons: number
+    barons: number
+    heralds: number
+    voidGrubs: number
+    turrets: number
+    inhibitors: number
+  }
+}
+
+/**
+ * Aggregate immutable owner results for the exact recipe selected by Recall.
+ * The scoped CTE keeps the existing filter contract without trusting the
+ * denormalized match Grade cache for any returned Grade value.
+ */
+function selectedRecipeGradeAggregate(
+  db: Database,
+  clause: string,
+  params: Array<string | number>,
+): GradeAggregate {
+  const row = db.prepare(`
+    WITH scoped_matches AS (
+      SELECT game_id AS scoped_game_id, puuid AS scoped_puuid
+      FROM matches ${clause}
+    )
+    SELECT AVG(r.grade_score) AS avgGradeScore,
+           AVG(r.role_fit_score) AS averageRecallScore,
+           COUNT(r.role_fit_score) AS gradedGames
+    FROM scoped_matches sm
+    JOIN grade_recipe_selections s
+      ON s.algorithm_version = ?
+    JOIN match_grade_attempts a
+      ON a.game_id = sm.scoped_game_id AND a.puuid = sm.scoped_puuid
+     AND a.algorithm_version = s.algorithm_version
+     AND a.recipe_id = s.recipe_id
+     AND a.grade_status = 'ready'
+     AND a.owner_participant_id IS NOT NULL
+    JOIN match_grade_results r
+      ON r.game_id = a.game_id AND r.puuid = a.puuid
+     AND r.participant_id = a.owner_participant_id
+     AND r.algorithm_version = a.algorithm_version
+     AND r.recipe_id = a.recipe_id
+     AND r.grade_status = 'ready'
+     AND r.role_fit_score IS NOT NULL
+     AND a.role_fit_score = r.role_fit_score
+  `).get(...params, MATCH_GRADE_ALGORITHM_VERSION) as {
+    avgGradeScore: number | null
+    averageRecallScore: number | null
+    gradedGames: number
+  }
+  return {
+    avgGradeScore: row.avgGradeScore ?? undefined,
+    averageRecallScore: row.averageRecallScore ?? undefined,
+    gradedGames: row.gradedGames,
+  }
+}
+
+function selectedRecipeChampionGrades(
+  db: Database,
+  clause: string,
+  params: Array<string | number>,
+): Map<number, GradeAggregate> {
+  const rows = db.prepare(`
+    WITH scoped_matches AS (
+      SELECT game_id AS scoped_game_id, puuid AS scoped_puuid,
+             champion_id AS scoped_champion_id
+      FROM matches ${clause}
+    )
+    SELECT sm.scoped_champion_id AS championId,
+           AVG(r.grade_score) AS avgGradeScore,
+           AVG(r.role_fit_score) AS averageRecallScore,
+           COUNT(r.role_fit_score) AS gradedGames
+    FROM scoped_matches sm
+    JOIN grade_recipe_selections s
+      ON s.algorithm_version = ?
+    JOIN match_grade_attempts a
+      ON a.game_id = sm.scoped_game_id AND a.puuid = sm.scoped_puuid
+     AND a.algorithm_version = s.algorithm_version
+     AND a.recipe_id = s.recipe_id
+     AND a.grade_status = 'ready'
+     AND a.owner_participant_id IS NOT NULL
+    JOIN match_grade_results r
+      ON r.game_id = a.game_id AND r.puuid = a.puuid
+     AND r.participant_id = a.owner_participant_id
+     AND r.algorithm_version = a.algorithm_version
+     AND r.recipe_id = a.recipe_id
+     AND r.grade_status = 'ready'
+     AND r.role_fit_score IS NOT NULL
+     AND a.role_fit_score = r.role_fit_score
+    GROUP BY sm.scoped_champion_id
+  `).all(...params, MATCH_GRADE_ALGORITHM_VERSION) as Array<{
+    championId: number
+    avgGradeScore: number | null
+    averageRecallScore: number | null
+    gradedGames: number
+  }>
+  return new Map(rows.map((row) => [row.championId, {
+    avgGradeScore: row.avgGradeScore ?? undefined,
+    averageRecallScore: row.averageRecallScore ?? undefined,
+    gradedGames: row.gradedGames,
+  }]))
+}
+
+function selectedRecipeGradeDistribution(
+  db: Database,
+  clause: string,
+  params: Array<string | number>,
+): GradeCount[] {
+  return db.prepare(`
+    WITH scoped_matches AS (
+      SELECT game_id AS scoped_game_id, puuid AS scoped_puuid
+      FROM matches ${clause}
+    )
+    SELECT r.grade, COUNT(*) AS count
+    FROM scoped_matches sm
+    JOIN grade_recipe_selections s
+      ON s.algorithm_version = ?
+    JOIN match_grade_attempts a
+      ON a.game_id = sm.scoped_game_id AND a.puuid = sm.scoped_puuid
+     AND a.algorithm_version = s.algorithm_version
+     AND a.recipe_id = s.recipe_id
+     AND a.grade_status = 'ready'
+     AND a.owner_participant_id IS NOT NULL
+    JOIN match_grade_results r
+      ON r.game_id = a.game_id AND r.puuid = a.puuid
+     AND r.participant_id = a.owner_participant_id
+     AND r.algorithm_version = a.algorithm_version
+     AND r.recipe_id = a.recipe_id
+     AND r.grade_status = 'ready'
+     AND r.role_fit_score IS NOT NULL
+     AND a.role_fit_score = r.role_fit_score
+    GROUP BY r.grade
+  `).all(...params, MATCH_GRADE_ALGORITHM_VERSION) as GradeCount[]
 }
 
 
@@ -640,10 +844,14 @@ export class MatchesRepository {
   getGradeDistribution(query: MatchQuery): GradeCount[] {
     const { clause, params } = buildQuery(query)
 
+    if (hasSelectedGradeRecipe(this.db)) {
+      return selectedRecipeGradeDistribution(this.db, clause, params)
+    }
+
     return this.db
       .prepare(
         `SELECT grade, COUNT(*) AS count FROM matches ${clause}
-           AND grade IS NOT NULL
+           AND grade IS NOT NULL AND role_fit_score IS NOT NULL
          GROUP BY grade`,
       )
       .all(...params) as GradeCount[]
@@ -674,9 +882,10 @@ export class MatchesRepository {
            COALESCE(AVG(gold_earned), 0)         AS avgGold,
            COALESCE(AVG(duration_secs), 0)       AS avgDurationSecs,
            COALESCE(SUM(penta_kills), 0)         AS pentaKills,
-           AVG(grade_score)                      AS avgGradeScore,
+           AVG(CASE WHEN role_fit_score IS NOT NULL THEN grade_score END)
+                                                 AS avgGradeScore,
            AVG(role_fit_score)                   AS averageRecallScore,
-           COUNT(grade)                          AS gradedGames
+           COUNT(role_fit_score)                 AS gradedGames
          FROM matches ${clause}`,
       )
       .get(...params) as Record<string, number>
@@ -688,6 +897,13 @@ export class MatchesRepository {
       .all(...params) as { win: number }[]
 
     const games = totals.games
+    const gradeAggregate = hasSelectedGradeRecipe(this.db)
+      ? selectedRecipeGradeAggregate(this.db, clause, params)
+      : {
+          avgGradeScore: totals.avgGradeScore ?? undefined,
+          averageRecallScore: totals.averageRecallScore ?? undefined,
+          gradedGames: totals.gradedGames,
+        }
 
     return {
       games,
@@ -703,13 +919,232 @@ export class MatchesRepository {
       avgGold: totals.avgGold,
       avgDurationSecs: totals.avgDurationSecs,
       pentaKills: totals.pentaKills,
-      avgGradeScore: totals.avgGradeScore ?? undefined,
-      averageRecallScore: totals.averageRecallScore ?? undefined,
-      gradedGames: totals.gradedGames,
+      avgGradeScore: gradeAggregate.avgGradeScore,
+      averageRecallScore: gradeAggregate.averageRecallScore,
+      gradedGames: gradeAggregate.gradedGames,
       currentStreak: computeCurrentStreak(results.map((row) => row.win === 1)),
       longestWinStreak: computeLongestWinStreak(
         results.map((row) => row.win === 1),
       ),
+    }
+  }
+
+  /**
+   * Lifetime archive across every completed matched game stored for an account.
+   * This is intentionally unfiltered: mode-specific records live separately,
+   * while this contract answers the Progress page's lifetime-total question.
+   */
+  getLifetimeTotals(puuid: string): LifetimeTotals {
+    const player = this.db.prepare(`
+      SELECT COUNT(*) AS recordedGames,
+             COALESCE(SUM(win), 0) AS wins,
+             COALESCE(SUM(duration_secs), 0) AS timePlayedSecs,
+             COALESCE(SUM(kills + assists), 0) AS championTakedowns,
+             COALESCE(SUM(kills), 0) AS kills,
+             COALESCE(SUM(deaths), 0) AS deaths,
+             COALESCE(SUM(assists), 0) AS assists,
+             COALESCE(MAX(largest_killing_spree), 0) AS largestKillingSpree,
+             COALESCE(MAX(largest_multi_kill), 0) AS largestMultiKill,
+             COALESCE(SUM(double_kills), 0) AS doubleKills,
+             COALESCE(SUM(triple_kills), 0) AS tripleKills,
+             COALESCE(SUM(quadra_kills), 0) AS quadraKills,
+             COALESCE(SUM(ended_in_surrender), 0) AS surrenders,
+             COALESCE(SUM(ended_in_early_surrender), 0) AS earlySurrenders,
+             COALESCE(SUM(total_minions_killed), 0) AS laneMinions,
+             COALESCE(SUM(damage_to_champions), 0) AS damageToChampions,
+             COALESCE(SUM(damage_taken), 0) AS damageTaken,
+             COALESCE(SUM(damage_self_mitigated), 0) AS damageSelfMitigated,
+             COALESCE(SUM(total_heal), 0) AS totalHeal,
+             COALESCE(SUM(total_units_healed), 0) AS totalUnitsHealed,
+             COALESCE(SUM(time_ccing_others), 0) AS crowdControlSecs,
+             COALESCE(SUM(gold_earned), 0) AS goldEarned,
+             COALESCE(SUM(vision_score), 0) AS visionScore,
+             COALESCE(SUM(wards_placed), 0) AS wardsPlaced,
+             COALESCE(SUM(wards_killed), 0) AS wardsKilled,
+             COALESCE(SUM(control_wards), 0) AS controlWards,
+             COALESCE(SUM(MAX(0, damage_objectives - damage_turrets)), 0)
+               AS neutralObjectiveDamage,
+             COALESCE(SUM(damage_turrets), 0) AS structureDamage,
+             COALESCE(SUM(turret_kills), 0) AS turretKills,
+             COALESCE(SUM(inhibitor_kills), 0) AS inhibitorKills,
+             COALESCE(SUM(first_blood), 0) AS firstBloods,
+             COALESCE(SUM(penta_kills), 0) AS pentaKills
+      FROM matches
+      WHERE puuid = ? AND is_matched = 1 AND duration_secs > 0
+    `).get(puuid) as Omit<LifetimeTotals, "losses" | "winRate" | "totalCs" | "detailContext" | "teamContext"> & {
+      laneMinions: number
+    }
+
+    // Statistics added after Recall's first database version are summed only
+    // from games with an owner participant row. The UI reports this measured
+    // game count instead of pretending migrated zero defaults were observed.
+    const detailContext = this.db.prepare(`
+      WITH owner_detail AS (
+        SELECT p.game_id,
+               MAX(p.neutral_minions) AS neutralMinions,
+               MAX(p.gold_spent) AS goldSpent,
+               MAX(p.total_damage_dealt) AS totalDamageDealt,
+               MAX(p.magic_damage_to_champions) AS magicDamageToChampions,
+               MAX(p.physical_damage_to_champions) AS physicalDamageToChampions,
+               MAX(p.true_damage_to_champions) AS trueDamageToChampions,
+               MAX(p.control_wards_purchased) AS controlWardsPurchased,
+               MAX(p.total_heals_on_teammates) AS teammateHealing,
+               MAX(p.total_damage_shielded_on_teammates) AS teammateShielding,
+               MAX(p.longest_time_living) AS longestLifeSecs,
+               MAX(p.wards_placed) AS wardsPlaced,
+               MAX(p.wards_killed) AS wardsKilled,
+               MAX(p.control_wards) AS controlWards,
+               MAX(MAX(0, p.damage_objectives - p.damage_turrets)) AS neutralObjectiveDamage,
+               MAX(p.damage_turrets) AS structureDamage,
+               MAX(p.turret_kills) AS turretKills,
+               MAX(p.inhibitor_kills) AS inhibitorKills,
+               MAX(p.first_blood) AS firstBloods
+        FROM match_participants p
+        JOIN matches m ON m.game_id = p.game_id AND m.puuid = p.puuid
+        WHERE p.puuid = ? AND p.is_player = 1
+          -- Original archive rows were migrated with zero-filled detail
+          -- columns and detail_version = 0. Those values are unavailable,
+          -- not observed zeroes, so they cannot enter detailed totals.
+          AND p.detail_version > 0
+          AND m.is_matched = 1 AND m.duration_secs > 0
+        GROUP BY p.game_id
+      )
+      SELECT COUNT(*) AS measuredGames,
+             COALESCE(SUM(neutralMinions), 0) AS neutralMinions,
+             COALESCE(SUM(goldSpent), 0) AS goldSpent,
+             COALESCE(SUM(totalDamageDealt), 0) AS totalDamageDealt,
+             COALESCE(SUM(magicDamageToChampions), 0) AS magicDamageToChampions,
+             COALESCE(SUM(physicalDamageToChampions), 0) AS physicalDamageToChampions,
+             COALESCE(SUM(trueDamageToChampions), 0) AS trueDamageToChampions,
+             COALESCE(SUM(controlWardsPurchased), 0) AS controlWardsPurchased,
+             COALESCE(SUM(teammateHealing), 0) AS teammateHealing,
+             COALESCE(SUM(teammateShielding), 0) AS teammateShielding,
+             COALESCE(MAX(longestLifeSecs), 0) AS longestLifeSecs,
+             COALESCE(SUM(wardsPlaced), 0) AS wardsPlaced,
+             COALESCE(SUM(wardsKilled), 0) AS wardsKilled,
+             COALESCE(SUM(controlWards), 0) AS controlWards,
+             COALESCE(SUM(neutralObjectiveDamage), 0) AS neutralObjectiveDamage,
+             COALESCE(SUM(structureDamage), 0) AS structureDamage,
+             COALESCE(SUM(turretKills), 0) AS turretKills,
+             COALESCE(SUM(inhibitorKills), 0) AS inhibitorKills,
+             COALESCE(SUM(firstBloods), 0) AS firstBloods
+      FROM owner_detail
+    `).get(puuid) as LifetimeTotals["detailContext"] & Pick<LifetimeTotals,
+      "wardsPlaced" | "wardsKilled" | "controlWards" | "neutralObjectiveDamage" |
+      "structureDamage" | "turretKills" | "inhibitorKills" | "firstBloods">
+
+    // Team totals require a proven standard scoreboard: one ten-player/two-team
+    // capture, five distinct participants per side, two persisted team rows,
+    // and one owner whose team maps to exactly one of them. Partial or legacy
+    // rows remain stored, but they cannot turn missing team context into zeroes.
+    const team = this.db.prepare(`
+      WITH scoped_matches AS (
+        SELECT game_id
+        FROM matches
+        WHERE puuid = ? AND is_matched = 1 AND duration_secs > 0
+      ), participant_team_shapes AS (
+        SELECT sm.game_id, p.team_id,
+               COUNT(*) AS participantRows,
+               COUNT(DISTINCT p.participant_id) AS distinctParticipants,
+               SUM(CASE WHEN p.is_player = 1 THEN 1 ELSE 0 END) AS ownerRows
+        FROM scoped_matches sm
+        JOIN match_participants p
+          ON p.game_id = sm.game_id AND p.puuid = ?
+        GROUP BY sm.game_id, p.team_id
+      ), participant_scoreboards AS (
+        SELECT game_id,
+               COUNT(*) AS participantTeams,
+               SUM(participantRows) AS participantRows,
+               SUM(distinctParticipants) AS distinctParticipants,
+               MIN(participantRows) AS smallestTeam,
+               MAX(participantRows) AS largestTeam,
+               SUM(ownerRows) AS ownerRows
+        FROM participant_team_shapes
+        GROUP BY game_id
+      ), team_scoreboards AS (
+        SELECT sm.game_id,
+               COUNT(*) AS teamRows,
+               COUNT(DISTINCT t.team_id) AS distinctTeams
+        FROM scoped_matches sm
+        JOIN match_teams t
+          ON t.game_id = sm.game_id AND t.puuid = ?
+        GROUP BY sm.game_id
+      ), aligned_scoreboards AS (
+        SELECT pts.game_id, COUNT(*) AS alignedTeams
+        FROM participant_team_shapes pts
+        JOIN match_teams t
+          ON t.game_id = pts.game_id AND t.puuid = ? AND t.team_id = pts.team_id
+        GROUP BY pts.game_id
+      ), complete_scoreboards AS (
+        SELECT sm.game_id
+        FROM scoped_matches sm
+        JOIN match_capture_manifests cm
+          ON cm.game_id = sm.game_id AND cm.puuid = ?
+         AND cm.participant_count = 10 AND cm.team_count = 2
+        JOIN participant_scoreboards ps ON ps.game_id = sm.game_id
+        JOIN team_scoreboards ts ON ts.game_id = sm.game_id
+        JOIN aligned_scoreboards als ON als.game_id = sm.game_id
+        WHERE ps.participantTeams = 2
+          AND ps.participantRows = 10
+          AND ps.distinctParticipants = 10
+          AND ps.smallestTeam = 5 AND ps.largestTeam = 5
+          AND ps.ownerRows = 1
+          AND ts.teamRows = 2 AND ts.distinctTeams = 2
+          AND als.alignedTeams = 2
+      ), owner_teams AS (
+        SELECT cs.game_id,
+               MAX(t.dragon_kills) AS dragons,
+               MAX(t.baron_kills) AS barons,
+               MAX(t.herald_kills) AS heralds,
+               MAX(t.horde_kills) AS voidGrubs,
+               MAX(t.tower_kills) AS turrets,
+               MAX(t.inhibitor_kills) AS inhibitors
+        FROM complete_scoreboards cs
+        JOIN match_participants p
+          ON p.game_id = cs.game_id AND p.puuid = ? AND p.is_player = 1
+        JOIN match_teams t
+          ON t.game_id = cs.game_id AND t.puuid = p.puuid AND t.team_id = p.team_id
+        GROUP BY cs.game_id
+        HAVING COUNT(*) = 1
+      )
+      SELECT COUNT(*) AS measuredGames,
+             COALESCE(SUM(dragons), 0) AS dragons,
+             COALESCE(SUM(barons), 0) AS barons,
+             COALESCE(SUM(heralds), 0) AS heralds,
+             COALESCE(SUM(voidGrubs), 0) AS voidGrubs,
+             COALESCE(SUM(turrets), 0) AS turrets,
+             COALESCE(SUM(inhibitors), 0) AS inhibitors
+      FROM owner_teams
+    `).get(puuid, puuid, puuid, puuid, puuid, puuid) as LifetimeTotals["teamContext"]
+
+    const { laneMinions, ...playerTotals } = player
+    return {
+      ...playerTotals,
+      losses: player.recordedGames - player.wins,
+      winRate: player.recordedGames === 0 ? 0 : player.wins / player.recordedGames,
+      totalCs: laneMinions + detailContext.neutralMinions,
+      wardsPlaced: detailContext.wardsPlaced,
+      wardsKilled: detailContext.wardsKilled,
+      controlWards: detailContext.controlWards,
+      neutralObjectiveDamage: detailContext.neutralObjectiveDamage,
+      structureDamage: detailContext.structureDamage,
+      turretKills: detailContext.turretKills,
+      inhibitorKills: detailContext.inhibitorKills,
+      firstBloods: detailContext.firstBloods,
+      detailContext: {
+        measuredGames: detailContext.measuredGames,
+        neutralMinions: detailContext.neutralMinions,
+        goldSpent: detailContext.goldSpent,
+        totalDamageDealt: detailContext.totalDamageDealt,
+        magicDamageToChampions: detailContext.magicDamageToChampions,
+        physicalDamageToChampions: detailContext.physicalDamageToChampions,
+        trueDamageToChampions: detailContext.trueDamageToChampions,
+        controlWardsPurchased: detailContext.controlWardsPurchased,
+        teammateHealing: detailContext.teammateHealing,
+        teammateShielding: detailContext.teammateShielding,
+        longestLifeSecs: detailContext.longestLifeSecs,
+      },
+      teamContext: team,
     }
   }
 
@@ -729,14 +1164,19 @@ export class MatchesRepository {
            COALESCE(AVG(deaths), 0)  AS avgDeaths,
            COALESCE(AVG(assists), 0) AS avgAssists,
            COALESCE(AVG(damage_to_champions), 0) AS avgDamageToChampions,
-           AVG(grade_score)                      AS avgGradeScore,
+           AVG(CASE WHEN role_fit_score IS NOT NULL THEN grade_score END)
+                                                 AS avgGradeScore,
            AVG(role_fit_score)                   AS averageRecallScore,
-           COUNT(grade)                          AS gradedGames
+           COUNT(role_fit_score)                 AS gradedGames
          FROM matches ${clause}
          GROUP BY champion_id
          ORDER BY games DESC, wins DESC`,
       )
       .all(...params) as Record<string, number>[]
+
+    const selectedGrades = hasSelectedGradeRecipe(this.db)
+      ? selectedRecipeChampionGrades(this.db, clause, params)
+      : undefined
 
     return rows.map((row) => ({
       championId: row.championId,
@@ -748,9 +1188,15 @@ export class MatchesRepository {
       avgAssists: row.avgAssists,
       kda: computeKda(row.totalKills, row.totalDeaths, row.totalAssists),
       avgDamageToChampions: row.avgDamageToChampions,
-      avgGradeScore: row.avgGradeScore ?? undefined,
-      averageRecallScore: row.averageRecallScore ?? undefined,
-      gradedGames: row.gradedGames,
+      avgGradeScore: selectedGrades
+        ? selectedGrades.get(row.championId)?.avgGradeScore
+        : row.avgGradeScore ?? undefined,
+      averageRecallScore: selectedGrades
+        ? selectedGrades.get(row.championId)?.averageRecallScore
+        : row.averageRecallScore ?? undefined,
+      gradedGames: selectedGrades
+        ? selectedGrades.get(row.championId)?.gradedGames ?? 0
+        : row.gradedGames,
     }))
   }
 
@@ -1120,8 +1566,48 @@ const SORT_COLUMNS: Record<string, string> = {
   played_at: "played_at",
   kda: "(kills + assists) * 1.0 / MAX(1, deaths)",
   damage: "damage_to_champions",
-  grade: "role_fit_score",
   duration: "duration_secs",
+}
+
+/**
+ * Read one authoritative owner score from the exact recipe selected for v3.
+ *
+ * `matches.grade_score` and `matches.role_fit_score` are renderer caches. A
+ * rebuild can leave those columns stale without changing the immutable result,
+ * so predicates and ordering must not use them after a recipe is selected.
+ * The fallback preserves history browsing in databases that have not crossed
+ * the recipe-selection cutover yet.
+ */
+function selectedOwnerScore(column: "grade_score" | "role_fit_score"): string {
+  const cacheColumn = column === "grade_score" ? "grade_score" : "role_fit_score"
+  return `CASE
+    WHEN EXISTS (
+      SELECT 1 FROM grade_recipe_selections selected
+      WHERE selected.algorithm_version = ${MATCH_GRADE_ALGORITHM_VERSION}
+    ) THEN (
+      SELECT result.${column}
+      FROM grade_recipe_selections selected
+      JOIN match_grade_attempts attempt
+        ON attempt.game_id = matches.game_id
+       AND attempt.puuid = matches.puuid
+       AND attempt.algorithm_version = selected.algorithm_version
+       AND attempt.recipe_id = selected.recipe_id
+       AND attempt.grade_status = 'ready'
+       AND attempt.owner_participant_id IS NOT NULL
+      JOIN match_grade_results result
+        ON result.game_id = attempt.game_id
+       AND result.puuid = attempt.puuid
+       AND result.participant_id = attempt.owner_participant_id
+       AND result.algorithm_version = attempt.algorithm_version
+       AND result.recipe_id = attempt.recipe_id
+       AND result.grade_status = 'ready'
+       AND result.role_fit_score IS NOT NULL
+       AND attempt.role_fit_score = result.role_fit_score
+      WHERE selected.algorithm_version = ${MATCH_GRADE_ALGORITHM_VERSION}
+      LIMIT 1
+    )
+    ELSE matches.${cacheColumn}
+  END`
 }
 
 /**
@@ -1152,7 +1638,9 @@ const LOBBY_PLACE_SQL = `
   ), 0) AS lobby_size`
 
 function orderBy(query: MatchQuery): string {
-  const column = SORT_COLUMNS[query.sortBy ?? "played_at"] ?? "played_at"
+  const column = query.sortBy === "grade"
+    ? selectedOwnerScore("role_fit_score")
+    : SORT_COLUMNS[query.sortBy ?? "played_at"] ?? "played_at"
   const direction = query.sortDir === "asc" ? "ASC" : "DESC"
 
   // game_id breaks ties so paging cannot repeat or skip a row.
@@ -1174,12 +1662,12 @@ function buildQuery(query: MatchQuery) {
   if (query.result === "loss") conditions.push("win = 0")
 
   if (query.minGradeScore !== undefined) {
-    conditions.push("grade_score >= ?")
+    conditions.push(`${selectedOwnerScore("grade_score")} >= ?`)
     params.push(query.minGradeScore)
   }
 
   if (query.minRecallScore !== undefined) {
-    conditions.push("role_fit_score >= ?")
+    conditions.push(`${selectedOwnerScore("role_fit_score")} >= ?`)
     params.push(query.minRecallScore)
   }
 
@@ -1298,7 +1786,7 @@ function buildFilter(filter: StatsFilter) {
   return { clause: `WHERE ${conditions.join(" AND ")}`, params }
 }
 
-/** Normalizes positions with the same precedence as renderer `resolvePosition`. */
+/** Uses the persisted resolver result before every legacy role/lane fallback. */
 function normalizedRole(alias = ""): string {
   const prefix = alias ? `${alias}.` : ""
   const outer = alias || "matches"
@@ -1308,6 +1796,9 @@ function normalizedRole(alias = ""): string {
       AND mp.is_player = 1
     LIMIT 1)`
   return `CASE
+    WHEN UPPER(COALESCE(${prefix}resolved_position, '')) IN
+        ('TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY')
+      THEN UPPER(${prefix}resolved_position)
     WHEN UPPER(COALESCE(${prefix}role, '')) IN ('TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY')
       THEN UPPER(${prefix}role)
     WHEN UPPER(COALESCE(${assigned}, '')) IN ('TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY')

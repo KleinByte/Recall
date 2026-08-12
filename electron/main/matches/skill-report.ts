@@ -25,7 +25,8 @@ import {
   wilsonInterval,
   type Interval,
 } from "./analytics.js"
-import { durationBucketsFor, rankChampions } from "./insights.js"
+import { durationBucketsFor } from "./insights.js"
+import { durationBucketFor } from "../../../src/helpers/time-contract-core.js"
 import { STYLE_AXIS_LABELS } from "./style.js"
 import type { StyleAxis, StyleProfile } from "./style.js"
 import {
@@ -51,7 +52,9 @@ export interface InsightFinding {
   games: number
   eligibleGames: number
   effect: number
+  /** `grade` is retained as a wire token and means 0-100 Recall Score points. */
   unit: "grade" | "probability" | "percentile" | "rate"
+  scoreScale?: "recall_score_0_100"
   interval?: Interval
   rateInterval?: Interval
   scope: string
@@ -65,6 +68,13 @@ export interface InsightSection {
   method: string
   eligible: boolean
   neededGames: number
+  observedGames?: number
+  window?: {
+    label: string
+    limit?: number
+    recentGames?: number
+    priorGames?: number
+  }
   findings: InsightFinding[]
 }
 
@@ -94,22 +104,22 @@ const BUCKET_MIN_GRADED = 8
 export function buildBestGamePattern(
   observations: InsightObservation[],
 ): BestGamePatternReport {
-  const graded = observations.filter((obs) => obs.gradeScore !== undefined)
+  const graded = observations.filter((obs) => obs.recallScore !== undefined)
 
   if (graded.length < STRONG_GAME_MIN_GRADED) {
     return { eligible: false, findings: [] }
   }
 
   // Find top quartile threshold (inclusive)
-  const scores = graded.map((obs) => obs.gradeScore!)
+  const scores = graded.map((obs) => obs.recallScore!)
   const threshold = quantile(scores, 0.75)
 
   if (threshold === undefined) {
     return { eligible: false, findings: [] }
   }
 
-  const strong = graded.filter((obs) => obs.gradeScore! >= threshold)
-  const nonStrong = graded.filter((obs) => obs.gradeScore! < threshold)
+  const strong = graded.filter((obs) => obs.recallScore! >= threshold)
+  const nonStrong = graded.filter((obs) => obs.recallScore! < threshold)
 
   if (strong.length < STRONG_GAME_MIN_EACH_SIDE || nonStrong.length < STRONG_GAME_MIN_EACH_SIDE) {
     return { eligible: false, findings: [] }
@@ -179,7 +189,11 @@ export function buildBestGamePattern(
     const effect = strongMedian - nonStrongMedian
 
     // Confidence based on sample size and interval width
-    const confidence = assessConfidence(strong.length, interval, "percentile")
+    const confidence = assessConfidence(
+      Math.min(strongPercentiles.length, nonStrongPercentiles.length),
+      interval,
+      "percentile",
+    )
 
     // Generate summary (association language only, no directional if interval includes zero)
     const includesZero = interval.low <= 0 && interval.high >= 0
@@ -193,19 +207,19 @@ export function buildBestGamePattern(
       summary,
       evidenceLevel: "comparative",
       confidence,
-      games: strong.length,
-      eligibleGames: graded.length,
+      games: strongPercentiles.length,
+      eligibleGames: strongPercentiles.length + nonStrongPercentiles.length,
       effect,
       unit: "percentile",
       interval,
-      scope: `Best ${strong.length} of ${graded.length} graded games`,
+      scope: `${strongPercentiles.length} strong-game measurements vs ${nonStrongPercentiles.length} other-game measurements`,
       caveat: includesZero ? "Difference may be due to chance" : undefined,
     })
   }
 
   return {
     eligible: true,
-    definition: `Strong games are the top 25% of your frozen-reference compatibility scores`,
+    definition: `Strong games are the top 25% of your frozen-reference Recall Scores`,
     strongGames: strong.length,
     nonStrongGames: nonStrong.length,
     findings,
@@ -245,20 +259,38 @@ function empiricalPercentileSorted(values: number[], value: number): number {
 /**
  * Analyze performance across playing conditions
  */
+function sessionizedInsightObservations(observations: InsightObservation[]) {
+  const sorted = [...observations].sort(
+    (left, right) => left.playedAt - right.playedAt || left.gameId - right.gameId,
+  )
+  if (sorted.every((observation) =>
+    Number.isSafeInteger(observation.session) && Number.isSafeInteger(observation.sessionGame))) {
+    return sorted.map((observation) => ({
+      gameId: observation.gameId,
+      startedAt: observation.playedAt,
+      durationSecs: observation.durationSecs,
+      observation,
+      session: observation.session!,
+      sessionGame: observation.sessionGame!,
+      restMinutes: observation.restMinutes,
+    }))
+  }
+  return sessionize(sorted.map((observation) => ({
+    gameId: observation.gameId,
+    startedAt: observation.playedAt,
+    durationSecs: observation.durationSecs,
+    observation,
+  })))
+}
+
 export function buildPlayingConditions(
   observations: InsightObservation[],
 ): PlayingConditionsReport {
-  // Sessionize first
-  const sessions = sessionize(
-    observations.map((obs) => ({
-      gameId: obs.gameId,
-      startedAt: obs.playedAt,
-      durationSecs: obs.durationSecs,
-      observation: obs,
-    })),
-  )
+  // Repository observations already carry account-wide session ordinals. Pure
+  // callers without that context still get deterministic local sessionization.
+  const sessions = sessionizedInsightObservations(observations)
 
-  const graded = sessions.filter((s) => s.observation.gradeScore !== undefined)
+  const graded = sessions.filter((s) => s.observation.recallScore !== undefined)
 
   // Require at least 30 graded games overall
   if (graded.length < CONDITIONS_MIN_GRADED) {
@@ -308,25 +340,24 @@ export function buildPlayingConditions(
     }
   }
 
-  const scopeGradeBaseline = graded.reduce((sum, s) => sum + s.observation.gradeScore!, 0) / graded.length
   const scopeWinRate = graded.filter((s) => s.observation.win).length / graded.length
 
   const sections: InsightSection[] = []
 
   // Time of day buckets (8 three-hour blocks)
-  sections.push(buildTimeOfDaySection(graded, scopeGradeBaseline, scopeWinRate))
+  sections.push(buildTimeOfDaySection(graded, scopeWinRate))
 
   // Day of week buckets
-  sections.push(buildDayOfWeekSection(graded, scopeGradeBaseline, scopeWinRate))
+  sections.push(buildDayOfWeekSection(graded, scopeWinRate))
 
   // Session game number buckets (1, 2, 3, 4+)
-  sections.push(buildSessionGameSection(graded, scopeGradeBaseline, scopeWinRate))
+  sections.push(buildSessionGameSection(graded, scopeWinRate))
 
   // Previous result condition
-  sections.push(buildPreviousResultSection(graded, scopeGradeBaseline, scopeWinRate))
+  sections.push(buildPreviousResultSection(graded, scopeWinRate))
 
   // Rest time buckets (<15, 15-45, 45-90, new session)
-  sections.push(buildRestTimeSection(graded, scopeGradeBaseline, scopeWinRate))
+  sections.push(buildRestTimeSection(graded, scopeWinRate))
 
   return { sections }
 }
@@ -337,13 +368,13 @@ export function buildPlayingConditions(
 export function buildDurationInsights(
   observations: InsightObservation[],
 ): DurationInsightsReport {
-  const graded = observations.filter((obs) => obs.gradeScore !== undefined)
+  const graded = observations.filter((obs) => obs.recallScore !== undefined)
 
   if (graded.length === 0) {
     return {
       key: "duration",
       title: "Game Duration",
-      method: "Duration-based compatibility-score comparison",
+      method: "Duration-based Recall Score comparison",
       eligible: false,
       neededGames: BUCKET_MIN_GRADED,
       findings: [],
@@ -352,12 +383,9 @@ export function buildDurationInsights(
 
   const family = graded[0]?.family ?? "sr"
   const buckets = durationBucketsFor(family)
-  const scopeBaseline = graded.reduce((sum, obs) => sum + obs.gradeScore!, 0) / graded.length
-
   const bucketData: Array<{ label: string; games: typeof graded }> = buckets.map((bucket, index) => {
-    const previousMax = index > 0 ? buckets[index - 1].maxSecs : 0
     const games = graded.filter(
-      (obs) => obs.durationSecs > previousMax && obs.durationSecs <= bucket.maxSecs
+      (obs) => durationBucketFor(family, obs.durationSecs)?.index === index,
     )
     return { label: bucket.label, games }
   })
@@ -368,7 +396,7 @@ export function buildDurationInsights(
     return {
       key: "duration",
       title: "Game Duration",
-      method: "Duration-based compatibility-score comparison",
+      method: "Duration-based Recall Score comparison",
       eligible: false,
       neededGames: BUCKET_MIN_GRADED * 2,
       findings: [],
@@ -378,49 +406,47 @@ export function buildDurationInsights(
   const findings: InsightFinding[] = []
 
   for (const bucket of eligibleBuckets) {
-    const wins = bucket.games.filter((g) => g.win).length
     const games = bucket.games.length
-    const grades = bucket.games.map((g) => g.gradeScore!)
-    const avgGrade = grades.reduce((sum, g) => sum + g, 0) / grades.length
+    const grades = bucket.games.map((g) => g.recallScore!)
 
-    const interval = wilsonInterval(wins, games)
-    const adjustedRate = shrinkRate(wins, games, scopeBaseline / 100)
-    const gradeDelta = avgGrade - scopeBaseline
-
-    // Bootstrap grade comparison if we have other buckets
+    // Compare the bucket median with the median of the other eligible buckets.
+    // The point estimate and bootstrap interval intentionally use the exact
+    // same robust median-difference estimand.
     const otherGames = eligibleBuckets
       .filter((b) => b.label !== bucket.label)
       .flatMap((b) => b.games)
 
-    const otherGrades = otherGames.map((g) => g.gradeScore!)
+    const otherGrades = otherGames.map((g) => g.recallScore!)
+    const gradeDelta = (quantile(grades, 0.5) ?? 0) - (quantile(otherGrades, 0.5) ?? 0)
     const gradeInterval = otherGrades.length > 0
       ? bootstrapDifference(grades, otherGrades, `duration:${bucket.label}`)
       : undefined
 
     const includesZero = gradeInterval && gradeInterval.low <= 0 && gradeInterval.high >= 0
     const summary = includesZero || !gradeInterval
-      ? `${bucket.label} games show no clear grade association.`
-      : `${bucket.label} games associated with ${gradeDelta > 0 ? "higher" : "lower"} compatibility scores.`
+      ? `${bucket.label} games show no clear Recall Score association.`
+      : `${bucket.label} games associated with ${gradeDelta > 0 ? "higher" : "lower"} Recall Scores.`
 
     findings.push({
       key: bucket.label,
       title: bucket.label,
       summary,
       evidenceLevel: "comparative",
-      confidence: assessConfidence(games, gradeInterval, "grade"),
+      confidence: assessConfidence(Math.min(games, otherGrades.length), gradeInterval, "grade"),
       games,
-      eligibleGames: graded.length,
+      eligibleGames: games + otherGrades.length,
       effect: gradeDelta,
       unit: "grade",
+      scoreScale: "recall_score_0_100",
       interval: gradeInterval,
-      scope: `${games} games`,
+      scope: `${games} games vs ${otherGrades.length} games in the other measured duration bands`,
     })
   }
 
   return {
     key: "duration",
     title: "Game Duration",
-    method: "Duration-based compatibility-score comparison",
+    method: "Duration-based Recall Score comparison",
     eligible: true,
     neededGames: 0,
     findings,
@@ -431,7 +457,6 @@ export function buildDurationInsights(
 
 function buildTimeOfDaySection(
   sessions: ReturnType<typeof sessionize<any>>,
-  scopeGradeBaseline: number,
   scopeWinRate: number,
 ): InsightSection {
   // 8 three-hour blocks using device local time
@@ -455,7 +480,7 @@ function buildTimeOfDaySection(
     })
 
     // Include all buckets, even sparse ones (<8 games)
-    const finding = buildConditionFinding(bucket.label, games, scopeGradeBaseline, scopeWinRate, sessions)
+    const finding = buildConditionFinding(bucket.label, games, scopeWinRate, sessions)
     findings.push(finding)
   }
 
@@ -474,7 +499,6 @@ function buildTimeOfDaySection(
 
 function buildDayOfWeekSection(
   sessions: ReturnType<typeof sessionize<any>>,
-  scopeGradeBaseline: number,
   scopeWinRate: number,
 ): InsightSection {
   const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
@@ -484,7 +508,7 @@ function buildDayOfWeekSection(
     const games = sessions.filter((s) => new Date(s.observation.playedAt).getDay() === dayIndex)
 
     // Include all fixed buckets, even sparse ones (<8 games)
-    const finding = buildConditionFinding(days[dayIndex], games, scopeGradeBaseline, scopeWinRate, sessions)
+    const finding = buildConditionFinding(days[dayIndex], games, scopeWinRate, sessions)
     findings.push(finding)
   }
 
@@ -503,7 +527,6 @@ function buildDayOfWeekSection(
 
 function buildSessionGameSection(
   sessions: ReturnType<typeof sessionize<any>>,
-  scopeGradeBaseline: number,
   scopeWinRate: number,
 ): InsightSection {
   const buckets = [
@@ -519,7 +542,7 @@ function buildSessionGameSection(
     const games = sessions.filter(bucket.filter)
 
     // Include all fixed buckets, even sparse ones (<8 games)
-    const finding = buildConditionFinding(bucket.label, games, scopeGradeBaseline, scopeWinRate, sessions)
+    const finding = buildConditionFinding(bucket.label, games, scopeWinRate, sessions)
     findings.push(finding)
   }
 
@@ -538,19 +561,22 @@ function buildSessionGameSection(
 
 function buildPreviousResultSection(
   sessions: ReturnType<typeof sessionize<any>>,
-  scopeGradeBaseline: number,
   scopeWinRate: number,
 ): InsightSection {
   const buckets = [
     {
       label: "After win",
       filter: (s: typeof sessions[0], index: number) =>
-        s.sessionGame > 1 && index > 0 && sessions[index - 1].observation.win && sessions[index - 1].session === s.session,
+        s.sessionGame > 1 && (s.observation.previousWin === true ||
+          (s.observation.previousWin === undefined && index > 0 &&
+            sessions[index - 1].observation.win && sessions[index - 1].session === s.session)),
     },
     {
       label: "After loss",
       filter: (s: typeof sessions[0], index: number) =>
-        s.sessionGame > 1 && index > 0 && !sessions[index - 1].observation.win && sessions[index - 1].session === s.session,
+        s.sessionGame > 1 && (s.observation.previousWin === false ||
+          (s.observation.previousWin === undefined && index > 0 &&
+            !sessions[index - 1].observation.win && sessions[index - 1].session === s.session)),
     },
   ]
 
@@ -560,7 +586,7 @@ function buildPreviousResultSection(
     const games = sessions.filter((s, i) => bucket.filter(s, i))
 
     // Include all fixed buckets, even sparse ones (<8 games)
-    const finding = buildConditionFinding(bucket.label, games, scopeGradeBaseline, scopeWinRate, sessions)
+    const finding = buildConditionFinding(bucket.label, games, scopeWinRate, sessions)
     findings.push(finding)
   }
 
@@ -579,7 +605,6 @@ function buildPreviousResultSection(
 
 function buildRestTimeSection(
   sessions: ReturnType<typeof sessionize<any>>,
-  scopeGradeBaseline: number,
   scopeWinRate: number,
 ): InsightSection {
   const buckets = [
@@ -590,7 +615,7 @@ function buildRestTimeSection(
     },
     {
       label: "Rest 45-90 min",
-      filter: (s: typeof sessions[0]) => s.restMinutes !== undefined && s.restMinutes >= 45 && s.restMinutes <= 90,
+      filter: (s: typeof sessions[0]) => s.restMinutes !== undefined && s.restMinutes >= 45 && s.restMinutes < 90,
     },
     {
       label: "New session",
@@ -604,7 +629,7 @@ function buildRestTimeSection(
     const games = sessions.filter(bucket.filter)
 
     // Include all fixed buckets, even sparse ones (<8 games)
-    const finding = buildConditionFinding(bucket.label, games, scopeGradeBaseline, scopeWinRate, sessions)
+    const finding = buildConditionFinding(bucket.label, games, scopeWinRate, sessions)
     findings.push(finding)
   }
 
@@ -614,7 +639,7 @@ function buildRestTimeSection(
   return {
     key: "restTime",
     title: "Rest Between Games",
-    method: "Performance by break duration (>90 min or missing end time starts new session)",
+    method: "Performance by break duration (90+ min or missing end time starts new session)",
     eligible,
     neededGames: BUCKET_MIN_GRADED,
     findings,
@@ -624,7 +649,6 @@ function buildRestTimeSection(
 function buildConditionFinding(
   label: string,
   games: Array<{ observation: InsightObservation }>,
-  scopeGradeBaseline: number,
   scopeWinRate: number,
   allSessions: Array<{ observation: InsightObservation }>,
 ): InsightFinding {
@@ -635,27 +659,24 @@ function buildConditionFinding(
   const rawRate = count === 0 ? 0 : wins / count
   const rateInterval = wilsonInterval(wins, count)
   const adjustedRate = count === 0 ? scopeWinRate : shrinkRate(wins, count, scopeWinRate)
-  const adjustedRateDelta = adjustedRate - scopeWinRate
 
   const grades = games
-    .filter((g) => g.observation.gradeScore !== undefined)
-    .map((g) => g.observation.gradeScore!)
+    .filter((g) => g.observation.recallScore !== undefined)
+    .map((g) => g.observation.recallScore!)
 
-  const bucketMean = grades.length > 0 ? grades.reduce((sum, g) => sum + g, 0) / grades.length : scopeGradeBaseline
+  const bucketGameIds = new Set(games.map((game) => game.observation.gameId))
+  const complementGrades = allSessions
+    .filter((session) => !bucketGameIds.has(session.observation.gameId))
+    .flatMap((session) => session.observation.recallScore === undefined
+      ? [] : [session.observation.recallScore])
+  const gradeDelta = grades.length && complementGrades.length
+    ? (quantile(grades, 0.5) ?? 0) - (quantile(complementGrades, 0.5) ?? 0)
+    : 0
 
-  // Adjusted grade formula: (n * bucketMean + 12 * scopeMean) / (n + 12)
-  // For 0 games: (0 * x + 12 * baseline) / 12 = baseline, delta = 0
-  const adjustedGrade = (grades.length * bucketMean + 12 * scopeGradeBaseline) / (grades.length + 12)
-  const adjustedGradeDelta = adjustedGrade - scopeGradeBaseline
-
-  // Bootstrap grade delta against selected-scope graded history
-  // Only if bucket has >=8 graded games
-  const allGrades = allSessions
-    .filter((s) => s.observation.gradeScore !== undefined)
-    .map((s) => s.observation.gradeScore!)
-
-  const gradeInterval = grades.length >= BUCKET_MIN_GRADED && allGrades.length > grades.length
-    ? bootstrapDifference(grades, allGrades, `condition:${label}`)
+  // Only infer with at least eight bucket games. Both the point and interval
+  // compare the bucket median with the non-overlapping complement median.
+  const gradeInterval = grades.length >= BUCKET_MIN_GRADED && complementGrades.length > 0
+    ? bootstrapDifference(grades, complementGrades, `condition:${label}`)
     : undefined
 
   // Directional copy only if bucket has >=8 graded games and grade interval excludes zero
@@ -664,8 +685,8 @@ function buildConditionFinding(
 
   const summary =
     !hasEnoughGames || includesZero
-      ? `${label}: ${count} games, insufficient data for compatibility-score comparison.`
-      : `${label} associated with ${adjustedGradeDelta > 0 ? "higher" : "lower"} compatibility scores.`
+      ? `${label}: ${count} games, insufficient data for Recall Score comparison.`
+      : `${label} associated with ${gradeDelta > 0 ? "higher" : "lower"} Recall Scores.`
 
   return {
     key: label,
@@ -675,12 +696,13 @@ function buildConditionFinding(
     confidence: assessConfidence(count, gradeInterval, "grade"),
     games: count,
     eligibleGames: allSessions.length,
-    effect: adjustedGradeDelta,
+    effect: gradeDelta,
     unit: "grade",
+    scoreScale: "recall_score_0_100",
     interval: gradeInterval,
     rateInterval,
     scope: `${count} games (raw rate ${(rawRate * 100).toFixed(1)}%, adjusted rate ${(adjustedRate * 100).toFixed(1)}%)`,
-    caveat: hasEnoughGames && includesZero ? "Grade difference may be due to chance" : undefined,
+    caveat: hasEnoughGames && includesZero ? "Recall Score difference may be due to chance" : undefined,
   }
 }
 
@@ -698,8 +720,9 @@ function assessConfidence(
     if (games >= 30 && width < 0.25) return "medium"
     return "low"
   } else if (unit === "grade") {
-    if (games >= 50 && width < 1.5) return "high"
-    if (games >= 30 && width < 2.5) return "medium"
+    // Public grade effects are measured in 0-100 Recall Score points.
+    if (games >= 50 && width < 8) return "high"
+    if (games >= 30 && width < 14) return "medium"
     return "low"
   } else {
     // percentile
@@ -736,19 +759,25 @@ const CORE_POOL_SIZE = 5
 export function buildChampionFindings(
   observations: InsightObservation[],
   championStats: ChampionStatRow[],
-  baseline: number,
+  _baseline: number,
   family: ModeFamily,
 ): InsightSection {
-  const graded = observations.filter((o) => o.gradeScore !== undefined)
-  const ranked = rankChampions(championStats, baseline)
-  const eligible = ranked.filter((c) => c.gradedGames >= CHAMP_MIN_GRADED)
+  const graded = observations.filter((o) => o.recallScore !== undefined)
+  const gradedByChampion = new Map<number, number[]>()
+  for (const observation of graded) {
+    const scores = gradedByChampion.get(observation.championId) ?? []
+    scores.push(observation.recallScore!)
+    gradedByChampion.set(observation.championId, scores)
+  }
+  const eligible = championStats.filter((champion) =>
+    (gradedByChampion.get(champion.championId)?.length ?? 0) >= CHAMP_MIN_GRADED)
   const isRandom = family === "aram" || family === "other"
 
   if (eligible.length === 0) {
     return {
       key: "champions",
       title: "Champion Performance",
-      method: "Adjusted grade with bootstrap interval",
+      method: "Median Recall Score difference with bootstrap interval",
       eligible: false,
       neededGames: CHAMP_MIN_GRADED,
       findings: [],
@@ -766,15 +795,13 @@ export function buildChampionFindings(
   const findings: InsightFinding[] = []
 
   for (const champ of eligible) {
-    const champGrades = graded
-      .filter((o) => o.championId === champ.championId)
-      .map((o) => o.gradeScore!)
+    const champGrades = gradedByChampion.get(champ.championId) ?? []
 
     if (champGrades.length < CHAMP_MIN_GRADED) continue
 
     const otherGrades = graded
-      .filter((o) => o.championId !== champ.championId && o.gradeScore !== undefined)
-      .map((o) => o.gradeScore!)
+      .filter((o) => o.championId !== champ.championId && o.recallScore !== undefined)
+      .map((o) => o.recallScore!)
 
     if (otherGrades.length === 0) continue
 
@@ -782,14 +809,16 @@ export function buildChampionFindings(
     const includesZero = interval.low <= 0 && interval.high >= 0
     const isCore = coreIds.has(champ.championId)
     const share = totalGames > 0 ? champ.games / totalGames : 0
+    const medianDifference = (quantile(champGrades, 0.5) ?? 0) -
+      (quantile(otherGrades, 0.5) ?? 0)
 
     let summary: string
     if (!includesZero && interval.low > 0) {
-      summary = `Champion ${champ.championId} associated with higher compatibility scores.`
+      summary = `Champion ${champ.championId} associated with higher Recall Scores.`
     } else if (!includesZero && interval.high < 0) {
-      summary = `Champion ${champ.championId} associated with lower compatibility scores.`
+      summary = `Champion ${champ.championId} associated with lower Recall Scores.`
     } else {
-      summary = `No clear grade association for champion ${champ.championId}.`
+      summary = `No clear Recall Score association for champion ${champ.championId}.`
     }
 
     findings.push({
@@ -797,13 +826,16 @@ export function buildChampionFindings(
       title: `Champion ${champ.championId}`,
       summary,
       evidenceLevel: "comparative",
-      confidence: assessConfidence(champGrades.length, interval, "grade"),
-      games: champ.games,
-      eligibleGames: graded.length,
-      effect: champ.adjustedGrade - baseline,
+      confidence: assessConfidence(Math.min(champGrades.length, otherGrades.length), interval, "grade"),
+      // Forest plots and confidence labels use this as the analyzed sample.
+      // Only selected-recipe graded games enter the Recall Score estimate.
+      games: champGrades.length,
+      eligibleGames: champGrades.length + otherGrades.length,
+      effect: medianDifference,
       unit: "grade",
+      scoreScale: "recall_score_0_100",
       interval,
-      scope: `${champGrades.length} graded games, ${(share * 100).toFixed(0)}% of pool${isCore ? " (core)" : ""}`,
+      scope: `${champGrades.length} graded games vs ${otherGrades.length} on other champions, ${(share * 100).toFixed(0)}% of pool${isCore ? " (core)" : ""}`,
       caveat: isRandom ? RANDOM_CHAMPION_CAVEAT : undefined,
     })
   }
@@ -811,9 +843,9 @@ export function buildChampionFindings(
   return {
     key: "champions",
     title: "Champion Performance",
-    method: "Adjusted grade with bootstrap interval",
-    eligible: true,
-    neededGames: 0,
+    method: "Median Recall Score difference with bootstrap interval",
+    eligible: findings.length > 0,
+    neededGames: findings.length > 0 ? 0 : CHAMP_MIN_GRADED,
     findings,
   }
 }
@@ -864,7 +896,7 @@ function bootstrapStratifiedEffect(
 export function buildItemFindings(
   itemObservations: FinalItemObservation[],
 ): InsightSection {
-  const graded = itemObservations.filter((o) => o.gradeScore !== undefined)
+  const graded = itemObservations.filter((o) => o.recallScore !== undefined)
 
   if (graded.length === 0) {
     return {
@@ -909,9 +941,9 @@ export function buildItemFindings(
       if (!strataMap.has(key)) strataMap.set(key, { withGrades: [], withoutGrades: [] })
       const s = strataMap.get(key)!
       if (obs.itemIds.includes(itemId)) {
-        s.withGrades.push(obs.gradeScore!)
+        s.withGrades.push(obs.recallScore!)
       } else {
-        s.withoutGrades.push(obs.gradeScore!)
+        s.withoutGrades.push(obs.recallScore!)
       }
     }
 
@@ -926,11 +958,13 @@ export function buildItemFindings(
         summary: `Item ${itemId} found in ${totalGames} games; insufficient stratified data.`,
         evidenceLevel: "comparative",
         confidence: "insufficient",
-        games: totalGames,
-        eligibleGames: graded.length,
+        games: 0,
+        eligibleGames: 0,
         effect: 0,
         unit: "grade",
-        scope: `${totalGames} games`,
+        scoreScale: "recall_score_0_100",
+        scope: `${totalGames} games with the item, but no comparable games in the same champion-position group`,
+        values: { recordedItemGames: totalGames },
         caveat: ITEM_CAVEAT,
       })
       continue
@@ -938,12 +972,16 @@ export function buildItemFindings(
 
     let totalWeight = 0
     let weightedSum = 0
+    let withItemGames = 0
+    let withoutItemGames = 0
     for (const s of validStrata) {
       const wMean = s.withGrades.reduce((a, b) => a + b, 0) / s.withGrades.length
       const woMean = s.withoutGrades.reduce((a, b) => a + b, 0) / s.withoutGrades.length
       const w = Math.min(s.withGrades.length, s.withoutGrades.length)
       weightedSum += w * (wMean - woMean)
       totalWeight += w
+      withItemGames += s.withGrades.length
+      withoutItemGames += s.withoutGrades.length
     }
     const effect = totalWeight > 0 ? weightedSum / totalWeight : 0
 
@@ -951,31 +989,33 @@ export function buildItemFindings(
     const includesZero = interval.low <= 0 && interval.high >= 0
 
     const summary = includesZero
-      ? `No clear grade association for item ${itemId}.`
-      : `Item ${itemId} associated with ${effect > 0 ? "higher" : "lower"} compatibility scores.`
+      ? `No clear Recall Score association for item ${itemId}.`
+      : `Item ${itemId} associated with ${effect > 0 ? "higher" : "lower"} Recall Scores.`
 
     findings.push({
       key: `item:${itemId}`,
       title: `Item ${itemId}`,
       summary,
       evidenceLevel: "comparative",
-      confidence: assessConfidence(totalGames, interval, "grade"),
-      games: totalGames,
-      eligibleGames: graded.length,
+      confidence: assessConfidence(Math.min(withItemGames, withoutItemGames), interval, "grade"),
+      games: withItemGames,
+      eligibleGames: withItemGames + withoutItemGames,
       effect,
       unit: "grade",
+      scoreScale: "recall_score_0_100",
       interval,
-      scope: `${totalGames} games across ${validStrata.length} champion-role strata`,
+      scope: `${withItemGames} games with the item vs ${withoutItemGames} without across ${validStrata.length} champion-position groups`,
       caveat: ITEM_CAVEAT,
     })
   }
 
+  const hasComparison = findings.some((finding) => finding.interval !== undefined)
   return {
     key: "items",
     title: "Item Associations",
     method: "Stratified weighted bootstrap by champion and role",
-    eligible: true,
-    neededGames: 0,
+    eligible: hasComparison,
+    neededGames: hasComparison ? 0 : ITEM_MIN_GAMES,
     findings,
   }
 }
@@ -1015,7 +1055,7 @@ export function buildTrendFindings(
   observations: InsightObservation[],
   family: ModeFamily,
 ): InsightSection {
-  const graded = observations.filter((o) => o.gradeScore !== undefined)
+  const graded = observations.filter((o) => o.recallScore !== undefined)
   const sorted = [...graded].sort((a, b) => b.playedAt - a.playedAt || b.gameId - a.gameId)
 
   const axisKeys = axisKeysFor(family)
@@ -1040,7 +1080,7 @@ export function buildTrendFindings(
 
     windows.push({
       index: windows.length,
-      grades: slice.map((o) => o.gradeScore!),
+      grades: slice.map((o) => o.recallScore!),
       axisValues,
     })
   }
@@ -1058,13 +1098,14 @@ export function buildTrendFindings(
     findings.push({
       key: `window:${w.index}`,
       title: `Games ${w.index * TREND_WINDOW_SIZE + 1}\u2013${(w.index + 1) * TREND_WINDOW_SIZE}`,
-      summary: `Average compatibility score: ${avg.toFixed(1)}`,
+      summary: `Average Recall Score: ${avg.toFixed(1)}`,
       evidenceLevel: "descriptive",
       confidence: "insufficient",
       games: w.grades.length,
       eligibleGames: graded.length,
       effect: avg,
       unit: "grade",
+      scoreScale: "recall_score_0_100",
       scope: `${w.grades.length} games`,
       values,
     })
@@ -1075,18 +1116,16 @@ export function buildTrendFindings(
     const prior = [...windows[1].grades, ...windows[2].grades]
 
     const interval = bootstrapDifference(latest, prior, "trend:grade")
-    const latestAvg = latest.reduce((s, g) => s + g, 0) / latest.length
-    const priorAvg = prior.reduce((s, g) => s + g, 0) / prior.length
-    const delta = latestAvg - priorAvg
+    const delta = (quantile(latest, 0.5) ?? 0) - (quantile(prior, 0.5) ?? 0)
     const includesZero = interval.low <= 0 && interval.high >= 0
 
     const gradeSummary = includesZero
-      ? "No clear trend in recent compatibility scores."
-      : `Recent games associated with ${delta > 0 ? "higher" : "lower"} compatibility scores.`
+      ? "No clear trend in recent Recall Scores."
+      : `Recent games associated with ${delta > 0 ? "higher" : "lower"} Recall Scores.`
 
     findings.push({
       key: "trend:grade",
-      title: "Compatibility-score trend",
+      title: "Recall Score trend",
       summary: gradeSummary,
       evidenceLevel: "comparative",
       confidence: assessConfidence(latest.length + prior.length, interval, "grade"),
@@ -1094,6 +1133,7 @@ export function buildTrendFindings(
       eligibleGames: latest.length + prior.length,
       effect: delta,
       unit: "grade",
+      scoreScale: "recall_score_0_100",
       interval,
       scope: `Latest ${latest.length} vs prior ${prior.length} games`,
     })
@@ -1221,7 +1261,7 @@ function buildStyleDrift(
   axes: StyleAxis[],
 ): Array<{ label: string; axes: StyleAxis[] }> {
   const ordered = observations
-    .filter((observation) => observation.gradeScore !== undefined)
+    .filter((observation) => observation.recallScore !== undefined)
     .sort((left, right) => left.playedAt - right.playedAt || left.gameId - right.gameId)
     .slice(-60)
 
@@ -1274,8 +1314,15 @@ export interface SkillReport {
       /** Authoritative Recall score on a fixed 0-100 scale. */
       recallScore?: number
       durationSecs: number
+      session?: number
+      sessionGame?: number
+      restMinutes?: number
     }>
     gradeComponents: GradeComponentObservation[]
+    windows: {
+      history: { label: string; shownGames: number; totalGames: number; limit: number }
+      gradeComponents: { label: string; shownGames: number; limit: number }
+    }
     champions: Array<{
       championId: number
       games: number
@@ -1307,7 +1354,12 @@ export function buildSkillReport(input: SkillReportInput): SkillReport {
     rvi, performanceTimelineHistory, duration, hours, weekdays,
   } = input
 
-  const baseline = summary.avgGradeScore ?? 0
+  const authoritativeScores = observations.flatMap((observation) =>
+    observation.recallScore === undefined ? [] : [observation.recallScore])
+  const componentHistory = gradeComponentHistory ?? []
+  const baseline = authoritativeScores.length
+    ? authoritativeScores.reduce((sum, score) => sum + score, 0) / authoritativeScores.length
+    : summary.averageRecallScore ?? 50
 
   const bgp = buildBestGamePattern(observations)
   const bestGamePattern: InsightSection = {
@@ -1323,13 +1375,22 @@ export function buildSkillReport(input: SkillReportInput): SkillReport {
   const conditions: InsightSection = {
     key: "conditions",
     title: "Playing Conditions",
-    method: "Condition-based compatibility-score comparison",
+    method: "Condition-based Recall Score comparison",
     eligible: conds.sections.some((s) => s.eligible),
     neededGames: conds.sections.some((s) => s.eligible) ? 0 : CONDITIONS_MIN_GRADED,
     findings: conds.sections.flatMap((s) => s.findings),
   }
 
   const trends = buildTrendFindings(observations, family)
+  const gradedObservationCount = observations.filter(
+    (observation) => observation.recallScore !== undefined,
+  ).length
+  const itemObservationCount = itemObservations.filter(
+    (observation) => observation.recallScore !== undefined,
+  ).length
+  const durationInsights = buildDurationInsights(observations)
+  const championInsights = buildChampionFindings(observations, championStats, baseline, family)
+  const itemInsights = buildItemFindings(itemObservations)
   const overviewStyle = input.style && {
     ...input.style,
     drift: buildStyleDrift(observations, input.style.career.axes),
@@ -1368,8 +1429,24 @@ export function buildSkillReport(input: SkillReportInput): SkillReport {
         gradeScore: observation.gradeScore,
         recallScore: observation.recallScore,
         durationSecs: observation.durationSecs,
+        session: observation.session,
+        sessionGame: observation.sessionGame,
+        restMinutes: observation.restMinutes,
       })),
-      gradeComponents: gradeComponentHistory,
+      gradeComponents: componentHistory,
+      windows: {
+        history: {
+          label: `Latest ${Math.min(180, observations.length)} of ${observations.length} selected matches`,
+          shownGames: Math.min(180, observations.length),
+          totalGames: observations.length,
+          limit: 180,
+        },
+        gradeComponents: {
+          label: `Latest ${componentHistory.length} selected-recipe graded matches`,
+          shownGames: componentHistory.length,
+          limit: 60,
+        },
+      },
       champions: championStats.map((champion) => ({
         championId: champion.championId,
         games: champion.games,
@@ -1382,13 +1459,45 @@ export function buildSkillReport(input: SkillReportInput): SkillReport {
       })),
     },
     insights: {
-      bestGamePattern,
-      conditions,
-      predictive: buildPredictiveSection(observations),
-      duration: buildDurationInsights(observations),
-      trends,
-      champions: buildChampionFindings(observations, championStats, baseline, family),
-      items: buildItemFindings(itemObservations),
+      bestGamePattern: {
+        ...bestGamePattern,
+        observedGames: gradedObservationCount,
+        window: { label: "All selected-recipe graded matches" },
+      },
+      conditions: {
+        ...conditions,
+        observedGames: gradedObservationCount,
+        window: { label: "All selected-recipe graded matches" },
+      },
+      predictive: {
+        ...buildPredictiveSection(observations),
+        observedGames: gradedObservationCount,
+        window: {
+          label: "Oldest 80% training · latest 20% holdout",
+          trainingGames: gradedObservationCount - Math.floor(gradedObservationCount * 0.2),
+          holdoutGames: Math.floor(gradedObservationCount * 0.2),
+        },
+      },
+      duration: {
+        ...durationInsights,
+        observedGames: gradedObservationCount,
+        window: { label: "All selected-recipe graded matches" },
+      },
+      trends: {
+        ...trends,
+        observedGames: gradedObservationCount,
+        window: { label: "Latest 10 vs prior 20 graded matches", recentGames: 10, priorGames: 20 },
+      },
+      champions: {
+        ...championInsights,
+        observedGames: gradedObservationCount,
+        window: { label: "All selected-recipe graded matches" },
+      },
+      items: {
+        ...itemInsights,
+        observedGames: itemObservationCount,
+        window: { label: "All selected final inventories with a current Grade" },
+      },
     },
   }
 }

@@ -139,7 +139,8 @@ function useLoading() {
 // ----------------------------------------------------------------------
 
 const { appendLoading, removeLoading } = useLoading()
-domReady().then(appendLoading)
+const isTempoOverlay = new URLSearchParams(location.search).get("surface") === "tempo-overlay"
+if (!isTempoOverlay) domReady().then(appendLoading)
 
 window.onmessage = (ev) => {
   ev.data.payload === "removeLoading" && removeLoading()

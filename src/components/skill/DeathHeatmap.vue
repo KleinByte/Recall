@@ -13,7 +13,7 @@ const phase = ref<DeathPhase>("all")
 const visualization = ref<VisualizationMode>("heat")
 
 const phases: Array<{ key: DeathPhase; label: string; detail: string }> = [
-  { key: "all", label: "All", detail: "all game" },
+  { key: "all", label: "All", detail: "whole match" },
   { key: "early", label: "Early", detail: "before 15 min" },
   { key: "mid", label: "Mid", detail: "15–30 min" },
   { key: "late", label: "Late", detail: "after 30 min" },
@@ -112,6 +112,7 @@ const chartPoints = computed(() => [...rankedHotspots.value].reverse())
 const HEAT_BIN_SIZE = 250
 const HEAT_RADIUS = 3
 const HEAT_SIGMA = 1.35
+const HEAT_DENSITY_SCALE_MAX = 0.5
 const HEAT_CELL_COUNT = Math.ceil(15_000 / HEAT_BIN_SIZE)
 const heatAxisCategories = Array.from({ length: HEAT_CELL_COUNT }, (_, index) => String(index))
 const heatPoints = computed(() => {
@@ -153,7 +154,7 @@ const heatPoints = computed(() => {
     return [
       x,
       y,
-      cell.density,
+      cell.density / Math.max(1, props.map.timelineGames),
       cell.deaths,
       cell.timestamp / cell.deaths,
       cell.games.size,
@@ -161,13 +162,11 @@ const heatPoints = computed(() => {
   })
 })
 
-const maxHeatDensity = computed(() => Math.max(1, ...heatPoints.value.map((point) => point[2])))
-
 function areaForCoordinates(x: number, y: number) {
   if (x < 3_200 && y < 3_200) return "Blue base"
   if (x > 11_800 && y > 11_800) return "Red base"
-  if (Math.abs(y - x) < 1_700) return "Mid lane"
-  return y > x ? "Top-side Rift" : "Bot-side Rift"
+  if (Math.abs(y - x) < 1_700) return "Central diagonal"
+  return y > x ? "Upper Rift" : "Lower Rift"
 }
 
 function hotspotArea(point: { value: number[] }) {
@@ -220,7 +219,7 @@ const option = computed<EChartsCoreOption>(() => ({
   visualMap: visualization.value === "heat" ? {
     show: false,
     min: 0,
-    max: maxHeatDensity.value,
+    max: HEAT_DENSITY_SCALE_MAX,
     dimension: 2,
     seriesIndex: 0,
     inRange: {
@@ -255,7 +254,7 @@ const option = computed<EChartsCoreOption>(() => ({
 }))
 
 const ariaLabel = computed(() =>
-  `Summoner's Rift death density map showing ${visibleDeaths.value.length} deaths across ${visibleGames.value} games for the selected ${phases.find((entry) => entry.key === phase.value)?.detail} phase as a ${visualization.value === "heat" ? "continuous heat overlay" : "clustered dot view"}.`,
+  `Summoner's Rift death density map showing ${visibleDeaths.value.length} deaths from ${props.map.timelineGames} timeline games. Those deaths occurred in ${visibleGames.value} games during the selected ${phases.find((entry) => entry.key === phase.value)?.detail} phase, displayed as a ${visualization.value === "heat" ? "continuous heat overlay" : "clustered dot view"}.`,
 )
 </script>
 
@@ -266,7 +265,8 @@ const ariaLabel = computed(() =>
         <p class="eyebrow">Positioning</p>
         <h2 class="section-title">Death density</h2>
         <p class="muted map-summary">
-          {{ visibleDeaths.length }} deaths across {{ visibleGames }} games
+          {{ visibleDeaths.length }} deaths · {{ map.timelineGames }} timeline games
+          <span v-if="visibleDeaths.length"> · deaths in {{ visibleGames }} games</span>
           <span v-if="phase !== 'all'"> · {{ phases.find((entry) => entry.key === phase)?.detail }}</span>
         </p>
       </div>
@@ -332,8 +332,9 @@ const ariaLabel = computed(() =>
         </ol>
         <p v-else class="muted no-hotspots">No hotspots in this phase.</p>
         <p class="muted map-note">
-          {{ visualization === "heat" ? "Warmer areas show greater continuous death density." : "Brighter dots contain more deaths." }}
-          Uses the mode, season, role, and champion filters above. {{ map.timelineGames }} timeline games are available.
+          {{ visualization === "heat" ? "Warmer areas are places where you died more often after accounting for how many games have timeline data." : "Brighter dots contain more deaths." }}
+          The color scale stays the same when you change a filter, so two views can be compared fairly.
+          The mode, season, position, and champion filters above all apply here.
         </p>
       </aside>
     </div>
@@ -596,7 +597,7 @@ const ariaLabel = computed(() =>
   font-size: 11px;
 }
 
-@media (max-width: 920px) {
+@container analyze-page (max-width: 920px) {
   .map-layout {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -615,7 +616,7 @@ const ariaLabel = computed(() =>
   }
 }
 
-@media (max-width: 560px) {
+@container analyze-page (max-width: 560px) {
   .death-map-panel {
     padding: var(--space-3);
   }

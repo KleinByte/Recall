@@ -1,4 +1,8 @@
 import { CHAMPION_CLASSES, type ChampionClass } from "./champion-classes.js"
+import {
+  PRIMARY_ARCHETYPES,
+  type PrimaryArchetype,
+} from "../../../src/shared/champion-archetypes.js"
 import type { ModeFamily } from "./types.js"
 import type { NormalizedPosition, Position } from "./position.js"
 import {
@@ -8,25 +12,11 @@ import {
   type ResponsibilityTier,
 } from "./match-grade-recipe.js"
 
-export { MATCH_GRADE_TAXONOMY_VERSION }
-
-export const PRIMARY_ARCHETYPES = [
-  "assassin",
-  "artillery",
-  "battlemage",
-  "burst_mage",
-  "catcher",
-  "diver",
-  "enchanter",
-  "juggernaut",
-  "marksman",
-  "skirmisher",
-  "vanguard",
-  "warden",
-  "specialist",
-] as const
-
-export type PrimaryArchetype = typeof PRIMARY_ARCHETYPES[number]
+export {
+  MATCH_GRADE_TAXONOMY_VERSION,
+  PRIMARY_ARCHETYPES,
+  type PrimaryArchetype,
+}
 
 export type MatchGradeRuleset = "standard_sr" | "howling_abyss" | "league_classic"
 

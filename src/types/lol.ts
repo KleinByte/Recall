@@ -1,3 +1,5 @@
+import type { PrimaryArchetype } from "../shared/champion-archetypes"
+
 export interface Summoner {
   accountId: string
   gameName: string
@@ -13,6 +15,8 @@ export interface Champion {
   alias: string
   name: string
   roles: ChampionRole[]
+  /** Supplied by Recall's versioned Grade/RVI taxonomy. */
+  primaryArchetype?: PrimaryArchetype
   isVisibleInClient: boolean
 }
 

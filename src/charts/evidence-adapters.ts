@@ -3,6 +3,7 @@ import type {
   SkillHistoryPoint,
   StyleAxis,
 } from "../types/stats"
+import { quantile } from "./statistics"
 
 export interface CalendarDay {
   date: string
@@ -37,6 +38,8 @@ export function calendarDays(history: readonly SkillHistoryPoint[]): CalendarDay
 }
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const
+export const MIN_WEEKDAY_DISTRIBUTION_GAMES = 3
+export const MIN_DURATION_TREND_GAMES = 5
 
 export function weekdayRecallScoreGroups(history: readonly SkillHistoryPoint[]) {
   return WEEKDAYS.flatMap((label, index) => {
@@ -44,7 +47,57 @@ export function weekdayRecallScoreGroups(history: readonly SkillHistoryPoint[]) 
       .filter((game) => ((new Date(game.playedAt).getDay() + 6) % 7) === index &&
         Number.isFinite(game.recallScore))
       .map((game) => game.recallScore as number)
-    return values.length ? [{ label, values }] : []
+    return values.length ? [{
+      label,
+      values,
+      eligible: values.length >= MIN_WEEKDAY_DISTRIBUTION_GAMES,
+    }] : []
+  })
+}
+
+export interface DurationRecallScoreBin {
+  minute: number
+  label: string
+  games: number
+  median: number | null
+}
+
+/**
+ * Five-minute duration bins for a descriptive trend. Every observed bin is
+ * retained so an ineligible gap cannot be visually connected across.
+ */
+export function durationRecallScoreBins(
+  history: readonly SkillHistoryPoint[],
+): DurationRecallScoreBin[] {
+  const grouped = new Map<number, number[]>()
+  for (const game of history) {
+    if (!Number.isFinite(game.recallScore)) continue
+    const startMinute = Math.floor(game.durationSecs / 300) * 5
+    const values = grouped.get(startMinute) ?? []
+    values.push(game.recallScore as number)
+    grouped.set(startMinute, values)
+  }
+
+  const observedStarts = [...grouped.keys()].sort((left, right) => left - right)
+  if (!observedStarts.length) return []
+
+  const starts: number[] = []
+  for (
+    let startMinute = observedStarts[0];
+    startMinute <= observedStarts.at(-1)!;
+    startMinute += 5
+  ) starts.push(startMinute)
+
+  return starts.map((startMinute) => {
+    const values = grouped.get(startMinute) ?? []
+    return {
+      minute: startMinute + 2.5,
+      label: `${startMinute}–${startMinute + 5} min`,
+      games: values.length,
+      median: values.length >= MIN_DURATION_TREND_GAMES
+        ? quantile(values, 0.5)
+        : null,
+    }
   })
 }
 

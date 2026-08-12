@@ -3,6 +3,7 @@
 import { mount } from "@vue/test-utils"
 import { beforeEach, describe, expect, it } from "vitest"
 import PerformanceProfile from "../src/components/skill/PerformanceProfile.vue"
+import RviContextBreakdown from "../src/components/skill/RviContextBreakdown.vue"
 import type {
   PerformanceDimensionScore,
   PerformanceMetricScore,
@@ -134,8 +135,13 @@ function profile(): PerformanceProfileType {
     headline,
     scopes: {
       overall: scope("overall", "overall", 50),
-      positions: [scope("middle", "position", 53, { position: "MIDDLE" })],
+      positions: [
+        scope("top", "position", 44, { position: "TOP" }),
+        scope("middle", "position", 53, { position: "MIDDLE" }),
+        scope("jungle", "position", 49, { position: "JUNGLE" }),
+      ],
       primaryArchetypes: [
+        scope("specialist", "primary_archetype", 45, { primaryArchetype: "specialist" }),
         scope("marksman", "primary_archetype", 51, { primaryArchetype: "marksman" }),
       ],
     },
@@ -151,13 +157,17 @@ function profile(): PerformanceProfileType {
   }
 }
 
-function renderProfile(width: number, detailsOpen = true) {
+function renderProfile(
+  width: number,
+  detailsOpen = true,
+  profileValue: PerformanceProfileType = profile(),
+) {
   Object.defineProperty(window, "innerWidth", { configurable: true, value: width })
   window.dispatchEvent(new Event("resize"))
 
   return mount(PerformanceProfile, {
     props: {
-      profile: profile(),
+      profile: profileValue,
       identity: {
         label: "Vanguard",
         description: "You combine availability with control and utility.",
@@ -181,17 +191,33 @@ describe("rendered RVI profile behavior", () => {
 
   it("keeps every arm usable and updates the inspector at a compact viewport", async () => {
     const wrapper = renderProfile(320)
-    const arms = wrapper.get('[aria-label="RVI performance arms"]').findAll("button")
+    const arms = wrapper.get(".career-arm-grid").findAll("button")
 
     expect(arms).toHaveLength(8)
+    expect(wrapper.get(".rvi-identity-title h2").text()).toBe("Vanguard")
+    expect(wrapper.get(".rvi-overall").text()).toContain("50")
+    expect(wrapper.get(".rvi-overall").text()).toContain("8 of 8 arms")
+    expect(wrapper.get(".rvi-context").text()).not.toContain("All matches")
+    expect(wrapper.get(".rvi-context-best").text()).toContain("Best position")
+    expect(wrapper.get(".rvi-context-best").text()).toContain("Mid")
+    expect(wrapper.get(".rvi-context-best").text()).not.toContain("Top")
+    expect(wrapper.get(".rvi-context-best").text()).toContain("Best primary archetype")
+    expect(wrapper.get(".rvi-context-best").text()).toContain("Marksman")
+    expect(wrapper.get(".rvi-context-best").text()).not.toContain("Specialist")
+    expect(wrapper.get(".rvi-context").text()).not.toContain("Jungle")
+    expect(wrapper.get(".rvi-context").text()).not.toContain("Top")
+    expect(
+      wrapper.get(".rvi-context").element.compareDocumentPosition(wrapper.get(".rvi-stage").element) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
     expect(arms[0].attributes("aria-pressed")).toBe("true")
-    expect(wrapper.get("#career-arm-details h3").text()).toBe("Combat")
+    expect(wrapper.get("#career-arm-details h3").text()).toBe("Combat measurements")
 
     await arms[2].trigger("click")
 
     expect(arms[0].attributes("aria-pressed")).toBe("false")
     expect(arms[2].attributes("aria-pressed")).toBe("true")
-    expect(wrapper.get("#career-arm-details h3").text()).toBe("Utility")
+    expect(wrapper.get("#career-arm-details h3").text()).toBe("Utility measurements")
     expect(wrapper.get('[role="region"]').attributes("aria-label")).toBe("Utility: Used in score")
     expect(wrapper.get('[role="region"]').text()).toContain("Crowd control")
 
@@ -203,6 +229,62 @@ describe("rendered RVI profile behavior", () => {
     await groups.find((button) => button.text().includes("Unavailable"))!.trigger("click")
     expect(wrapper.get('[role="region"]').text()).toContain("Peel timing")
     expect(wrapper.get('[data-state="unavailable"]').text()).toBe("Unavailable")
+  })
+
+  it("keeps detailed context comparisons out of Overview", () => {
+    const wrapper = renderProfile(752)
+
+    expect(wrapper.find(".rvi-context-more").exists()).toBe(false)
+    expect(wrapper.get(".rvi-context").findAll("li")).toHaveLength(2)
+    expect(wrapper.get(".rvi-context").findAll(".rvi-context-name").map((item) => item.text()))
+      .toEqual(["Mid", "Marksman"])
+  })
+
+  it("keeps positions visible and condenses the longer archetype ranking", () => {
+    const profileValue = profile()
+    profileValue.scopes.positions.push(
+      scope("bottom", "position", 47, { position: "BOTTOM" }),
+      scope("utility", "position", 42, { position: "UTILITY" }),
+    )
+    profileValue.scopes.primaryArchetypes = [
+      scope("specialist", "primary_archetype", 45, { primaryArchetype: "specialist" }),
+      scope("marksman", "primary_archetype", 61, { primaryArchetype: "marksman" }),
+      scope("vanguard", "primary_archetype", 58, { primaryArchetype: "vanguard" }),
+      scope("warden", "primary_archetype", 55, { primaryArchetype: "warden" }),
+      scope("enchanter", "primary_archetype", 44, { primaryArchetype: "enchanter" }),
+      scope("assassin", "primary_archetype", 41, { primaryArchetype: "assassin" }),
+    ]
+
+    const wrapper = mount(RviContextBreakdown, { props: { profile: profileValue } })
+    const groups = wrapper.findAll(".context-group")
+
+    expect(groups).toHaveLength(2)
+    expect(groups[0].findAll(".context-name").map((item) => item.text()))
+      .toEqual(["Mid", "Jungle", "Bot", "Top", "Support"])
+    expect(groups[1].findAll(".archetype-grid")[0].findAll(".context-name").map((item) => item.text()))
+      .toEqual(["Marksman", "Vanguard", "Warden", "Specialist"])
+
+    const disclosure = wrapper.get(".more-archetypes")
+    expect(disclosure.attributes("open")).toBeUndefined()
+    expect(disclosure.get("summary").text()).toContain("Show 2 more archetypes")
+    expect(disclosure.get(".remaining-grid").findAll(".context-name").map((item) => item.text()))
+      .toEqual(["Enchanter", "Assassin"])
+    expect(wrapper.findAll(".context-rank").map((item) => item.text()))
+      .toEqual(["#1", "#2", "#3", "#4", "#5", "#1", "#2", "#3", "#4", "#5", "#6"])
+    expect(wrapper.find("button").exists()).toBe(false)
+  })
+
+  it("omits context cleanly when the selected games have no position or archetype scopes", () => {
+    const profileValue = profile()
+    profileValue.scopes.positions = []
+    profileValue.scopes.primaryArchetypes = []
+    const wrapper = renderProfile(752, true, profileValue)
+
+    expect(wrapper.find(".rvi-context").exists()).toBe(false)
+    expect(wrapper.find(".rvi-context-more").exists()).toBe(false)
+    expect(wrapper.get(".rvi-stage").exists()).toBe(true)
+    expect(wrapper.get(".career-arm-grid").exists()).toBe(true)
+    expect(wrapper.get('[aria-label="Career RVI summary"]').exists()).toBe(true)
   })
 
   it("exposes a controlled, accessible arm-details disclosure at wide and narrow widths", async () => {
@@ -226,7 +308,7 @@ describe("rendered RVI profile behavior", () => {
 
   it("opens native metric evidence details without losing the selected measurement group", async () => {
     const wrapper = renderProfile(480)
-    const arms = wrapper.get('[aria-label="RVI performance arms"]').findAll("button")
+    const arms = wrapper.get(".career-arm-grid").findAll("button")
     await arms[2].trigger("click")
 
     const summary = wrapper.get(".metric-row summary")

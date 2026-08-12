@@ -516,14 +516,14 @@ describe("getObservations", () => {
       family: "sr",
       queueId: 420,
       win: true,
-      gradeScore: 0.5,
-      recallScore: 72.5,
       championId: 84,
       role: "MIDDLE",
       durationSecs: 1800,
       completeLobby: true,
     })
     expect(rows[0].endedAt).toBe(1000 + 1800 * 1000)
+    expect(rows[0].gradeScore).toBeUndefined()
+    expect(rows[0].recallScore).toBeUndefined()
     expect(rows[0].metrics.kda).toBeCloseTo((8 + 12) / 4)
     expect(rows[0].metrics.deaths).toBe(4)
     expect(rows[0].metrics.damagePerMinute).toBeCloseTo(20000 / 30)
@@ -577,6 +577,62 @@ describe("getObservations", () => {
     const rows = insights.getObservations({ puuid: PUUID, modes: ["aram"] })
 
     expect(rows.map((r) => r.gameId)).toEqual([2, 1, 3])
+  })
+
+  it("keeps account-wide session ordinals before mode and champion filters", () => {
+    const base = 1_700_000_000_000
+    matches.insertMany([
+      buildMatchRow({
+        gameId: 1, playedAt: base, durationSecs: 1_800,
+        mode: "sr_ranked_solo", modeFamily: "sr", championId: 84, win: 1,
+      }),
+      buildMatchRow({
+        gameId: 2, playedAt: base + 31 * 60_000, durationSecs: 1_800,
+        mode: "aram", modeFamily: "aram", championId: 22, win: 0,
+      }),
+      buildMatchRow({
+        gameId: 3, playedAt: base + 62 * 60_000, durationSecs: 1_800,
+        mode: "sr_ranked_solo", modeFamily: "sr", championId: 84, win: 1,
+      }),
+    ])
+
+    const rows = insights.getObservations({
+      puuid: PUUID,
+      modes: ["sr_ranked_solo"],
+      championIds: [84],
+    })
+
+    expect(rows.map((row) => row.gameId)).toEqual([1, 3])
+    expect(rows.map((row) => row.sessionGame)).toEqual([1, 3])
+    expect(rows[1].previousWin).toBe(false)
+    expect(rows.map((row) => row.priorChampionGames)).toEqual([0, 1])
+  })
+
+  it("uses resolved position consistently in filters, observations, and item rows", () => {
+    matches.insertMany([buildMatchRow({
+      gameId: 1,
+      mode: "sr_ranked_solo",
+      modeFamily: "sr",
+      resolvedPosition: "JUNGLE",
+      role: "TOP",
+      lane: "TOP",
+    })])
+    participants.insertMany([player({
+      gameId: 1,
+      participantId: 1,
+      isPlayer: 1,
+      resolvedPosition: "JUNGLE",
+      role: "TOP",
+      lane: "TOP",
+      items: [3001, 0, 0, 0, 0, 0, 3340],
+    })])
+
+    expect(insights.getObservations({ puuid: PUUID, roles: ["TOP"] })).toEqual([])
+    const observations = insights.getObservations({ puuid: PUUID, roles: ["JUNGLE"] })
+    expect(observations).toHaveLength(1)
+    expect(observations[0].role).toBe("JUNGLE")
+    expect(insights.getFinalItemObservations({ puuid: PUUID, roles: ["JUNGLE"] })[0].role)
+      .toBe("JUNGLE")
   })
 
   it("uses a constant number of SQL statements as match count grows", () => {
@@ -773,8 +829,9 @@ describe("getFinalItemObservations", () => {
       gameId: 1,
       championId: 84,
       role: "MIDDLE",
-      gradeScore: 0.5,
     })
+    expect(rows[0].gradeScore).toBeUndefined()
+    expect(rows[0].recallScore).toBeUndefined()
     expect(rows[0].itemIds).toEqual([3089, 3020, 3135, 3165, 3157])
   })
 

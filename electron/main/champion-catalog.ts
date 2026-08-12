@@ -1,8 +1,12 @@
+import type { PrimaryArchetype } from "../../src/shared/champion-archetypes.js"
+import { resolvePrimaryArchetype } from "./matches/match-grade-taxonomy.js"
+
 export interface ChampionCatalogEntry {
   id: number
   alias: string
   name: string
   roles: string[]
+  primaryArchetype: PrimaryArchetype
   isVisibleInClient: boolean
 }
 
@@ -20,6 +24,9 @@ function champion(value: unknown): ChampionCatalogEntry | undefined {
     roles: Array.isArray(entry.roles)
       ? entry.roles.filter((role): role is string => typeof role === "string")
       : [],
+    // Always resolve from the current versioned Grade taxonomy. Persisted
+    // catalogs from older releases cannot leave the renderer with stale data.
+    primaryArchetype: resolvePrimaryArchetype(entry.id),
     isVisibleInClient: entry.isVisibleInClient !== false,
   }
 }

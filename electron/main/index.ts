@@ -2,10 +2,12 @@ import {
   app,
   BrowserWindow,
   dialog,
+  globalShortcut,
   ipcMain,
   Menu,
   nativeImage,
   safeStorage,
+  screen,
   shell,
   Tray,
 } from "electron"
@@ -179,6 +181,12 @@ const PERIODIC_SYNC_INTERVAL_MS = 5 * 60_000
 const LIVE_GAME_REFRESH_INTERVAL_MS = 2_000
 const SESSION_RETRY_DELAY_MS = 10_000
 
+interface TempoOverlayStatus {
+  visible: boolean
+  locked: boolean
+  shortcutRegistered: boolean
+}
+
 interface Summoner {
   puuid: string
   gameName: string
@@ -206,6 +214,11 @@ let session: Session | undefined
 let connectRetry: NodeJS.Timeout | undefined
 let lcuDiscovery: LcuDiscovery | undefined
 let tray: Tray | undefined
+let tempoOverlayWindow: BrowserWindow | undefined
+let tempoOverlayRequestedVisible = false
+let tempoOverlayLocked = false
+let tempoOverlayShortcutRegistered = false
+let tempoOverlayMoveSave: NodeJS.Timeout | undefined
 let liveRevision = 0
 let liveGameReading = false
 let liveSession: LiveSession = {
@@ -690,6 +703,186 @@ function broadcast(win: BrowserWindow, channel: string, payload?: unknown) {
   win.webContents.send(channel, payload)
 }
 
+const TEMPO_OVERLAY_WIDTH = 360
+const TEMPO_OVERLAY_HEIGHT = 232
+
+function tempoOverlayStatus(): TempoOverlayStatus {
+  return {
+    visible: tempoOverlayRequestedVisible,
+    locked: tempoOverlayLocked,
+    shortcutRegistered: tempoOverlayShortcutRegistered,
+  }
+}
+
+function sendTempoOverlayStatus(win: BrowserWindow) {
+  const status = tempoOverlayStatus()
+  broadcast(win, "tempo-overlay:status", status)
+  if (tempoOverlayWindow && !tempoOverlayWindow.isDestroyed()) {
+    tempoOverlayWindow.webContents.send("tempo-overlay:status", status)
+  }
+}
+
+function fittedTempoOverlayPosition(position?: { x: number; y: number }) {
+  const display = position
+    ? screen.getDisplayMatching({
+        x: position.x,
+        y: position.y,
+        width: TEMPO_OVERLAY_WIDTH,
+        height: TEMPO_OVERLAY_HEIGHT,
+      })
+    : screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+  const area = display.workArea
+  const fallback = {
+    x: area.x + area.width - TEMPO_OVERLAY_WIDTH - 24,
+    y: area.y + 24,
+  }
+  const requested = position ?? fallback
+  return {
+    x: Math.min(
+      Math.max(requested.x, area.x),
+      area.x + Math.max(0, area.width - TEMPO_OVERLAY_WIDTH),
+    ),
+    y: Math.min(
+      Math.max(requested.y, area.y),
+      area.y + Math.max(0, area.height - TEMPO_OVERLAY_HEIGHT),
+    ),
+  }
+}
+
+function saveTempoOverlayPosition() {
+  if (!tempoOverlayWindow || tempoOverlayWindow.isDestroyed()) return
+  const [x, y] = tempoOverlayWindow.getPosition()
+  settingsStore.setMain("tempo-overlay-position", { x, y })
+}
+
+function keepTempoOverlayOnScreen() {
+  if (!tempoOverlayWindow || tempoOverlayWindow.isDestroyed()) return
+  const [x, y] = tempoOverlayWindow.getPosition()
+  const fitted = fittedTempoOverlayPosition({ x, y })
+  tempoOverlayWindow.setPosition(fitted.x, fitted.y)
+}
+
+function createTempoOverlayWindow(mainWindow: BrowserWindow) {
+  if (tempoOverlayWindow && !tempoOverlayWindow.isDestroyed()) {
+    return tempoOverlayWindow
+  }
+
+  const stored = settingsStore.getMain("tempo-overlay-position")
+  const position = fittedTempoOverlayPosition(stored)
+  const overlay = new BrowserWindow({
+    title: "Recall Tempo Overlay",
+    x: position.x,
+    y: position.y,
+    width: TEMPO_OVERLAY_WIDTH,
+    height: TEMPO_OVERLAY_HEIGHT,
+    frame: false,
+    thickFrame: false,
+    transparent: true,
+    backgroundColor: "#00000000",
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    focusable: false,
+    movable: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    show: false,
+    webPreferences: {
+      preload,
+      nodeIntegration: false,
+      contextIsolation: true,
+      webSecurity: true,
+    },
+  })
+  tempoOverlayWindow = overlay
+  overlay.setAlwaysOnTop(true, "screen-saver")
+  overlay.setMenuBarVisibility(false)
+
+  overlay.on("move", () => {
+    if (tempoOverlayMoveSave) clearTimeout(tempoOverlayMoveSave)
+    tempoOverlayMoveSave = setTimeout(saveTempoOverlayPosition, 200)
+  })
+  overlay.on("page-title-updated", (event) => event.preventDefault())
+  overlay.on("closed", () => {
+    if (tempoOverlayMoveSave) clearTimeout(tempoOverlayMoveSave)
+    tempoOverlayMoveSave = undefined
+    tempoOverlayWindow = undefined
+    tempoOverlayRequestedVisible = false
+    tempoOverlayLocked = false
+    sendTempoOverlayStatus(mainWindow)
+  })
+  overlay.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
+  overlay.webContents.on("did-finish-load", () => {
+    overlay.webContents.send("live:updated", liveSession)
+    overlay.webContents.send("tempo-overlay:status", tempoOverlayStatus())
+    if (tempoOverlayRequestedVisible) overlay.showInactive()
+  })
+
+  if (VITE_DEV_SERVER_URL) {
+    const overlayUrl = new URL(VITE_DEV_SERVER_URL)
+    overlayUrl.searchParams.set("surface", "tempo-overlay")
+    void overlay.loadURL(overlayUrl.toString())
+  } else {
+    void overlay.loadFile(indexHtml, { query: { surface: "tempo-overlay" } })
+  }
+
+  return overlay
+}
+
+function setTempoOverlayLocked(mainWindow: BrowserWindow, locked: boolean) {
+  const overlay = createTempoOverlayWindow(mainWindow)
+  tempoOverlayLocked = locked
+  if (locked) overlay.setIgnoreMouseEvents(true, { forward: true })
+  else overlay.setIgnoreMouseEvents(false)
+  sendTempoOverlayStatus(mainWindow)
+  return tempoOverlayStatus()
+}
+
+function showTempoOverlay(mainWindow: BrowserWindow) {
+  tempoOverlayRequestedVisible = true
+  const overlay = createTempoOverlayWindow(mainWindow)
+  // Every show begins in placement mode. Locking makes it click-through until
+  // the next hide/show cycle, so the dial never traps gameplay input by accident.
+  tempoOverlayLocked = false
+  overlay.setIgnoreMouseEvents(false)
+  if (!overlay.webContents.isLoadingMainFrame()) overlay.showInactive()
+  sendTempoOverlayStatus(mainWindow)
+  return tempoOverlayStatus()
+}
+
+function hideTempoOverlay(mainWindow: BrowserWindow) {
+  tempoOverlayRequestedVisible = false
+  tempoOverlayWindow?.hide()
+  sendTempoOverlayStatus(mainWindow)
+  return tempoOverlayStatus()
+}
+
+function toggleTempoOverlay(mainWindow: BrowserWindow) {
+  return tempoOverlayRequestedVisible
+    ? hideTempoOverlay(mainWindow)
+    : showTempoOverlay(mainWindow)
+}
+
+function resetTempoOverlayPosition(mainWindow: BrowserWindow) {
+  settingsStore.deleteMain("tempo-overlay-position")
+  const overlay = createTempoOverlayWindow(mainWindow)
+  const position = fittedTempoOverlayPosition()
+  overlay.setPosition(position.x, position.y)
+  saveTempoOverlayPosition()
+  return tempoOverlayStatus()
+}
+
+function broadcastLive(win: BrowserWindow) {
+  broadcast(win, "live:updated", liveSession)
+  if (tempoOverlayWindow && !tempoOverlayWindow.isDestroyed()) {
+    tempoOverlayWindow.webContents.send("live:updated", liveSession)
+  }
+  if (liveSession.phase === "Idle" && tempoOverlayRequestedVisible) {
+    hideTempoOverlay(win)
+  }
+}
+
 /** Brings the window back from the tray, wherever it was left. */
 function reveal(win: BrowserWindow) {
   if (win.isMinimized()) win.restore()
@@ -714,6 +907,10 @@ function createTray(win: BrowserWindow) {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: "Open Recall", click: () => reveal(win) },
+      {
+        label: "Show / hide Tempo overlay (Alt+T)",
+        click: () => toggleTempoOverlay(win),
+      },
       { type: "separator" },
       {
         label: "Quit",
@@ -875,7 +1072,7 @@ function clearLiveSession(win: BrowserWindow) {
   liveTempoTracker.reset()
   assignedPositions.clear()
   liveSession = { phase: "Idle", benchChampionIds: [], allies: [], enemies: [], updatedAt: Date.now() }
-  broadcast(win, "live:updated", liveSession)
+  broadcastLive(win)
 }
 
 /**
@@ -916,7 +1113,7 @@ async function refreshLiveSession(win: BrowserWindow, phase: LivePhase) {
       storeAssignedPositions(next.gameId)
     }
     liveSession = next
-    broadcast(win, "live:updated", liveSession)
+    broadcastLive(win)
     if (phase === "InProgress") {
       storeAssignedPositions(next.gameId)
       void refreshLiveGameData(win)
@@ -956,7 +1153,7 @@ async function refreshLiveGameData(win: BrowserWindow) {
       game,
       updatedAt: game.updatedAt,
     }
-    broadcast(win, "live:updated", liveSession)
+    broadcastLive(win)
   } catch {
     // Port 2999 is unavailable during the loading transition and immediately
     // after a game. Preserve the latest good snapshot and retry quietly.
@@ -1419,6 +1616,10 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
   })
   ipcMain.on("window:close", () => win.close())
   ipcMain.handle("window:is-maximized", () => win.isMaximized())
+  ipcMain.handle("tempo-overlay:status", () => tempoOverlayStatus())
+  ipcMain.handle("tempo-overlay:toggle", () => toggleTempoOverlay(win))
+  ipcMain.handle("tempo-overlay:lock", () => setTempoOverlayLocked(win, true))
+  ipcMain.handle("tempo-overlay:reset-position", () => resetTempoOverlayPosition(win))
 
   registerUpdaterIpc(ipcMain, updaterService)
 
@@ -1840,6 +2041,10 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
 
   ipcMain.handle("stats:summary", (_event, filter: Partial<MatchQuery>) =>
     getRepository().getSummary(withPuuid(filter)),
+  )
+
+  ipcMain.handle("stats:lifetime-totals", () =>
+    getRepository().getLifetimeTotals(withPuuid().puuid),
   )
 
   ipcMain.handle("stats:champions", (_event, filter: Partial<StatsFilter>) =>
@@ -2542,6 +2747,15 @@ async function main() {
   })
 
   registerIpc(win, updater)
+  tempoOverlayShortcutRegistered = globalShortcut.register(
+    "Alt+T",
+    () => toggleTempoOverlay(win),
+  )
+  if (!tempoOverlayShortcutRegistered) {
+    console.warn("Could not register the Alt+T Tempo overlay shortcut")
+  }
+  screen.on("display-removed", keepTempoOverlayOnScreen)
+  screen.on("display-metrics-changed", keepTempoOverlayOnScreen)
   void updater.start()
 
   // A second launch reveals the running copy rather than starting another.
@@ -2559,6 +2773,12 @@ async function main() {
         quitting = false
         console.error(`Could not close Recall safely: ${(error as Error).message}`)
       })
+  })
+
+  app.on("will-quit", () => {
+    globalShortcut.unregister("Alt+T")
+    screen.removeListener("display-removed", keepTempoOverlayOnScreen)
+    screen.removeListener("display-metrics-changed", keepTempoOverlayOnScreen)
   })
 
   // The window only hides, so this fires solely on a real quit. Recall must

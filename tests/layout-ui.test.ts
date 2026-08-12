@@ -353,11 +353,14 @@ describe("desktop page layout", () => {
     expect(progress).not.toContain("excludeLeagueClassic: true")
   })
 
-  it("visually separates the evidence introduction from its accordions", () => {
+  it("presents evidence as its own uncertainty-first section", () => {
     const insights = read("src/components/skill/SkillInsights.vue")
 
-    expect(insights).toContain('class="story-head evidence-head"')
-    expect(insights).toMatch(/\.evidence-head \{[\s\S]*border-left: 2px solid var\(--cyan\)/)
+    expect(insights).toContain('class="story-section evidence-section"')
+    expect(insights).toContain('id="evidence-title">What keeps showing up in your games</h2>')
+    expect(insights).toContain("EvidenceForestPlot")
+    expect(insights).toContain("Treat them as clues worth reviewing")
+    expect(insights).toContain("not proof that one thing caused another")
   })
 
   it("sorts champions from their table headers instead of separate buttons", () => {
@@ -379,17 +382,18 @@ describe("desktop page layout", () => {
     expect(challenges).toContain("challengeMatchesMap")
   })
 
-  it("uses visual performance charts in insights and names the top champion pool", () => {
+  it("uses consolidated performance charts in insights and names the top champion pool", () => {
     const overview = read("src/components/skill/SkillOverview.vue")
     const insights = read("src/components/skill/SkillInsights.vue")
 
     expect(overview).toContain("overview.pool.top")
     expect(overview).toContain("championNameById")
     expect(overview).toContain("championIconUrl")
-    expect(insights).toContain("OutcomeTrendChart")
-    expect(insights).toContain(':rows="report.overview.outcomes.hours"')
-    expect(insights).toContain(':rows="report.overview.outcomes.weekdays"')
-    expect(insights).toContain(':rows="report.overview.outcomes.duration"')
-    expect(insights).toContain("ChampionPoolTreemap")
+    expect(insights).toContain("GradeJourneyChart")
+    expect(insights).toContain("GradeDnaHeatmap")
+    expect(insights).toContain("SkillContextExplorer")
+    expect(insights).toContain(':outcomes="report.overview.outcomes"')
+    expect(insights).not.toContain("ChampionPoolTreemap")
+    expect(insights).not.toContain("OutcomeTrendChart")
   })
 })

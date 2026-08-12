@@ -155,7 +155,7 @@ describe("Strong game pattern", () => {
   it("defines strong games from the inclusive top quartile", () => {
     const report = buildBestGamePattern(observations(32))
     expect(report.eligible).toBe(true)
-    expect(report.definition).toContain("top 25% of your frozen-reference compatibility scores")
+    expect(report.definition).toContain("top 25% of your frozen-reference Recall Scores")
     expect(report.strongGames).toBeGreaterThanOrEqual(8)
   })
 
@@ -251,22 +251,28 @@ describe("Playing conditions", () => {
   })
 
   it("handles exact 15, 45, and 90 minute boundaries correctly", () => {
-    // Test with games at exact boundary times
-    const obs = observations(40).map((o, i) => {
-      if (i > 0) {
-        const prev = observations(1)[0]
-        // Set exact 15, 45, 90 minute gaps
-        const gaps = [14, 15, 44, 45, 89, 90, 91]
-        const gapMinutes = gaps[i % gaps.length]
-        o.playedAt = prev.playedAt + gapMinutes * 60 * 1000
-        o.endedAt = o.playedAt + o.durationSecs * 1000
-      }
-      return o
-    })
+    const rests = [
+      { minutes: 14, sessionGame: 2 },
+      { minutes: 15, sessionGame: 2 },
+      { minutes: 45, sessionGame: 2 },
+      { minutes: 90, sessionGame: 1 },
+    ]
+    const obs = observations(32).map((row, index) => ({
+      ...row,
+      session: index + 1,
+      sessionGame: rests[Math.floor(index / 8)].sessionGame,
+      restMinutes: rests[Math.floor(index / 8)].minutes,
+    }))
 
     const report = buildPlayingConditions(obs)
-    // Boundaries should be handled consistently (<15, 15-45, 45-90, >90)
-    expect(report.sections).toBeDefined()
+    const rest = report.sections.find((section) => section.key === "restTime")
+    expect(Object.fromEntries(rest!.findings.map((finding) => [finding.key, finding.games])))
+      .toMatchObject({
+        "Rest <15 min": 8,
+        "Rest 15-45 min": 8,
+        "Rest 45-90 min": 8,
+        "New session": 8,
+      })
   })
 
   it("requires at least 8 graded games per bucket for directional copy", () => {
@@ -349,6 +355,40 @@ describe("Playing conditions", () => {
       expect(sparseFinding2.summary).not.toMatch(/higher|lower|associated with.*grade/i)
     }
   })
+
+  it("uses precomputed account-wide session ordinals when supplied", () => {
+    const obs = observations(32).map((row, index) => ({
+      ...row,
+      session: index + 1,
+      sessionGame: 3,
+      restMinutes: 5,
+      previousWin: false,
+    }))
+
+    const report = buildPlayingConditions(obs)
+    const session = report.sections.find((section) => section.key === "sessionGame")
+    expect(session?.findings.find((finding) => finding.key === "Third game")?.games).toBe(32)
+    expect(session?.findings.find((finding) => finding.key === "First game")?.games).toBe(0)
+  })
+
+  it("uses the same median-difference estimator for condition effects and intervals", () => {
+    const obs = observations(32).map((row, index) => {
+      const playedAt = new Date(row.playedAt)
+      playedAt.setHours(index < 16 ? 10 : 16, 0, 0, 0)
+      return {
+        ...row,
+        playedAt: playedAt.getTime() + Math.floor(index / 2) * 24 * 60 * 60_000,
+        recallScore: index === 0 ? 100 : index < 16 ? 80 : 20,
+      }
+    })
+
+    const report = buildPlayingConditions(obs)
+    const time = report.sections.find((section) => section.key === "timeOfDay")
+    const morning = time?.findings.find((finding) => finding.key === "9-12")
+    expect(morning?.effect).toBe(60)
+    expect(morning?.interval?.low).toBeLessThanOrEqual(60)
+    expect(morning?.interval?.high).toBeGreaterThanOrEqual(60)
+  })
 })
 
 describe("Duration insights", () => {
@@ -375,6 +415,52 @@ describe("Duration insights", () => {
     const report = buildDurationInsights(observations(50))
     const json = JSON.stringify(report)
     expect(json).not.toMatch(/better|improve|should|causes/i)
+  })
+
+  it("uses the shared half-open duration boundaries", () => {
+    const boundaryDurations = [1_319, 1_320, 1_680, 2_040]
+    const obs = observations(32).map((row, index) => ({
+      ...row,
+      durationSecs: boundaryDurations[Math.floor(index / 8)],
+    }))
+
+    const report = buildDurationInsights(obs)
+    expect(Object.fromEntries(report.findings.map((finding) => [finding.key, finding.games])))
+      .toEqual({
+        "Under 22 min": 8,
+        "22–28 min": 8,
+        "28–34 min": 8,
+        "34 min +": 8,
+      })
+  })
+
+  it("reports only the buckets that entered each duration comparison", () => {
+    const obs = observations(23).map((row, index) => ({
+      ...row,
+      durationSecs: index < 8 ? 1_200 : index < 16 ? 1_500 : 1_800,
+    }))
+
+    const report = buildDurationInsights(obs)
+    expect(report.findings).toHaveLength(2)
+    expect(report.findings.every((finding) => finding.eligibleGames === 16)).toBe(true)
+    expect(report.findings.every((finding) => finding.scope.includes("vs 8 games"))).toBe(true)
+  })
+
+  it("measures public effects in authoritative Recall Score points", () => {
+    const obs = observations(32, { variedDuration: true }).map((row) => ({
+      ...row,
+      recallScore: row.durationSecs === 1_200
+        ? row.gameId === 1000 ? 100 : 80
+        : 20,
+      gradeScore: row.durationSecs === 1_200 ? -3 : 3,
+    }))
+
+    const section = buildDurationInsights(obs)
+    const short = section.findings.find((finding) => finding.key === "Under 22 min")
+    expect(short?.effect).toBe(60)
+    expect(short?.interval?.low).toBeLessThanOrEqual(60)
+    expect(short?.interval?.high).toBeGreaterThanOrEqual(60)
+    expect(short?.scoreScale).toBe("recall_score_0_100")
   })
 })
 
@@ -478,6 +564,21 @@ describe("Champion findings", () => {
     const section = buildChampionFindings(obs, stats, 50, "sr")
     expect(section.eligible).toBe(true)
     expect(section.findings.length).toBeGreaterThan(0)
+    expect(section.findings.every((finding) => finding.games === 10)).toBe(true)
+    expect(section.findings.every((finding) => finding.eligibleGames === 30)).toBe(true)
+    expect(section.findings.every((finding) => finding.scope.includes("vs 20"))).toBe(true)
+  })
+
+  it("does not mark a champion section eligible without another champion to compare", () => {
+    const section = buildChampionFindings(
+      champObservations(8, [100]),
+      champStats(1, 8),
+      50,
+      "sr",
+    )
+
+    expect(section.eligible).toBe(false)
+    expect(section.findings).toEqual([])
   })
 
   it("uses bootstrap interval wholly above/below zero for directional copy", () => {
@@ -522,6 +623,19 @@ describe("Champion findings", () => {
     const json = JSON.stringify(section)
     expect(json).not.toMatch(/better|improve|causes|should/i)
   })
+
+  it("uses the same median-difference estimator for champion effects and intervals", () => {
+    const stats = champStats(2, 10)
+    const obs = champObservations(20, [100, 101]).map((row) => ({
+      ...row,
+      recallScore: row.gameId === 2000 ? 100 : row.championId === 100 ? 80 : 20,
+    }))
+    const section = buildChampionFindings(obs, stats, 50, "sr")
+    const champion = section.findings.find((finding) => finding.key === "champion:100")
+    expect(champion?.effect).toBe(60)
+    expect(champion?.interval?.low).toBeLessThanOrEqual(60)
+    expect(champion?.interval?.high).toBeGreaterThanOrEqual(60)
+  })
 })
 
 // --- Item findings ---
@@ -535,6 +649,7 @@ function itemObservations(count: number): FinalItemObservation[] {
       championId: 100 + (i % 3),
       role: i < count / 2 ? "MIDDLE" : "BOTTOM",
       gradeScore: hasItem ? 55 + (i % 10) : 45 + (i % 10),
+      recallScore: hasItem ? 55 + (i % 10) : 45 + (i % 10),
       itemIds: hasItem ? [3001, 3006, 3089] : [3006, 3089, 3100],
     })
   }
@@ -547,7 +662,7 @@ describe("Item findings", () => {
     for (let i = 0; i < 9; i++) {
       obs.push({
         gameId: i, championId: 100, role: "MIDDLE",
-        gradeScore: 50, itemIds: [3001],
+        gradeScore: 50, recallScore: 50, itemIds: [3001],
       })
     }
     const section = buildItemFindings(obs)
@@ -559,7 +674,39 @@ describe("Item findings", () => {
     expect(section.eligible).toBe(true)
     const finding = section.findings.find((f) => f.key === "item:3001")
     expect(finding).toBeDefined()
-    expect(finding!.scope).toMatch(/strata/)
+    expect(finding!.scope).toMatch(/champion-position groups/)
+  })
+
+  it("reports only games from champion-position groups with a comparator", () => {
+    const obs: FinalItemObservation[] = Array.from({ length: 30 }, (_, index) => ({
+      gameId: index + 1,
+      championId: index < 20 ? 100 : 200,
+      role: index < 20 ? "MIDDLE" : "TOP",
+      gradeScore: index < 10 ? 70 : 40,
+      recallScore: index < 10 ? 70 : 40,
+      itemIds: index < 10 || index >= 20 ? [3001] : [3006],
+    }))
+
+    const finding = buildItemFindings(obs).findings
+      .find((row) => row.key === "item:3001")
+    expect(finding).toMatchObject({ games: 10, eligibleGames: 20 })
+    expect(finding?.scope).toContain("10 games with the item vs 10 without")
+  })
+
+  it("does not mark an item section eligible when every item lacks a comparator", () => {
+    const obs: FinalItemObservation[] = Array.from({ length: 12 }, (_, index) => ({
+      gameId: index + 1,
+      championId: 100,
+      role: "MIDDLE",
+      gradeScore: 50,
+      recallScore: 50,
+      itemIds: [3001],
+    }))
+
+    const section = buildItemFindings(obs)
+    expect(section.eligible).toBe(false)
+    expect(section.findings[0]).toMatchObject({ games: 0, eligibleGames: 0 })
+    expect(section.findings[0].values).toEqual({ recordedItemGames: 12 })
   })
 
   it("includes final-inventory caveat on every finding", () => {
@@ -615,6 +762,18 @@ describe("Trend findings", () => {
     expect(trend).toBeDefined()
     expect(trend!.scope).toMatch(/Latest 10 vs prior 20/)
     expect(trend!.interval).toBeDefined()
+  })
+
+  it("uses the same median-difference estimator for trend effects and intervals", () => {
+    const obs = observations(30).map((row, index) => ({
+      ...row,
+      recallScore: index === 29 ? 100 : index >= 20 ? 90 : 10,
+    }))
+    const trend = buildTrendFindings(obs, "sr").findings
+      .find((finding) => finding.key === "trend:grade")
+    expect(trend?.effect).toBe(80)
+    expect(trend?.interval?.low).toBeLessThanOrEqual(80)
+    expect(trend?.interval?.high).toBeGreaterThanOrEqual(80)
   })
 
   it("returns raw windows even without directional finding", () => {

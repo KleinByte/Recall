@@ -21,6 +21,15 @@ function note(
 /** Shipped releases, newest first. */
 export const patchNotes: readonly PatchNoteRelease[] = [
   note(
+    "3.1.0",
+    "2026-08-11",
+    "Deeper performance insights",
+    "Skill, challenges, and Progress are clearer and more useful.",
+    "Rebuilt Skill insights, analysis, and RVI profiles.",
+    "Added lifetime totals and clearer challenge goals.",
+    "Improved data accuracy and responsive layouts.",
+  ),
+  note(
     "3.0.3",
     "2026-08-11",
     "Sharper playback and RVI",

@@ -1,4 +1,5 @@
 import type { MatchRviArmKey } from "../shared/performance-vocabulary"
+import type { PrimaryArchetype } from "../shared/champion-archetypes"
 
 export type TrackedMode =
   | "sr_ranked_solo"
@@ -190,6 +191,68 @@ export interface StatsSummary {
   avgGradeScore?: number
   averageRecallScore?: number
   gradedGames: number
+}
+
+/** Account-wide totals across completed matched games stored by Recall. */
+export interface LifetimeTotals {
+  recordedGames: number
+  wins: number
+  losses: number
+  winRate: number
+  timePlayedSecs: number
+  championTakedowns: number
+  kills: number
+  deaths: number
+  assists: number
+  largestKillingSpree: number
+  largestMultiKill: number
+  doubleKills: number
+  tripleKills: number
+  quadraKills: number
+  surrenders: number
+  earlySurrenders: number
+  totalCs: number
+  damageToChampions: number
+  damageTaken: number
+  damageSelfMitigated: number
+  totalHeal: number
+  totalUnitsHealed: number
+  crowdControlSecs: number
+  goldEarned: number
+  visionScore: number
+  wardsPlaced: number
+  wardsKilled: number
+  controlWards: number
+  neutralObjectiveDamage: number
+  structureDamage: number
+  turretKills: number
+  inhibitorKills: number
+  firstBloods: number
+  pentaKills: number
+  /** Later scoreboard fields, measured only for games with stored owner detail. */
+  detailContext: {
+    measuredGames: number
+    neutralMinions: number
+    goldSpent: number
+    totalDamageDealt: number
+    magicDamageToChampions: number
+    physicalDamageToChampions: number
+    trueDamageToChampions: number
+    controlWardsPurchased: number
+    teammateHealing: number
+    teammateShielding: number
+    longestLifeSecs: number
+  }
+  /** Team results, not individual credit; only games with a stored team scoreboard. */
+  teamContext: {
+    measuredGames: number
+    dragons: number
+    barons: number
+    heralds: number
+    voidGrubs: number
+    turrets: number
+    inhibitors: number
+  }
 }
 
 export interface GradeCount {
@@ -682,7 +745,9 @@ export interface InsightFinding {
   games: number
   eligibleGames: number
   effect: number
+  /** `grade` is the legacy wire token for 0-100 Recall Score points. */
   unit: "grade" | "probability" | "percentile" | "rate"
+  scoreScale?: "recall_score_0_100"
   interval?: Interval
   rateInterval?: Interval
   scope: string
@@ -696,6 +761,13 @@ export interface InsightSection {
   method: string
   eligible: boolean
   neededGames: number
+  observedGames?: number
+  window?: {
+    label: string
+    limit?: number
+    recentGames?: number
+    priorGames?: number
+  }
   findings: InsightFinding[]
 }
 
@@ -709,6 +781,8 @@ export interface PredictiveSection {
   state: "insufficient" | "no-signal" | "ready" | "error"
   message?: string
   neededGames?: number
+  observedGames?: number
+  window?: { label: string; trainingGames?: number; holdoutGames?: number }
   signals?: PredictiveSignal[]
 }
 
@@ -724,6 +798,9 @@ export interface SkillHistoryPoint {
   /** Authoritative Recall score on a fixed 0-100 scale. */
   recallScore?: number
   durationSecs: number
+  session?: number
+  sessionGame?: number
+  restMinutes?: number
 }
 
 export interface SkillGradeComponent {
@@ -738,8 +815,15 @@ export interface SkillGradeComponent {
 export interface SkillGradeComponentPoint {
   gameId: number
   playedAt: number
+  win?: boolean
+  championId?: number
+  role?: string
   grade?: string
+  recallScore?: number
   gradeScore?: number
+  session?: number
+  sessionGame?: number
+  restMinutes?: number
   compositePercentile: number
   components: SkillGradeComponent[]
 }
@@ -844,20 +928,7 @@ export interface RviCareerArmHeadlineAggregate extends RviScoreAggregate {
 }
 
 export type PerformancePosition = "TOP" | "JUNGLE" | "MIDDLE" | "BOTTOM" | "UTILITY"
-export type PerformancePrimaryArchetype =
-  | "assassin"
-  | "artillery"
-  | "battlemage"
-  | "burst_mage"
-  | "catcher"
-  | "diver"
-  | "enchanter"
-  | "juggernaut"
-  | "marksman"
-  | "skirmisher"
-  | "vanguard"
-  | "warden"
-  | "specialist"
+export type PerformancePrimaryArchetype = PrimaryArchetype
 
 export type PerformanceScopeKind =
   | "overall"
@@ -981,6 +1052,10 @@ export interface SkillReport {
   visuals: {
     history: SkillHistoryPoint[]
     gradeComponents: SkillGradeComponentPoint[]
+    windows: {
+      history: { label: string; shownGames: number; totalGames: number; limit: number }
+      gradeComponents: { label: string; shownGames: number; limit: number }
+    }
     champions: SkillChampionPoint[]
   }
   insights: {

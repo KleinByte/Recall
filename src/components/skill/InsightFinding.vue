@@ -33,15 +33,15 @@ const confidenceLabel = computed(() => ({
 const effectLabel = computed(() => {
   const effect = props.finding.effect
   const sign = effect > 0 ? "+" : ""
-  if (props.finding.unit === "grade") return `${sign}${effect.toFixed(2)} Recall grade`
-  return `${sign}${(effect * 100).toFixed(1)} pp`
+  if (props.finding.unit === "grade") return `${sign}${effect.toFixed(1)} Recall Score points`
+  return `${sign}${(effect * 100).toFixed(1)} percentage points`
 })
 
 const intervalLabel = computed(() => {
   const interval = props.finding.interval
   if (!interval) return undefined
   const multiplier = props.finding.unit === "grade" ? 1 : 100
-  const suffix = props.finding.unit === "grade" ? "" : " pp"
+  const suffix = props.finding.unit === "grade" ? " Recall Score points" : " pp"
   return `95% interval ${formatSigned(interval.low * multiplier)} to ${formatSigned(interval.high * multiplier)}${suffix}`
 })
 
@@ -116,15 +116,15 @@ function formatSigned(value: number) {
     <div class="evidence-row">
       <span class="evidence">{{ evidenceLabel }}</span>
       <span>{{ confidenceLabel }}</span>
-      <span>{{ finding.games }} games · {{ finding.eligibleGames }} eligible in scope</span>
-      <span v-if="intervalLabel" class="numeric">{{ intervalLabel }}</span>
-      <span v-if="rateIntervalLabel" class="numeric">{{ rateIntervalLabel }}</span>
+      <span>{{ finding.games }} of {{ finding.eligibleGames }} games compared</span>
     </div>
 
     <details>
-      <summary>Scope and caveats</summary>
+      <summary>Technical details and caveats</summary>
       <p>{{ finding.scope }}</p>
       <p v-if="finding.caveat">{{ finding.caveat }}</p>
+      <p v-if="intervalLabel" class="numeric">{{ intervalLabel }}</p>
+      <p v-if="rateIntervalLabel" class="numeric">{{ rateIntervalLabel }}</p>
     </details>
   </article>
 </template>

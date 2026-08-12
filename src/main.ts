@@ -1,10 +1,18 @@
 import { createApp } from "vue"
-import App from "./App.vue"
-
 import "./style.css"
 
-createApp(App)
-  .mount("#app")
-  .$nextTick(() => {
-    postMessage({ payload: "removeLoading" }, "*")
-  })
+async function bootstrap() {
+  const overlay = new URLSearchParams(window.location.search).get("surface") === "tempo-overlay"
+  if (overlay) document.documentElement.classList.add("tempo-overlay-surface")
+  const component = overlay
+    ? (await import("./TempoOverlayApp.vue")).default
+    : (await import("./App.vue")).default
+
+  createApp(component)
+    .mount("#app")
+    .$nextTick(() => {
+      postMessage({ payload: "removeLoading" }, "*")
+    })
+}
+
+void bootstrap()

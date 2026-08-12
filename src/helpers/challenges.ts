@@ -60,9 +60,31 @@ export function challengeTierProgress(challenge: ChallengeRow): number {
   return Math.min(1, Math.max(0, (challenge.currentValue - current) / span))
 }
 
-/** No next tier means the challenge has reached its highest available tier. */
+/**
+ * A challenge is complete when League reports no further milestone, or when
+ * the recorded value has already met the reported target. The latter matters
+ * for boolean-style 1/1 challenges and for brief client-sync states where the
+ * value advances before the tier metadata does.
+ */
 export function isChallengeCompleted(challenge: ChallengeRow): boolean {
-  return challenge.nextLevel === null || challenge.nextThreshold === null
+  const target = challenge.nextThreshold
+  return challenge.nextLevel === null || target === null ||
+    (Number.isFinite(challenge.currentValue) && Number.isFinite(target) &&
+      challenge.currentValue >= target)
+}
+
+/** One canonical completion selector shared by every challenge surface. */
+export function selectIncompleteChallenges(
+  challenges: readonly ChallengeRow[],
+): ChallengeRow[] {
+  return challenges.filter((challenge) => !isChallengeCompleted(challenge))
+}
+
+/** Amount still required for the reported target, clamped after completion. */
+export function challengeRemaining(challenge: ChallengeRow): number | null {
+  return challenge.nextThreshold === null
+    ? null
+    : Math.max(0, challenge.nextThreshold - challenge.currentValue)
 }
 
 /**
