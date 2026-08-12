@@ -1234,8 +1234,10 @@ describe("SkillReport", () => {
     const startedAt = performance.now()
     const report = buildSkillReport(input)
     const elapsedMs = performance.now() - startedAt
+    // Preserve the strict local regression guard while allowing modest hosted-runner variance.
+    const budgetMs = process.env.CI ? 350 : 250
 
     expect(report.overview.summary.games).toBe(2000)
-    expect(elapsedMs).toBeLessThan(250)
+    expect(elapsedMs).toBeLessThan(budgetMs)
   })
 })

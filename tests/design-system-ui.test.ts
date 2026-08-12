@@ -7,9 +7,9 @@ describe("Recall shared UI system", () => {
   it("publishes semantic tokens and the non-CSS renderer bridge", () => {
     const tokens = read("src/design/tokens.css")
     const theme = read("src/design/theme.ts")
-    const spec = read("docs/recall-ui-system.md")
 
     expect(tokens).toContain('@import "./dial-tokens.css"')
+    expect(tokens).toContain("Product and UI components consume --ui-* roles")
 
     const requiredTokens = [
       "ui-canvas",
@@ -55,9 +55,9 @@ describe("Recall shared UI system", () => {
       expect(theme).toMatch(new RegExp(`\\b${role}:`))
     }
 
-    expect(spec).toContain("## Architecture")
-    expect(spec).toContain("## Intentional specialty visuals")
-    expect(spec).toContain("## Acceptance criteria")
+    expect(tokens).toContain("--ui-page-ambient-energy:")
+    expect(tokens).toContain("--ui-control-background-hover:")
+    expect(tokens).toContain("--ui-z-transition:")
   })
 
   it("exports accessible, token-driven component contracts", () => {

@@ -526,7 +526,7 @@ function panelPosition(value: number, scale: number) {
   border-radius: 8px;
   color: var(--text-muted);
   background: var(--surface-2);
-  font-size: 10px;
+  font-size: var(--ui-text-micro);
 }
 
 .standout .pattern-visual {
@@ -708,7 +708,7 @@ function panelPosition(value: number, scale: number) {
 }
 
 .more-patterns svg {
-  font-size: 10px;
+  font-size: var(--ui-text-micro);
   transition: transform 160ms ease;
 }
 

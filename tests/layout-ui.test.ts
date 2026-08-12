@@ -44,7 +44,6 @@ describe("desktop page layout", () => {
   it("publishes a reusable instrument design language", () => {
     const baseTokens = read("src/design/tokens.css")
     const dialTokens = read("src/design/dial-tokens.css")
-    const spec = read("docs/dial-ui-design-token-spec.md")
     const dashboard = read("src/pages/DashboardPage.vue")
     const dial = read("src/components/MomentumGauge.vue")
 
@@ -52,13 +51,15 @@ describe("desktop page layout", () => {
     expect(dialTokens).toContain("--instrument-surface:")
     expect(dialTokens).toContain("--instrument-frame:")
     expect(dialTokens).toContain("--instrument-energy:")
+    expect(dialTokens).toContain("--instrument-border-soft:")
+    expect(dialTokens).toContain("--instrument-shadow-raised:")
+    expect(dialTokens).toContain("--instrument-motion-fast:")
     expect(dialTokens).toContain("--dial-score-100: #e7bd55")
     expect(dialTokens).toContain("--dial-tier-master-bright: #e0a4ff")
     expect(dashboard).toContain("background: var(--ui-surface-panel-quiet)")
     expect(dial).toContain("var(--instrument-motion-ambient)")
-    expect(spec).toContain("## Design principles")
-    expect(spec).toContain("## Component recipes")
-    expect(spec).toContain("## Accessibility guardrails")
+    expect(dial).toContain('role="meter"')
+    expect(dial).toContain("prefers-reduced-motion")
   })
 
   it("aligns variable-height analysis and progress cards", () => {
