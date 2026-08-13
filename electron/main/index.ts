@@ -13,8 +13,6 @@ import {
 } from "electron"
 import electronUpdater from "electron-updater"
 import { fileURLToPath } from "node:url"
-import { renameSync, rmSync, writeFileSync } from "node:fs"
-import { createHash } from "node:crypto"
 import path from "node:path"
 import os from "node:os"
 import Store from "electron-store"
@@ -36,6 +34,11 @@ import {
   type ChallengeFilter,
 } from "./database/challenges-repo.js"
 import { ProfileRepository } from "./database/profile-repo.js"
+import { AccountProfileRepository } from "./database/account-profile-repo.js"
+import {
+  AccountProfileCapture,
+  type AccountProfileSummoner,
+} from "./account-profile-capture.js"
 import { ParticipantsRepository } from "./database/participants-repo.js"
 import { MasteryRepository } from "./database/mastery-repo.js"
 import { LiveGameCaptureRepository } from "./database/live-game-capture-repo.js"
@@ -47,13 +50,10 @@ import { ChallengeSync } from "./challenges/challenge-sync.js"
 import { InsightsRepository } from "./database/insights-repo.js"
 import { RiotBackfillRepository } from "./database/riot-backfill-repo.js"
 import {
-  matchAxes,
   pickBestAndWorst,
   splitChampionSignals,
 } from "./matches/insights.js"
-import { buildSkillReport } from "./matches/skill-report.js"
 import {
-  buildPerformanceProfile,
   type PerformanceScoringContext,
 } from "./matches/performance-profile.js"
 import { recordScopeForMatch } from "./matches/records.js"
@@ -65,7 +65,6 @@ import { LcuEvents as LcuEventStream } from "./lcu-events.js"
 import { MatchSync } from "./match-sync.js"
 import { MatchGradingService } from "./matches/match-grading-service.js"
 import { syncUntilRecorded } from "./post-game-sync.js"
-import { buildStyleProfile } from "./matches/style.js"
 import type {
   ChampionMasterySnapshot,
   MatchRow,
@@ -74,7 +73,6 @@ import type {
   TrackedMode,
 } from "./matches/types.js"
 import { migrateLegacyUserData } from "./migrate-user-data.js"
-import { createSingleFlightRefresh } from "./full-refresh.js"
 import { readLiveSession, type LivePhase, type LiveSession } from "./live-session.js"
 import { GameClient, readLiveGameSnapshot } from "./game-client.js"
 import { LiveTempoTracker } from "./live-analysis.js"
@@ -116,6 +114,10 @@ import {
   registerUpdaterIpc,
   type UpdaterService,
 } from "./updater.js"
+import { registerDataTrustIpc } from "./ipc/data-trust-ipc.js"
+import { LcuSessionGeneration } from "./lcu-session-generation.js"
+import { AnalysisWorkerClient } from "./background/analysis-worker-client.js"
+import { runStableAnalysis } from "./background/stable-analysis.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -187,17 +189,11 @@ interface TempoOverlayStatus {
   shortcutRegistered: boolean
 }
 
-interface Summoner {
-  puuid: string
-  gameName: string
-  tagLine: string
-  summonerId: number
-  profileIconId: number
-  summonerLevel: number
-}
+type Summoner = AccountProfileSummoner
 
 /** State tied to one connected League Client session. */
 interface Session {
+  credentials: LcuCredentials
   client: LcuClient
   events: LcuEventStream
   sync: MatchSync
@@ -261,12 +257,15 @@ let dataTrustService: DataTrustService | undefined
 let timelineService: LcuTimelineService | undefined
 let reviewService: ReviewService | undefined
 let recall: MatchGradingService | undefined
+let analysisWorker: AnalysisWorkerClient | undefined
+let statsRevision = 0
 let startupRestoreError: string | undefined
 let riotBackfillAbort: AbortController | undefined
 let riotBackfillTask: Promise<void> | undefined
 let riotBackfillRevision = 0
 let dailyBackupTask: Promise<void> | undefined
 const databaseWrites = new DatabaseWriteCoordinator()
+const lcuSessionGeneration = new LcuSessionGeneration()
 let shutdownPrepared = false
 let shutdownPreparing: Promise<void> | undefined
 
@@ -301,6 +300,10 @@ function getChallenges(): ChallengesRepository {
 function getProfiles(): ProfileRepository {
   if (!profiles) profiles = new ProfileRepository(getDatabase())
   return profiles
+}
+
+function getAccountProfileCapture(): AccountProfileCapture {
+  return new AccountProfileCapture(new AccountProfileRepository(getDatabase()))
 }
 
 function getParticipants(): ParticipantsRepository {
@@ -458,6 +461,11 @@ function getMatchGradingService() {
   return recall
 }
 
+function getAnalysisWorker() {
+  if (!analysisWorker) analysisWorker = new AnalysisWorkerClient()
+  return analysisWorker
+}
+
 async function ensureRecallFrozen(win?: BrowserWindow) {
   const service = getMatchGradingService()
   const status = service.referenceStatus()
@@ -477,10 +485,13 @@ async function ensureRecallFrozen(win?: BrowserWindow) {
     return status
   }
   const backup = await getBackupManager().createAsync(getDatabase(), "pre-repair")
-  const result = service.ensureFrozenReference({
-    path: backup.fileName,
-    sha256: backup.sha256,
-  })
+  const result = await trackDatabaseTask(getAnalysisWorker().ensureFrozenReference({
+    databasePath: getDatabasePath(),
+    backup: {
+      path: backup.fileName,
+      sha256: backup.sha256,
+    },
+  }))
   if ("processed" in result) {
     console.log(
       `Recall rebuilt ${result.processed} matches (${result.ready} ready, ${result.nonready} withheld)`,
@@ -587,7 +598,6 @@ function getTimelineService(win: BrowserWindow) {
             match,
             player,
             participants: detail.participants,
-            teams: detail.teams,
           }),
           ...evaluateTimelineLabels({
             match,
@@ -700,6 +710,7 @@ async function createWindow(startHidden = false) {
 }
 
 function broadcast(win: BrowserWindow, channel: string, payload?: unknown) {
+  if (channel === "stats:updated") statsRevision += 1
   if (win.isDestroyed()) return
   win.webContents.send(channel, payload)
 }
@@ -926,8 +937,16 @@ function createTray(win: BrowserWindow) {
   tray.on("double-click", () => reveal(win))
 }
 
-async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
-  if (collectionDisabled()) return
+async function startSession(
+  win: BrowserWindow,
+  credentials: LcuCredentials,
+  generation: number,
+) {
+  const isCurrent = () =>
+    lcuSessionGeneration.isCurrent(generation) &&
+    !quitting &&
+    !collectionDisabled()
+  if (!isCurrent()) return
   const client = new LcuClient(credentials)
 
   let summoner: Summoner
@@ -937,7 +956,7 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
     summoner = await client.request<Summoner>(
       "/lol-summoner/v1/current-summoner",
     )
-    if (collectionDisabled()) {
+    if (!isCurrent()) {
       client.close()
       return
     }
@@ -948,9 +967,9 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
     console.warn(`Could not read current summoner: ${(error as Error).message}`)
     client.close()
 
-    if (!collectionDisabled()) {
+    if (isCurrent()) {
       connectRetry = setTimeout(
-        () => void startSession(win, credentials),
+        () => void startSession(win, credentials, generation),
         SESSION_RETRY_DELAY_MS,
       )
     }
@@ -969,10 +988,15 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
     console.warn(`Could not determine Riot API route: ${(error as Error).message}`)
   }
 
-  if (collectionDisabled()) {
+  if (!isCurrent()) {
     client.close()
     return
   }
+
+  getAccountProfileCapture().record(summoner, {
+    platformId,
+    regionalRoute,
+  })
 
   const sync = new MatchSync(
     client,
@@ -1020,6 +1044,7 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
 
   const gameClient = new GameClient()
   session = {
+    credentials,
     client,
     events,
     sync,
@@ -1043,16 +1068,18 @@ async function startSession(win: BrowserWindow, credentials: LcuCredentials) {
   if (getMatchGradingService().needsDirectCutover() && regionalRoute && readRiotApiKey()) {
     await startRiotHistoryBackfill(win, true)
   }
+  if (!isCurrent() || session?.client !== client) return
   await runSync(win)
 }
 
-function stopSession(win: BrowserWindow) {
+function stopSession(win: BrowserWindow): number {
+  const generation = lcuSessionGeneration.invalidate()
   if (connectRetry) {
     clearTimeout(connectRetry)
     connectRetry = undefined
   }
 
-  if (!session) return
+  if (!session) return generation
 
   riotBackfillRevision += 1
   riotBackfillAbort?.abort()
@@ -1066,6 +1093,7 @@ function stopSession(win: BrowserWindow) {
   clearLiveSession(win)
 
   broadcast(win, "lcu:status", { connected: false, summoner: null })
+  return generation
 }
 
 function clearLiveSession(win: BrowserWindow) {
@@ -1187,14 +1215,20 @@ let catchingGame = false
 
 async function catchFinishedGame(win: BrowserWindow) {
   if (collectionDisabled() || catchingGame || !session) return
+  const active = session
   catchingGame = true
 
   try {
     await syncUntilRecorded(async () => {
-      if (collectionDisabled() || !session) return { inserted: 0 }
+      if (collectionDisabled() || session !== active) return { inserted: 0 }
 
-      const result = await session.sync.syncNow()
-      if (result.inserted > 0) await afterSync(win, result)
+      await snapshotAccountProfile(win, active)
+      if (session !== active || collectionDisabled()) return { inserted: 0 }
+      const result = await active.sync.syncNow()
+      if (session !== active || collectionDisabled()) return { inserted: 0 }
+      await snapshotAccountProfile(win, active)
+      if (session !== active || collectionDisabled()) return { inserted: 0 }
+      if (result.inserted > 0) await afterSync(win, active, result)
 
       return result
     })
@@ -1203,19 +1237,42 @@ async function catchFinishedGame(win: BrowserWindow) {
   }
 }
 
-async function performFullSync(win: BrowserWindow) {
-  if (collectionDisabled() || !session) return
+async function performFullSync(win: BrowserWindow, active: Session) {
+  if (collectionDisabled() || session !== active) return
 
-  const result = await session.sync.syncNow()
-  await afterSync(win, result)
+  await snapshotAccountProfile(win, active)
+  if (collectionDisabled() || session !== active) return
+  const result = await active.sync.syncNow()
+  if (collectionDisabled() || session !== active) return
+  await snapshotAccountProfile(win, active)
+  if (collectionDisabled() || session !== active) return
+  await afterSync(win, active, result)
   return result
 }
 
-const refreshAll = createSingleFlightRefresh(performFullSync)
+let refreshAllTask: Promise<Awaited<ReturnType<typeof performFullSync>>> | undefined
+let refreshAllSession: Session | undefined
+
+async function refreshAll(win: BrowserWindow, active: Session) {
+  if (refreshAllTask) {
+    if (refreshAllSession === active) return refreshAllTask
+    await refreshAllTask.catch(() => undefined)
+    if (collectionDisabled() || session !== active) return
+  }
+  const task = performFullSync(win, active).finally(() => {
+    if (refreshAllTask === task) {
+      refreshAllTask = undefined
+      refreshAllSession = undefined
+    }
+  })
+  refreshAllSession = active
+  refreshAllTask = task
+  return task
+}
 
 async function runSync(win: BrowserWindow) {
-  if (collectionDisabled()) return
-  return trackDatabaseTask(refreshAll(win))
+  if (collectionDisabled() || !session) return
+  return trackDatabaseTask(refreshAll(win, session))
 }
 
 /**
@@ -1357,30 +1414,34 @@ async function startRiotHistoryBackfill(
 /** Tells the renderer what changed, and refreshes everything a game affects. */
 async function afterSync(
   win: BrowserWindow,
+  active: Session,
   result: { inserted: number },
 ) {
-  if (collectionDisabled() || !session) return
+  const isCurrent = () => !collectionDisabled() && session === active
+  if (!isCurrent()) return
 
   const needsDirectCutover = getMatchGradingService().needsDirectCutover()
   const timelineTask = getTimelineService(win)
-    .queueRecentMatches(session.summoner.puuid)
+    .queueRecentMatches(active.summoner.puuid)
   if (timelineTask) {
     const trackedTimelineTask = trackDatabaseTask(timelineTask)
-    // For the v3.0.1 recipe replacement, retained/source timelines need to be
+    // During a recipe replacement, retained/source timelines need to be
     // present before the immutable local reference is rebuilt. Normal syncs
     // remain asynchronous after the cutover has completed.
     if (needsDirectCutover) await trackedTimelineTask
+    if (!isCurrent()) return
   }
   // A periodic/local sync may overlap the one-time full-history enrichment.
   // Do not let that race freeze a partially enriched reference.
   if (needsDirectCutover && riotBackfillTask) {
     await riotBackfillTask.catch(() => undefined)
+    if (!isCurrent()) return
   }
   let cutoverEnrichmentComplete = true
-  if (needsDirectCutover && session.regionalRoute && readRiotApiKey()) {
+  if (needsDirectCutover && active.regionalRoute && readRiotApiKey()) {
     const enrichment = getRiotBackfills().get(
-      session.summoner.puuid,
-      session.regionalRoute,
+      active.summoner.puuid,
+      active.regionalRoute,
     )
     // Keep the recipe in an honest building state after an interrupted or
     // failed full-history pass. Retrying the import resumes the cutover;
@@ -1388,6 +1449,7 @@ async function afterSync(
     cutoverEnrichmentComplete = enrichment?.status === "complete"
   }
   if (cutoverEnrichmentComplete) await ensureRecallFrozen(win)
+  if (!isCurrent()) return
 
   if (result.inserted > 0) {
     broadcast(win, "stats:updated", result)
@@ -1395,32 +1457,66 @@ async function afterSync(
     // Every newly inserted game is checked against active experiment scopes;
     // the newest one drives the post-game banner.
     const recent = getRepository().getRecentMatches(
-      { puuid: session.summoner.puuid },
+      { puuid: active.summoner.puuid },
       result.inserted,
     )
     const [latest] = recent
     for (const match of recent) getReviewRepository().attachMatchingExperiments(match)
     if (latest) {
       broadcast(win, "match:recorded", latest)
-      broadcastHeldRecords(win, latest, session.summoner.puuid)
+      broadcastHeldRecords(win, latest, active.summoner.puuid)
       broadcast(win, "review:updated", latest.gameId)
     }
     createDailyBackupIfNeeded(win)
   }
-  getDataTrustService().recordSync(session.summoner.puuid, "league_client", {
+  getDataTrustService().recordSync(active.summoner.puuid, "league_client", {
     success: true,
     seen: result.inserted,
     written: result.inserted,
   })
   // Challenges are synced after matches so a challenge failure can never cost
   // us a recorded game.
-  const challengeResult = await session.challengeSync.syncNow()
+  const challengeResult = await active.challengeSync.syncNow()
+  if (!isCurrent()) return
   if (challengeResult.changed > 0) {
     broadcast(win, "challenges:updated", challengeResult)
   }
 
-  await snapshotProfile(win)
-  await snapshotRanked(win)
+  await snapshotProfile(win, active)
+  if (!isCurrent()) return
+  await snapshotRanked(win, active)
+}
+
+/** Refreshes mutable LCU identity fields without allowing a stale session to write. */
+async function snapshotAccountProfile(win: BrowserWindow, active: Session) {
+  if (collectionDisabled() || session !== active) return
+
+  try {
+    const result = await getAccountProfileCapture().refresh(
+      () => active.client.request<Summoner>(
+        "/lol-summoner/v1/current-summoner",
+      ),
+      active.summoner.puuid,
+      {
+        platformId: active.platformId,
+        regionalRoute: active.regionalRoute,
+      },
+      () => !collectionDisabled() && session === active,
+    )
+    if (result.state === "account_changed") {
+      const generation = stopSession(win)
+      void startSession(win, active.credentials, generation)
+      return
+    }
+    if (result.state === "stale") return
+
+    active.summoner = result.summoner
+    if (result.state === "changed") {
+      broadcast(win, "lcu:status", { connected: true, summoner: result.summoner })
+    }
+  } catch (error) {
+    console.warn(`Account profile snapshot skipped: ${(error as Error).message}`)
+  }
 }
 
 /**
@@ -1429,11 +1525,11 @@ async function afterSync(
  * The client only ever reports the current standing, so a season's climb only
  * exists if it is written down as it happens.
  */
-async function snapshotRanked(win: BrowserWindow) {
-  if (!session) return
+async function snapshotRanked(win: BrowserWindow, active: Session) {
+  if (collectionDisabled() || session !== active) return
 
   try {
-    const stats = await session.client.request<{
+    const stats = await active.client.request<{
       queueMap?: Record<
         string,
         {
@@ -1445,6 +1541,7 @@ async function snapshotRanked(win: BrowserWindow) {
         }
       >
     }>("/lol-ranked/v1/current-ranked-stats")
+    if (collectionDisabled() || session !== active) return
 
     const recordedAt = Date.now()
     let changed = false
@@ -1454,7 +1551,7 @@ async function snapshotRanked(win: BrowserWindow) {
       if (!entry.tier || entry.tier === "NONE") continue
 
       const stored = getRankedHistory().recordSnapshot({
-        puuid: session.summoner.puuid,
+        puuid: active.summoner.puuid,
         queue,
         recordedAt,
         tier: entry.tier,
@@ -1474,19 +1571,20 @@ async function snapshotRanked(win: BrowserWindow) {
 }
 
 /** Records challenge standing so progress over time can be shown. */
-async function snapshotProfile(win: BrowserWindow) {
-  if (!session) return
+async function snapshotProfile(win: BrowserWindow, active: Session) {
+  if (collectionDisabled() || session !== active) return
 
   try {
-    const summary = await session.client.request<{
+    const summary = await active.client.request<{
       overallChallengeLevel: string
       totalChallengeScore: number
       positionPercentile?: number
       categoryProgress?: unknown[]
     }>("/lol-challenges/v1/summary-player-data/local-player")
+    if (collectionDisabled() || session !== active) return
 
     const changed = getProfiles().recordSnapshot({
-      puuid: session.summoner.puuid,
+      puuid: active.summoner.puuid,
       recordedAt: Date.now(),
       overallLevel: summary.overallChallengeLevel ?? "NONE",
       totalScore: summary.totalChallengeScore ?? 0,
@@ -1515,8 +1613,8 @@ function connectToLcu(win: BrowserWindow) {
         settingsStore.getMain("collection-mode") === "disabled_after_clear") {
       settingsStore.setMain("collection-mode", "enabled")
     }
-    stopSession(win)
-    void startSession(win, credentials)
+    const generation = stopSession(win)
+    void startSession(win, credentials, generation)
   })
 
   discovery.on("disconnect", () => stopSession(win))
@@ -1671,52 +1769,25 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
 
   ipcMain.handle("champions:catalog", () => loadChampionCatalog())
 
-  ipcMain.handle("data-trust:get", () =>
-    getDataTrustService().report(
-      currentPuuid(),
-      settingsStore.getMain("riot-api-key-encrypted") !== undefined,
-      safeStorage.isEncryptionAvailable(),
-    ),
-  )
-
-  ipcMain.handle("data-trust:check", () => {
-    const service = getDataTrustService()
-    service.check()
-    const report = service.report(
-      currentPuuid(),
-      settingsStore.getMain("riot-api-key-encrypted") !== undefined,
-      safeStorage.isEncryptionAvailable(),
-    )
-    broadcast(win, "data-trust:updated", report)
-    return report
-  })
-
-  ipcMain.handle("backups:list", () => getBackupManager().list())
-  ipcMain.handle("backups:create", async () => {
-    const backup = await trackDatabaseTask(
-      getBackupManager().createAsync(getDatabase(), "manual"),
-    )
-    broadcast(win, "data-trust:updated")
-    return backup
-  })
-  ipcMain.handle("backups:delete", (_event, fileName: unknown) => {
-    const deleted = getBackupManager().delete(
-      limitedString(fileName, "Backup name", 180),
-    )
-    broadcast(win, "data-trust:updated")
-    return deleted
-  })
-  ipcMain.handle("backups:restore", async (_event, fileName: unknown) => {
-    await trackDatabaseTask(getBackupManager().prepareRestoreAsync(
-      getDatabase(),
-      limitedString(fileName, "Backup name", 180),
-    ))
-    setImmediate(() => {
-      quitting = true
-      app.relaunch()
-      app.quit()
-    })
-    return true
+  registerDataTrustIpc(ipcMain, {
+    getDataTrustService,
+    getBackupManager,
+    getDatabase,
+    getReportContext: () => ({
+      puuid: currentPuuid(),
+      keyConfigured: settingsStore.getMain("riot-api-key-encrypted") !== undefined,
+      keyProtected: safeStorage.isEncryptionAvailable(),
+    }),
+    trackDatabaseTask,
+    normalizeBackupName: (value) => limitedString(value, "Backup name", 180),
+    broadcastUpdated: (report) => broadcast(win, "data-trust:updated", report),
+    scheduleApplicationRestart: () => {
+      setImmediate(() => {
+        quitting = true
+        app.relaunch()
+        app.quit()
+      })
+    },
   })
 
   ipcMain.handle("review:overview", () =>
@@ -2108,53 +2179,6 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
   )
 
   ipcMain.handle(
-    "stats:lobby",
-    (_event, filter: Partial<StatsFilter>) =>
-      getParticipants().getLobbyComparison(withPuuid(filter)),
-  )
-
-  ipcMain.handle("matches:detail", (_event, gameId: number) => {
-    const puuid = withPuuid().puuid
-    return {
-      ...getParticipants().getMatchDetail(gameId, puuid),
-      labels: getRepository().getPerformanceLabels(gameId, puuid),
-    }
-  })
-
-  ipcMain.handle(
-    "stats:drift",
-    (_event, query: Partial<MatchQuery>, family: ModeFamily) => {
-      const scoped = withPuuid(query)
-      const repo = getRepository()
-
-      const size = 10
-      const maxWindows = 6
-      const total = repo.getSummary(scoped).games
-
-      const windows: { label: string; axes: unknown[] }[] = []
-
-      for (let index = 0; index < maxWindows; index += 1) {
-        const offset = index * size
-        if (offset >= total) break
-
-        const profile = buildStyleProfile(
-          repo.getStyleAverages(scoped, { limit: size, offset }),
-          family,
-        )
-        if (!profile) break
-
-        windows.push({
-          label: `${offset + 1}\u2013${offset + size} ago`,
-          axes: profile.axes,
-        })
-      }
-
-      // Read left to right as oldest to newest, the way a trend is read.
-      return windows.reverse()
-    },
-  )
-
-  ipcMain.handle(
     "insights:all",
     (_event, filter: Partial<StatsFilter>, family: ModeFamily) => {
       const scoped = withPuuid(filter)
@@ -2177,34 +2201,32 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     const scoped = withPuuid(filter)
     const repo = getRepository()
 
-    // Compatibility scores still feed the legacy/internal signal model, but
-    // the visible ordering is the unshrunk authoritative Recall Score average.
-    const baseline = repo.getSummary(scoped).avgGradeScore ?? 0
-    const signals = splitChampionSignals(repo.getChampionStats(scoped), baseline)
-    const byRecallScore = (left: typeof signals.main[number], right: typeof signals.main[number]) =>
-      (right.recallScore ?? -Infinity) - (left.recallScore ?? -Infinity) ||
-      right.gradedGames - left.gradedGames || left.championId - right.championId
-    const ranked = [...signals.main].sort(byRecallScore)
-    const earlySignals = [...signals.earlySignals].sort(byRecallScore)
+    const { main: ranked, earlySignals } = splitChampionSignals(
+      repo.getChampionStats(scoped),
+    )
 
     return { ranked, earlySignals, ...pickBestAndWorst(ranked, 3) }
   })
 
   ipcMain.handle(
     "stats:rvi",
-    (_event, filter: Partial<StatsFilter>, family: ModeFamily, scoringContext?: PerformanceScoringContext) => {
+    async (_event, filter: Partial<StatsFilter>, family: ModeFamily, scoringContext?: PerformanceScoringContext) => {
       const scoped = withPuuid(filter)
-      const insightsRepo = getInsights()
-      // RVI is a career profile for the selected frozen recipe. At this hobby-
-      // project scale, silently truncating it to a recent window is both
-      // unnecessary and misleading.
-      const rvi = insightsRepo.getRviObservations(scoped)
-      if (!rvi) return undefined
-      return buildPerformanceProfile({
-        recipeId: rvi.recipeId,
-        rviObservations: rvi.observations,
-        family,
-        scoringContext,
+      return runStableAnalysis({
+        expectedIdentity: scoped.puuid,
+        currentIdentity: currentPuuid,
+        currentRevision: () => statsRevision,
+        task: async () => {
+          // RVI is a career profile for the selected frozen recipe. At this hobby-
+          // project scale, silently truncating it to a recent window is both
+          // unnecessary and misleading.
+          return getAnalysisWorker().buildPerformanceProfileFromDatabase({
+            databasePath: getDatabasePath(),
+            filter: scoped,
+            family,
+            scoringContext,
+          })
+        },
       })
     },
   )
@@ -2236,14 +2258,17 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
       await databaseWrites.drain()
 
       const backup = await getBackupManager().createAsync(getDatabase(), "pre-repair")
-      const result = getMatchGradingService().rebuildReference({
-        path: backup.fileName,
-        sha256: backup.sha256,
+      const result = await trackDatabaseTask(getAnalysisWorker().rebuildReference({
+        databasePath: getDatabasePath(),
+        backup: {
+          path: backup.fileName,
+          sha256: backup.sha256,
+        },
       }, (progress) => {
         if (progress.processed === progress.total || progress.processed % 25 === 0) {
           broadcast(win, "performance-reference:progress", progress)
         }
-      })
+      }))
       broadcast(win, "stats:updated", { inserted: 0, regraded: result.processed })
       broadcast(win, "performance-reference:updated", getMatchGradingService().referenceStatus())
       broadcast(win, "data-trust:updated")
@@ -2255,63 +2280,19 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
 
   ipcMain.handle(
     "stats:skill-report",
-    (_event, filter: Partial<StatsFilter>, family: ModeFamily) => {
+    async (_event, filter: Partial<StatsFilter>, family: ModeFamily) => {
       const scoped = withPuuid(filter)
-      const repo = getRepository()
-      const insightsRepo = getInsights()
-      const timeOfDay = insightsRepo.getTimeOfDay(scoped)
-      const careerStyle = buildStyleProfile(repo.getStyleAverages(scoped), family)
-      const recentStyle = buildStyleProfile(
-        repo.getStyleAverages(scoped, { limit: 10 }),
-        family,
-      )
-      const earlierStyle = buildStyleProfile(
-        repo.getStyleAverages(scoped, { offset: 10 }),
-        family,
-      )
-
-      return buildSkillReport({
-        modes: filter.modes ?? (filter.mode ? [filter.mode] : []),
-        family,
-        generatedAt: Date.now(),
-        summary: repo.getSummary(scoped),
-        style: careerStyle
-          ? { career: careerStyle, recent: recentStyle, earlier: earlierStyle }
-          : undefined,
-        grades: repo.getGradeDistribution(scoped),
-        lobby: getParticipants().getLobbyComparison(scoped),
-        contribution: insightsRepo.getTeamContribution(scoped),
-        duration: insightsRepo.getDurationBuckets(scoped, family),
-        hours: timeOfDay.hours,
-        weekdays: timeOfDay.weekdays,
-        pool: insightsRepo.getChampionPool(scoped),
-        builds: insightsRepo.getBuildPatterns(scoped, 8),
-        observations: insightsRepo.getObservations(scoped),
-        championStats: repo.getChampionStats(scoped),
-        itemObservations: insightsRepo.getFinalItemObservations(scoped),
-        gradeComponentHistory: insightsRepo.getGradeComponentHistory(scoped),
-        rvi: insightsRepo.getRviObservations(scoped),
-        performanceTimelineHistory: insightsRepo.getRviTimelineHistory(scoped, 240),
-      })
-    },
-  )
-
-  ipcMain.handle(
-    "matches:axes",
-    (_event, gameId: number, family: ModeFamily) => {
-      const puuid = withPuuid().puuid
-      const detail = getParticipants().getMatchDetail(gameId, puuid)
-      const mine = detail.participants.find((row) => row.isPlayer === 1)
-
-      if (!mine) return { axes: [] }
-
-      return {
-        axes: matchAxes(
-          mine,
-          getRepository().getMatchDuration(gameId, puuid),
+      return runStableAnalysis({
+        expectedIdentity: scoped.puuid,
+        currentIdentity: currentPuuid,
+        currentRevision: () => statsRevision,
+        task: () => getAnalysisWorker().buildSkillReportFromDatabase({
+          databasePath: getDatabasePath(),
+          filter: scoped,
           family,
-        ),
-      }
+          generatedAt: Date.now(),
+        }),
+      })
     },
   )
 
@@ -2369,29 +2350,6 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
 
   ipcMain.handle("goals:remove", (_event, id: number) =>
     getGoals().remove(id, withPuuid().puuid),
-  )
-
-  ipcMain.handle(
-    "stats:style",
-    (_event, query: Partial<MatchQuery>, family: ModeFamily) => {
-      const repo = getRepository()
-      const scoped = withPuuid(query)
-
-      // The most recent games, against everything that came before them.
-      const recentGames = 10
-
-      return {
-        career: buildStyleProfile(repo.getStyleAverages(scoped), family),
-        recent: buildStyleProfile(
-          repo.getStyleAverages(scoped, { limit: recentGames }),
-          family,
-        ),
-        earlier: buildStyleProfile(
-          repo.getStyleAverages(scoped, { offset: recentGames }),
-          family,
-        ),
-      }
-    },
   )
 
   ipcMain.handle(
@@ -2503,35 +2461,23 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
 
     if (canceled || !filePath) return { exported: 0 }
 
-    const matches = getRepository().getAllMatches(puuid)
-    const columns = ["gameId", "playedAt", "mode", "championId", "win", "kills",
-      "deaths", "assists", "durationSecs", "grade", "gradeScore", "recallScore",
-      "gradeAlgorithmVersion", "gradeRecipeId", "gradeStatus", "gradeEvidenceCoverage",
-      "gradeReferenceSampleCount"] as const
-    const csvCell = (value: unknown) => {
-      const text = value === undefined || value === null ? "" : String(value)
-      return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text
-    }
-    const csv = `${columns.join(",")}\r\n${matches.map((match) =>
-      columns.map((column) => csvCell(match[column])).join(",")).join("\r\n")}\r\n`
-    const temporary = `${filePath}.tmp-${process.pid}`
-    try {
-      writeFileSync(temporary, csv, { encoding: "utf8", flag: "wx" })
-      renameSync(temporary, filePath)
-    } finally {
-      rmSync(temporary, { force: true })
-    }
-    const digest = createHash("sha256").update(csv, "utf8").digest("hex")
-    const now = Date.now()
-    getDatabase().prepare(
-      `INSERT INTO export_artifacts
-       (kind, absolute_path, artifact_sha256, status, created_at, last_verified_at)
-       VALUES ('match_summary_csv', ?, ?, 'present', ?, ?)
-       ON CONFLICT(absolute_path) DO UPDATE SET artifact_sha256=excluded.artifact_sha256,
-         status='present', last_verified_at=excluded.last_verified_at`,
-    ).run(path.resolve(filePath), digest, now, now)
+    const result = await trackDatabaseTask(getAnalysisWorker().exportMatchSummary({
+      databasePath: getDatabasePath(),
+      puuid,
+      filePath,
+    }).then((exported) => {
+      const now = Date.now()
+      getDatabase().prepare(
+        `INSERT INTO export_artifacts
+         (kind, absolute_path, artifact_sha256, status, created_at, last_verified_at)
+         VALUES ('match_summary_csv', ?, ?, 'present', ?, ?)
+         ON CONFLICT(absolute_path) DO UPDATE SET artifact_sha256=excluded.artifact_sha256,
+           status='present', last_verified_at=excluded.last_verified_at`,
+      ).run(path.resolve(exported.filePath), exported.digest, now, now)
+      return exported
+    }))
 
-    return { exported: matches.length, filePath }
+    return { exported: result.exported, filePath: result.filePath }
   })
 
   ipcMain.handle("stats:full-backup", async () => {
@@ -2686,6 +2632,8 @@ async function prepareShutdown(
         getDatabaseBackupDir(),
       )
     }
+    await analysisWorker?.close()
+    analysisWorker = undefined
     if (database?.open) database.close()
     database = undefined
     shutdownPrepared = true

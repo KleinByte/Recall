@@ -1,6 +1,6 @@
 import type { Position } from "./position.js"
 import type { MatchGradeModeContext, PrimaryArchetype } from "./match-grade-taxonomy.js"
-import { MATCH_GRADE_METRIC_DIRECTIONS, MATCH_GRADE_RECIPE } from "./match-grade-recipe.js"
+import { CURRENT_GRADE_RECIPE, MATCH_GRADE_METRIC_DIRECTIONS } from "./match-grade-recipe.js"
 import type {
   MetricDirection,
   MetricResponsibilityTier,
@@ -341,7 +341,7 @@ export function assertValidMetricRegistry(
     if (Math.abs(total - 1) > 1e-12) {
       throw new Error(`metric_vector_weight_total_invalid:${vector}:${total}`)
     }
-    const recipeMetrics = MATCH_GRADE_RECIPE.aggregation.familyMetrics[vector]
+    const recipeMetrics = CURRENT_GRADE_RECIPE.aggregation.familyMetrics[vector]
     if (recipeMetrics.length !== scoredPolicies.length || recipeMetrics.some((metric) => {
       const policy = scoredPolicies.find((entry) => entry.metricKey === metric.key)
       const definition = definitions.find((entry) => entry.key === metric.key)

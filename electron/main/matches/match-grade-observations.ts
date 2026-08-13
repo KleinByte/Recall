@@ -6,7 +6,7 @@ import {
   unavailable,
 } from "../../../src/shared/measurement.js"
 import {
-  MATCH_GRADE_RECIPE,
+  CURRENT_GRADE_RECIPE,
   MATCH_GRADE_METRIC_KEYS,
   MATCH_GRADE_METRIC_DIRECTIONS,
   type MatchGradeMetricKey,
@@ -35,7 +35,7 @@ import { rawResponsibilityScores } from "./match-grade.js"
 export const MATCH_GRADE_CALIBRATION_FORMAT_VERSION = 5 as const
 export const MATCH_GRADE_MINIMUM_REFERENCE_MATCHES = 5
 export const MATCH_GRADE_MINIMUM_SCOPE_MATCHES =
-  MATCH_GRADE_RECIPE.calibration.minimumScopeMatches
+  CURRENT_GRADE_RECIPE.calibration.minimumScopeMatches
 
 export interface GradeCalibrationClusterFacts {
   gameId: number
@@ -134,7 +134,7 @@ export interface GradeCalibrationSnapshot {
   referencePopulation: {
     kind: "local_recall_installation"
     clusterUnit: "match"
-    clusterIdentity: typeof MATCH_GRADE_RECIPE.calibration.clusterIdentity
+    clusterIdentity: typeof CURRENT_GRADE_RECIPE.calibration.clusterIdentity
     frozen: true
     supportedModes: string[]
     supportedScopes: string[]
@@ -177,7 +177,7 @@ export interface PreparedGradeLobby {
     population: "local_recall_installation"
     frozen: true
     clusterUnit: "match"
-    clusterIdentity: typeof MATCH_GRADE_RECIPE.calibration.clusterIdentity
+    clusterIdentity: typeof CURRENT_GRADE_RECIPE.calibration.clusterIdentity
     trackedMode: string
     rulesetKey: string
     scopeKey: string
@@ -219,8 +219,8 @@ export function deriveRawMetricEvidence(
 
   // Production lobbies derive the shared summary inventory once. Grade then
   // selects its registered subset instead of recalculating the same formulas
-  // through a parallel RVI-only path. The fallback below remains for pure
-  // scorer callers that intentionally provide only legacy Grade raw fields.
+  // through a parallel RVI-only path. Pure scorer callers may still provide
+  // the minimal Grade raw fields directly, so that path remains deterministic.
   if (lobby.detailMetricObservations) {
     let complete = true
     for (const player of lobby.players) {
@@ -415,7 +415,7 @@ export function buildGradeCalibrationSnapshot(
     referencePopulation: {
       kind: "local_recall_installation",
       clusterUnit: "match",
-      clusterIdentity: MATCH_GRADE_RECIPE.calibration.clusterIdentity,
+      clusterIdentity: CURRENT_GRADE_RECIPE.calibration.clusterIdentity,
       frozen: true,
       supportedModes: [...new Set(sorted.map((lobby) => lobby.context.trackedMode))].sort(),
       supportedScopes: [...supportedScopeSet].sort(),
@@ -816,7 +816,7 @@ function prepareMetricLobbyFromSnapshot(
       population: "local_recall_installation",
       frozen: true,
       clusterUnit: "match",
-      clusterIdentity: MATCH_GRADE_RECIPE.calibration.clusterIdentity,
+      clusterIdentity: CURRENT_GRADE_RECIPE.calibration.clusterIdentity,
       trackedMode: lobby.context.trackedMode,
       rulesetKey: lobby.context.rulesetKey,
       scopeKey,
@@ -867,7 +867,7 @@ export function prepareGradeLobbyFromSnapshot(
     }
     const calibrated = shrunkMidEcdf(rawScore.rawResponsibilityComposite, cohort, {
       excludeMatchId: lobby.clusterId,
-      rootKappa: MATCH_GRADE_RECIPE.calibration.finalCompositeRootKappa,
+      rootKappa: CURRENT_GRADE_RECIPE.calibration.finalCompositeRootKappa,
     })
     player.responsibilityEvidence = observed(calibrated.percentile, {
       source: "derived",

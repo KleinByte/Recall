@@ -23,7 +23,7 @@ import type {
 export { TIMELINE_METRIC_KEYS }
 
 export const RVI_TIMELINE_DERIVATION_ID =
-  "recall.rvi.v3.timeline.2026-08-10.r4" as const
+  "recall.rvi.timeline.3f63f728ee5817b0de2d74a3eda48ce85f5f078669e9c5907db6f4033936217c" as const
 export const RVI_FIGHT_CLUSTER_WINDOW_MS = 12_000
 export const RVI_FIGHT_CLUSTER_RADIUS = 1_200
 export const RVI_PHASE_FRAME_TOLERANCE_MS = 30_000

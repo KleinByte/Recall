@@ -3,7 +3,6 @@ import { defineConfig, type Plugin } from "vite"
 import vue from "@vitejs/plugin-vue"
 import electron from "vite-plugin-electron/simple"
 import pkg from "./package.json"
-import { nodePolyfills } from "vite-plugin-node-polyfills"
 
 // Pure JavaScript dependencies used by the main process are bundled so their
 // transitive dependency trees cannot be pruned by the desktop packager. Keep
@@ -60,15 +59,13 @@ export default defineConfig(({ command }) => {
     plugins: [
       vue(),
       rendererEntryBudget(),
-      nodePolyfills({
-        globals: {
-          Buffer: true,
-        },
-      }),
       electron({
         main: {
           // Shortcut of `build.lib.entry`
-          entry: "electron/main/index.ts",
+          entry: {
+            index: "electron/main/index.ts",
+            "analysis-worker": "electron/main/background/analysis-worker.ts",
+          },
           onstart({ startup }) {
             if (process.env.VSCODE_DEBUG) {
               console.log(
@@ -104,9 +101,8 @@ export default defineConfig(({ command }) => {
             },
           },
         },
-        // Ployfill the Electron and Node.js API for Renderer process.
-        // If you want use Node.js in Renderer process, the `nodeIntegration` needs to be enabled in the Main process.
-        // See 👉 https://github.com/electron-vite/vite-plugin-electron-renderer
+        // Keep the plugin's Electron renderer bridge, but do not inject general
+        // Node globals: the sandboxed renderer uses the preload API exclusively.
         renderer: {},
       }),
     ],

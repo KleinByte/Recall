@@ -5,7 +5,15 @@ import {
   type CanonicalGradeResultInput,
 } from "../electron/main/database/grade-persistence-repo.js"
 import { MatchSourceRepository } from "../electron/main/database/match-source-repo.js"
-import { applyMigrations, migrations } from "../electron/main/database/migrations.js"
+import {
+  decodeStoredJsonBody,
+  type StoredJsonBodyRow,
+} from "../electron/main/database/json-body-codec.js"
+import {
+  applyMigrations,
+  executeMigration,
+  migrations,
+} from "../electron/main/database/migrations.js"
 import { MatchesRepository } from "../electron/main/database/matches-repo.js"
 import { ParticipantsRepository } from "../electron/main/database/participants-repo.js"
 import {
@@ -25,6 +33,25 @@ let db: InstanceType<typeof Database>
 let matches: MatchesRepository
 let participants: ParticipantsRepository
 let grades: GradePersistenceRepository
+
+function attemptForRecipe(gameId: number, puuid: string, recipeId: string) {
+  const row = db.prepare(`
+    SELECT game_id AS gameId, puuid, algorithm_version AS algorithmVersion,
+           recipe_id AS recipeId, owner_participant_id AS ownerParticipantId,
+           grade_status AS status, input_fingerprint AS inputFingerprint,
+           role_fit_score AS recallScore, evidence_coverage AS evidenceCoverage,
+           reference_sample_count AS referenceSampleCount,
+           reference_metadata_json AS referenceMetadataJson,
+           status_reason AS statusReason, attempted_at AS attemptedAt
+    FROM match_grade_attempts
+    WHERE game_id = ? AND puuid = ? AND recipe_id = ?
+  `).get(gameId, puuid, recipeId) as (Record<string, unknown> & {
+    referenceMetadataJson: string
+  }) | undefined
+  if (!row) return undefined
+  const { referenceMetadataJson, ...attempt } = row
+  return { ...attempt, referenceMetadata: JSON.parse(referenceMetadataJson) as unknown }
+}
 
 const participant = (overrides: Partial<ParticipantRow> = {}): ParticipantRow => ({
   gameId: 1,
@@ -162,6 +189,64 @@ beforeEach(() => {
 })
 
 describe("GradePersistenceRepository canonical writer", () => {
+  it("stores calibration bodies once, verifies them, and stays idempotent", () => {
+    const registration = {
+      calibrationId: "calibration:compressed",
+      calibrationHash: "c".repeat(64),
+      referencePopulation: { supportedModes: ["aram"] },
+      sampleCount: 12,
+      snapshot: { z: "召唤师", nested: { b: 2, a: 1 } },
+      createdAt: 1234,
+    }
+    expect(grades.registerCalibration(registration)).toBe(true)
+    expect(grades.registerCalibration({
+      ...registration,
+      snapshot: { nested: { a: 1, b: 2 }, z: "召唤师" },
+    })).toBe(false)
+
+    const row = db.prepare(`
+      SELECT snapshot_encoding AS snapshotEncoding,
+             snapshot_uncompressed_bytes AS snapshotUncompressedBytes,
+             snapshot_compressed_bytes AS snapshotCompressedBytes,
+             snapshot_sha256 AS snapshotSha256,
+             snapshot_payload AS snapshotPayload,
+             typeof(snapshot_payload) AS payloadType,
+             created_at AS createdAt
+      FROM grade_calibration_snapshots
+      WHERE calibration_id = 'calibration:compressed'
+    `).get() as StoredJsonBodyRow & { payloadType: string; createdAt: number }
+    expect(row.payloadType).toBe("blob")
+    expect(row.snapshotCompressedBytes).toBe(row.snapshotPayload.length)
+    expect(row.createdAt).toBe(1234)
+    expect(decodeStoredJsonBody(row).value).toEqual(registration.snapshot)
+    expect(() => grades.registerCalibration({
+      ...registration,
+      snapshot: { different: true },
+    })).toThrow("registration_conflict")
+    expect(() => db.prepare(`
+      UPDATE grade_calibration_snapshots SET sample_count = 13
+      WHERE calibration_id = 'calibration:compressed'
+    `).run()).toThrow("immutable")
+  })
+
+  it("rejects a corrupted stored calibration body before treating it as identical", () => {
+    const registration = {
+      calibrationId: "calibration:corrupt",
+      calibrationHash: "d".repeat(64),
+      referencePopulation: {},
+      sampleCount: 1,
+      snapshot: { valid: true },
+    }
+    grades.registerCalibration(registration)
+    db.exec("DROP TRIGGER grade_calibration_snapshots_immutable_update")
+    db.prepare(`
+      UPDATE grade_calibration_snapshots SET snapshot_sha256 = ?
+      WHERE calibration_id = 'calibration:corrupt'
+    `).run("0".repeat(64))
+
+    expect(() => grades.registerCalibration(registration)).toThrow("sha256")
+  })
+
   it("advances mapper metadata for identical raw bytes without replacing the payload", () => {
     const raw = new MatchSourceRepository(db)
     const first = raw.persistRawPayload({
@@ -335,7 +420,7 @@ describe("GradePersistenceRepository canonical writer", () => {
       .get()).toEqual({ count: 10 })
     expect(db.prepare("SELECT COUNT(*) AS count FROM match_grade_breakdown_versions")
       .get()).toEqual({ count: 10 })
-    const attempt = grades.getCurrentAttempt(1, PUUID, 3)
+    const attempt = attemptForRecipe(1, PUUID, RECIPE_A)
     expect(attempt).toMatchObject({
       recipeId: RECIPE_A,
       inputFingerprint: INPUT_HASH,
@@ -417,7 +502,7 @@ describe("GradePersistenceRepository canonical writer", () => {
       .get()).toEqual({ count: 0 })
     expect(db.prepare("SELECT COUNT(*) AS count FROM match_grade_breakdown_versions")
       .get()).toEqual({ count: 0 })
-    expect(grades.getCurrentAttempt(1, PUUID, 3)).toMatchObject({
+    expect(attemptForRecipe(1, PUUID, RECIPE_A)).toMatchObject({
       status: "short_game",
       recallScore: null,
       statusReason: "duration_under_300_seconds",
@@ -453,7 +538,7 @@ describe("GradePersistenceRepository canonical writer", () => {
         results: new Map(),
       })
 
-      expect(grades.getCurrentAttempt(1, PUUID, 3)?.status).toBe(status)
+      expect(attemptForRecipe(1, PUUID, RECIPE_A)?.status).toBe(status)
       expect(db.prepare(`
         SELECT grade_status AS status FROM matches
         WHERE game_id = 1 AND puuid = ?
@@ -471,21 +556,25 @@ describe("recipe selection and derived-only rebuild support", () => {
     grades.writeCanonicalGrade(1, PUUID, readyWrite())
     register(RECIPE_B, "b")
 
-    expect(grades.getAttemptForRecipe(1, PUUID, RECIPE_B)).toBeUndefined()
+    expect(attemptForRecipe(1, PUUID, RECIPE_B)).toBeUndefined()
     expect(() => grades.selectRecipe(RECIPE_B)).toThrow("grade_recipe_purge_required")
 
     grades.purgeDerivedGrades({ algorithmVersion: 3 })
     expect(() => grades.selectRecipe(RECIPE_B)).not.toThrow()
-    expect(grades.getCurrentAttempt(1, PUUID, 3)).toBeUndefined()
+    expect(attemptForRecipe(1, PUUID, RECIPE_B)).toBeUndefined()
   })
 
   it("purges idempotently while preserving matches, participants, and timeline evidence", () => {
     grades.writeCanonicalGrade(1, PUUID, readyWrite())
-    db.prepare(`
-      INSERT INTO match_timeline_cache
-        (game_id, puuid, status, mapper_version, data_json, updated_at)
-      VALUES (1, ?, 'ready', 1, '{"events":[]}', 1000)
-    `).run(PUUID)
+    new MatchSourceRepository(db).persistTimelineSource({
+      gameId: 1,
+      puuid: PUUID,
+      source: "league_client",
+      sourceMatchId: "1",
+      mapperVersion: 11,
+      timeline: { frames: [], events: [], turningPoints: [] },
+      capturedAt: 1000,
+    })
 
     const first = grades.purgeDerivedGrades({ algorithmVersion: 3, puuid: PUUID })
     const second = grades.purgeDerivedGrades({ algorithmVersion: 3, puuid: PUUID })
@@ -502,8 +591,12 @@ describe("recipe selection and derived-only rebuild support", () => {
     expect(db.prepare("SELECT COUNT(*) AS count FROM matches").get()).toEqual({ count: 1 })
     expect(db.prepare("SELECT COUNT(*) AS count FROM match_participants").get())
       .toEqual({ count: 10 })
-    expect(db.prepare("SELECT data_json AS dataJson FROM match_timeline_cache").get())
-      .toEqual({ dataJson: '{"events":[]}' })
+    expect(db.prepare(`
+      SELECT data_json AS dataJson FROM selected_match_timelines
+      WHERE game_id = 1 AND puuid = ?
+    `).get(PUUID)).toEqual({
+      dataJson: '{"events":[],"frames":[],"turningPoints":[]}',
+    })
   })
 
   it("tracks a verified, resumable rebuild without mutating recipe metadata", () => {
@@ -537,7 +630,7 @@ describe("schema v25 compatibility", () => {
   it("marks legacy artifacts and corrects historical URF classification", () => {
     const legacy = new Database(":memory:")
     legacy.pragma("foreign_keys = ON")
-    for (const migration of migrations.slice(0, 24)) legacy.exec(migration.up)
+    for (const migration of migrations.slice(0, 24)) executeMigration(legacy, migration)
     legacy.pragma("user_version = 24")
     const legacyMatches = new MatchesRepository(legacy)
     const legacyParticipants = new ParticipantsRepository(legacy)
@@ -552,7 +645,7 @@ describe("schema v25 compatibility", () => {
     })])
     legacyParticipants.insertMany(lobby(9))
     // v7 normalized missing numbers to zero. Without its raw payload, even a
-    // structurally complete lobby must remain unavailable to v3 calibration.
+    // structurally complete lobby must remain unavailable to canonical calibration.
     legacy.prepare(`
       UPDATE match_participants SET detail_version = 7
       WHERE game_id = 9 AND puuid = ?

@@ -70,24 +70,7 @@ export class ReviewService {
     }
   }
 
-  /**
-   * Recomputes a batch of grades stored by an older algorithm version, so a
-   * recipe change rolls out to the whole history instead of only newly synced
-   * games. Returns how many matches were regraded; callers keep invoking it
-   * until a pass regrades nothing.
-   */
-  regradeOutdated(limit = 200): number {
-    if (!this.recall) return 0
-    const candidates = this.matches.getOutdatedGradeMatches(3, limit)
-    let regraded = 0
-    for (const candidate of candidates) {
-      const match = this.matches.getMatch(candidate.gameId, candidate.puuid)
-      if (match && this.regrade(match, candidate.puuid)) regraded += 1
-    }
-    return regraded
-  }
-
-  /** Regrades one match from its stored lobby with the current algorithm. */
+  /** Rebuilds missing review evidence from the already stored full lobby. */
   private regrade(match: MatchRow, puuid: string): boolean {
     return this.recall?.gradeStoredMatch(match.gameId, puuid) === "ready"
   }

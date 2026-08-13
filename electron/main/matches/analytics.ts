@@ -8,8 +8,6 @@ export interface SessionInput {
   gameId: number
   startedAt: number
   durationSecs?: number
-  /** @deprecated Supply normalized durationSecs; retained for old in-memory callers. */
-  endedAt?: number
 }
 export interface SessionGame extends SessionInput {
   session: number
@@ -86,11 +84,7 @@ export function sessionize<T extends SessionInput>(games: T[], breakMinutes = 90
   const normalized = games.map((game) => ({
     ...game,
     playedAt: game.startedAt,
-    durationSecs: game.durationSecs ?? (
-      Number.isSafeInteger(game.endedAt) && game.endedAt! > game.startedAt
-        ? Math.trunc((game.endedAt! - game.startedAt) / 1000)
-        : undefined
-    ),
+    durationSecs: game.durationSecs,
   }))
   const gapMs = breakMinutes === 90
     ? DEFAULT_ANALYTIC_SESSION_GAP_MS

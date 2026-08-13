@@ -216,7 +216,6 @@ const decorated = computed(() => {
       wins: recorded?.wins ?? 0,
       winRate: recorded?.winRate ?? 0,
       kda: recorded?.kda ?? 0,
-      adjustedGrade: rank?.adjustedGrade,
       recallScore: rank?.recallScore ?? recorded?.averageRecallScore,
       confidence: rank?.confidence,
       earlySignal,

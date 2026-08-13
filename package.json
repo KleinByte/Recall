@@ -1,9 +1,10 @@
 {
   "name": "recall",
-  "version": "3.1.1",
+  "version": "3.2.0",
   "main": "dist-electron/main/index.js",
   "description": "League of Legends challenge and ARAM stat tracker that remembers what the client forgets.",
   "author": "KleinByte",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "private": true,
   "packageManager": "pnpm@9.15.9",
   "engines": {
@@ -25,12 +26,14 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "pnpm theme:generate && vite",
     "typecheck": "vue-tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
-    "build:renderer": "vite build",
+    "build:renderer": "pnpm theme:check && vite build",
     "package:smoke": "electron-builder --dir --publish never",
     "format:check": "node scripts/check-repository-hygiene.mjs",
-    "check:repo": "pnpm format:check",
+    "theme:generate": "node scripts/generate-theme-colors.mjs",
+    "theme:check": "node scripts/generate-theme-colors.mjs --check",
+    "check:repo": "pnpm format:check && pnpm theme:check",
     "doctor:native": "node scripts/doctor-native.mjs",
     "test:e2e": "playwright test",
     "verify": "pnpm check:repo && pnpm typecheck && pnpm test && pnpm build:renderer && pnpm doctor:native",
@@ -73,7 +76,6 @@
     "vite": "^5.1.5",
     "vite-plugin-electron": "^0.28.4",
     "vite-plugin-electron-renderer": "^0.14.5",
-    "vite-plugin-node-polyfills": "^0.22.0",
     "vitest": "2.1.9",
     "vue": "^3.4.21",
     "vue-tsc": "^2.0.6"

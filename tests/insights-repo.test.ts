@@ -5,6 +5,10 @@ import { MatchesRepository } from "../electron/main/database/matches-repo.js"
 import { InsightsRepository } from "../electron/main/database/insights-repo.js"
 import { ParticipantsRepository } from "../electron/main/database/participants-repo.js"
 import type { ParticipantRow } from "../electron/main/matches/types.js"
+import {
+  storeLegacyMatchGrade,
+  storeLegacyParticipantGrades,
+} from "./fixtures/legacy-grade-cache.js"
 import { buildMatchRow } from "./fixtures/matches.js"
 
 const PUUID = "test-puuid"
@@ -472,8 +476,12 @@ describe("getObservations", () => {
     ])
 
     // Set grades separately
-    matches.setGrade(1, PUUID, "A", 0.5)
-    matches.setGrade(2, PUUID, "C", -0.3)
+    storeLegacyMatchGrade(insights.db, {
+      gameId: 1, puuid: PUUID, grade: "A", score: 0.5,
+    })
+    storeLegacyMatchGrade(insights.db, {
+      gameId: 2, puuid: PUUID, grade: "C", score: -0.3,
+    })
     insights.db.prepare("UPDATE matches SET role_fit_score = 72.5 WHERE game_id = 1 AND puuid = ?")
       .run(PUUID)
 
@@ -812,7 +820,9 @@ describe("getFinalItemObservations", () => {
         role: "MIDDLE",
       }),
     ])
-    matches.setGrade(1, PUUID, "A", 0.5)
+    storeLegacyMatchGrade(insights.db, {
+      gameId: 1, puuid: PUUID, grade: "A", score: 0.5,
+    })
     participants.insertMany([
       player({
         gameId: 1,
@@ -875,21 +885,25 @@ describe("getFinalItemObservations", () => {
 })
 
 describe("getGradeComponentHistory", () => {
-  it("withholds legacy grade components until a calibrated v3 recipe is selected", () => {
+  it("withholds legacy grade components until a calibrated recipe is selected", () => {
     matches.insertMany([
       buildMatchRow({ gameId: 2, playedAt: 2_000, mode: "aram", modeFamily: "aram" }),
       buildMatchRow({ gameId: 1, playedAt: 1_000, mode: "aram", modeFamily: "aram" }),
     ])
 
     for (const gameId of [1, 2]) {
-      matches.setGrade(gameId, PUUID, "A", gameId / 10)
+      storeLegacyMatchGrade(insights.db, {
+        gameId, puuid: PUUID, grade: "A", score: gameId / 10,
+      })
       participants.insertMany([player({ gameId, participantId: 1, isPlayer: 1 })])
-      participants.setGrades(gameId, PUUID, new Map([[1, {
-        grade: "A",
-        score: gameId / 10,
-        percentile: 0.7,
-        breakdown: {
-          algorithmVersion: 1,
+      storeLegacyParticipantGrades(insights.db, {
+        gameId,
+        puuid: PUUID,
+        storagePartition: 1,
+        grades: [{
+          participantId: 1,
+          grade: "A",
+          score: gameId / 10,
           compositePercentile: 0.7,
           components: [{
             key: "combat",
@@ -899,8 +913,8 @@ describe("getGradeComponentHistory", () => {
             contribution: 0.16,
             scope: "lobby",
           }],
-        },
-      }]]))
+        }],
+      })
     }
 
     const rows = insights.getGradeComponentHistory({ puuid: PUUID, modes: ["aram"] })

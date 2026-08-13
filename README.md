@@ -298,3 +298,23 @@ Recall is not endorsed by Riot Games and does not reflect the views or opinions
 of Riot Games or anyone officially involved in producing or managing Riot Games
 properties. Riot Games and all associated properties are trademarks or
 registered trademarks of Riot Games, Inc.
+
+## Contributing
+
+Contributions are welcome. Before submitting a pull request, read
+[CONTRIBUTING.md](CONTRIBUTING.md) and the
+[Recall Contributor License Agreement](CLA.md). Contributors retain ownership
+of their contributions while granting the project owner the rights needed to
+offer Recall under both public noncommercial and separate commercial terms.
+
+## License
+
+Recall is source-available under the
+[PolyForm Noncommercial License 1.0.0](LICENSE). Personal and other permitted
+noncommercial use, modification, and distribution are allowed under that
+license. Commercial use requires a separate license from KleinByte; contact
+[KleinByte on GitHub](https://github.com/KleinByte) for commercial licensing.
+
+This is a source-available license, not an OSI-approved open-source license.
+Third-party components and Riot Games materials remain subject to their own
+terms.

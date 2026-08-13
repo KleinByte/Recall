@@ -95,7 +95,7 @@ export interface ParticipantRow {
   gradeStatus?: string
   gradeEvidenceCoverage?: number
   gradeReferenceSampleCount?: number
-  /** Whether every v3 core fact was observed before numeric fallback coercion. */
+  /** Whether every canonical core fact was observed before numeric fallback coercion. */
   gradeCoreComplete?: 0 | 1
   /** Payload family that established completeness (or the legacy policy). */
   gradeCoreSource?: GradeCoreSource

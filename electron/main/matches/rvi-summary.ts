@@ -14,7 +14,7 @@ import type {
 import type { MatchGradeModeContext } from "./match-grade-taxonomy.js"
 
 export const RVI_SUMMARY_DERIVATION_ID =
-  "recall.rvi.v3.summary.2026-08-09.r1" as const
+  "recall.rvi.summary.745fee65b43871c606aa4623d485f2a60eb7b242e8f1d76d4403f0e561e7b9fc" as const
 
 export const SUMMARY_METRIC_KEYS = [
   "damage_share",

@@ -18,7 +18,6 @@ export interface GradeComponent {
 }
 
 export interface GradeBreakdown {
-  algorithmVersion: number
   recipeId?: string
   recallScore?: number
   lobbyPercentile?: number

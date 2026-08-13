@@ -2,13 +2,16 @@ import Database from "better-sqlite3-node"
 import { beforeEach, describe, expect, it } from "vitest"
 import { applyMigrations } from "../electron/main/database/migrations.js"
 import { MatchesRepository } from "../electron/main/database/matches-repo.js"
-import { MATCH_GRADE_RECIPE_DEFINITION_ID } from
+import { GradePersistenceRepository } from
+  "../electron/main/database/grade-persistence-repo.js"
+import { CURRENT_GRADE_RECIPE, CURRENT_GRADE_RECIPE_DEFINITION_ID } from
   "../electron/main/matches/match-grade-recipe.js"
+import { storeLegacyMatchGrade } from "./fixtures/legacy-grade-cache.js"
 import { buildMatchRow, buildMatchSequence } from "./fixtures/matches.js"
 
 const PUUID = "test-puuid"
 const SELECTED_RECIPE_ID =
-  `${MATCH_GRADE_RECIPE_DEFINITION_ID}@calibration:paging-test`
+  `${CURRENT_GRADE_RECIPE_DEFINITION_ID}@calibration:paging-test`
 
 let repo: MatchesRepository
 let db: InstanceType<typeof Database>
@@ -52,12 +55,14 @@ function storeSelectedOwnerGrades(rows: Array<{
   cachedGradeScore: number
   cachedRecallScore: number
 }>) {
-  db.prepare(`
-    INSERT INTO grade_calibration_snapshots
-      (calibration_id, calibration_hash, reference_population_json,
-       sample_count, snapshot_json, created_at)
-    VALUES ('paging-test', ?, '{}', 2, '{}', 1)
-  `).run("a".repeat(64))
+  new GradePersistenceRepository(db).registerCalibration({
+    calibrationId: "paging-test",
+    calibrationHash: "a".repeat(64),
+    referencePopulation: {},
+    sampleCount: 2,
+    snapshot: {},
+    createdAt: 1,
+  })
   db.prepare(`
     INSERT INTO grade_recipes
       (recipe_id, algorithm_version, recipe_hash, calibration_id,
@@ -66,7 +71,12 @@ function storeSelectedOwnerGrades(rows: Array<{
   `).run(
     SELECTED_RECIPE_ID,
     "b".repeat(64),
-    JSON.stringify({ recipeDefinitionId: MATCH_GRADE_RECIPE_DEFINITION_ID }),
+    JSON.stringify({
+      ...CURRENT_GRADE_RECIPE,
+      calibrationId: "paging-test",
+      calibrationHash: "a".repeat(64),
+      referencePopulation: {},
+    }),
   )
   db.prepare(`
     INSERT INTO grade_recipe_selections (algorithm_version, recipe_id, selected_at)
@@ -213,8 +223,12 @@ describe("listMatches", () => {
       buildMatchRow({ gameId: 2 }),
       buildMatchRow({ gameId: 3 }),
     ])
-    repo.setGrade(1, PUUID, "S+", 1.8)
-    repo.setGrade(2, PUUID, "B", -0.2)
+    storeLegacyMatchGrade(db, {
+      gameId: 1, puuid: PUUID, grade: "S+", score: 1.8,
+    })
+    storeLegacyMatchGrade(db, {
+      gameId: 2, puuid: PUUID, grade: "B", score: -0.2,
+    })
 
     const page = repo.listMatches({ puuid: PUUID, minGradeScore: 1 }, 1, 25)
 
@@ -290,8 +304,12 @@ describe("listMatches", () => {
       buildMatchRow({ gameId: 1 }),
       buildMatchRow({ gameId: 2 }),
     ])
-    repo.setGrade(1, PUUID, "A", 1)
-    repo.setGrade(2, PUUID, "B", 0)
+    storeLegacyMatchGrade(db, {
+      gameId: 1, puuid: PUUID, grade: "A", score: 1,
+    })
+    storeLegacyMatchGrade(db, {
+      gameId: 2, puuid: PUUID, grade: "B", score: 0,
+    })
     db.prepare(
       `UPDATE matches
        SET role_fit_score = CASE game_id WHEN 1 THEN 80 ELSE 60 END
@@ -309,8 +327,12 @@ describe("listMatches", () => {
       buildMatchRow({ gameId: 1 }),
       buildMatchRow({ gameId: 2 }),
     ])
-    repo.setGrade(1, PUUID, "A", 1)
-    repo.setGrade(2, PUUID, "B", -2)
+    storeLegacyMatchGrade(db, {
+      gameId: 1, puuid: PUUID, grade: "A", score: 1,
+    })
+    storeLegacyMatchGrade(db, {
+      gameId: 2, puuid: PUUID, grade: "B", score: -2,
+    })
     db.prepare("UPDATE matches SET role_fit_score = 80 WHERE game_id = 1 AND puuid = ?")
       .run(PUUID)
 

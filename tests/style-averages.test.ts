@@ -2,6 +2,7 @@ import Database from "better-sqlite3-node"
 import { beforeEach, describe, expect, it } from "vitest"
 import { applyMigrations } from "../electron/main/database/migrations.js"
 import { MatchesRepository } from "../electron/main/database/matches-repo.js"
+import { storeLegacyMatchGrade } from "./fixtures/legacy-grade-cache.js"
 import { buildMatchRow, buildMatchSequence } from "./fixtures/matches.js"
 
 const PUUID = "test-puuid"
@@ -183,8 +184,12 @@ describe("getChampionStats", () => {
       buildMatchRow({ gameId: 2, championId: 84 }),
       buildMatchRow({ gameId: 3, championId: 22 }),
     ])
-    repo.setGrade(1, PUUID, "S", 1.4)
-    repo.setGrade(2, PUUID, "B", -0.2)
+    storeLegacyMatchGrade(db, {
+      gameId: 1, puuid: PUUID, grade: "S", score: 1.4,
+    })
+    storeLegacyMatchGrade(db, {
+      gameId: 2, puuid: PUUID, grade: "B", score: -0.2,
+    })
     db.prepare(
       "UPDATE matches SET role_fit_score = CASE game_id WHEN 1 THEN 88 WHEN 2 THEN 52 END WHERE puuid = ?",
     ).run(PUUID)

@@ -3,13 +3,21 @@ import type { Database } from "better-sqlite3"
 import {
   GradePersistenceRepository,
   type MatchGradeStatus,
-  type StoredGradeRecipe,
 } from "../database/grade-persistence-repo.js"
 import { MetricObservationsRepository } from "../database/metric-observations-repo.js"
+import {
+  getCompatibleGradeRecipeSelection,
+  getCompatibleRviRecipeSelection,
+} from "../database/grade-recipe-selection.js"
 import {
   canonicalJson,
   decodeCanonicalJsonV1,
 } from "../database/match-source-repo.js"
+import { TimelineRepository } from "../database/timeline-repo.js"
+import {
+  decodeStoredJsonBody,
+  type StoredJsonBodyRow,
+} from "../database/json-body-codec.js"
 import {
   evaluateMatchEligibility,
   isBotQueue,
@@ -24,9 +32,8 @@ import {
   hasRecoverableGradeCoreFactsFromRawPayloads,
 } from "./grade-core-backfill.js"
 import {
-  MATCH_GRADE_ALGORITHM_VERSION,
-  MATCH_GRADE_RECIPE,
-  MATCH_GRADE_RECIPE_DEFINITION_ID,
+  CANONICAL_GRADE_STORAGE_PARTITION,
+  CURRENT_GRADE_RECIPE,
   scoreMatchLobby,
 } from "./match-grade.js"
 import {
@@ -44,6 +51,7 @@ import {
 } from "./match-grade-observations.js"
 import {
   recipeIdForCalibration,
+  type GradeRecipeIdentityKind,
 } from "./match-grade-recipe.js"
 import {
   calibrationScopeKey,
@@ -70,14 +78,12 @@ import {
 } from "./match-metric-observations.js"
 import { RVI_SUMMARY_DERIVATION_ID } from "./rvi-summary.js"
 import {
-  RVI_ALGORITHM_VERSION,
+  CANONICAL_RVI_STORAGE_PARTITION,
   rviRecipeDefinition,
-  rviRecipeIdForCalibration,
 } from "./rvi-recipe.js"
 import { MATCH_GRADE_METRIC_KEYS, type MatchGradeMetricKey } from "./match-grade-recipe.js"
 import {
   mapTimeline,
-  TIMELINE_MAPPER_VERSION,
   type CompactTimeline,
 } from "../riot/timeline-mapper.js"
 import {
@@ -85,10 +91,6 @@ import {
   RVI_TIMELINE_DERIVATION_ID,
 } from "./rvi-timeline.js"
 import { METRIC_DEFINITIONS } from "./match-metric-registry.js"
-import {
-  selectTimelineSource,
-  type TimelineSourceCandidate,
-} from "./timeline-source-selector.js"
 
 export const MATCH_GRADE_MINIMUM_SNAPSHOT_MATCHES = MATCH_GRADE_MINIMUM_SCOPE_MATCHES
 export const MATCH_GRADE_MODE_REFERENCE_LIMIT = 100
@@ -576,29 +578,29 @@ function snapshotFromUnknown(value: unknown): VersionedGradeCalibrationSnapshot 
   if (!value || typeof value !== "object" ||
       (value as GradeCalibrationSnapshot).formatVersion !==
         MATCH_GRADE_CALIBRATION_FORMAT_VERSION) {
-    throw new Error("grade_v3_calibration_snapshot_invalid")
+    throw new Error("grade_calibration_snapshot_invalid")
   }
   const snapshot = value as VersionedGradeCalibrationSnapshot
   if (!Array.isArray(snapshot.referencePopulation?.supportedModes) ||
       !Array.isArray(snapshot.referencePopulation?.supportedScopes) ||
       snapshot.referencePopulation.clusterIdentity !==
-        MATCH_GRADE_RECIPE.calibration.clusterIdentity ||
+        CURRENT_GRADE_RECIPE.calibration.clusterIdentity ||
       !Array.isArray(snapshot.clusterIds) ||
       !snapshot.referencePopulation.scopeMatchCounts ||
        typeof snapshot.referencePopulation.scopeMatchCounts !== "object" ||
        !snapshot.observations || typeof snapshot.observations !== "object" ||
        !snapshot.detailObservations || typeof snapshot.detailObservations !== "object" ||
        !Array.isArray(snapshot.compositeObservations)) {
-    throw new Error("grade_v3_calibration_snapshot_invalid")
+    throw new Error("grade_calibration_snapshot_invalid")
   }
   if (snapshot.modeEpochs !== undefined) {
     if (!snapshot.modeEpochs || typeof snapshot.modeEpochs !== "object" ||
         Array.isArray(snapshot.modeEpochs)) {
-      throw new Error("grade_v3_calibration_snapshot_invalid")
+      throw new Error("grade_calibration_snapshot_invalid")
     }
     for (const [mode, epochs] of Object.entries(snapshot.modeEpochs)) {
       if (!mode || !Array.isArray(epochs) || epochs.length === 0) {
-        throw new Error("grade_v3_calibration_snapshot_invalid")
+        throw new Error("grade_calibration_snapshot_invalid")
       }
       let previousEffectiveFrom = Number.NEGATIVE_INFINITY
       for (const epoch of epochs) {
@@ -606,31 +608,20 @@ function snapshotFromUnknown(value: unknown): VersionedGradeCalibrationSnapshot 
             !Number.isFinite(epoch.effectiveFrom) || !Number.isFinite(epoch.frozenAt) ||
             !Number.isSafeInteger(epoch.eligibleMatchesAtFreeze) ||
             epoch.effectiveFrom < previousEffectiveFrom) {
-          throw new Error("grade_v3_calibration_snapshot_invalid")
+          throw new Error("grade_calibration_snapshot_invalid")
         }
         const epochSnapshot = snapshotFromUnknown(epoch.snapshot)
         if (epoch.eligibleMatchesAtFreeze < epochSnapshot.clusterIds.length ||
             epochSnapshot.modeEpochs !== undefined ||
             epochSnapshot.referencePopulation.supportedModes.length !== 1 ||
             epochSnapshot.referencePopulation.supportedModes[0] !== mode) {
-          throw new Error("grade_v3_calibration_snapshot_invalid")
+          throw new Error("grade_calibration_snapshot_invalid")
         }
         previousEffectiveFrom = epoch.effectiveFrom
       }
     }
   }
   return snapshot
-}
-
-function selectedRecipeIsCurrent(
-  recipe: StoredGradeRecipe | undefined,
-): recipe is StoredGradeRecipe & { calibrationId: string } {
-  if (!recipe?.calibrationId) return false
-  const definition = recipe.definition && typeof recipe.definition === "object"
-    ? recipe.definition as Record<string, unknown>
-    : undefined
-  return recipe.recipeId === recipeIdForCalibration(recipe.calibrationId) &&
-    definition?.recipeDefinitionId === MATCH_GRADE_RECIPE_DEFINITION_ID
 }
 
 function calibrationScopeStatus(lobbies: readonly GradeRawLobby[]) {
@@ -675,7 +666,7 @@ function snapshotForMode(
     referencePopulation: {
       kind: "local_recall_installation",
       clusterUnit: "match",
-      clusterIdentity: MATCH_GRADE_RECIPE.calibration.clusterIdentity,
+      clusterIdentity: CURRENT_GRADE_RECIPE.calibration.clusterIdentity,
       frozen: true,
       supportedModes: [mode],
       supportedScopes,
@@ -741,7 +732,7 @@ function combineModeEpochs(
     referencePopulation: {
       kind: "local_recall_installation",
       clusterUnit: "match",
-      clusterIdentity: MATCH_GRADE_RECIPE.calibration.clusterIdentity,
+      clusterIdentity: CURRENT_GRADE_RECIPE.calibration.clusterIdentity,
       frozen: true,
       supportedModes: latest.map(([mode]) => mode),
       supportedScopes,
@@ -890,10 +881,10 @@ export class MatchGradingService {
   }
 
   referenceStatus(): PerformanceReferenceStatus {
-    const selected = this.grades.getSelectedRecipe(MATCH_GRADE_ALGORITHM_VERSION)
+    const selected = getCompatibleGradeRecipeSelection(this.db)
     const eligibleLobbies = this.loadEligibleReferenceLobbies()
     const liveScopes = calibrationScopeStatus(eligibleLobbies)
-    if (!selectedRecipeIsCurrent(selected)) {
+    if (!selected) {
       return {
         state: "calibrating",
         requiredMatches: MATCH_GRADE_MINIMUM_SNAPSHOT_MATCHES,
@@ -918,8 +909,8 @@ export class MatchGradingService {
       ...liveScopes,
       supportedScopes: [...snapshot.referencePopulation.supportedScopes],
       supportedModes: [...snapshot.referencePopulation.supportedModes],
-      recipeId: selected.recipeId,
-      calibrationId: selected.calibrationId,
+      recipeId: selected.publicRecipeId,
+      calibrationId: selected.publicCalibrationId,
       frozenAt: row.createdAt,
       referenceMatches: row.sampleCount,
       modeReferences: modeReferenceStatuses(
@@ -937,20 +928,19 @@ export class MatchGradingService {
   }
 
   /**
-   * True when a pre-v3 cache/artifact could still be read as current data.
+   * True when a stale cache or derived artifact could still be read as current data.
    * This is checked before any renderer IPC is registered so an upgrade never
    * exposes a legacy grade while the local reference is still calibrating.
    */
   needsDirectCutover(): boolean {
-    const selected = this.grades.getSelectedRecipe(MATCH_GRADE_ALGORITHM_VERSION)
-    const hasCurrentRecipe = selectedRecipeIsCurrent(selected)
-    const selectedRvi = this.metrics.getSelectedRecipe(MATCH_GRADE_ALGORITHM_VERSION)
+    const rawSelected = this.grades.getSelectedRecipe(CANONICAL_GRADE_STORAGE_PARTITION)
+    const selected = getCompatibleGradeRecipeSelection(this.db)
+    const hasCurrentRecipe = Boolean(selected)
+    const selectedRvi = selected
+      ? getCompatibleRviRecipeSelection(this.db, selected)
+      : undefined
     const staleRviSelection = hasCurrentRecipe && (
-      !selectedRvi || selectedRvi.recipeId !== rviRecipeIdForCalibration(
-        selected.recipeId,
-        selected.calibrationId,
-      ) || selectedRvi.gradeRecipeId !== selected.recipeId ||
-      selectedRvi.calibrationId !== selected.calibrationId
+      !selectedRvi
     )
     const missingMetricInventory = hasCurrentRecipe && !staleRviSelection &&
       Number((this.db.prepare(`
@@ -962,29 +952,31 @@ export class MatchGradingService {
            AND participant.puuid = attempt.puuid
            AND participant.participant_id = attempt.owner_participant_id
            AND participant.is_player = 1
-          WHERE attempt.algorithm_version = 3
+          WHERE attempt.algorithm_version = ${CANONICAL_GRADE_STORAGE_PARTITION}
             AND attempt.recipe_id = ?
             AND attempt.grade_status = 'ready'
             AND (
-              SELECT COUNT(*) FROM match_metric_observations observation
+              SELECT COUNT(*) FROM match_metric_observation_details observation
               WHERE observation.game_id = attempt.game_id
                 AND observation.puuid = attempt.puuid
                 AND observation.participant_id = attempt.owner_participant_id
-                AND observation.algorithm_version = 3
+                AND observation.algorithm_version = ${CANONICAL_RVI_STORAGE_PARTITION}
                 AND observation.recipe_id = ?
             ) <> ?
         ) AS present
       `).get(
-        selected.recipeId,
+        selected!.recipeId,
         selectedRvi!.recipeId,
         METRIC_DEFINITIONS.length,
       ) as { present: number }).present) === 1
-    const staleSelection = Boolean(selected) && !hasCurrentRecipe
+    const staleSelection = Boolean(rawSelected) && !hasCurrentRecipe
     const staleArtifact = (table: string) => Number((this.db.prepare(`
       SELECT EXISTS(
         SELECT 1 FROM ${table}
         WHERE algorithm_version IN (1, 2)
-           ${hasCurrentRecipe ? "" : "OR algorithm_version = 3"}
+           ${hasCurrentRecipe
+             ? ""
+             : `OR algorithm_version = ${CANONICAL_GRADE_STORAGE_PARTITION}`}
       ) AS present
     `).get() as { present: number }).present) === 1
     const staleCache = (table: string) => Number((this.db.prepare(`
@@ -992,11 +984,12 @@ export class MatchGradingService {
         SELECT 1 FROM ${table}
         WHERE ${GRADE_CACHE_PRESENT_SQL}
           ${hasCurrentRecipe ? `AND (
-            grade_algorithm_version IS NULL OR grade_algorithm_version <> 3 OR
+            grade_algorithm_version IS NULL OR
+            grade_algorithm_version <> ${CANONICAL_GRADE_STORAGE_PARTITION} OR
             grade_recipe_id IS NULL OR grade_recipe_id <> ?
           )` : ""}
        ) AS present
-    `).get(...(hasCurrentRecipe ? [selected.recipeId] : [])) as { present: number }).present) === 1
+    `).get(...(hasCurrentRecipe ? [selected!.recipeId] : [])) as { present: number }).present) === 1
 
     return staleSelection || staleRviSelection || missingMetricInventory || [
       "match_grade_attempts",
@@ -1008,16 +1001,10 @@ export class MatchGradingService {
 
   /** Grades a newly stored match without changing the active reference. */
   gradeStoredMatch(gameId: number, puuid: string): MatchGradeStatus | "calibrating" {
-    const selected = this.grades.getSelectedRecipe(MATCH_GRADE_ALGORITHM_VERSION)
-    if (!selectedRecipeIsCurrent(selected)) return "calibrating"
-    const selectedRvi = this.metrics.getSelectedRecipe(RVI_ALGORITHM_VERSION)
-    const expectedRviRecipeId = rviRecipeIdForCalibration(
-      selected.recipeId,
-      selected.calibrationId,
-    )
-    if (!selectedRvi || selectedRvi.recipeId !== expectedRviRecipeId ||
-        selectedRvi.gradeRecipeId !== selected.recipeId ||
-        selectedRvi.calibrationId !== selected.calibrationId) return "calibrating"
+    const selected = getCompatibleGradeRecipeSelection(this.db)
+    if (!selected) return "calibrating"
+    const selectedRvi = getCompatibleRviRecipeSelection(this.db, selected)
+    if (!selectedRvi) return "calibrating"
     const snapshot = this.loadSnapshot(selected.calibrationId)
     const { match, participants } = this.loadStoredMatch(gameId, puuid)
     if (!match) throw new Error("grade_match_not_found")
@@ -1028,6 +1015,7 @@ export class MatchGradingService {
       selectedRvi.recipeId,
       selected.calibrationId,
       snapshot,
+      selected.identity,
     ))()
   }
 
@@ -1040,14 +1028,10 @@ export class MatchGradingService {
     gameId: number,
     puuid: string,
   ): MatchGradeStatus | "calibrating" {
-    const selected = this.grades.getSelectedRecipe(MATCH_GRADE_ALGORITHM_VERSION)
-    if (!selectedRecipeIsCurrent(selected)) return "calibrating"
-    const selectedRvi = this.metrics.getSelectedRecipe(RVI_ALGORITHM_VERSION)
-    if (!selectedRvi || selectedRvi.recipeId !== rviRecipeIdForCalibration(
-      selected.recipeId,
-      selected.calibrationId,
-    ) || selectedRvi.gradeRecipeId !== selected.recipeId ||
-      selectedRvi.calibrationId !== selected.calibrationId) return "calibrating"
+    const selected = getCompatibleGradeRecipeSelection(this.db)
+    if (!selected) return "calibrating"
+    const selectedRvi = getCompatibleRviRecipeSelection(this.db, selected)
+    if (!selectedRvi) return "calibrating"
     const snapshot = this.loadSnapshot(selected.calibrationId)
     const { match, participants } = this.loadStoredMatch(gameId, puuid)
     if (!match) throw new Error("metric_observation_match_not_found")
@@ -1058,12 +1042,13 @@ export class MatchGradingService {
       selectedRvi.recipeId,
       selected.calibrationId,
       snapshot,
+      selected.identity,
     ))()
   }
 
   /**
-   * Freezes the first eligible local reference and performs the direct v3
-   * cutover. Later modes freeze automatically when their own sample is ready.
+   * Freezes the first eligible local reference and performs the direct
+   * canonical cutover. Later modes freeze automatically when ready.
    */
   ensureFrozenReference(
     backup: VerifiedGradeBackup,
@@ -1073,7 +1058,14 @@ export class MatchGradingService {
     let status = this.referenceStatus()
     const needsDirectCutover = this.needsDirectCutover()
     if (needsDirectCutover && status.supportedScopes.length > 0) {
-      return this.rebuildReference(backup, onProgress, true)
+      // A missing/stale linked RVI inventory does not authorize recalibrating
+      // an otherwise valid frozen Grade reference. Reuse its epochs verbatim.
+      return this.rebuildReference(
+        backup,
+        onProgress,
+        true,
+        !getCompatibleGradeRecipeSelection(this.db),
+      )
     }
     if (needsDirectCutover) {
       this.purgePreDerivedState(backup)
@@ -1114,11 +1106,11 @@ export class MatchGradingService {
     backfillGradeCoreFactsFromRawPayloads(this.db)
     const referenceLobbies = this.loadEligibleReferenceLobbies()
     const liveScopes = calibrationScopeStatus(referenceLobbies)
-    const previousRecipe = this.grades.getSelectedRecipe(MATCH_GRADE_ALGORITHM_VERSION)
-    const previousSnapshot = selectedRecipeIsCurrent(previousRecipe)
+    const previousRecipe = getCompatibleGradeRecipeSelection(this.db)
+    const previousSnapshot = previousRecipe
       ? this.loadSnapshot(previousRecipe.calibrationId)
       : undefined
-    const previousFrozenAt = selectedRecipeIsCurrent(previousRecipe)
+    const previousFrozenAt = previousRecipe
       ? (this.db.prepare(`
           SELECT created_at AS createdAt FROM grade_calibration_snapshots
           WHERE calibration_id = ?
@@ -1152,13 +1144,20 @@ export class MatchGradingService {
     }
     const snapshot = combineModeEpochs(modeEpochs)
     if (snapshot.referencePopulation.supportedScopes.length === 0) {
-      throw new Error("grade_v3_reference_population_too_small")
+      throw new Error("grade_reference_population_too_small")
     }
     const calibrationHash = sha256(snapshot)
-    const calibrationId = `recall.grade.v3.calibration.${calibrationHash}`
+    // A historical row may already own this hash under its opaque old id.
+    // Reuse that row rather than violating the immutable UNIQUE(hash) contract.
+    const existingCalibration = this.db.prepare(`
+      SELECT calibration_id AS calibrationId
+      FROM grade_calibration_snapshots WHERE calibration_hash = ?
+    `).get(calibrationHash) as { calibrationId: string } | undefined
+    const calibrationId = existingCalibration?.calibrationId ??
+      `recall.grade.calibration.${calibrationHash}`
     const recipeId = recipeIdForCalibration(calibrationId)
     const recipeDefinition = {
-      ...MATCH_GRADE_RECIPE,
+      ...CURRENT_GRADE_RECIPE,
       calibrationId,
       calibrationHash,
       referencePopulation: snapshot.referencePopulation,
@@ -1177,14 +1176,14 @@ export class MatchGradingService {
       })
       this.grades.registerRecipe({
         recipeId,
-        algorithmVersion: MATCH_GRADE_ALGORITHM_VERSION,
+        algorithmVersion: CANONICAL_GRADE_STORAGE_PARTITION,
         recipeHash,
         calibrationId,
         definition: recipeDefinition,
       })
       this.metrics.registerRecipe({
         recipeId: rviRecipeId,
-        algorithmVersion: RVI_ALGORITHM_VERSION,
+        algorithmVersion: CANONICAL_RVI_STORAGE_PARTITION,
         recipeHash: rviRecipeHash,
         gradeRecipeId: recipeId,
         calibrationId,
@@ -1206,11 +1205,11 @@ export class MatchGradingService {
         this.clearStaleGradeCaches()
       }
       this.grades.purgeDerivedGrades({
-        algorithmVersion: MATCH_GRADE_ALGORITHM_VERSION,
+        algorithmVersion: CANONICAL_GRADE_STORAGE_PARTITION,
         rebuildRunId: runId,
       })
       this.metrics.purgeObservations({
-        algorithmVersion: RVI_ALGORITHM_VERSION,
+        algorithmVersion: CANONICAL_RVI_STORAGE_PARTITION,
       })
       this.grades.selectRecipe(recipeId)
       this.metrics.selectRecipe(rviRecipeId)
@@ -1227,6 +1226,7 @@ export class MatchGradingService {
           rviRecipeId,
           calibrationId,
           snapshot,
+          "canonical",
         )
         if (status === "ready") ready += 1
         else nonready += 1
@@ -1254,7 +1254,7 @@ export class MatchGradingService {
       const written = Number((this.db.prepare(`
         SELECT COUNT(*) AS count FROM match_grade_attempts
         WHERE algorithm_version = ? AND recipe_id = ?
-      `).get(MATCH_GRADE_ALGORITHM_VERSION, recipeId) as { count: number }).count)
+      `).get(CANONICAL_GRADE_STORAGE_PARTITION, recipeId) as { count: number }).count)
       if (written !== matches.length) {
         throw new Error(`grade_rebuild_verification_failed:${written}/${matches.length}`)
       }
@@ -1267,13 +1267,14 @@ export class MatchGradingService {
            AND participant.puuid = attempt.puuid
            AND participant.participant_id = attempt.owner_participant_id
            AND participant.is_player = 1
-          LEFT JOIN match_metric_observations observation
+          LEFT JOIN match_metric_observation_details observation
             ON observation.game_id = attempt.game_id
            AND observation.puuid = attempt.puuid
            AND observation.participant_id = attempt.owner_participant_id
-           AND observation.algorithm_version = 3
+           AND observation.algorithm_version = ${CANONICAL_RVI_STORAGE_PARTITION}
            AND observation.recipe_id = ?
-          WHERE attempt.algorithm_version = 3 AND attempt.recipe_id = ?
+          WHERE attempt.algorithm_version = ${CANONICAL_GRADE_STORAGE_PARTITION}
+            AND attempt.recipe_id = ?
             AND attempt.grade_status = 'ready'
           GROUP BY attempt.game_id, attempt.puuid, attempt.owner_participant_id
           HAVING COUNT(observation.metric_key) <> ?
@@ -1315,29 +1316,34 @@ export class MatchGradingService {
     if (!backup.path || !/^[a-f0-9]{64}$/.test(backup.sha256)) {
       throw new Error("verified_grade_rebuild_backup_required")
     }
-    const selected = this.grades.getSelectedRecipe(MATCH_GRADE_ALGORITHM_VERSION)
-    const keepCurrent = selectedRecipeIsCurrent(selected)
+    const selected = getCompatibleGradeRecipeSelection(this.db)
+    const keepCurrent = Boolean(selected)
     this.db.transaction(() => {
       this.grades.purgeDerivedGrades({ algorithmVersion: 1 })
       this.grades.purgeDerivedGrades({ algorithmVersion: 2 })
       if (!keepCurrent) {
-        this.metrics.purgeObservations({ algorithmVersion: 3 })
-        this.db.prepare(
-          "DELETE FROM rvi_recipe_selections WHERE algorithm_version = 3",
-        ).run()
-        this.grades.purgeDerivedGrades({ algorithmVersion: 3 })
-        this.db.prepare(
-          "DELETE FROM grade_recipe_selections WHERE algorithm_version = 3",
-        ).run()
+        this.metrics.purgeObservations({ algorithmVersion: CANONICAL_RVI_STORAGE_PARTITION })
+        this.db.prepare(`
+          DELETE FROM rvi_recipe_selections
+          WHERE algorithm_version = ${CANONICAL_RVI_STORAGE_PARTITION}
+        `).run()
+        this.grades.purgeDerivedGrades({
+          algorithmVersion: CANONICAL_GRADE_STORAGE_PARTITION,
+        })
+        this.db.prepare(`
+          DELETE FROM grade_recipe_selections
+          WHERE algorithm_version = ${CANONICAL_GRADE_STORAGE_PARTITION}
+        `).run()
       }
-      this.clearStaleGradeCaches(keepCurrent ? selected.recipeId : undefined)
+      this.clearStaleGradeCaches(keepCurrent ? selected!.recipeId : undefined)
     })()
   }
 
   private clearStaleGradeCaches(currentRecipeId?: string): void {
     const exactCurrent = currentRecipeId
       ? `AND (
-          grade_algorithm_version IS NULL OR grade_algorithm_version <> 3 OR
+          grade_algorithm_version IS NULL OR
+          grade_algorithm_version <> ${CANONICAL_GRADE_STORAGE_PARTITION} OR
           grade_recipe_id IS NULL OR grade_recipe_id <> ?
         )`
       : ""
@@ -1356,6 +1362,7 @@ export class MatchGradingService {
     rviRecipeId: string,
     calibrationId: string,
     snapshot: VersionedGradeCalibrationSnapshot,
+    recipeIdentity: GradeRecipeIdentityKind,
   ): MatchGradeStatus {
     const activeEpoch = epochForMatch(snapshot, match.mode, match.playedAt)
     const activeSnapshot = activeEpoch?.snapshot
@@ -1381,7 +1388,7 @@ export class MatchGradingService {
     if (!raw) {
       const status = ineligible ?? "unsupported_mode"
       this.grades.writeCanonicalGrade(match.gameId, match.puuid, {
-        algorithmVersion: MATCH_GRADE_ALGORITHM_VERSION,
+        algorithmVersion: CANONICAL_GRADE_STORAGE_PARTITION,
         recipeId,
         inputFingerprint,
         status,
@@ -1402,7 +1409,7 @@ export class MatchGradingService {
     const scopeMetadata = snapshotReferenceMetadata(activeSnapshot ?? snapshot, raw.context)
     if (!activeSnapshot || !scopeMetadata.scopeFrozen) {
       this.grades.writeCanonicalGrade(match.gameId, match.puuid, {
-        algorithmVersion: MATCH_GRADE_ALGORITHM_VERSION,
+        algorithmVersion: CANONICAL_GRADE_STORAGE_PARTITION,
         recipeId,
         inputFingerprint,
         status: "calibrating",
@@ -1432,13 +1439,14 @@ export class MatchGradingService {
       players: prepared.players,
       context: raw.context,
       calibrationSnapshotId: calibrationId,
+      recipeIdentity,
     })
     if (outcome.recipeId && outcome.recipeId !== recipeId) {
       throw new Error("grade_recipe_identity_mismatch")
     }
     if (outcome.status !== "ready") {
       this.grades.writeCanonicalGrade(match.gameId, match.puuid, {
-        algorithmVersion: MATCH_GRADE_ALGORITHM_VERSION,
+        algorithmVersion: CANONICAL_GRADE_STORAGE_PARTITION,
         recipeId,
         inputFingerprint,
         status: outcome.status,
@@ -1473,7 +1481,7 @@ export class MatchGradingService {
       },
     ]))
     this.grades.writeCanonicalGrade(match.gameId, match.puuid, {
-      algorithmVersion: MATCH_GRADE_ALGORITHM_VERSION,
+      algorithmVersion: CANONICAL_GRADE_STORAGE_PARTITION,
       recipeId,
       inputFingerprint,
       status: "ready",
@@ -1501,7 +1509,7 @@ export class MatchGradingService {
     this.metrics.replaceMatchObservations({
       gameId: match.gameId,
       puuid: match.puuid,
-      algorithmVersion: RVI_ALGORITHM_VERSION,
+      algorithmVersion: CANONICAL_RVI_STORAGE_PARTITION,
       recipeId: rviRecipeId,
       observations,
     })
@@ -1595,37 +1603,23 @@ export class MatchGradingService {
     match: StoredMatchRow,
     participants: readonly StoredParticipantRow[],
   ): LoadedTimelineEvidence {
-    const cache = this.db.prepare(`
-      SELECT status, mapper_version AS mapperVersion, data_json AS dataJson
-      FROM match_timeline_cache WHERE game_id = ? AND puuid = ?
-    `).get(match.gameId, match.puuid) as {
-      status: string
-      mapperVersion: number
-      dataJson: string | null
-    } | undefined
-    const selectedSource = selectTimelineSource(this.db.prepare(`
-      SELECT source, mapper_version AS mapperVersion, status,
-             data_json AS dataJson, captured_at AS capturedAt
-      FROM match_timeline_sources
-      WHERE game_id = ? AND puuid = ?
-    `).all(match.gameId, match.puuid) as TimelineSourceCandidate[])
-    const selectedCompact = compactTimelineFromJson(selectedSource?.dataJson ?? null)
-    const currentCompact = selectedCompact ?? (
-      cache?.status === "ready" && cache.mapperVersion === TIMELINE_MAPPER_VERSION
-        ? compactTimelineFromJson(cache.dataJson)
-        : undefined
+    const selectedSource = new TimelineRepository(this.db).selected(
+      match.gameId,
+      match.puuid,
     )
+    const currentCompact = selectedSource
+      ? compactTimelineFromJson(selectedSource.dataJson)
+      : undefined
     // Quality and capability claims must describe the bytes actually used,
-    // not whichever source row happened to be updated most recently.
-    const actualSource = selectedCompact ? selectedSource : undefined
-    const sourceQuality: MetricSourceQuality = actualSource?.source === "match_v5"
+    // not whichever candidate happened to be updated most recently.
+    const sourceQuality: MetricSourceQuality = selectedSource?.source === "match_v5"
       ? "verified"
-      : actualSource ? "retained" : "legacy"
+      : selectedSource ? "retained" : "legacy"
     if (currentCompact) {
       return {
         timeline: currentCompact,
         sourceQuality,
-        wardEventsComplete: actualSource?.source === "match_v5",
+        wardEventsComplete: selectedSource?.source === "match_v5",
       }
     }
 
@@ -1664,15 +1658,12 @@ export class MatchGradingService {
           }
         }
       } catch {
-        // Preserve the existing compact fallback and expose reasoned gaps.
+        // Invalid retained evidence remains a reasoned gap.
       }
     }
 
     return {
-      timeline: cache?.status === "ready" &&
-          cache.mapperVersion === TIMELINE_MAPPER_VERSION
-        ? compactTimelineFromJson(cache.dataJson)
-        : undefined,
+      timeline: undefined,
       sourceQuality,
       wardEventsComplete: false,
     }
@@ -1680,11 +1671,16 @@ export class MatchGradingService {
 
   private loadSnapshot(calibrationId: string): VersionedGradeCalibrationSnapshot {
     const row = this.db.prepare(`
-      SELECT snapshot_json AS snapshotJson, created_at AS createdAt
+      SELECT snapshot_encoding AS snapshotEncoding,
+             snapshot_uncompressed_bytes AS snapshotUncompressedBytes,
+             snapshot_compressed_bytes AS snapshotCompressedBytes,
+             snapshot_sha256 AS snapshotSha256,
+             snapshot_payload AS snapshotPayload,
+             created_at AS createdAt
       FROM grade_calibration_snapshots WHERE calibration_id = ?
-    `).get(calibrationId) as { snapshotJson: string; createdAt: number } | undefined
+    `).get(calibrationId) as (StoredJsonBodyRow & { createdAt: number }) | undefined
     if (!row) throw new Error("grade_calibration_snapshot_not_found")
-    const snapshot = snapshotFromUnknown(JSON.parse(row.snapshotJson))
+    const snapshot = snapshotFromUnknown(decodeStoredJsonBody(row).value)
     return snapshot.modeEpochs ? snapshot : {
       ...snapshot,
       modeEpochs: epochsFromSnapshot(snapshot, row.createdAt),

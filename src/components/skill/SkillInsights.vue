@@ -28,7 +28,6 @@ const gradedHistory = computed(() => history.value.filter((game) => Number.isFin
 const averageGrade = computed(() => recallGradeFromRecallScore(summary.value.averageRecallScore))
 const gradedCoverage = computed(() => summary.value.games ? summary.value.gradedGames / summary.value.games : 0)
 const historyWindow = computed(() => props.report.visuals.windows.history)
-const componentWindow = computed(() => props.report.visuals.windows.gradeComponents)
 const historySampleLabel = computed(() => historyWindow.value.totalGames > historyWindow.value.shownGames
   ? `${gradedHistory.value.length} graded shown · latest ${historyWindow.value.shownGames} of ${historyWindow.value.totalGames} selected matches`
   : `${gradedHistory.value.length} graded matches shown`)

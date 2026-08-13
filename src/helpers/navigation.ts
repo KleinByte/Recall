@@ -28,8 +28,6 @@ export const focusChallengeId = ref<number | null>(null)
 /** A champion whose breakdown is open, shown over whatever page is beneath. */
 export const detailChampionId = ref<number | null>(null)
 
-/** A match whose full sheet is open, shown over whatever page is beneath. */
-export const detailMatch = ref<MatchRow | null>(null)
 export const focusReviewGameId = ref<number | null>(null)
 
 export interface NavigationEntry {
@@ -102,10 +100,5 @@ export function openMatch(match: MatchRow) {
 }
 
 export function reviewMatch(gameId: number) {
-  detailMatch.value = null
   navigate({ page: "review", reviewGameId: gameId })
-}
-
-export function closeMatch() {
-  detailMatch.value = null
 }

@@ -202,7 +202,7 @@ describe("MetricObservationsRepository", () => {
       ],
     })).toBe(2)
 
-    expect(metrics.getOwnerMatchObservations(1, PUUID, 3, RVI_RECIPE_A))
+    expect(metrics.getMatchObservations(1, PUUID, 1, 3, RVI_RECIPE_A))
       .toEqual([
         { ...observation(), algorithmVersion: 3 },
         { ...observation({
@@ -274,20 +274,22 @@ describe("MetricObservationsRepository", () => {
     expect(metrics.selectRecipe(RVI_RECIPE_B).recipeId).toBe(RVI_RECIPE_B)
   })
 
-  it("rolls back an entire bulk replacement when a participant is unknown", () => {
-    expect(() => metrics.replaceManyMatches([
-      {
+  it("rolls back composed production writes when a participant is unknown", () => {
+    const replaceBoth = db.transaction(() => {
+      metrics.replaceMatchObservations({
         gameId: 1, puuid: PUUID, algorithmVersion: 3,
         recipeId: RVI_RECIPE_A, observations: [observation()],
-      },
-      {
+      })
+      metrics.replaceMatchObservations({
         gameId: 2, puuid: OTHER_PUUID, algorithmVersion: 3,
         recipeId: RVI_RECIPE_A,
         observations: [observation({
           gameId: 2, puuid: OTHER_PUUID, participantId: 99,
         })],
-      },
-    ])).toThrow()
+      })
+    })
+
+    expect(() => replaceBoth()).toThrow()
     expect(db.prepare(
       "SELECT COUNT(*) AS count FROM match_metric_observations",
     ).get()).toEqual({ count: 0 })

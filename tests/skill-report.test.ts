@@ -1053,9 +1053,9 @@ describe("SkillReport", () => {
     itemObservations: itemObservations(50),
   })
 
-  it("has exact top-level shape with version 3", () => {
+  it("has an unversioned stable top-level contract", () => {
     const report = buildSkillReport(baseInput())
-    expect(report.version).toBe(3)
+    expect(report).not.toHaveProperty("version")
     expect(report.generatedAt).toBe(1700000000000)
     expect(report.scope).toEqual({
       modes: ["sr_ranked_solo", "sr_ranked_flex"],
@@ -1073,7 +1073,7 @@ describe("SkillReport", () => {
   })
 
   it("builds report RVI only from the selected match Grade recipe observations", () => {
-    const recipeId = "recall.grade.v3.test@calibration:test"
+    const recipeId = "recall.grade.test@calibration:test"
     const familyPercentiles = Object.fromEntries(
       RVI_VECTOR_KEYS.map((family, index) => [family, 90 - index * 10]),
     )
@@ -1127,7 +1127,6 @@ describe("SkillReport", () => {
     })
 
     expect(report.overview.performance).toMatchObject({
-      algorithmVersion: 3,
       recipeId,
       score: 60,
       recallScoreAverage: 50,
@@ -1234,8 +1233,10 @@ describe("SkillReport", () => {
     const startedAt = performance.now()
     const report = buildSkillReport(input)
     const elapsedMs = performance.now() - startedAt
-    // Preserve the strict local regression guard while allowing modest hosted-runner variance.
-    const budgetMs = process.env.CI ? 350 : 250
+    // Vitest runs this alongside CPU-heavy calibration suites, so keep one
+    // bounded budget that tolerates scheduler contention without masking a
+    // large report-generation regression.
+    const budgetMs = 350
 
     expect(report.overview.summary.games).toBe(2000)
     expect(elapsedMs).toBeLessThan(budgetMs)

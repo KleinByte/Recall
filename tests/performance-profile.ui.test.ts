@@ -126,7 +126,6 @@ function scope(
 
 function profile(): PerformanceProfileType {
   return {
-    algorithmVersion: 3,
     recipeId: "test-recipe",
     scoringContext: "profile",
     weighting: { kind: "equal" },

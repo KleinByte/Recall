@@ -44,6 +44,7 @@ describe("performance and resource lifecycle", () => {
     const chart = read("src/components/charts/BaseEChart.vue")
     const app = read("src/App.vue")
     const review = read("src/pages/ReviewPage.vue")
+    const reviewData = read("src/features/review/use-review-page-data.ts")
 
     for (const page of ["DashboardPage", "ChallengesPage", "ChampionsPage", "MatchesPage", "ProgressPage", "SkillPage"]) {
       expect(read(`src/pages/${page}.vue`), page).toContain("useCoalescedTask")
@@ -51,19 +52,23 @@ describe("performance and resource lifecycle", () => {
     expect(chart).not.toContain("deep: true")
     expect(chart).toContain("resizeFrame")
     expect(app).toContain("defineAsyncComponent")
-    expect(review).toContain("annotationSavesInFlight")
-    expect(review).toContain("refreshCurrent")
+    expect(review).toContain("useReviewPageData")
+    expect(reviewData).toContain("annotationSavesInFlight")
+    expect(reviewData).toContain("refreshCurrent")
   })
 
   it("keeps Settings trust refreshes coalesced and backup work off the main thread", () => {
     const settings = read("src/pages/SettingsPage.vue")
     const main = read("electron/main/index.ts")
+    const dataTrustIpc = read("electron/main/ipc/data-trust-ipc.ts")
     const backups = read("electron/main/database/backup-manager.ts")
 
     expect(settings).toContain("useCoalescedTask")
     expect(settings).toContain("events.on(\"data-trust:updated\", () => void refreshTrust())")
-    expect(main).toContain("createAsync(getDatabase(), \"manual\")")
-    expect(main).toContain("prepareRestoreAsync(")
+    expect(main).toContain("registerDataTrustIpc")
+    expect(dataTrustIpc).toContain("createAsync(")
+    expect(dataTrustIpc).toContain('"manual"')
+    expect(dataTrustIpc).toContain("prepareRestoreAsync(")
     expect(backups).toContain("await db.backup(staging)")
     expect(backups).not.toContain("integrity: sha256(database)")
   })

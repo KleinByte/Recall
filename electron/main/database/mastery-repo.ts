@@ -66,10 +66,4 @@ export class MasteryRepository {
       mastery.updatedAt,
     )
   }
-
-  deleteAll(ownerPuuid: string) {
-    return this.db.prepare(
-      "DELETE FROM champion_mastery_cache WHERE owner_puuid = ?",
-    ).run(ownerPuuid).changes
-  }
 }

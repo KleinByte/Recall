@@ -117,19 +117,6 @@ const toRow = (row: Record<string, never>): ChallengeRow => ({
 export class ChallengesRepository {
   constructor(private readonly db: Database) {}
 
-  upsertMany(rows: ChallengeRow[]): number {
-    if (rows.length === 0) return 0
-
-    const statement = this.db.prepare(UPSERT_SQL)
-
-    const run = this.db.transaction((batch: ChallengeRow[]) => {
-      for (const row of batch) statement.run(toValues(row))
-      return batch.length
-    })
-
-    return run(rows)
-  }
-
   /** Writes the current challenge projection and its changed history atomically. */
   saveSnapshot(rows: ChallengeRow[], history: ChallengeHistoryRow[]): number {
     if (rows.length === 0) return 0
@@ -213,32 +200,6 @@ export class ChallengesRepository {
         { currentValue: row.value, currentLevel: row.level },
       ]),
     )
-  }
-
-  recordHistory(rows: ChallengeHistoryRow[]): number {
-    if (rows.length === 0) return 0
-
-    const statement = this.db.prepare(
-      `INSERT OR IGNORE INTO challenge_history
-         (challenge_id, puuid, recorded_at, current_value, current_level)
-       VALUES (?, ?, ?, ?, ?)`,
-    )
-
-    const run = this.db.transaction((batch: ChallengeHistoryRow[]) => {
-      let written = 0
-      for (const row of batch) {
-        written += statement.run(
-          row.challengeId,
-          row.puuid,
-          row.recordedAt,
-          row.currentValue,
-          row.currentLevel,
-        ).changes
-      }
-      return written
-    })
-
-    return run(rows)
   }
 
   getHistory(challengeId: number, puuid: string): ChallengeHistoryRow[] {

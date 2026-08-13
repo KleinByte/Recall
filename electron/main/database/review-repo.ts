@@ -5,9 +5,10 @@ import { confidenceForGames } from "../review/types.js"
 import {
   MATCH_GRADE_ARM_KEYS,
   MATCH_GRADE_ARM_LABELS,
-  MATCH_GRADE_ALGORITHM_VERSION,
-  MATCH_GRADE_RECIPE_DEFINITION_ID,
+  CANONICAL_GRADE_STORAGE_PARTITION,
+  gradeRecipeDefinitionId,
 } from "../matches/match-grade-recipe.js"
+import { getCompatibleGradeRecipeSelection } from "./grade-recipe-selection.js"
 
 export type ExperimentStatus = "active" | "paused" | "completed"
 export type ExperimentOutcome = "worked" | "mixed" | "did_not_work" | "unrated"
@@ -100,6 +101,7 @@ function parseSelectedGradeBreakdown(
   value: string,
   recipeId: string,
   recallScore: number,
+  recipeDefinitionId: string,
 ): GradeBreakdown["components"] | undefined {
   let parsed: unknown
   try {
@@ -110,8 +112,8 @@ function parseSelectedGradeBreakdown(
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined
   const breakdown = parsed as Record<string, unknown>
   const storedRecallScore = breakdown.recallScore ?? breakdown.roleFitScore
-  if (breakdown.algorithmVersion !== MATCH_GRADE_ALGORITHM_VERSION ||
-      breakdown.recipeDefinitionId !== MATCH_GRADE_RECIPE_DEFINITION_ID ||
+  if (breakdown.algorithmVersion !== CANONICAL_GRADE_STORAGE_PARTITION ||
+      breakdown.recipeDefinitionId !== recipeDefinitionId ||
       breakdown.recipeId !== recipeId ||
       !finiteInRange(storedRecallScore, 0, 100) ||
       Math.abs(storedRecallScore - recallScore) > 1e-9 ||
@@ -156,21 +158,14 @@ export class ReviewRepository {
     puuid: string,
     participantId: number,
   ): GradeBreakdown | undefined {
+    const selected = getCompatibleGradeRecipeSelection(this.db)
+    if (!selected) return undefined
     const row = this.db.prepare(
-      `SELECT b.algorithm_version AS algorithmVersion,
-              b.recipe_id AS recipeId,
+      `SELECT b.recipe_id AS recipeId,
               r.role_fit_score AS recallScore,
               b.composite_percentile AS lobbyPercentile,
               b.components_json AS componentsJson
        FROM match_grade_breakdown_versions b
-       JOIN grade_recipe_selections selected
-         ON selected.algorithm_version = b.algorithm_version
-        AND selected.recipe_id = b.recipe_id
-       JOIN grade_recipes recipe
-         ON recipe.algorithm_version = selected.algorithm_version
-        AND recipe.recipe_id = selected.recipe_id
-       JOIN grade_calibration_snapshots calibration
-         ON calibration.calibration_id = recipe.calibration_id
        JOIN match_grade_results r
          ON r.game_id = b.game_id
         AND r.puuid = b.puuid
@@ -184,10 +179,7 @@ export class ReviewRepository {
         AND a.recipe_id = r.recipe_id
        WHERE b.game_id = ? AND b.puuid = ? AND b.participant_id = ?
          AND b.algorithm_version = ?
-         AND recipe.calibration_id IS NOT NULL
-         AND recipe.recipe_id NOT LIKE 'legacy:%'
-         AND json_extract(recipe.definition_json, '$.recipeDefinitionId') = ?
-         AND recipe.recipe_id = ? || '@calibration:' || recipe.calibration_id
+         AND b.recipe_id = ?
          AND a.owner_participant_id = b.participant_id
          AND a.grade_status = 'ready'
          AND r.grade_status = 'ready'
@@ -201,11 +193,10 @@ export class ReviewRepository {
       gameId,
       puuid,
       participantId,
-      MATCH_GRADE_ALGORITHM_VERSION,
-      MATCH_GRADE_RECIPE_DEFINITION_ID,
-      MATCH_GRADE_RECIPE_DEFINITION_ID,
+      CANONICAL_GRADE_STORAGE_PARTITION,
+      selected.recipeId,
     ) as
-      | { algorithmVersion: number; recipeId: string; recallScore: number;
+      | { recipeId: string; recallScore: number;
           lobbyPercentile: number; componentsJson: string }
       | undefined
     if (!row) return undefined
@@ -215,11 +206,11 @@ export class ReviewRepository {
       row.componentsJson,
       row.recipeId,
       row.recallScore,
+      gradeRecipeDefinitionId(selected.identity),
     )
     if (!components) return undefined
     return {
-      algorithmVersion: row.algorithmVersion,
-      recipeId: row.recipeId,
+      recipeId: selected.publicRecipeId,
       recallScore: row.recallScore,
       lobbyPercentile: row.lobbyPercentile,
       compositePercentile: row.recallScore / 100,

@@ -3,10 +3,166 @@ import {
   BOT_QUEUE_IDS,
   LEAGUE_CLASSIC_PVP_QUEUE_IDS,
 } from "../matches/eligibility.js"
+import { gzipJsonTextV1 } from "./json-body-codec.js"
+import {
+  TIMELINE_STORAGE_V32_AFTER,
+  TIMELINE_STORAGE_V32_UP,
+  migrateTimelineStorageV32,
+  verifyTimelineStorageV32,
+} from "./timeline-storage-migration.js"
 
-interface Migration {
+export interface Migration {
   version: number
   up: string
+  /** Synchronous data transform executed inside the migration transaction. */
+  migrate?: (db: Database) => void
+  /** Schema finalization executed after the data transform succeeds. */
+  after?: string
+  /** In-transaction invariant checks run before the schema version advances. */
+  verify?: (db: Database) => void
+  /**
+   * SQLite treats dropping a referenced parent as a deferred DELETE even when
+   * an equivalent parent is restored before commit. This opt-in disables FK
+   * actions around the atomic rebuild; verify must still run foreign_key_check.
+   */
+  rebuildsReferencedTable?: boolean
+}
+
+interface LegacyLiveSnapshotBody {
+  sourceRowId: number
+  gameId: number
+  puuid: string
+  gameTimeMs: number
+  capturedAt: number
+  reason: string
+  snapshotJson: string
+}
+
+interface LegacyGradeCalibrationBody {
+  sourceRowId: number
+  calibrationId: string
+  calibrationHash: string
+  referencePopulationJson: string
+  sampleCount: number
+  snapshotJson: string
+  createdAt: number
+}
+
+function migrateCompressedSnapshotBodies(db: Database) {
+  const insertLive = db.prepare(`
+    INSERT INTO live_game_snapshots_v31
+      (game_id, puuid, game_time_ms, captured_at, reason,
+       has_active_player_stat_runes, snapshot_encoding,
+       snapshot_uncompressed_bytes, snapshot_compressed_bytes,
+       snapshot_sha256, snapshot_payload)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+  const readLive = db.prepare(`
+    SELECT rowid AS sourceRowId, game_id AS gameId, puuid,
+           game_time_ms AS gameTimeMs, captured_at AS capturedAt, reason,
+           snapshot_json AS snapshotJson
+    FROM live_game_snapshots
+    WHERE rowid > ? ORDER BY rowid LIMIT 100
+  `)
+  let lastLiveRowId = 0
+  while (true) {
+    const rows = readLive.all(lastLiveRowId) as LegacyLiveSnapshotBody[]
+    if (rows.length === 0) break
+    for (const row of rows) {
+      let encoded
+      let hasActivePlayerStatRunes = 0
+      try {
+        encoded = gzipJsonTextV1(row.snapshotJson)
+        const snapshot = JSON.parse(row.snapshotJson) as {
+          activePlayer?: { runes?: { statRuneIds?: unknown } }
+        }
+        const statRuneIds = snapshot.activePlayer?.runes?.statRuneIds
+        hasActivePlayerStatRunes = Array.isArray(statRuneIds) && statRuneIds.length > 0
+          ? 1
+          : 0
+      } catch (error) {
+        throw new Error(
+          `live_game_snapshot_body_invalid:${row.gameId}:${row.puuid}:${row.gameTimeMs}`,
+          { cause: error },
+        )
+      }
+      insertLive.run(
+        row.gameId,
+        row.puuid,
+        row.gameTimeMs,
+        row.capturedAt,
+        row.reason,
+        hasActivePlayerStatRunes,
+        encoded.encoding,
+        encoded.uncompressedBytes,
+        encoded.compressedBytes,
+        encoded.sha256,
+        encoded.payload,
+      )
+    }
+    lastLiveRowId = rows.at(-1)!.sourceRowId
+  }
+
+  const insertCalibration = db.prepare(`
+    INSERT INTO grade_calibration_snapshots_v31
+      (calibration_id, calibration_hash, reference_population_json,
+       sample_count, snapshot_encoding, snapshot_uncompressed_bytes,
+       snapshot_compressed_bytes, snapshot_sha256, snapshot_payload, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+  const readCalibration = db.prepare(`
+    SELECT rowid AS sourceRowId, calibration_id AS calibrationId,
+           calibration_hash AS calibrationHash,
+           reference_population_json AS referencePopulationJson,
+           sample_count AS sampleCount, snapshot_json AS snapshotJson,
+           created_at AS createdAt
+    FROM grade_calibration_snapshots
+    WHERE rowid > ? ORDER BY rowid LIMIT 1
+  `)
+  let lastCalibrationRowId = 0
+  while (true) {
+    const row = readCalibration.get(lastCalibrationRowId) as
+      LegacyGradeCalibrationBody | undefined
+    if (!row) break
+    let encoded
+    try {
+      encoded = gzipJsonTextV1(row.snapshotJson)
+    } catch (error) {
+      throw new Error(`grade_calibration_snapshot_body_invalid:${row.calibrationId}`, {
+        cause: error,
+      })
+    }
+    insertCalibration.run(
+      row.calibrationId,
+      row.calibrationHash,
+      row.referencePopulationJson,
+      row.sampleCount,
+      encoded.encoding,
+      encoded.uncompressedBytes,
+      encoded.compressedBytes,
+      encoded.sha256,
+      encoded.payload,
+      row.createdAt,
+    )
+    lastCalibrationRowId = row.sourceRowId
+  }
+
+  const sourceLiveCount = Number((db.prepare(`
+    SELECT COUNT(*) AS count FROM live_game_snapshots
+  `).get() as { count: number }).count)
+  const migratedLiveCount = Number((db.prepare(`
+    SELECT COUNT(*) AS count FROM live_game_snapshots_v31
+  `).get() as { count: number }).count)
+  const sourceCalibrationCount = Number((db.prepare(`
+    SELECT COUNT(*) AS count FROM grade_calibration_snapshots
+  `).get() as { count: number }).count)
+  const migratedCalibrationCount = Number((db.prepare(`
+    SELECT COUNT(*) AS count FROM grade_calibration_snapshots_v31
+  `).get() as { count: number }).count)
+  if (sourceLiveCount !== migratedLiveCount ||
+      sourceCalibrationCount !== migratedCalibrationCount) {
+    throw new Error("snapshot_body_migration_row_count_mismatch")
+  }
 }
 
 export const migrations: Migration[] = [
@@ -1877,9 +2033,436 @@ export const migrations: Migration[] = [
       BEGIN SELECT RAISE(ABORT, 'metric_observation_calibration_mismatch'); END;
     `,
   },
+  {
+    // Account identity and profile observations are separate from
+    // profile_snapshots, which stores Challenge progression. LCU sessions are
+    // sampled repeatedly, so the repository records only actual transitions.
+    version: 27,
+    up: `
+      CREATE TABLE account_profile_snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        puuid TEXT NOT NULL CHECK (length(trim(puuid)) > 0),
+        summoner_id INTEGER
+          CHECK (summoner_id IS NULL OR summoner_id >= 0),
+        game_name TEXT,
+        tag_line TEXT,
+        profile_icon_id INTEGER
+          CHECK (profile_icon_id IS NULL OR profile_icon_id >= 0),
+        summoner_level INTEGER
+          CHECK (summoner_level IS NULL OR summoner_level >= 0),
+        platform_id TEXT,
+        regional_route TEXT,
+        observed_at INTEGER NOT NULL CHECK (observed_at >= 0)
+      );
+
+      CREATE INDEX idx_account_profile_snapshots_owner_time
+        ON account_profile_snapshots (puuid, observed_at DESC, id DESC);
+    `,
+  },
+  {
+    // Remove abandoned parallel pipelines that were introduced as schema
+    // experiments but never wired into the running application. The active
+    // local-first history backfill, source payload, label, timeline, export,
+    // and live-capture paths remain unchanged.
+    version: 28,
+    up: `
+      DROP TABLE IF EXISTS match_enrichment_jobs;
+      DROP TABLE IF EXISTS history_remediation_runs;
+      DROP TABLE IF EXISTS riot_history_run_matches;
+      DROP TABLE IF EXISTS riot_match_ingestion;
+      DROP TABLE IF EXISTS riot_history_runs;
+
+      DROP TABLE IF EXISTS match_source_capture_payloads;
+      DROP TABLE IF EXISTS match_source_captures;
+
+      DROP TABLE IF EXISTS match_performance_label_versions;
+      DROP TABLE IF EXISTS match_label_evaluation_versions;
+
+      DROP TABLE IF EXISTS live_capture_compactions;
+      DROP TABLE IF EXISTS artifact_publish_journal;
+      DROP TABLE IF EXISTS maintenance_operations;
+      DROP TABLE IF EXISTS release_cleanup_state;
+    `,
+  },
+  {
+    // Raw bodies are content-addressed, but repeated observations still carry
+    // useful provenance. Keep one copy of identical bytes together with the
+    // first/last observation boundary and exact number of captures.
+    version: 29,
+    up: `
+      ALTER TABLE match_source_payloads ADD COLUMN first_fetched_at INTEGER
+        CHECK (first_fetched_at IS NULL OR first_fetched_at >= 0);
+      ALTER TABLE match_source_payloads ADD COLUMN last_fetched_at INTEGER
+        CHECK (last_fetched_at IS NULL OR last_fetched_at >= 0);
+      ALTER TABLE match_source_payloads ADD COLUMN observation_count INTEGER
+        NOT NULL DEFAULT 1 CHECK (observation_count > 0);
+
+      UPDATE match_source_payloads
+      SET first_fetched_at = fetched_at,
+          last_fetched_at = fetched_at;
+
+      -- Older builds put the observation timestamp in history-page identity,
+      -- so an identical 0..19 response bypassed the payload primary key on
+      -- every poll. The highest mapper owns mapping metadata while aggregate
+      -- fields retain the complete observation boundary and count.
+      CREATE TEMP TABLE retained_history_pages AS
+      WITH ranked AS (
+        SELECT payload_row.*,
+               MIN(first_fetched_at) OVER (
+                 PARTITION BY owner_puuid, source, kind, sha256
+               ) AS retained_first_fetched_at,
+               MAX(last_fetched_at) OVER (
+                 PARTITION BY owner_puuid, source, kind, sha256
+               ) AS retained_last_fetched_at,
+               SUM(observation_count) OVER (
+                 PARTITION BY owner_puuid, source, kind, sha256
+               ) AS retained_observation_count,
+               ROW_NUMBER() OVER (
+                 PARTITION BY owner_puuid, source, kind, sha256
+                 ORDER BY mapper_version DESC, fetched_at DESC, rowid DESC
+               ) AS retained_rank
+        FROM match_source_payloads payload_row
+        WHERE source = 'league_client' AND kind = 'history_page'
+      )
+      SELECT owner_puuid, source, 'recent:0:19' AS source_match_id, game_id,
+             kind, encoding, payload, sha256, data_version, mapper_version,
+             serialization_version, mapping_status, mapping_error, mapped_at,
+             retained_last_fetched_at AS fetched_at,
+             retained_first_fetched_at AS first_fetched_at,
+             retained_last_fetched_at AS last_fetched_at,
+             retained_observation_count AS observation_count
+      FROM ranked
+      WHERE retained_rank = 1;
+
+      DELETE FROM match_source_payloads
+      WHERE source = 'league_client' AND kind = 'history_page';
+
+      INSERT INTO match_source_payloads
+        (owner_puuid, source, source_match_id, game_id, kind, encoding,
+         payload, sha256, data_version, mapper_version,
+         serialization_version, mapping_status, mapping_error, mapped_at,
+         fetched_at, first_fetched_at, last_fetched_at, observation_count)
+      SELECT owner_puuid, source, source_match_id, game_id, kind, encoding,
+             payload, sha256, data_version, mapper_version,
+             serialization_version, mapping_status, mapping_error, mapped_at,
+             fetched_at, first_fetched_at, last_fetched_at, observation_count
+      FROM retained_history_pages;
+
+      DROP TABLE retained_history_pages;
+    `,
+  },
+  {
+    // Metric observations can outnumber matches by two orders of magnitude.
+    // Store their immutable RVI recipe identity once and reference it with an
+    // integer key; the details view keeps the exact public identity available
+    // to every reader without duplicating long recipe/calibration strings in
+    // each row and in both covering indexes.
+    version: 30,
+    up: `
+      DROP TRIGGER IF EXISTS rvi_selection_insert_requires_purge;
+      DROP TRIGGER IF EXISTS rvi_selection_update_requires_purge;
+      DROP TRIGGER IF EXISTS rvi_selection_delete_requires_purge;
+      DROP TRIGGER IF EXISTS metric_observation_selected_recipe_insert;
+      DROP TRIGGER IF EXISTS metric_observation_selected_recipe_update;
+      DROP TRIGGER IF EXISTS metric_observation_calibration_insert;
+      DROP TRIGGER IF EXISTS metric_observation_calibration_update;
+
+      DROP INDEX IF EXISTS idx_metric_observations_owner_recipe_history;
+      DROP INDEX IF EXISTS idx_metric_observations_match_recipe_detail;
+
+      ALTER TABLE match_metric_observations
+        RENAME TO match_metric_observations_v29;
+
+      CREATE TABLE rvi_recipe_storage_keys (
+        recipe_key INTEGER PRIMARY KEY,
+        algorithm_version INTEGER NOT NULL CHECK (algorithm_version > 0),
+        recipe_id TEXT NOT NULL UNIQUE CHECK (length(trim(recipe_id)) > 0),
+        UNIQUE (algorithm_version, recipe_id),
+        FOREIGN KEY (algorithm_version, recipe_id)
+          REFERENCES rvi_recipes (algorithm_version, recipe_id)
+          ON DELETE CASCADE
+      );
+
+      INSERT INTO rvi_recipe_storage_keys (algorithm_version, recipe_id)
+      SELECT algorithm_version, recipe_id
+      FROM rvi_recipes
+      ORDER BY algorithm_version, recipe_id;
+
+      CREATE TRIGGER rvi_recipe_storage_key_insert
+      AFTER INSERT ON rvi_recipes
+      BEGIN
+        INSERT INTO rvi_recipe_storage_keys (algorithm_version, recipe_id)
+        VALUES (NEW.algorithm_version, NEW.recipe_id);
+      END;
+
+      CREATE TABLE match_metric_observations (
+        game_id INTEGER NOT NULL,
+        puuid TEXT NOT NULL,
+        participant_id INTEGER NOT NULL CHECK (participant_id > 0),
+        recipe_key INTEGER NOT NULL,
+        metric_key TEXT NOT NULL CHECK (length(trim(metric_key)) > 0),
+        raw_evidence_state TEXT NOT NULL CHECK (raw_evidence_state IN (
+          'observed','unavailable','no_opportunity','not_applicable','invalid','unknown')),
+        raw_evidence_reason TEXT,
+        raw_value REAL,
+        score_evidence_state TEXT NOT NULL CHECK (score_evidence_state IN (
+          'observed','unavailable','no_opportunity','not_applicable','invalid','unknown')),
+        score_evidence_reason TEXT,
+        score_value REAL,
+        numerator REAL,
+        denominator REAL CHECK (denominator IS NULL OR denominator >= 0),
+        opportunity_count INTEGER
+          CHECK (opportunity_count IS NULL OR opportunity_count >= 0),
+        unit TEXT NOT NULL CHECK (length(trim(unit)) > 0),
+        comparison_scope TEXT CHECK (comparison_scope IS NULL OR comparison_scope IN (
+          'mode','position','archetype')),
+        reference_match_count INTEGER
+          CHECK (reference_match_count IS NULL OR reference_match_count >= 0),
+        source TEXT NOT NULL CHECK (source IN (
+          'scoreboard','extended','timeline','derived')),
+        source_quality TEXT NOT NULL CHECK (source_quality IN (
+          'verified','retained','derived','legacy')),
+        derivation_id TEXT NOT NULL CHECK (length(trim(derivation_id)) > 0),
+        derived_at INTEGER NOT NULL CHECK (derived_at >= 0),
+        PRIMARY KEY (
+          game_id, puuid, participant_id, recipe_key, metric_key
+        ),
+        FOREIGN KEY (game_id, puuid, participant_id)
+          REFERENCES match_participants (game_id, puuid, participant_id)
+          ON DELETE CASCADE,
+        FOREIGN KEY (recipe_key)
+          REFERENCES rvi_recipe_storage_keys (recipe_key),
+        CHECK ((raw_evidence_state = 'observed') = (raw_value IS NOT NULL)),
+        CHECK ((score_evidence_state = 'observed') = (score_value IS NOT NULL)),
+        CHECK (score_value IS NULL OR score_value BETWEEN 0 AND 1),
+        CHECK (score_evidence_state <> 'observed' OR raw_evidence_state = 'observed')
+      );
+
+      INSERT INTO match_metric_observations
+        (game_id, puuid, participant_id, recipe_key, metric_key,
+         raw_evidence_state, raw_evidence_reason, raw_value,
+         score_evidence_state, score_evidence_reason, score_value,
+         numerator, denominator, opportunity_count, unit, comparison_scope,
+         reference_match_count, source, source_quality, derivation_id, derived_at)
+      SELECT observation.game_id, observation.puuid, observation.participant_id,
+             (SELECT storage.recipe_key
+              FROM rvi_recipe_storage_keys storage
+              WHERE storage.algorithm_version = observation.algorithm_version
+                AND storage.recipe_id = observation.recipe_id),
+             observation.metric_key, observation.raw_evidence_state,
+             observation.raw_evidence_reason, observation.raw_value,
+             observation.score_evidence_state,
+             observation.score_evidence_reason, observation.score_value,
+             observation.numerator, observation.denominator,
+             observation.opportunity_count, observation.unit,
+             observation.comparison_scope, observation.reference_match_count,
+             observation.source, observation.source_quality,
+             observation.derivation_id, observation.derived_at
+      FROM match_metric_observations_v29 observation;
+
+      DROP TABLE match_metric_observations_v29;
+
+      CREATE INDEX idx_metric_observations_owner_recipe_history
+        ON match_metric_observations
+          (puuid, recipe_key, participant_id, game_id, metric_key);
+      CREATE INDEX idx_metric_observations_match_recipe_detail
+        ON match_metric_observations
+          (game_id, puuid, recipe_key, participant_id, metric_key);
+
+      CREATE VIEW match_metric_observation_details AS
+      SELECT observation.game_id,
+             observation.puuid,
+             observation.participant_id,
+             storage.algorithm_version,
+             storage.recipe_id,
+             recipe.calibration_id,
+             observation.metric_key,
+             observation.raw_evidence_state,
+             observation.raw_evidence_reason,
+             observation.raw_value,
+             observation.score_evidence_state,
+             observation.score_evidence_reason,
+             observation.score_value,
+             observation.numerator,
+             observation.denominator,
+             observation.opportunity_count,
+             observation.unit,
+             observation.comparison_scope,
+             observation.reference_match_count,
+             observation.source,
+             observation.source_quality,
+             observation.derivation_id,
+             observation.derived_at
+      FROM match_metric_observations observation
+      JOIN rvi_recipe_storage_keys storage
+        ON storage.recipe_key = observation.recipe_key
+      JOIN rvi_recipes recipe
+        ON recipe.algorithm_version = storage.algorithm_version
+       AND recipe.recipe_id = storage.recipe_id;
+
+      CREATE TRIGGER rvi_selection_insert_requires_purge
+      BEFORE INSERT ON rvi_recipe_selections
+      WHEN EXISTS (
+        SELECT 1
+        FROM match_metric_observations observation
+        JOIN rvi_recipe_storage_keys storage
+          ON storage.recipe_key = observation.recipe_key
+        WHERE storage.algorithm_version = NEW.algorithm_version
+          AND storage.recipe_id <> NEW.recipe_id
+      )
+      BEGIN SELECT RAISE(ABORT, 'rvi_recipe_purge_required'); END;
+
+      CREATE TRIGGER rvi_selection_update_requires_purge
+      BEFORE UPDATE OF algorithm_version, recipe_id ON rvi_recipe_selections
+      WHEN (OLD.algorithm_version <> NEW.algorithm_version
+            OR OLD.recipe_id <> NEW.recipe_id)
+        AND (
+          EXISTS (
+            SELECT 1
+            FROM match_metric_observations observation
+            JOIN rvi_recipe_storage_keys storage
+              ON storage.recipe_key = observation.recipe_key
+            WHERE storage.algorithm_version = OLD.algorithm_version
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM match_metric_observations observation
+            JOIN rvi_recipe_storage_keys storage
+              ON storage.recipe_key = observation.recipe_key
+            WHERE storage.algorithm_version = NEW.algorithm_version
+              AND storage.recipe_id <> NEW.recipe_id
+          )
+        )
+      BEGIN SELECT RAISE(ABORT, 'rvi_recipe_purge_required'); END;
+
+      CREATE TRIGGER rvi_selection_delete_requires_purge
+      BEFORE DELETE ON rvi_recipe_selections
+      WHEN EXISTS (
+        SELECT 1
+        FROM match_metric_observations observation
+        JOIN rvi_recipe_storage_keys storage
+          ON storage.recipe_key = observation.recipe_key
+        WHERE storage.algorithm_version = OLD.algorithm_version
+      )
+      BEGIN SELECT RAISE(ABORT, 'rvi_recipe_purge_required'); END;
+
+      CREATE TRIGGER metric_observation_selected_recipe_insert
+      BEFORE INSERT ON match_metric_observations
+      WHEN NOT EXISTS (
+        SELECT 1
+        FROM rvi_recipe_storage_keys storage
+        JOIN rvi_recipe_selections selection
+          ON selection.algorithm_version = storage.algorithm_version
+         AND selection.recipe_id = storage.recipe_id
+        WHERE storage.recipe_key = NEW.recipe_key
+      )
+      BEGIN SELECT RAISE(ABORT, 'metric_observation_recipe_is_not_selected'); END;
+
+      CREATE TRIGGER metric_observation_selected_recipe_update
+      BEFORE UPDATE OF recipe_key ON match_metric_observations
+      WHEN NOT EXISTS (
+        SELECT 1
+        FROM rvi_recipe_storage_keys storage
+        JOIN rvi_recipe_selections selection
+          ON selection.algorithm_version = storage.algorithm_version
+         AND selection.recipe_id = storage.recipe_id
+        WHERE storage.recipe_key = NEW.recipe_key
+      )
+      BEGIN SELECT RAISE(ABORT, 'metric_observation_recipe_is_not_selected'); END;
+    `,
+  },
+  {
+    // High-volume snapshot bodies are immutable and read as whole JSON values.
+    // Keep their relational identity/timestamps queryable while storing the
+    // body inline as deterministic gzip with independently verified metadata.
+    version: 31,
+    rebuildsReferencedTable: true,
+    up: `
+      CREATE TABLE live_game_snapshots_v31 (
+        game_id       INTEGER NOT NULL,
+        puuid         TEXT    NOT NULL,
+        game_time_ms  INTEGER NOT NULL,
+        captured_at   INTEGER NOT NULL,
+        reason        TEXT    NOT NULL CHECK (reason IN ('first', 'periodic', 'state_change')),
+        has_active_player_stat_runes INTEGER NOT NULL
+          CHECK (has_active_player_stat_runes IN (0, 1)),
+        snapshot_encoding TEXT NOT NULL CHECK (snapshot_encoding = 'gzip_json_v1'),
+        snapshot_uncompressed_bytes INTEGER NOT NULL
+          CHECK (snapshot_uncompressed_bytes > 0),
+        snapshot_compressed_bytes INTEGER NOT NULL
+          CHECK (snapshot_compressed_bytes >= 18),
+        snapshot_sha256 TEXT NOT NULL CHECK (
+          length(snapshot_sha256) = 64 AND snapshot_sha256 NOT GLOB '*[^0-9a-f]*'
+        ),
+        snapshot_payload BLOB NOT NULL CHECK (
+          typeof(snapshot_payload) = 'blob'
+          AND length(snapshot_payload) = snapshot_compressed_bytes
+        ),
+        PRIMARY KEY (game_id, puuid, game_time_ms)
+      );
+
+      CREATE TABLE grade_calibration_snapshots_v31 (
+        calibration_id TEXT PRIMARY KEY,
+        calibration_hash TEXT NOT NULL UNIQUE CHECK (length(calibration_hash) = 64),
+        reference_population_json TEXT NOT NULL CHECK (json_valid(reference_population_json)),
+        sample_count INTEGER NOT NULL CHECK (sample_count >= 0),
+        snapshot_encoding TEXT NOT NULL CHECK (snapshot_encoding = 'gzip_json_v1'),
+        snapshot_uncompressed_bytes INTEGER NOT NULL
+          CHECK (snapshot_uncompressed_bytes > 0),
+        snapshot_compressed_bytes INTEGER NOT NULL
+          CHECK (snapshot_compressed_bytes >= 18),
+        snapshot_sha256 TEXT NOT NULL CHECK (
+          length(snapshot_sha256) = 64 AND snapshot_sha256 NOT GLOB '*[^0-9a-f]*'
+        ),
+        snapshot_payload BLOB NOT NULL CHECK (
+          typeof(snapshot_payload) = 'blob'
+          AND length(snapshot_payload) = snapshot_compressed_bytes
+        ),
+        created_at INTEGER NOT NULL
+      );
+    `,
+    migrate: migrateCompressedSnapshotBodies,
+    after: `
+      DROP TABLE live_game_snapshots;
+      ALTER TABLE live_game_snapshots_v31 RENAME TO live_game_snapshots;
+      CREATE INDEX idx_live_snapshots_owner
+        ON live_game_snapshots (puuid, game_id, game_time_ms);
+
+      DROP TRIGGER grade_calibration_snapshots_immutable_update;
+      DROP TABLE grade_calibration_snapshots;
+      ALTER TABLE grade_calibration_snapshots_v31
+        RENAME TO grade_calibration_snapshots;
+      CREATE TRIGGER grade_calibration_snapshots_immutable_update
+      BEFORE UPDATE ON grade_calibration_snapshots
+      BEGIN SELECT RAISE(ABORT, 'grade_calibration_snapshot_is_immutable'); END;
+    `,
+    verify: (db) => {
+      if ((db.pragma("foreign_key_check") as unknown[]).length > 0) {
+        throw new Error("snapshot_body_migration_foreign_key_violation")
+      }
+    },
+  },
+  {
+    // The selected v11 source is the compact timeline authority. Preserve one
+    // LCU and one Match-V5 candidate, promote the compatibility cache's only
+    // raw bodies into the canonical gzip store, then remove the duplicate
+    // cache only after byte/hash/coverage verification succeeds.
+    version: 32,
+    up: TIMELINE_STORAGE_V32_UP,
+    migrate: migrateTimelineStorageV32,
+    after: TIMELINE_STORAGE_V32_AFTER,
+    verify: verifyTimelineStorageV32,
+  },
 ]
 
 export const latestSchemaVersion = migrations.at(-1)?.version ?? 0
+
+export function executeMigration(db: Database, migration: Migration) {
+  db.exec(migration.up)
+  migration.migrate?.(db)
+  if (migration.after) db.exec(migration.after)
+  migration.verify?.(db)
+}
 
 export function applyMigrations(db: Database): number {
   const current = db.pragma("user_version", { simple: true }) as number
@@ -1888,13 +2471,22 @@ export function applyMigrations(db: Database): number {
   if (pending.length === 0) return current
 
   const latest = pending[pending.length - 1].version
-
-  db.transaction(() => {
-    for (const migration of pending) {
-      db.exec(migration.up)
-    }
-    db.pragma(`user_version = ${latest}`)
-  })()
+  const foreignKeysWereEnabled = Number(db.pragma("foreign_keys", {
+    simple: true,
+  })) === 1
+  const suspendForeignKeys = foreignKeysWereEnabled && pending.some((migration) =>
+    migration.rebuildsReferencedTable)
+  if (suspendForeignKeys) db.pragma("foreign_keys = OFF")
+  try {
+    db.transaction(() => {
+      for (const migration of pending) {
+        executeMigration(db, migration)
+      }
+      db.pragma(`user_version = ${latest}`)
+    })()
+  } finally {
+    if (suspendForeignKeys) db.pragma("foreign_keys = ON")
+  }
 
   return latest
 }

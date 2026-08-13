@@ -7,13 +7,13 @@ import type { ModeFamily } from "./types.js"
 import type { NormalizedPosition, Position } from "./position.js"
 import {
   MATCH_GRADE_ARM_KEYS,
-  MATCH_GRADE_TAXONOMY_VERSION,
+  CURRENT_GRADE_TAXONOMY_ID,
   type MatchGradeArmKey,
   type ResponsibilityTier,
 } from "./match-grade-recipe.js"
 
 export {
-  MATCH_GRADE_TAXONOMY_VERSION,
+  CURRENT_GRADE_TAXONOMY_ID,
   PRIMARY_ARCHETYPES,
   type PrimaryArchetype,
 }
@@ -293,7 +293,7 @@ export type ArchetypeResolutionSource =
 export interface ArchetypeResolution {
   archetype: PrimaryArchetype
   source: ArchetypeResolutionSource
-  taxonomyVersion: typeof MATCH_GRADE_TAXONOMY_VERSION
+  taxonomyVersion: typeof CURRENT_GRADE_TAXONOMY_ID
 }
 
 export function resolvePrimaryArchetypeWithSource(
@@ -301,25 +301,25 @@ export function resolvePrimaryArchetypeWithSource(
   explicit?: PrimaryArchetype,
 ): ArchetypeResolution {
   if (explicit) {
-    return { archetype: explicit, source: "explicit", taxonomyVersion: MATCH_GRADE_TAXONOMY_VERSION }
+    return { archetype: explicit, source: "explicit", taxonomyVersion: CURRENT_GRADE_TAXONOMY_ID }
   }
   if (!Number.isSafeInteger(championId)) {
     return {
       archetype: "specialist",
       source: "specialist_fallback",
-      taxonomyVersion: MATCH_GRADE_TAXONOMY_VERSION,
+      taxonomyVersion: CURRENT_GRADE_TAXONOMY_ID,
     }
   }
   const canonical = canonicalChampionId(championId as number)
   const curated = CURATED_PRIMARY_ARCHETYPES.get(canonical)
   if (curated) {
-    return { archetype: curated, source: "curated", taxonomyVersion: MATCH_GRADE_TAXONOMY_VERSION }
+    return { archetype: curated, source: "curated", taxonomyVersion: CURRENT_GRADE_TAXONOMY_ID }
   }
   const championClass = CHAMPION_CLASSES.get(canonical)?.[0]
   return {
     archetype: primaryArchetypeForClass(championClass),
     source: championClass ? "class_fallback" : "specialist_fallback",
-    taxonomyVersion: MATCH_GRADE_TAXONOMY_VERSION,
+    taxonomyVersion: CURRENT_GRADE_TAXONOMY_ID,
   }
 }
 

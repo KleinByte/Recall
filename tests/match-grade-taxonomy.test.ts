@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
-  MATCH_GRADE_RECIPE,
+  CURRENT_GRADE_RECIPE,
   recipeIdForCalibration,
 } from "../electron/main/matches/match-grade-recipe.js"
 import { CHAMPION_CLASSES } from "../electron/main/matches/champion-classes.js"
@@ -167,9 +167,9 @@ describe("match Grade taxonomy and recipe identity", () => {
     const first = recipeIdForCalibration("sha256.aaa")
     const second = recipeIdForCalibration("sha256.bbb")
     expect(first).not.toBe(second)
-    expect(first).toContain(MATCH_GRADE_RECIPE.recipeDefinitionId)
+    expect(first).toContain(CURRENT_GRADE_RECIPE.recipeDefinitionId)
     expect(() => recipeIdForCalibration("mutable current")).toThrow(TypeError)
-    expect(Object.isFrozen(MATCH_GRADE_RECIPE)).toBe(true)
-    expect(Object.isFrozen(MATCH_GRADE_RECIPE.aggregation.familyMetrics.combat)).toBe(true)
+    expect(Object.isFrozen(CURRENT_GRADE_RECIPE)).toBe(true)
+    expect(Object.isFrozen(CURRENT_GRADE_RECIPE.aggregation.familyMetrics.combat)).toBe(true)
   })
 })

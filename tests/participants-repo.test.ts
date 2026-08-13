@@ -12,6 +12,13 @@ let repo: ParticipantsRepository
 let matches: MatchesRepository
 let db: InstanceType<typeof Database>
 
+function countStoredLobbies(puuid: string): number {
+  const row = db.prepare(
+    "SELECT COUNT(DISTINCT game_id) AS total FROM match_participants WHERE puuid = ?",
+  ).get(puuid) as { total: number }
+  return row.total
+}
+
 beforeEach(() => {
   db = new Database(":memory:")
   applyMigrations(db)
@@ -113,7 +120,7 @@ const lobby = (gameId: number, playerDamage: number): ParticipantRow[] =>
 describe("ParticipantsRepository", () => {
   it("stores a whole lobby", () => {
     expect(repo.insertMany(lobby(1, 30000))).toBe(10)
-    expect(repo.countGamesWithLobby(PUUID)).toBe(1)
+    expect(countStoredLobbies(PUUID)).toBe(1)
   })
 
   it("stores augments for every player but aggregates only the owner without wins", () => {
@@ -204,7 +211,7 @@ describe("ParticipantsRepository", () => {
     repo.insertMany(lobby(1, 30000))
     repo.insertMany(lobby(1, 30000))
 
-    expect(repo.countGamesWithLobby(PUUID)).toBe(1)
+    expect(countStoredLobbies(PUUID)).toBe(1)
     expect(repo.getMatchDetail(1, PUUID).participants).toHaveLength(10)
   })
 
@@ -262,7 +269,9 @@ describe("ParticipantsRepository", () => {
   it("stores the participant PUUID needed for mastery lookups without account IDs", () => {
     repo.insertMany(lobby(1, 30000))
 
-    const columns = repo.columnNames()
+    const columns = (
+      db.pragma("table_info(match_participants)") as { name: string }[]
+    ).map((column) => column.name)
 
     expect(columns).toContain("participant_puuid")
     expect(columns).not.toContain("account_id")

@@ -1,4 +1,4 @@
-import { UI_THEME } from "../design/theme"
+import { UI_SCORE_RAMP, UI_THEME } from "../design/theme"
 
 /**
  * Semantic colors for canvas/SVG charts. Feature charts should choose a role
@@ -51,18 +51,12 @@ export const CHART_STYLES = {
   neutralFill: alpha(UI_THEME.neutral, .18),
   zeroLine: alpha(UI_THEME.text, .42),
   tooltipBorder: alpha(UI_THEME.accent, .55),
-  labelBackdrop: "rgba(6, 14, 28, .78)",
-  labelShadow: "rgba(0, 0, 0, .78)",
+  labelBackdrop: UI_THEME.labelBackdrop,
+  labelShadow: UI_THEME.labelShadow,
 } as const
 
 /** Ordered low-to-high score colors; never use for categorical series. */
-export const CHART_SCORE_RAMP = [
-  "#4a0717",
-  "#8f1428",
-  "#17608f",
-  "#18a66e",
-  "#e7bd55",
-] as const
+export const CHART_SCORE_RAMP = UI_SCORE_RAMP
 
 export const RECALL_CHART_THEME = {
   color: [

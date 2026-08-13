@@ -14,7 +14,8 @@ import { ReviewRepository } from "../electron/main/database/review-repo.js"
 import type { ParticipantRow } from "../electron/main/matches/types.js"
 import {
   MATCH_GRADE_ARM_KEYS,
-  MATCH_GRADE_RECIPE_DEFINITION_ID,
+  CURRENT_GRADE_RECIPE,
+  CURRENT_GRADE_RECIPE_DEFINITION_ID,
 } from "../electron/main/matches/match-grade-recipe.js"
 import type { PrimaryArchetype } from "../electron/main/matches/match-grade-taxonomy.js"
 import { RVI_VECTOR_KEYS } from "../electron/main/matches/rvi-contract.js"
@@ -25,10 +26,11 @@ import {
 import { buildMatchRow } from "./fixtures/matches.js"
 
 const PUUID = "rvi-owner"
-const CALIBRATION_ID = "recall.grade.v3.calibration.test"
-const RECIPE_ID = `${MATCH_GRADE_RECIPE_DEFINITION_ID}@calibration:${CALIBRATION_ID}`
-const OTHER_RECIPE_ID = "recall.grade.v3.definition.other@calibration:test"
-const STALE_RECIPE_DEFINITION_ID = "recall.grade.v3.definition.2026-08-08.r1"
+const CALIBRATION_ID = "recall.grade.calibration.test"
+const RECIPE_ID = `${CURRENT_GRADE_RECIPE_DEFINITION_ID}@calibration:${CALIBRATION_ID}`
+const RVI_RECIPE_ID = rviRecipeIdForCalibration(RECIPE_ID, CALIBRATION_ID)
+const OTHER_RECIPE_ID = "recall.grade.definition.other@calibration:test"
+const STALE_RECIPE_DEFINITION_ID = "recall.grade.definition.stale"
 const STALE_RECIPE_ID = `${STALE_RECIPE_DEFINITION_ID}@calibration:${CALIBRATION_ID}`
 const INPUT_HASH = "1".repeat(64)
 
@@ -137,8 +139,10 @@ function selectRecipe() {
     recipeHash: "b".repeat(64),
     calibrationId: CALIBRATION_ID,
     definition: {
-      recipeDefinitionId: MATCH_GRADE_RECIPE_DEFINITION_ID,
-      familyKeys: MATCH_GRADE_ARM_KEYS,
+      ...CURRENT_GRADE_RECIPE,
+      calibrationId: CALIBRATION_ID,
+      calibrationHash: "a".repeat(64),
+      referencePopulation: { population: "local_recall_installation" },
     },
   })
   grades.registerRecipe({
@@ -147,7 +151,7 @@ function selectRecipe() {
     recipeHash: "c".repeat(64),
     calibrationId: CALIBRATION_ID,
     definition: {
-      recipeDefinitionId: "recall.grade.v3.definition.other",
+      recipeDefinitionId: "recall.grade.definition.other",
       familyKeys: MATCH_GRADE_ARM_KEYS,
       other: true,
     },
@@ -207,7 +211,7 @@ function writeReady(
   options: ReadyOptions = {},
 ) {
   const recipeId = options.recipeId ?? RECIPE_ID
-  const recipeDefinitionId = options.recipeDefinitionId ?? MATCH_GRADE_RECIPE_DEFINITION_ID
+  const recipeDefinitionId = options.recipeDefinitionId ?? CURRENT_GRADE_RECIPE_DEFINITION_ID
   const primaryArchetype = options.primaryArchetype ?? "assassin"
   const familySignals: Record<string, string[]> = {
     combat: ["damage_share", "kill_participation"],
@@ -289,7 +293,7 @@ beforeEach(() => {
 })
 
 describe("ReviewRepository.getGradeBreakdown", () => {
-  it("returns a zero percentile only when the selected v3 artifact observed zero", () => {
+  it("returns a zero percentile only when the selected artifact observed zero", () => {
     selectRecipe()
     addLobby(1, 1_000, 84, "MIDDLE")
     writeReady(1, 40, [
@@ -298,7 +302,6 @@ describe("ReviewRepository.getGradeBreakdown", () => {
     ])
 
     expect(reviews.getGradeBreakdown(1, PUUID, 1)).toMatchObject({
-      algorithmVersion: 3,
       recipeId: RECIPE_ID,
       recallScore: 40,
       compositePercentile: 0.4,
@@ -412,6 +415,7 @@ describe("compiled match Grade recipe identity", () => {
 describe("InsightsRepository.getRviObservations", () => {
   it("uses the entire selected-recipe history unless a caller explicitly requests a window", () => {
     selectRecipe()
+    selectRviRecipe()
     for (let gameId = 1; gameId <= 241; gameId += 1) {
       addLobby(gameId, gameId * 1_000, 84, "MIDDLE")
       writeReady(gameId, 50, [{ key: "combat", componentScore: 0.5 }])
@@ -424,6 +428,7 @@ describe("InsightsRepository.getRviObservations", () => {
 
   it("returns selected-recipe Recall Score and 0-100 capability vectors chronologically", () => {
     selectRecipe()
+    selectRviRecipe()
     addLobby(2, 2_000, 222, "BOTTOM")
     addLobby(1, 1_000, 84, "MIDDLE")
     writeReady(2, 84.5, [
@@ -440,13 +445,13 @@ describe("InsightsRepository.getRviObservations", () => {
 
     expect(result).toMatchObject({
       algorithmVersion: 3,
-      recipeId: RECIPE_ID,
+      recipeId: RVI_RECIPE_ID,
       calibrationId: CALIBRATION_ID,
       familyKeys: RVI_VECTOR_KEYS,
     })
     expect(result.observations.map((row) => row.matchId)).toEqual([1, 2])
     expect(result.observations[0]).toMatchObject({
-      recipeId: RECIPE_ID,
+      recipeId: RVI_RECIPE_ID,
       playedAt: 1_000,
       recallScore: 42,
       championId: 84,
@@ -489,7 +494,6 @@ describe("InsightsRepository.getRviObservations", () => {
       championId: 222,
       role: "BOTTOM",
       grade: "A",
-      gradeScore: 0.5,
       recallScore: 84.5,
       sessionGame: 2,
       compositePercentile: 0.845,
@@ -630,6 +634,7 @@ describe("InsightsRepository.getRviObservations", () => {
 
   it("exposes Enchanter protection as optional arm evidence and preserves zero versus missing", () => {
     selectRecipe()
+    selectRviRecipe()
     addLobby(1, 1_000, 16, "UTILITY")
     addLobby(2, 2_000, 16, "UTILITY")
     addLobby(3, 3_000, 16, "UTILITY")
@@ -688,6 +693,7 @@ describe("InsightsRepository.getRviObservations", () => {
 
   it("takes primary archetype only from a validated current breakdown", () => {
     selectRecipe()
+    selectRviRecipe()
     addLobby(1, 1_000, 154, "JUNGLE")
     addLobby(2, 2_000, 18, "BOTTOM")
     writeReady(1, 70, [{ key: "combat", componentScore: .7 }], {
@@ -721,6 +727,7 @@ describe("InsightsRepository.getRviObservations", () => {
 
   it("rejects malformed, mismatched, legacy, and non-ready grade artifacts", () => {
     selectRecipe()
+    selectRviRecipe()
     for (let gameId = 1; gameId <= 5; gameId += 1) {
       addLobby(gameId, gameId * 1_000, 84 + gameId, "MIDDLE")
     }

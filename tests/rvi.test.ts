@@ -7,6 +7,8 @@ import {
   type RviMatchObservation,
   type RviMetricObservation,
 } from "../electron/main/matches/rvi-contract.js"
+import { DEFAULT_GRADE_RECIPE_ID } from
+  "../electron/main/matches/match-grade-recipe.js"
 
 const RECIPE_ID = "rvi-current:test-recipe"
 
@@ -55,6 +57,38 @@ function metric(
 }
 
 describe("RVI profile aggregation", () => {
+  it("preserves the pure-caller bootstrap seed across the identity-only rename", () => {
+    const oldRecipeId =
+      "recall.grade.v3.radar-arms.2026-08-10.r2@calibration:compatibility-lobby-rank-r1"
+    const rows = [90, 0, 45].map((recallScore, index) => ({
+      ...observation(index + 1, { recallScore }),
+      recipeId: DEFAULT_GRADE_RECIPE_ID,
+    }))
+    const current = aggregateRviProfile({
+      recipeId: DEFAULT_GRADE_RECIPE_ID,
+      familyKeys: ["combat", "economy"],
+      observations: rows,
+    }).headline.confidenceInterval95
+    const legacy = aggregateRviProfile({
+      recipeId: oldRecipeId,
+      familyKeys: ["combat", "economy"],
+      observations: rows.map((row) => ({ ...row, recipeId: oldRecipeId })),
+    }).headline.confidenceInterval95
+
+    expect(current).toEqual(legacy)
+    expect(current).toMatchInlineSnapshot(`
+      {
+        "confidenceLevel": 0.95,
+        "lower": 15,
+        "method": "deterministic_match_bootstrap_percentile",
+        "observedGames": 3,
+        "replicates": 2000,
+        "seed": 3395782763,
+        "upper": 90,
+      }
+    `)
+  })
+
   it("defaults to equal weights and takes the headline only from stored recall-score scores", () => {
     const result = aggregateRviProfile({
       recipeId: RECIPE_ID,

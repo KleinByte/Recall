@@ -21,6 +21,15 @@ function note(
 /** Shipped releases, newest first. */
 export const patchNotes: readonly PatchNoteRelease[] = [
   note(
+    "3.2.0",
+    "2026-08-12",
+    "Stronger analysis and data trust",
+    "Recall is faster, clearer, and more reliable across reviews and performance insights.",
+    "Added background analysis and durable performance and skill-report storage.",
+    "Improved timeline capture, migration safety, and data-trust reporting.",
+    "Streamlined dashboards and reviews with a unified generated theme.",
+  ),
+  note(
     "3.1.1",
     "2026-08-12",
     "Faster, steadier settings",

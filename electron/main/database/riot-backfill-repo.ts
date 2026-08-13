@@ -204,10 +204,4 @@ export class RiotBackfillRepository {
       .run(status, message ?? null, now, puuid, regionalRoute)
     return this.get(puuid, regionalRoute)!
   }
-
-  deleteAll(puuid: string): number {
-    return this.db
-      .prepare("DELETE FROM riot_history_backfill WHERE puuid = ?")
-      .run(puuid).changes
-  }
 }

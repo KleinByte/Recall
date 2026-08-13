@@ -303,13 +303,6 @@ export interface StyleProfile {
   detail: StyleDetail
 }
 
-/** The career shape, the last few games, and what came before them. */
-export interface StyleReport {
-  career?: StyleProfile
-  recent?: StyleProfile
-  earlier?: StyleProfile
-}
-
 export interface SkillStyleReport {
   career: StyleProfile
   recent?: StyleProfile
@@ -458,12 +451,6 @@ export interface TeamRow {
   firstInhibitor: number
 }
 
-export interface MatchDetail {
-  participants: ParticipantRow[]
-  teams: TeamRow[]
-  labels: PerformanceLabel[]
-}
-
 export interface PerformanceLabel {
   id: string
   name: string
@@ -484,8 +471,6 @@ export interface RankedChampion {
   gradedGames: number
   winRate: number
   kda: number
-  rawGrade?: number
-  adjustedGrade: number
   /** Visible authoritative Recall average; never reliability-shrunk. */
   recallScore?: number
   confidence: Confidence
@@ -793,8 +778,6 @@ export interface SkillHistoryPoint {
   role?: string
   win: boolean
   grade?: string
-  /** Legacy/internal compatibility normal score. */
-  gradeScore?: number
   /** Authoritative Recall score on a fixed 0-100 scale. */
   recallScore?: number
   durationSecs: number
@@ -820,7 +803,6 @@ export interface SkillGradeComponentPoint {
   role?: string
   grade?: string
   recallScore?: number
-  gradeScore?: number
   session?: number
   sessionGame?: number
   restMinutes?: number
@@ -834,8 +816,6 @@ export interface SkillChampionPoint {
   wins: number
   winRate: number
   kda: number
-  /** Legacy/internal compatibility normal score. */
-  avgGradeScore?: number
   /** Average authoritative Recall score (0-100). */
   averageRecallScore?: number
   gradedGames: number
@@ -993,7 +973,6 @@ export interface PerformanceProfileAuxiliary {
 }
 
 export interface PerformanceProfile {
-  algorithmVersion: number
   recipeId: string
   scoringContext: PerformanceScoringContext
   weighting: RviResolvedWeighting
@@ -1012,7 +991,6 @@ export interface PerformanceProfile {
   dimensions: PerformanceDimensionScore[]
   strongestKey?: string
   growthKey?: string
-  version?: number
 }
 
 export interface SkillDeathPoint {
@@ -1029,7 +1007,6 @@ export interface SkillDeathMap {
 }
 
 export interface SkillReport {
-  version: 3
   generatedAt: number
   scope: { modes: TrackedMode[]; family: ModeFamily }
   overview: {

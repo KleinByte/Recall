@@ -6,7 +6,6 @@ import {
   pickBestAndWorst,
   rankChampions,
   splitChampionSignals,
-  shrinkToward,
 } from "../electron/main/matches/insights.js"
 import type { ChampionStatRow } from "../electron/main/database/matches-repo.js"
 import type { ParticipantRow } from "../electron/main/matches/types.js"
@@ -24,23 +23,9 @@ const champion = (
   kda: 3,
   avgDamageToChampions: 20000,
   avgGradeScore: 0,
+  averageRecallScore: 50,
   gradedGames: 5,
   ...overrides,
-})
-
-describe("shrinkToward", () => {
-  it("leaves a large sample almost untouched", () => {
-    expect(shrinkToward(2, 60, 0)).toBeCloseTo(1.9, 1)
-  })
-
-  it("pulls a single game most of the way back", () => {
-    // One game at 2.0 against a baseline of 0: (1 * 2 + 3 * 0) / 4
-    expect(shrinkToward(2, 1, 0)).toBeCloseTo(0.5)
-  })
-
-  it("returns the baseline when there are no games", () => {
-    expect(shrinkToward(2, 0, 0.4)).toBeCloseTo(0.4)
-  })
 })
 
 describe("confidenceOf", () => {
@@ -60,7 +45,6 @@ describe("rankChampions", () => {
         champion({ championId: 40, games: 1, avgGradeScore: 1.97, gradedGames: 1 }),
         champion({ championId: 110, games: 8, avgGradeScore: 1.0, gradedGames: 8 }),
       ],
-      0,
     )
 
     expect(ranked[0].championId).toBe(110)
@@ -69,19 +53,16 @@ describe("rankChampions", () => {
   it("keeps a graded singleton only as an unranked early signal", () => {
     const split = splitChampionSignals(
       [champion({ championId: 40, games: 1, avgGradeScore: 2.0, gradedGames: 1 })],
-      0,
     )
 
     expect(split.main).toEqual([])
     expect(split.earlySignals).toHaveLength(1)
     expect(split.earlySignals[0]).toMatchObject({ championId: 40, gradedGames: 1, confidence: "thin" })
-    expect(split.earlySignals[0].adjustedGrade).toBeCloseTo(0.5)
   })
 
   it("uses gradedGames for confidence rather than total games", () => {
     const ranked = splitChampionSignals(
       [champion({ games: 20, gradedGames: 3 })],
-      0,
     ).earlySignals
 
     // 20 total games but only 3 graded → "thin", not "solid".
@@ -95,23 +76,23 @@ describe("rankChampions", () => {
         champion({ championId: 7, avgGradeScore: undefined, gradedGames: 0 }),
         champion({ championId: 8, avgGradeScore: 0.5, gradedGames: 3 }),
       ],
-      0,
     )
 
     expect(ranked.map((row) => row.championId)).toEqual([])
     expect(splitChampionSignals([
       champion({ championId: 7, avgGradeScore: undefined, gradedGames: 0 }),
-    ], 0)).toEqual({ main: [], earlySignals: [] })
+    ])).toEqual({ main: [], earlySignals: [] })
   })
 
   it("keeps a losing champion out of the top spot", () => {
     // The real defect: three games at -0.39 was being called a best champion.
     const ranked = rankChampions(
       [
-        champion({ championId: 31, games: 5, avgGradeScore: -0.39, gradedGames: 5 }),
-        champion({ championId: 147, games: 6, avgGradeScore: 1.49, gradedGames: 6 }),
+        champion({ championId: 31, games: 5, avgGradeScore: -0.39,
+          averageRecallScore: 42, gradedGames: 5 }),
+        champion({ championId: 147, games: 6, avgGradeScore: 1.49,
+          averageRecallScore: 70, gradedGames: 6 }),
       ],
-      0.2,
     )
 
     expect(ranked[0].championId).toBe(147)
@@ -122,9 +103,9 @@ describe("pickBestAndWorst", () => {
   it("never puts the same champion in both lists", () => {
     const ranked = rankChampions(
       [1, 2, 3, 4].map((id) =>
-        champion({ championId: id, avgGradeScore: id * 0.1 }),
+        champion({ championId: id, avgGradeScore: id * 0.1,
+          averageRecallScore: id * 10 }),
       ),
-      0,
     )
 
     const { best, worst } = pickBestAndWorst(ranked, 3)
@@ -136,7 +117,7 @@ describe("pickBestAndWorst", () => {
   })
 
   it("gives nothing to the worst list when there is too little to split", () => {
-    const ranked = rankChampions([champion({ championId: 1 })], 3)
+    const ranked = rankChampions([champion({ championId: 1 })])
 
     expect(pickBestAndWorst(ranked, 3).worst).toEqual([])
   })
@@ -144,14 +125,14 @@ describe("pickBestAndWorst", () => {
   it("orders worst from the poorest upward", () => {
     const ranked = rankChampions(
       [1, 2, 3, 4, 5, 6].map((id) =>
-        champion({ championId: id, avgGradeScore: id * 0.1 }),
+        champion({ championId: id, avgGradeScore: id * 0.1,
+          averageRecallScore: id * 10 }),
       ),
-      0,
     )
 
     const { worst } = pickBestAndWorst(ranked, 2)
 
-    expect(worst[0].adjustedGrade).toBeLessThan(worst[1].adjustedGrade)
+    expect(worst[0].recallScore).toBeLessThan(worst[1].recallScore!)
   })
 })
 

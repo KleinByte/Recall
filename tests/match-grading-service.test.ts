@@ -6,11 +6,16 @@ import { ParticipantsRepository } from "../electron/main/database/participants-r
 import { GradePersistenceRepository } from "../electron/main/database/grade-persistence-repo.js"
 import { MatchSourceRepository } from "../electron/main/database/match-source-repo.js"
 import {
+  decodeStoredJsonBody,
+  gzipJsonTextV1,
+  type StoredJsonBodyRow,
+} from "../electron/main/database/json-body-codec.js"
+import {
   MatchGradingService,
   selectRecentModeReferenceLobbies,
 } from "../electron/main/matches/match-grading-service.js"
 import type { GradeRawLobby } from "../electron/main/matches/match-grade-observations.js"
-import { MATCH_GRADE_RECIPE_DEFINITION_ID } from "../electron/main/matches/match-grade-recipe.js"
+import { CURRENT_GRADE_RECIPE_DEFINITION_ID } from "../electron/main/matches/match-grade-recipe.js"
 import { POSITION_RESOLVER_VERSION } from "../electron/main/matches/position.js"
 import {
   TIMELINE_MAPPER_VERSION,
@@ -22,7 +27,7 @@ import type {
 } from "../electron/main/matches/types.js"
 import { buildMatchRow } from "./fixtures/matches.js"
 
-const PUUID = "recall-v3-owner"
+const PUUID = "recall-canonical-owner"
 const BACKUP = { path: "verified-test-backup.db", sha256: "b".repeat(64) }
 const POSITIONS = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"] as const
 
@@ -242,13 +247,13 @@ describe("MatchGradingService", () => {
     expect(db.prepare(`
       SELECT raw_evidence_state AS state, raw_value AS value,
              source_quality AS sourceQuality
-      FROM match_metric_observations
+      FROM match_metric_observation_details
       WHERE game_id = 1 AND puuid = ? AND participant_id = 1
         AND metric_key = 'objective_setup_ward_rate'
     `).get(PUUID)).toEqual({ state: "observed", value: 1, sourceQuality: "verified" })
   })
 
-  it("does not derive v3 observations from an old-mapper compact fallback", () => {
+  it("does not derive canonical observations from an old-mapper compact fallback", () => {
     const { db } = databaseWithMatches(10)
     const service = new MatchGradingService(db, () => 10_000)
     expect(service.ensureFrozenReference(BACKUP)).toMatchObject({ ready: 10 })
@@ -276,16 +281,20 @@ describe("MatchGradingService", () => {
       events: [],
       turningPoints: [],
     }
-    db.prepare(`
-      INSERT INTO match_timeline_cache
-        (game_id, puuid, status, mapper_version, data_json, updated_at)
-      VALUES (1, ?, 'ready', ?, ?, 1)
-    `).run(PUUID, TIMELINE_MAPPER_VERSION - 1, JSON.stringify(stale))
+    new MatchSourceRepository(db).persistTimelineSource({
+      gameId: 1,
+      puuid: PUUID,
+      source: "league_client",
+      sourceMatchId: "1",
+      mapperVersion: TIMELINE_MAPPER_VERSION - 1,
+      timeline: stale,
+      capturedAt: 1,
+    })
 
     expect(service.gradeStoredMatch(1, PUUID)).toBe("ready")
     expect(db.prepare(`
       SELECT raw_evidence_state AS state, raw_evidence_reason AS reason
-      FROM match_metric_observations
+      FROM match_metric_observation_details
       WHERE game_id = 1 AND puuid = ? AND participant_id = 1
         AND metric_key = 'gold_delta_10'
     `).get(PUUID)).toEqual({ state: "unavailable", reason: "timeline_not_retained" })
@@ -367,7 +376,7 @@ describe("MatchGradingService", () => {
     })
   })
 
-  it("removes legacy grade caches before exposing an underfilled v3 installation", () => {
+  it("removes legacy grade caches before exposing an underfilled installation", () => {
     const { db } = databaseWithMatches(9)
     db.prepare(`
       UPDATE matches
@@ -475,7 +484,7 @@ describe("MatchGradingService", () => {
     })
     expect(db.prepare(`
       SELECT COUNT(*) AS count
-      FROM match_metric_observations observation
+      FROM match_metric_observation_details observation
       JOIN match_participants participant
         ON participant.game_id = observation.game_id
        AND participant.puuid = observation.puuid
@@ -490,7 +499,7 @@ describe("MatchGradingService", () => {
     participants.insertMany(lobby(13, 500))
     expect(service.gradeStoredMatch(13, PUUID)).toBe("ready")
     expect(db.prepare(`
-      SELECT COUNT(*) AS count FROM match_metric_observations observation
+      SELECT COUNT(*) AS count FROM match_metric_observation_details observation
       JOIN match_participants participant
         ON participant.game_id = observation.game_id
        AND participant.puuid = observation.puuid
@@ -632,11 +641,11 @@ describe("MatchGradingService", () => {
     `).get(PUUID)).toEqual(originalSr)
   })
 
-  it("treats an older v3 recipe definition as a required direct cutover", () => {
+  it("treats a stale recipe definition as a required direct cutover", () => {
     const { db } = databaseWithMatches(12)
     const grades = new GradePersistenceRepository(db, () => 9_000)
-    const calibrationId = "recall.grade.v3.calibration.old"
-    const recipeId = `recall.grade.v3.definition.old@calibration:${calibrationId}`
+    const calibrationId = "recall.grade.calibration.stale"
+    const recipeId = `recall.grade.definition.stale@calibration:${calibrationId}`
     grades.registerCalibration({
       calibrationId,
       calibrationHash: "c".repeat(64),
@@ -649,7 +658,7 @@ describe("MatchGradingService", () => {
       algorithmVersion: 3,
       recipeHash: "d".repeat(64),
       calibrationId,
-      definition: { recipeDefinitionId: "recall.grade.v3.definition.old" },
+      definition: { recipeDefinitionId: "recall.grade.definition.stale" },
     })
     grades.selectRecipe(recipeId)
     const service = new MatchGradingService(db, () => 10_000)
@@ -659,7 +668,7 @@ describe("MatchGradingService", () => {
     expect(service.gradeStoredMatch(1, PUUID)).toBe("calibrating")
     const rebuilt = service.ensureFrozenReference(BACKUP)
     expect(rebuilt).toMatchObject({ processed: 12, errors: 0 })
-    expect(service.referenceStatus().recipeId).toContain(MATCH_GRADE_RECIPE_DEFINITION_ID)
+    expect(service.referenceStatus().recipeId).toContain(CURRENT_GRADE_RECIPE_DEFINITION_ID)
     expect(service.needsDirectCutover()).toBe(false)
   })
 
@@ -741,16 +750,20 @@ describe("MatchGradingService", () => {
     expect(futureMetadata.modeBaselineEffectiveFrom).toBeLessThan(aramMatch(500).playedAt)
   })
 
-  it("uses the stored creation time when upgrading a legacy v3 snapshot in memory", () => {
+  it("uses the stored creation time when upgrading a legacy snapshot in memory", () => {
     const { db, matches, participants } = databaseWithMatches(10)
     const service = new MatchGradingService(db, () => 42_000)
     service.ensureFrozenReference(BACKUP)
     const selected = service.referenceStatus()
     const stored = db.prepare(`
-      SELECT snapshot_json AS snapshotJson
+      SELECT snapshot_encoding AS snapshotEncoding,
+             snapshot_uncompressed_bytes AS snapshotUncompressedBytes,
+             snapshot_compressed_bytes AS snapshotCompressedBytes,
+             snapshot_sha256 AS snapshotSha256,
+             snapshot_payload AS snapshotPayload
       FROM grade_calibration_snapshots WHERE calibration_id = ?
-    `).get(selected.calibrationId) as { snapshotJson: string }
-    const legacy = JSON.parse(stored.snapshotJson) as {
+    `).get(selected.calibrationId) as StoredJsonBodyRow
+    const legacy = decodeStoredJsonBody(stored).value as {
       modeEpochs?: unknown
       recentMatchLimit?: unknown
     }
@@ -758,10 +771,14 @@ describe("MatchGradingService", () => {
     delete legacy.recentMatchLimit
     // Reproduce a row written before immutable snapshot triggers were added.
     db.exec("DROP TRIGGER grade_calibration_snapshots_immutable_update")
+    const encoded = gzipJsonTextV1(JSON.stringify(legacy))
     db.prepare(`
-      UPDATE grade_calibration_snapshots SET snapshot_json = ?
+      UPDATE grade_calibration_snapshots
+      SET snapshot_encoding = ?, snapshot_uncompressed_bytes = ?,
+          snapshot_compressed_bytes = ?, snapshot_sha256 = ?, snapshot_payload = ?
       WHERE calibration_id = ?
-    `).run(JSON.stringify(legacy), selected.calibrationId)
+    `).run(encoded.encoding, encoded.uncompressedBytes, encoded.compressedBytes,
+      encoded.sha256, encoded.payload, selected.calibrationId)
 
     matches.insertMany([match(11)])
     participants.insertMany(lobby(11))
@@ -832,7 +849,7 @@ describe("MatchGradingService", () => {
     matches.insertMany([match(13)])
     participants.insertMany(lobby(13, 500))
     db.exec(`
-      CREATE TRIGGER fail_recall_v3_attempt
+      CREATE TRIGGER fail_recall_grade_attempt
       BEFORE INSERT ON match_grade_attempts
       WHEN NEW.game_id = 13
       BEGIN

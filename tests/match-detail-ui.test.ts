@@ -1,18 +1,10 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import {
-  formatMilestone,
-  formatOptionalText,
-  formatStat,
-  formatStatDuration,
-  groupMatchSides,
-  killParticipation,
   lobbyStandings,
-  teamComparison,
   teamTotals,
-  toggleExpandedParticipant,
 } from "../src/helpers/match-detail.js"
-import type { MatchDetail, ParticipantRow } from "../src/types/stats.js"
+import type { ParticipantRow } from "../src/types/stats.js"
 
 const participant = (
   participantId: number,
@@ -72,26 +64,7 @@ const participant = (
   role: "SOLO",
 })
 
-describe("groupMatchSides", () => {
-  it("lists the local player's team first and attaches team summaries", () => {
-    const detail: MatchDetail = {
-      labels: [],
-      participants: [participant(6, 200), participant(1, 100, 1)],
-      teams: [
-        { gameId: 1, puuid: "owner", teamId: 200, win: 0, bans: "[]", baronKills: 0, dragonKills: 0, heraldKills: 0, hordeKills: 0, towerKills: 0, inhibitorKills: 0, firstBlood: 0, firstTower: 0, firstBaron: 0, firstDragon: 0, firstInhibitor: 0 },
-        { gameId: 1, puuid: "owner", teamId: 100, win: 1, bans: "[]", baronKills: 0, dragonKills: 0, heraldKills: 0, hordeKills: 0, towerKills: 1, inhibitorKills: 0, firstBlood: 0, firstTower: 1, firstBaron: 0, firstDragon: 0, firstInhibitor: 0 },
-      ],
-    }
-
-    const sides = groupMatchSides(detail)
-
-    expect(sides.map((side) => side.teamId)).toEqual([100, 200])
-    expect(sides[0].team?.towerKills).toBe(1)
-    expect(sides[0].won).toBe(true)
-  })
-})
-
-describe("team totals", () => {
+describe("teamTotals", () => {
   it("adds up every contribution on a side", () => {
     const totals = teamTotals([participant(1, 100), participant(2, 100)])
 
@@ -100,31 +73,6 @@ describe("team totals", () => {
     expect(totals.damage).toBe(40_000)
     expect(totals.cs).toBe(220)
     expect(totals.vision).toBe(40)
-  })
-
-  it("splits each bar by the pair's share and marks compact figures", () => {
-    const left = teamTotals([participant(1, 100)])
-    const right = teamTotals([participant(6, 200), participant(7, 200)])
-
-    const rows = teamComparison(left, right)
-    const kills = rows.find((row) => row.key === "kills")
-
-    expect(kills).toMatchObject({ left: 1, right: 2, leftShare: 1 / 3, compact: false })
-    expect(rows.find((row) => row.key === "gold")?.compact).toBe(true)
-  })
-
-  it("splits the bar evenly when neither side scored", () => {
-    const empty = teamTotals([])
-
-    expect(teamComparison(empty, empty)[0].leftShare).toBe(0.5)
-  })
-
-  it("caps kill participation and survives a team without kills", () => {
-    const row = participant(1, 100)
-
-    expect(killParticipation(row, 8)).toBe(0.5)
-    expect(killParticipation(row, 1)).toBe(1)
-    expect(killParticipation(row, 0)).toBe(0)
   })
 })
 
@@ -157,89 +105,65 @@ describe("lobbyStandings", () => {
   })
 })
 
-describe("toggleExpandedParticipant", () => {
-  it("replaces the expanded player only on the same team", () => {
-    let state = toggleExpandedParticipant({}, 100, 1)
-    state = toggleExpandedParticipant(state, 200, 6)
-    state = toggleExpandedParticipant(state, 100, 2)
+describe("current match review component contract", () => {
+  it("loads the unified review payload and passes its scoreboard down", () => {
+    const review = readFileSync("src/pages/ReviewPage.vue", "utf8")
+    const reviewData = readFileSync("src/features/review/use-review-page-data.ts", "utf8")
+    const scoreboard = readFileSync("src/components/ReviewScoreboard.vue", "utf8")
 
-    expect(state).toEqual({ 100: 2, 200: 6 })
+    expect(review).toContain("useReviewPageData")
+    expect(reviewData).toContain("review.value = target ? await api.getMatchReview(target) : undefined")
+    expect(review).toContain("<ReviewScoreboard")
+    expect(review).toContain(':participants="review.scoreboard"')
+    expect(review).toContain(':teams="review.teams"')
+    expect(scoreboard).not.toContain("api.")
   })
 
-  it("collapses a player when selected again", () => {
-    const open = toggleExpandedParticipant({}, 100, 1)
-    expect(toggleExpandedParticipant(open, 100, 1)).toEqual({})
-  })
-})
-
-describe("advanced stat formatting", () => {
-  it("groups integers and preserves zero", () => {
-    expect(formatStat(12_345)).toBe("12,345")
-    expect(formatStat(0)).toBe("0")
-  })
-
-  it("formats durations, milestones, and absent text", () => {
-    expect(formatStatDuration(125)).toBe("2:05")
-    expect(formatMilestone(1)).toBe("Yes")
-    expect(formatMilestone(0)).toBe("No")
-    expect(formatOptionalText("")).toBe("—")
-    expect(formatOptionalText("MIDDLE")).toBe("MIDDLE")
-  })
-})
-
-describe("match detail component contract", () => {
-  it("keeps the detail IPC request in MatchSheet only", () => {
-    const sheet = readFileSync("src/components/MatchSheet.vue", "utf8")
-    const scoreboard = readFileSync("src/components/MatchDetail.vue", "utf8")
-
-    expect(sheet.match(/getMatchDetail\(/g)).toHaveLength(1)
-    expect(scoreboard).not.toContain("getMatchDetail(")
-  })
-
-  it("renders accessible controls and every advanced stat group", () => {
-    const scoreboard = readFileSync("src/components/MatchDetail.vue", "utf8")
+  it("renders interactive setup and every advanced stat group", () => {
+    const scoreboard = readFileSync("src/components/ReviewScoreboard.vue", "utf8")
+    const stats = readFileSync("src/components/MatchStatsTable.vue", "utf8")
     const runePage = readFileSync("src/components/RunePage.vue", "utf8")
 
-    expect(scoreboard).toContain(":aria-expanded=")
-    expect(scoreboard).toContain("Combat")
-    expect(scoreboard).toContain("Economy &amp; farming")
-    expect(scoreboard).toContain("Vision")
-    expect(scoreboard).toContain("Objectives")
-    expect(scoreboard).toContain("Multikills &amp; survival")
-    expect(scoreboard).toContain("Player setup")
     expect(scoreboard).toContain("<RunePage")
-    expect(scoreboard).toContain(':classic="classic"')
+    expect(scoreboard).toContain(":classic=\"match.modeFamily === 'classic'\"")
+    expect(stats).toContain('label: "Combat"')
+    expect(stats).toContain('label: "Damage dealt"')
+    expect(stats).toContain('label: "Damage taken and healed"')
+    expect(stats).toContain('label: "Economy"')
+    expect(stats).toContain('label: "Vision"')
+    expect(stats).toContain('label: "Objectives"')
     expect(runePage).toContain('<Teleport to="body">')
     expect(runePage).toContain("window.addEventListener(\"scroll\", placePopover, true)")
     expect(runePage).toContain("classic-rune-board.webp")
     expect(runePage).toContain("classic-masteries-empty.webp")
     expect(runePage).toContain("Mastery allocations not captured")
-    expect(scoreboard).not.toContain("Primary rune style")
-    expect(scoreboard).not.toContain("row.perks.join")
   })
 
-  it("resets expanded players when the displayed match changes", () => {
-    const scoreboard = readFileSync("src/components/MatchDetail.vue", "utf8")
+  it("resets expanded review content when the displayed match changes", () => {
+    const hero = readFileSync("src/components/MatchReviewHero.vue", "utf8")
 
-    expect(scoreboard).toContain("watch(() => props.detail")
-    expect(scoreboard).toContain("expanded.value = {}")
+    expect(hero).toContain("watch(() => props.review.match.gameId")
+    expect(hero).toContain("showAllRecords.value = false")
+    expect(hero).toContain("showAllLabels.value = false")
   })
 
-  it("shows the lobby place under each portrait and marks the MVP", () => {
-    const scoreboard = readFileSync("src/components/MatchDetail.vue", "utf8")
-    const sheet = readFileSync("src/components/MatchSheet.vue", "utf8")
+  it("shows lobby placement and marks the MVP in both summary and scoreboard", () => {
+    const scoreboard = readFileSync("src/components/ReviewScoreboard.vue", "utf8")
+    const hero = readFileSync("src/components/MatchReviewHero.vue", "utf8")
 
-    expect(scoreboard).toContain('v-if="placeOf(row)"')
-    expect(scoreboard).toContain('placeOf(row) === 1')
-    expect(scoreboard).toContain("mvp-tag")
-    expect(sheet).toContain('id: "mvp"')
+    expect(scoreboard).toContain('if (value === 1) return "MVP"')
+    expect(scoreboard).toContain(":class=\"{ mvp: place(row) === 1 }\"")
+    expect(hero).toContain("standing?.place === 1")
+    expect(hero).toContain('class="mvp-badge"')
   })
 
-  it("labels the scoreboard columns and compares the two teams", () => {
-    const scoreboard = readFileSync("src/components/MatchDetail.vue", "utf8")
+  it("labels the scoreboard columns and compares team totals", () => {
+    const scoreboard = readFileSync("src/components/ReviewScoreboard.vue", "utf8")
 
-    expect(scoreboard).toContain('class="columns muted"')
-    expect(scoreboard).toContain("Kill participation")
-    expect(scoreboard).toContain("Team totals")
+    expect(scoreboard).toContain('aria-label="Complete match scoreboard"')
+    expect(scoreboard).toContain("Player</span><span>Lobby</span><span>Role</span>")
+    expect(scoreboard).toContain("teamTotals(players(teamId))")
+    expect(scoreboard).toContain('class="team-objectives"')
+    expect(scoreboard).toContain('class="team-bans"')
   })
 })

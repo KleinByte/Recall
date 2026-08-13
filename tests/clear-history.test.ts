@@ -10,7 +10,13 @@ import { MetricObservationsRepository } from
   "../electron/main/database/metric-observations-repo.js"
 import { applyMigrations } from "../electron/main/database/migrations.js"
 import { MatchesRepository } from "../electron/main/database/matches-repo.js"
+import { MatchSourceRepository } from "../electron/main/database/match-source-repo.js"
 import { buildMatchRow } from "./fixtures/matches.js"
+import {
+  decodeStoredJsonBody,
+  gzipJsonTextV1,
+  type StoredJsonBodyRow,
+} from "../electron/main/database/json-body-codec.js"
 
 const RECIPE_ID = "recall-current:clear-history-test"
 const CALIBRATION_ID = "calibration:clear-history-test"
@@ -63,7 +69,7 @@ function gradeResults(): Map<number, CanonicalGradeResultInput> {
 }
 
 describe("ClearHistoryService Recall lifecycle", () => {
-  it("removes frozen v3 state while preserving unrelated-account raw evidence", () => {
+  it("removes frozen derived state while preserving unrelated-account raw evidence", () => {
     const db = new Database(":memory:")
     db.pragma("foreign_keys = ON")
     applyMigrations(db)
@@ -74,20 +80,42 @@ describe("ClearHistoryService Recall lifecycle", () => {
     ])
     insertLobby(db, 1, "remove-me")
     insertLobby(db, 2, "keep-me")
-    db.prepare(`
-      INSERT INTO match_timeline_cache
-        (game_id, puuid, status, mapper_version, data_json, raw_json, updated_at)
-      VALUES (2, 'keep-me', 'ready', 1, '{"events":[]}',
-              '{"frames":[{"timestamp":0}]}', 1)
-    `).run()
-    db.prepare(`
-      INSERT INTO match_source_payloads
-        (owner_puuid, source, source_match_id, game_id, kind, encoding,
-         payload, sha256, mapper_version, serialization_version,
-         mapping_status, mapped_at, fetched_at)
-      VALUES ('keep-me', 'league_client', '2', 2, 'timeline', 'gzip_json_v1',
-              ?, ?, 1, 1, 'mapped', 1, 1)
-    `).run(Buffer.from([1, 2, 3]), "f".repeat(64))
+    const timelineSources = new MatchSourceRepository(db)
+    const retainedRaw = timelineSources.persistRawPayload({
+      ownerPuuid: "keep-me",
+      source: "league_client",
+      sourceMatchId: "2",
+      gameId: 2,
+      kind: "timeline",
+      body: { frames: [{ timestamp: 0 }] },
+      mapperVersion: 11,
+      fetchedAt: 1,
+    })
+    timelineSources.setMappingResult(retainedRaw, "mapped", 1, { gameId: 2 })
+    timelineSources.persistTimelineSource({
+      gameId: 2,
+      puuid: "keep-me",
+      source: "league_client",
+      sourceMatchId: "2",
+      mapperVersion: 11,
+      timeline: { frames: [], events: [], turningPoints: [] },
+      sourcePayload: retainedRaw,
+      capturedAt: 1,
+    })
+    const insertLiveSnapshot = db.prepare(`
+      INSERT INTO live_game_snapshots
+        (game_id, puuid, game_time_ms, captured_at, reason,
+         has_active_player_stat_runes, snapshot_encoding,
+         snapshot_uncompressed_bytes, snapshot_compressed_bytes,
+         snapshot_sha256, snapshot_payload)
+      VALUES (?, ?, 1000, ?, 'first', 0, ?, ?, ?, ?, ?)
+    `)
+    for (const [gameId, puuid] of [[1, "remove-me"], [2, "keep-me"]] as const) {
+      const encoded = gzipJsonTextV1(JSON.stringify({ gameId, puuid }))
+      insertLiveSnapshot.run(gameId, puuid, gameId, encoded.encoding,
+        encoded.uncompressedBytes, encoded.compressedBytes, encoded.sha256,
+        encoded.payload)
+    }
 
     const grades = new GradePersistenceRepository(db, () => 1)
     grades.registerCalibration({
@@ -171,22 +199,34 @@ describe("ClearHistoryService Recall lifecycle", () => {
       "SELECT COUNT(*) AS count FROM match_participants WHERE puuid = 'keep-me'",
     ).get()).toEqual({ count: 10 })
     expect(db.prepare(`
-      SELECT data_json AS dataJson, raw_json AS rawJson
-      FROM match_timeline_cache WHERE puuid = 'keep-me'
+      SELECT data_json AS dataJson FROM selected_match_timelines
+      WHERE puuid = 'keep-me'
     `).get()).toEqual({
-      dataJson: '{"events":[]}',
-      rawJson: '{"frames":[{"timestamp":0}]}',
+      dataJson: '{"events":[],"frames":[],"turningPoints":[]}',
     })
     expect(db.prepare(`
-      SELECT sha256, hex(payload) AS payloadHex
+      SELECT sha256, encoding
       FROM match_source_payloads WHERE owner_puuid = 'keep-me'
-    `).get()).toEqual({ sha256: "f".repeat(64), payloadHex: "010203" })
+    `).get()).toEqual({ sha256: retainedRaw.sha256, encoding: "gzip_json_v1" })
+    expect(db.prepare(`
+      SELECT COUNT(*) AS count FROM live_game_snapshots WHERE puuid = 'remove-me'
+    `).get()).toEqual({ count: 0 })
+    const retainedLive = db.prepare(`
+      SELECT snapshot_encoding AS snapshotEncoding,
+             snapshot_uncompressed_bytes AS snapshotUncompressedBytes,
+             snapshot_compressed_bytes AS snapshotCompressedBytes,
+             snapshot_sha256 AS snapshotSha256,
+             snapshot_payload AS snapshotPayload
+      FROM live_game_snapshots WHERE puuid = 'keep-me'
+    `).get() as StoredJsonBodyRow
+    expect(decodeStoredJsonBody(retainedLive).value)
+      .toEqual({ gameId: 2, puuid: "keep-me" })
 
     expect(db.prepare(
       "SELECT COUNT(*) AS count FROM grade_recipe_selections WHERE algorithm_version = 3",
     ).get()).toEqual({ count: 0 })
     expect(db.prepare(
-      "SELECT COUNT(*) AS count FROM match_metric_observations WHERE algorithm_version = 3",
+      "SELECT COUNT(*) AS count FROM match_metric_observation_details WHERE algorithm_version = 3",
     ).get()).toEqual({ count: 0 })
     expect(db.prepare(
       "SELECT COUNT(*) AS count FROM rvi_recipe_selections WHERE algorithm_version = 3",

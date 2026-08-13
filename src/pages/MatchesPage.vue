@@ -16,7 +16,6 @@ import { useCoalescedTask } from "../helpers/use-coalesced-task"
 import {
   formatDecimal,
   formatPercent,
-  modeLabel,
 } from "../helpers/format"
 import {
   RECALL_SCORE_THRESHOLDS,

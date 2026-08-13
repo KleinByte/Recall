@@ -179,6 +179,8 @@ const OBSERVATION_SELECT = `
   observation.derived_at AS derivedAt
 `
 
+const OBSERVATION_DETAILS = "match_metric_observation_details"
+
 /**
  * Persists the exact metric evidence shared by match Grade and RVI.
  *
@@ -297,25 +299,6 @@ export class MetricObservationsRepository {
     return this.db.transaction(() => this.replaceSet(input))()
   }
 
-  replaceManyMatches(inputs: readonly MatchMetricObservationSet[]): number {
-    const identities = new Set<string>()
-    for (const input of inputs) {
-      this.validateObservationSet(input)
-      const identity = [
-        input.gameId,
-        input.puuid,
-        input.algorithmVersion,
-        input.recipeId,
-      ].join("\u0000")
-      if (identities.has(identity)) throw new Error("metric_observation_set_duplicate")
-      identities.add(identity)
-    }
-    return this.db.transaction(() => inputs.reduce(
-      (total, input) => total + this.replaceSet(input),
-      0,
-    ))()
-  }
-
   getMatchObservations(
     gameId: number,
     puuid: string,
@@ -325,33 +308,12 @@ export class MetricObservationsRepository {
   ): StoredMatchMetricObservation[] {
     return (this.db.prepare(`
       SELECT ${OBSERVATION_SELECT}
-      FROM match_metric_observations observation
+      FROM ${OBSERVATION_DETAILS} observation
       WHERE observation.game_id = ? AND observation.puuid = ?
         AND observation.participant_id = ?
         AND observation.algorithm_version = ? AND observation.recipe_id = ?
       ORDER BY observation.metric_key
     `).all(gameId, puuid, participantId, algorithmVersion, recipeId) as ObservationRow[])
-      .map(mapObservation)
-  }
-
-  getOwnerMatchObservations(
-    gameId: number,
-    puuid: string,
-    algorithmVersion: number,
-    recipeId: string,
-  ): StoredMatchMetricObservation[] {
-    return (this.db.prepare(`
-      SELECT ${OBSERVATION_SELECT}
-      FROM match_metric_observations observation
-      JOIN match_participants participant
-        ON participant.game_id = observation.game_id
-       AND participant.puuid = observation.puuid
-       AND participant.participant_id = observation.participant_id
-       AND participant.is_player = 1
-      WHERE observation.game_id = ? AND observation.puuid = ?
-        AND observation.algorithm_version = ? AND observation.recipe_id = ?
-      ORDER BY observation.metric_key
-    `).all(gameId, puuid, algorithmVersion, recipeId) as ObservationRow[])
       .map(mapObservation)
   }
 
@@ -362,7 +324,7 @@ export class MetricObservationsRepository {
   ): OwnerMetricObservation[] {
     return (this.db.prepare(`
       SELECT ${OBSERVATION_SELECT}, match.played_at AS playedAt
-      FROM match_metric_observations observation
+      FROM ${OBSERVATION_DETAILS} observation
       JOIN match_participants participant
         ON participant.game_id = observation.game_id
        AND participant.puuid = observation.puuid
@@ -379,12 +341,16 @@ export class MetricObservationsRepository {
 
   purgeObservations(options: MetricObservationPurgeOptions): number {
     assertIntegerAtLeast(options.algorithmVersion, 1, "rvi_algorithm_version")
-    const clauses = ["algorithm_version = ?"]
+    const storageClauses = ["algorithm_version = ?"]
     const parameters: Array<string | number> = [options.algorithmVersion]
     if (options.recipeId !== undefined) {
-      clauses.push("recipe_id = ?")
+      storageClauses.push("recipe_id = ?")
       parameters.push(options.recipeId)
     }
+    const clauses = [`recipe_key IN (
+      SELECT recipe_key FROM rvi_recipe_storage_keys
+      WHERE ${storageClauses.join(" AND ")}
+    )`]
     if (options.puuid !== undefined) {
       clauses.push("puuid = ?")
       parameters.push(options.puuid)
@@ -452,27 +418,26 @@ export class MetricObservationsRepository {
   }
 
   private replaceSet(input: MatchMetricObservationSet): number {
+    const recipeKey = this.recipeKey(input.algorithmVersion, input.recipeId)
     this.db.prepare(`
       DELETE FROM match_metric_observations
-      WHERE game_id = ? AND puuid = ? AND algorithm_version = ? AND recipe_id = ?
-    `).run(input.gameId, input.puuid, input.algorithmVersion, input.recipeId)
+      WHERE game_id = ? AND puuid = ? AND recipe_key = ?
+    `).run(input.gameId, input.puuid, recipeKey)
     const insert = this.db.prepare(`
       INSERT INTO match_metric_observations
-        (game_id, puuid, participant_id, algorithm_version, recipe_id,
-         calibration_id, metric_key, raw_evidence_state, raw_evidence_reason,
+        (game_id, puuid, participant_id, recipe_key,
+         metric_key, raw_evidence_state, raw_evidence_reason,
          raw_value, score_evidence_state, score_evidence_reason, score_value,
          numerator, denominator, opportunity_count, unit, comparison_scope,
          reference_match_count, source, source_quality, derivation_id, derived_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     for (const observation of input.observations) {
       insert.run(
         observation.gameId,
         observation.puuid,
         observation.participantId,
-        input.algorithmVersion,
-        observation.recipeId,
-        observation.calibrationId,
+        recipeKey,
         observation.metricKey,
         observation.rawEvidence.state,
         observation.rawEvidence.reason ?? null,
@@ -497,5 +462,15 @@ export class MetricObservationsRepository {
       )
     }
     return input.observations.length
+  }
+
+  private recipeKey(algorithmVersion: number, recipeId: string): number {
+    const row = this.db.prepare(`
+      SELECT recipe_key AS recipeKey
+      FROM rvi_recipe_storage_keys
+      WHERE algorithm_version = ? AND recipe_id = ?
+    `).get(algorithmVersion, recipeId) as { recipeKey: number } | undefined
+    if (!row) throw new Error("rvi_recipe_storage_key_missing")
+    return row.recipeKey
   }
 }

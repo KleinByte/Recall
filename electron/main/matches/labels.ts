@@ -4,7 +4,6 @@ import type {
   PerformanceLabel,
   PerformanceLabelConfidence,
   PerformanceLabelPolarity,
-  TeamRow,
 } from "./types.js"
 
 export const LABEL_EVALUATOR_VERSION = 2
@@ -14,7 +13,6 @@ interface LabelContext {
   match: MatchRow
   player: ParticipantRow
   participants: ParticipantRow[]
-  teams: TeamRow[]
 }
 
 interface CandidateInput {
@@ -83,7 +81,7 @@ function challenge(row: ParticipantRow, key: string) {
  * vision state intentionally do not appear here.
  */
 export function evaluateMatchLabels(context: LabelContext): PerformanceLabel[] {
-  const { match, player, participants, teams } = context
+  const { match, player, participants } = context
   if (match.isMatched !== 1 || participants.length < 2 || match.durationSecs <= 0) {
     return []
   }

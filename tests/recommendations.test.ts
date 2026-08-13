@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { REVIEW_METRIC_FLOORS } from "../electron/main/review/review-service.js"
 import { recommendationDirection } from "../electron/main/review/recommendations.js"
 
-describe("review v3 contract", () => {
+describe("review contract", () => {
   it("pins a positive finite robust floor for every review metric", () => {
     expect(Object.keys(REVIEW_METRIC_FLOORS).sort()).toEqual([
       "cs", "damage", "deaths", "gold", "grade", "kda", "objectives", "vision",
@@ -12,7 +12,7 @@ describe("review v3 contract", () => {
   })
 })
 
-describe("recommendation direction v3", () => {
+describe("recommendation direction", () => {
   it("uses fixed latest and preceding slices and requires interval evidence", () => {
     const games = Array.from({ length: 20 }, (_, index) => ({
       gameId: index + 1,

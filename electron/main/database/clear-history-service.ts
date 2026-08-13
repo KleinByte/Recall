@@ -1,22 +1,21 @@
 import type { Database } from "better-sqlite3"
 import type { BackupManifest } from "./backup-manager.js"
+import { CANONICAL_GRADE_STORAGE_PARTITION } from "../matches/match-grade-recipe.js"
+import { CANONICAL_RVI_STORAGE_PARTITION } from "../matches/rvi-recipe.js"
 
 export const ACCOUNT_SCOPED_DELETE_ORDER = [
-  "match_enrichment_jobs", "history_remediation_runs", "grade_rebuild_runs",
-  "riot_history_run_matches",
-  "riot_history_runs", "riot_match_ingestion", "riot_history_backfill",
-  "augment_enrichment_jobs", "match_performance_label_versions",
-  "match_label_evaluation_versions", "match_metric_observations",
+  "grade_rebuild_runs", "riot_history_backfill",
+  "augment_enrichment_jobs", "match_metric_observations",
   "match_grade_breakdown_versions",
   "match_grade_results", "match_grade_attempts", "participant_augments",
   "match_annotation_tags", "match_experiments", "match_grade_breakdowns",
-  "session_boundary_overrides", "match_timeline_cache", "match_annotations",
+  "session_boundary_overrides", "match_annotations",
   "match_capture_manifests", "match_performance_labels", "match_label_evaluations",
-  "match_source_capture_payloads", "match_source_captures", "match_timeline_sources",
-  "match_source_payloads", "live_capture_compactions", "live_game_events",
+  "match_timeline_sources", "match_source_payloads", "live_game_events",
   "live_game_snapshots", "champ_select_positions", "match_participants", "match_teams",
   "matches", "annotation_tags", "practice_experiments", "challenge_history", "challenges",
-  "profile_snapshots", "ranked_snapshots", "goals", "champion_mastery_cache",
+  "account_profile_snapshots", "profile_snapshots", "ranked_snapshots", "goals",
+  "champion_mastery_cache",
   "sync_health", "riot_accounts",
 ] as const
 
@@ -50,7 +49,7 @@ export class ClearHistoryService {
       }
       // A frozen local reference can contain observations from the account
       // being erased. It cannot safely remain active for another account.
-      // Invalidate only v3-derived state globally; unrelated accounts keep
+      // Invalidate only canonical derived state globally; unrelated accounts keep
       // their raw/normalized matches, participants, source payloads, and
       // timelines and can deterministically rebuild against a fresh snapshot.
       deleted += this.resetGlobalRecallDerivedState(present)
@@ -85,9 +84,20 @@ export class ClearHistoryService {
       "match_grade_breakdowns",
     ]) {
       if (!present.has(table)) continue
-      deleted += this.db.prepare(
-        `DELETE FROM ${table} WHERE algorithm_version = 3`,
-      ).run().changes
+      const partition = table === "match_metric_observations"
+        ? CANONICAL_RVI_STORAGE_PARTITION
+        : CANONICAL_GRADE_STORAGE_PARTITION
+      deleted += table === "match_metric_observations"
+        ? this.db.prepare(`
+            DELETE FROM match_metric_observations
+            WHERE recipe_key IN (
+              SELECT recipe_key FROM rvi_recipe_storage_keys
+              WHERE algorithm_version = ?
+            )
+          `).run(partition).changes
+        : this.db.prepare(
+            `DELETE FROM ${table} WHERE algorithm_version = ?`,
+          ).run(partition).changes
     }
     if (present.has("match_participants")) {
       this.db.prepare(`
@@ -98,8 +108,8 @@ export class ClearHistoryService {
             grade_evidence_coverage = NULL,
             grade_reference_sample_count = NULL,
             grade_reference_metadata_json = NULL
-        WHERE grade_algorithm_version = 3
-      `).run()
+        WHERE grade_algorithm_version = ?
+      `).run(CANONICAL_GRADE_STORAGE_PARTITION)
     }
     if (present.has("matches")) {
       this.db.prepare(`
@@ -110,32 +120,32 @@ export class ClearHistoryService {
             grade_evidence_coverage = NULL,
             grade_reference_sample_count = NULL,
             grade_reference_metadata_json = NULL
-        WHERE grade_algorithm_version = 3
-      `).run()
+        WHERE grade_algorithm_version = ?
+      `).run(CANONICAL_GRADE_STORAGE_PARTITION)
     }
     if (present.has("grade_rebuild_runs")) {
       deleted += this.db.prepare(
-        "DELETE FROM grade_rebuild_runs WHERE algorithm_version = 3",
-      ).run().changes
+        "DELETE FROM grade_rebuild_runs WHERE algorithm_version = ?",
+      ).run(CANONICAL_GRADE_STORAGE_PARTITION).changes
     }
     deleted += this.db.prepare(
-      "DELETE FROM grade_recipe_selections WHERE algorithm_version = 3",
-    ).run().changes
+      "DELETE FROM grade_recipe_selections WHERE algorithm_version = ?",
+    ).run(CANONICAL_GRADE_STORAGE_PARTITION).changes
     if (present.has("rvi_recipe_selections")) {
       deleted += this.db.prepare(
-        "DELETE FROM rvi_recipe_selections WHERE algorithm_version = 3",
-      ).run().changes
+        "DELETE FROM rvi_recipe_selections WHERE algorithm_version = ?",
+      ).run(CANONICAL_RVI_STORAGE_PARTITION).changes
     }
     if (present.has("rvi_recipes")) {
       deleted += this.db.prepare(`
-        DELETE FROM rvi_recipes WHERE algorithm_version = 3
-      `).run().changes
+        DELETE FROM rvi_recipes WHERE algorithm_version = ?
+      `).run(CANONICAL_RVI_STORAGE_PARTITION).changes
     }
     if (present.has("grade_recipes")) {
       deleted += this.db.prepare(`
         DELETE FROM grade_recipes
-        WHERE algorithm_version = 3 AND recipe_id NOT LIKE 'legacy:%'
-      `).run().changes
+        WHERE algorithm_version = ? AND recipe_id NOT LIKE 'legacy:%'
+      `).run(CANONICAL_GRADE_STORAGE_PARTITION).changes
     }
     if (present.has("grade_calibration_snapshots")) {
       deleted += this.db.prepare(`

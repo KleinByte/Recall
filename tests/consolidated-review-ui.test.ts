@@ -9,7 +9,7 @@ describe("consolidated match review UI", () => {
     const navigation = read("src/helpers/navigation.ts")
     const titlebar = read("src/components/WindowTitleBar.vue")
 
-    expect(app).not.toContain("<MatchSheet")
+    expect(app).toContain("<ReviewPage")
     expect(navigation).toContain("reviewGameId?: number")
     expect(navigation).toContain("export function goBack()")
     expect(navigation).toContain("export function goForward()")
@@ -24,6 +24,7 @@ describe("consolidated match review UI", () => {
 
   it("uses one tabbed match destination with the requested review surfaces", () => {
     const review = read("src/pages/ReviewPage.vue")
+    const reviewData = read("src/features/review/use-review-page-data.ts")
     const rviProfile = read("src/components/skill/PerformanceProfile.vue")
 
     expect(review).toContain("<MatchReviewHero")
@@ -37,7 +38,7 @@ describe("consolidated match review UI", () => {
     expect(review).toContain("<MatchDeathMap")
     expect(review).toContain("Team gold advantage")
     expect(review).toContain('{ value: "rvi", label: "RVI" }')
-    expect(review).toMatch(/getRviProfile\([\s\S]*?family, "match"\)/)
+    expect(reviewData).toMatch(/getRviProfile\([\s\S]*?family, "match"\)/)
     expect(review).toContain("hasGameRviEvidence")
     expect(review).toContain("Match RVI evidence is unavailable")
     expect(review).toContain("detail-only")
@@ -93,12 +94,13 @@ describe("consolidated match review UI", () => {
 
   it("plays positioned timeline frames on a synchronized review map", () => {
     const review = read("src/pages/ReviewPage.vue")
+    const timeline = read("src/features/review/use-review-timeline.ts")
     const playback = read("src/components/MatchPlaybackMap.vue")
 
     expect(review).toContain("<MatchPlaybackMap")
-    expect(review).toContain('type TimelineMapView = "deaths" | "playback"')
-    expect(review).toContain('label: "Deaths"')
-    expect(review).toContain('label: "Playback"')
+    expect(timeline).toContain('type TimelineMapView = "deaths" | "playback"')
+    expect(timeline).toContain('label: "Deaths"')
+    expect(timeline).toContain('label: "Playback"')
     expect(review).toContain("v-if=\"timelineMapView === 'deaths'\"")
     expect(review).toContain('class="timeline-visuals"')
     expect(review).toContain('@pointerdown="beginTimelineScrub"')

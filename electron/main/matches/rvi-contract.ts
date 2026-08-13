@@ -11,8 +11,10 @@ import {
   RVI_METRIC_POLICIES,
   type RviCapabilityVector,
 } from "./match-metric-registry.js"
-
-export const RVI_ALGORITHM_VERSION = 3
+import {
+  CANONICAL_RVI_STORAGE_PARTITION,
+  stableRviBootstrapSeedIdentity,
+} from "./rvi-recipe.js"
 export const RVI_SCORE_MIN = 0
 export const RVI_SCORE_MAX = 100
 export const RVI_MAD_NORMAL_SCALE = 1.4826
@@ -199,7 +201,7 @@ export interface RviHillVersatility {
 }
 
 export interface RviProfileAggregate {
-  algorithmVersion: typeof RVI_ALGORITHM_VERSION
+  algorithmVersion: typeof CANONICAL_RVI_STORAGE_PARTITION
   recipeId: string
   weighting: RviResolvedWeighting
   headline: RviHeadlineAggregate
@@ -696,7 +698,7 @@ function headlineBootstrapInterval(
   }
 
   const seed = fnv1a32(JSON.stringify({
-    recipeId,
+    recipeId: stableRviBootstrapSeedIdentity(recipeId),
     observations: observed.map((entry) => [
       typeof entry.matchId,
       String(entry.matchId),
@@ -933,7 +935,7 @@ export function aggregateRviProfile(input: RviProfileAggregationInput): RviProfi
       metrics: metrics.filter((metric) => metric.vector === key),
     }))
   return {
-    algorithmVersion: RVI_ALGORITHM_VERSION,
+    algorithmVersion: CANONICAL_RVI_STORAGE_PARTITION,
     recipeId: input.recipeId,
     weighting,
     headline: {

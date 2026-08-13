@@ -3,9 +3,13 @@ import { statSync } from "node:fs"
 import type { BackupManager } from "./backup-manager.js"
 import { schedulerForRoute } from "../riot/request-scheduler.js"
 import {
-  MATCH_GRADE_ALGORITHM_VERSION,
-  MATCH_GRADE_RECIPE_DEFINITION_ID,
+  CANONICAL_GRADE_STORAGE_PARTITION,
 } from "../matches/match-grade-recipe.js"
+import { CANONICAL_RVI_STORAGE_PARTITION } from "../matches/rvi-recipe.js"
+import {
+  getCompatibleGradeRecipeSelection,
+  getCompatibleRviRecipeSelection,
+} from "./grade-recipe-selection.js"
 
 export class DataTrustService {
   private lastIntegrityCheck = Date.now()
@@ -46,8 +50,8 @@ export class DataTrustService {
                    GROUP BY game_id
                    HAVING COUNT(*) >= 10
                  )) AS complete,
-                (SELECT COUNT(*) FROM match_timeline_cache
-                 WHERE puuid = ? AND status = 'ready') AS timelines,
+                (SELECT COUNT(*) FROM selected_match_timelines
+                 WHERE puuid = ?) AS timelines,
                 (SELECT COUNT(*) FROM match_capture_manifests
                  WHERE puuid = ?) AS captured,
                 (SELECT COUNT(DISTINCT game_id) FROM participant_augments
@@ -126,59 +130,35 @@ export class DataTrustService {
       try { return Number((this.db.prepare(sql).get(...parameters) as { count: number }).count) }
       catch { return 0 }
     }
-    const selectedGradeRecipe = puuid ? this.db.prepare(`
-      SELECT r.recipe_id AS recipeId
-      FROM grade_recipe_selections s
-      JOIN grade_recipes r
-        ON r.algorithm_version = s.algorithm_version
-       AND r.recipe_id = s.recipe_id
-      WHERE s.algorithm_version = ?
-        AND r.calibration_id IS NOT NULL
-        AND r.recipe_id NOT LIKE 'legacy:%'
-        AND json_extract(r.definition_json, '$.recipeDefinitionId') = ?
-        AND r.recipe_id = ? || '@calibration:' || r.calibration_id
-    `).get(
-      MATCH_GRADE_ALGORITHM_VERSION,
-      MATCH_GRADE_RECIPE_DEFINITION_ID,
-      MATCH_GRADE_RECIPE_DEFINITION_ID,
-    ) as { recipeId: string } | undefined : undefined
+    const selectedGradeRecipe = puuid
+      ? getCompatibleGradeRecipeSelection(this.db)
+      : undefined
     const gradeEligible = selectedGradeRecipe ? scalar(
       `SELECT COUNT(*) AS count FROM match_grade_attempts
        WHERE puuid = ? AND algorithm_version = ? AND recipe_id = ?
-         AND grade_status = 'ready'`, puuid, MATCH_GRADE_ALGORITHM_VERSION,
+         AND grade_status = 'ready'`, puuid, CANONICAL_GRADE_STORAGE_PARTITION,
       selectedGradeRecipe.recipeId,
     ) : 0
     const currentGrades = selectedGradeRecipe ? scalar(
       `SELECT COUNT(*) AS count FROM matches
        WHERE puuid = ? AND grade_status = 'ready' AND grade_algorithm_version = ?
-         AND grade_recipe_id = ?`, puuid, MATCH_GRADE_ALGORITHM_VERSION,
+         AND grade_recipe_id = ?`, puuid, CANONICAL_GRADE_STORAGE_PARTITION,
       selectedGradeRecipe.recipeId,
     ) : 0
-    const selectedRviRecipe = puuid ? this.db.prepare(`
-      SELECT recipe.recipe_id AS recipeId
-      FROM rvi_recipe_selections selection
-      JOIN rvi_recipes recipe
-        ON recipe.algorithm_version = selection.algorithm_version
-       AND recipe.recipe_id = selection.recipe_id
-      JOIN grade_recipe_selections grade_selection
-        ON grade_selection.algorithm_version = recipe.algorithm_version
-       AND grade_selection.recipe_id = recipe.grade_recipe_id
-      JOIN grade_recipes grade_recipe
-        ON grade_recipe.recipe_id = recipe.grade_recipe_id
-       AND grade_recipe.calibration_id = recipe.calibration_id
-      WHERE selection.algorithm_version = ?
-    `).get(MATCH_GRADE_ALGORITHM_VERSION) as { recipeId: string } | undefined : undefined
+    const selectedRviRecipe = puuid && selectedGradeRecipe
+      ? getCompatibleRviRecipeSelection(this.db, selectedGradeRecipe)
+      : undefined
     const rviObservationMatches = selectedRviRecipe ? scalar(
       `SELECT COUNT(DISTINCT game_id) AS count
-       FROM match_metric_observations
+       FROM match_metric_observation_details
        WHERE puuid = ? AND algorithm_version = ? AND recipe_id = ?`,
       puuid,
-      MATCH_GRADE_ALGORITHM_VERSION,
+      CANONICAL_RVI_STORAGE_PARTITION,
       selectedRviRecipe.recipeId,
     ) : 0
     const mixedRviObservations = scalar(
       `SELECT COUNT(*) AS count
-       FROM match_metric_observations observation
+       FROM match_metric_observation_details observation
        LEFT JOIN rvi_recipe_selections selection
          ON selection.algorithm_version = observation.algorithm_version
         AND selection.recipe_id = observation.recipe_id
@@ -189,20 +169,20 @@ export class DataTrustService {
        WHERE observation.puuid = ? AND observation.algorithm_version = ?
          AND (selection.recipe_id IS NULL OR recipe.recipe_id IS NULL)`,
       puuid,
-      MATCH_GRADE_ALGORITHM_VERSION,
+      CANONICAL_RVI_STORAGE_PARTITION,
     )
     const invalidRviSelection = puuid && !selectedRviRecipe ? Number((this.db.prepare(`
       SELECT EXISTS (
         SELECT 1 FROM rvi_recipe_selections WHERE algorithm_version = ?
       ) AS count
-    `).get(MATCH_GRADE_ALGORITHM_VERSION) as { count: number }).count) : 0
+    `).get(CANONICAL_RVI_STORAGE_PARTITION) as { count: number }).count) : 0
     const rviRecipeIntegrityIssues = mixedRviObservations + invalidRviSelection
     const intentionallyUngraded = selectedGradeRecipe ? scalar(
       `SELECT COUNT(*) AS count FROM match_grade_attempts
        WHERE puuid = ? AND algorithm_version = ? AND recipe_id = ?
          AND grade_status IN
          ('unsupported_mode','short_game','terminated','ineligible_for_progression',
-          'unmatched','bot_or_tutorial')`, puuid, MATCH_GRADE_ALGORITHM_VERSION,
+          'unmatched','bot_or_tutorial')`, puuid, CANONICAL_GRADE_STORAGE_PARTITION,
       selectedGradeRecipe.recipeId,
     ) : 0
     const clientStatus = this.lastIntegrity === "failed" || this.startupError || leagueClient.lastError
@@ -222,10 +202,10 @@ export class DataTrustService {
              AND mode_family IN ('sr','aram','classic')`, puuid,
         ),
         gradableMatches: gradeEligible,
-        currentVersionEligibleGrades: currentGrades,
+        eligibleGrades: currentGrades,
         intentionallyUngradedModes: intentionallyUngraded,
         gradeCoverage: gradeEligible ? currentGrades / gradeEligible : null,
-        selectedRviRecipeId: selectedRviRecipe?.recipeId,
+        selectedRviRecipeId: selectedRviRecipe?.publicRecipeId,
         rviObservationMatches,
         rviRecipeIntegrityIssues,
         endpoint: leagueClient,

@@ -10,7 +10,6 @@ import {
 import type {
   MatchRow,
   ParticipantRow,
-  TeamRow,
 } from "../electron/main/matches/types.js"
 
 const OWNER = "owner"
@@ -68,18 +67,11 @@ function participant(id: number, overrides: Partial<ParticipantRow> = {}): Parti
   }
 }
 
-const teams: TeamRow[] = [100, 200].map((teamId) => ({
-  gameId: 1, puuid: OWNER, teamId, win: teamId === 100 ? 1 : 0, bans: "[]",
-  baronKills: 0, dragonKills: 0, heraldKills: 0, hordeKills: 0,
-  towerKills: 0, inhibitorKills: 0, firstBlood: 0, firstTower: 0,
-  firstBaron: 0, firstDragon: 0, firstInhibitor: 0,
-}))
-
 describe("Match-V5 performance labels", () => {
   it("selects a readable, suppressed set of high-value labels", () => {
     const participants = Array.from({ length: 10 }, (_, index) => participant(index + 1))
     const labels = evaluateMatchLabels({
-      match: match(), player: participants[0], participants, teams,
+      match: match(), player: participants[0], participants,
     })
 
     expect(labels).toHaveLength(MAX_LABELS_PER_GAME)
@@ -92,7 +84,7 @@ describe("Match-V5 performance labels", () => {
   it("does not claim telemetry Match-V5 summaries cannot observe", () => {
     const participants = Array.from({ length: 10 }, (_, index) => participant(index + 1))
     const ids = evaluateMatchLabels({
-      match: match(), player: participants[0], participants, teams,
+      match: match(), player: participants[0], participants,
     }).map((label) => label.id)
 
     expect(ids).not.toContain("facecheck_fatality")
@@ -109,7 +101,6 @@ describe("Match-V5 performance labels", () => {
     const label = evaluateMatchLabels({
       match: match(), player: participant(1),
       participants: Array.from({ length: 10 }, (_, index) => participant(index + 1)),
-      teams,
     })[0]
 
     repository.replacePerformanceLabels(1, OWNER, [label])

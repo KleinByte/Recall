@@ -34,5 +34,10 @@ yarn.lock
 # Local documentation and design specs. README screenshots are release assets,
 # while local plans and working notes remain outside the repository.
 /docs/*
+!/docs/codebase-audit-2026-08-12.md
+!/docs/refactor-roadmap-2026-08-12.md
+!/docs/refactor-implementation-2026-08-12.md
+!/docs/data-integrity-and-analytics-methodology.md
+!/docs/recall-vector-index.md
 !/docs/screenshots/
 !/docs/screenshots/**

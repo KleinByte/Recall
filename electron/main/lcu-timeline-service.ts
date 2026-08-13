@@ -11,11 +11,9 @@ import {
 } from "./riot/timeline-mapper.js"
 import {
   MatchSourceRepository,
-  canonicalJson,
   type RawPayloadIdentity,
 } from "./database/match-source-repo.js"
-import { createHash } from "node:crypto"
-import { refreshTimelineCompatibilityCache } from "./matches/timeline-source-selector.js"
+import { TimelineRepository } from "./database/timeline-repo.js"
 
 type TimelineFrames = Parameters<typeof mapTimeline>[0]
 
@@ -84,48 +82,38 @@ export class LcuTimelineService {
   ) {}
 
   get(gameId: number, puuid: string) {
-    const row = this.db.prepare(
-      `SELECT status, mapper_version AS mapperVersion,
-              riot_match_id AS riotMatchId, fetched_at AS fetchedAt,
-              last_error AS error, data_json AS dataJson, raw_json AS rawJson
-       FROM match_timeline_cache WHERE game_id = ? AND puuid = ?`,
-    ).get(gameId, puuid) as
-      | {
-        status: string
-        mapperVersion: number
-        riotMatchId?: string
-        fetchedAt?: number
-        error?: string
-        dataJson?: string
-        rawJson?: string
-      }
-      | undefined
-    if (!row) {
-      return { status: "not_requested" as const }
-    }
-    if (row.mapperVersion !== TIMELINE_MAPPER_VERSION) {
-      const durableRaw = row.rawJson ?? this.rawTimelineJson(gameId, puuid)
-      const summary = row.status === "ready" && durableRaw
-        ? this.remapCached(gameId, puuid, durableRaw)
-        : undefined
-      if (!summary) return { status: "not_requested" as const }
-      this.write(gameId, puuid, row.riotMatchId, "ready", {
-        fetchedAt: row.fetchedAt ?? Date.now(),
-        data: summary,
-      })
-      void Promise.resolve(this.onReady?.(gameId, puuid, summary)).catch((error) => {
+    const timelines = new TimelineRepository(this.db)
+    const current = timelines.state(gameId, puuid)
+    if (current.status !== "not_requested") return current
+
+    const local = timelines.source(gameId, puuid, "league_client")
+    if (!local || (local.status === "ready" &&
+        local.mapperVersion !== TIMELINE_MAPPER_VERSION)) {
+      const remapped = this.remapRetained(gameId, puuid)
+      if (!remapped) return current
+      const sources = new MatchSourceRepository(this.db)
+      this.db.transaction(() => {
+        sources.persistTimelineSource({
+          gameId,
+          puuid,
+          source: "league_client",
+          sourceMatchId: String(gameId),
+          mapperVersion: TIMELINE_MAPPER_VERSION,
+          timeline: remapped.summary,
+          sourcePayload: remapped.sourcePayload,
+          capturedAt: remapped.fetchedAt,
+        })
+        sources.setMappingResult(remapped.sourcePayload, "mapped", Date.now(), {
+          gameId,
+          mapperVersion: TIMELINE_MAPPER_VERSION,
+        })
+      })()
+      void Promise.resolve(this.onReady?.(gameId, puuid, remapped.summary)).catch((error) => {
         console.warn(`Timeline labels could not be reevaluated: ${(error as Error).message}`)
       })
-      return { status: "ready" as const, summary, fetchedAt: row.fetchedAt }
+      return timelines.state(gameId, puuid)
     }
-    return {
-      status: row.status,
-      summary: row.status === "ready" && row.dataJson
-        ? JSON.parse(row.dataJson) as CompactTimeline
-        : undefined,
-      error: row.error ?? undefined,
-      fetchedAt: row.fetchedAt ?? undefined,
-    }
+    return current
   }
 
   async request(gameId: number, puuid: string, manualRetry = false) {
@@ -146,12 +134,12 @@ export class LcuTimelineService {
 
     const client = this.client()
     if (!client) {
-      this.write(gameId, puuid, match.riotMatchId, "pending")
+      this.write(gameId, puuid, "pending")
       this.onUpdated(gameId)
       return this.get(gameId, puuid)
     }
 
-    this.write(gameId, puuid, match.riotMatchId, "loading")
+    this.write(gameId, puuid, "loading")
     this.onUpdated(gameId)
 
     let rawPayload: RawPayloadIdentity | undefined
@@ -200,38 +188,38 @@ export class LcuTimelineService {
         summary,
         participants,
       ) ?? summary
-      this.write(gameId, puuid, match.riotMatchId, "ready", {
-        fetchedAt,
-        data: summary,
-        raw: dto,
-        sourcePayload: rawPayload,
-      })
-      sourceRepository.setMappingResult(rawPayload, "mapped", fetchedAt, { gameId })
+      this.db.transaction(() => {
+        this.write(gameId, puuid, "ready", {
+          fetchedAt,
+          data: summary,
+          sourcePayload: rawPayload,
+        })
+        sourceRepository!.setMappingResult(rawPayload!, "mapped", fetchedAt, { gameId })
+      })()
       try {
         await this.onReady?.(gameId, puuid, summary)
       } catch (error) {
         console.warn(`Timeline labels could not be evaluated: ${(error as Error).message}`)
       }
     } catch (error) {
-      if (rawPayload && sourceRepository) {
-        sourceRepository.setMappingResult(rawPayload, "unmappable", Date.now(), {
-          gameId,
-          error: error instanceof Error ? error.message.slice(0, 500) : "timeline_unmappable",
-        })
-      }
+      const errorMessage = error instanceof Error
+        ? error.message.slice(0, 500) : "timeline_unmappable"
       const missingRecentlyFinishedTimeline = error instanceof LcuRequestError &&
         error.status === 404 &&
         this.now() - (match.playedAt + match.durationSecs * 1000) <=
           LCU_TIMELINE_404_GRACE_MS
-      this.write(
-        gameId,
-        puuid,
-        match.riotMatchId,
-        error instanceof IncompleteLcuTimelineError ? "unavailable" :
-          missingRecentlyFinishedTimeline ? "error" :
-          error instanceof LcuRequestError && error.status === 404 ? "unavailable" : "error",
-        { error: (error as Error).message },
-      )
+      const status = error instanceof IncompleteLcuTimelineError ? "unavailable" :
+        missingRecentlyFinishedTimeline ? "error" :
+        error instanceof LcuRequestError && error.status === 404 ? "unavailable" : "error"
+      this.db.transaction(() => {
+        if (rawPayload && sourceRepository) {
+          sourceRepository.setMappingResult(rawPayload, "unmappable", Date.now(), {
+            gameId,
+            error: errorMessage,
+          })
+        }
+        this.write(gameId, puuid, status, { error: errorMessage })
+      })()
     }
 
     this.onUpdated(gameId)
@@ -250,42 +238,16 @@ export class LcuTimelineService {
         // Mapper upgrades are local work when Recall retained the raw payload;
         // rebuild every such artifact before spending the client's short
         // history window on network requests for the newest uncached games.
-        const outdated = this.db.prepare(`
-          SELECT game_id AS gameId FROM match_timeline_cache
-          WHERE puuid = ? AND status = 'ready' AND mapper_version <> ?
-          ORDER BY game_id
-        `).all(puuid, TIMELINE_MAPPER_VERSION) as { gameId: number }[]
-        for (const row of outdated) this.get(row.gameId, puuid)
-
-        const rows = this.db.prepare(
-          `SELECT m.game_id AS gameId
-           FROM matches m
-           LEFT JOIN match_timeline_cache t
-             ON t.game_id = m.game_id AND t.puuid = m.puuid
-           WHERE m.puuid = ? AND m.mode_family IN ('sr', 'aram', 'classic')
-             AND m.is_matched = 1
-             AND EXISTS (
-               SELECT 1 FROM match_participants p
-               WHERE p.game_id = m.game_id AND p.puuid = m.puuid
-                 AND p.is_player = 1
-             )
-             AND (
-               t.status IS NULL OR t.mapper_version <> ? OR
-               t.status IN ('not_requested', 'pending', 'error') OR
-               (t.status = 'loading' AND t.updated_at <= ?)
-             )
-           ORDER BY m.played_at DESC
-           LIMIT ?`,
-        ).all(
+        const timelines = new TimelineRepository(this.db)
+        for (const gameId of timelines.staleLocalReadyGames(puuid)) this.get(gameId, puuid)
+        const gameIds = timelines.captureCandidates(
           puuid,
-          TIMELINE_MAPPER_VERSION,
           this.now() - LCU_TIMELINE_LOADING_STALE_MS,
           limit,
-        ) as { gameId: number }[]
-
-        for (const row of rows) {
+        )
+        for (const gameId of gameIds) {
           if (!this.client()) break
-          await this.request(row.gameId, puuid)
+          await this.request(gameId, puuid)
         }
       } finally {
         this.drainingAccounts.delete(puuid)
@@ -297,9 +259,20 @@ export class LcuTimelineService {
   }
 
   /** Reprocesses durable raw LCU data when mapping logic gains richer fields. */
-  private remapCached(gameId: number, puuid: string, rawJson: string) {
+  private remapRetained(gameId: number, puuid: string): {
+    summary: CompactTimeline
+    sourcePayload: RawPayloadIdentity
+    fetchedAt: number
+  } | undefined {
     try {
-      const dto = JSON.parse(rawJson) as LcuTimelineResponse
+      const retained = new MatchSourceRepository(this.db).readLatestPayloadRecord({
+        ownerPuuid: puuid,
+        source: "league_client",
+        sourceMatchId: String(gameId),
+        kind: "timeline",
+      })
+      if (!retained) return undefined
+      const dto = retained.body as LcuTimelineResponse
       const frames = Array.isArray(dto) ? dto : dto.frames ?? dto.info?.frames
       if (!frames?.length) return undefined
       const participants = this.db.prepare(
@@ -309,7 +282,7 @@ export class LcuTimelineService {
       ).all(gameId, puuid) as LiveCaptureParticipant[]
       const owner = participants.find((participant) => participant.isPlayer === 1)
       if (!owner) return undefined
-      const summary = mapTimeline(
+      let summary = mapTimeline(
         frames,
         owner.participantId,
         new Map(participants.map((participant) => [
@@ -317,12 +290,17 @@ export class LcuTimelineService {
           participant.teamId,
         ])),
       )
-      return this.liveCaptures?.enrichTimeline(
+      summary = this.liveCaptures?.enrichTimeline(
         gameId,
         puuid,
         summary,
         participants,
       ) ?? summary
+      return {
+        summary,
+        sourcePayload: retained.identity,
+        fetchedAt: retained.fetchedAt,
+      }
     } catch {
       return undefined
     }
@@ -374,114 +352,43 @@ export class LcuTimelineService {
     })
   }
 
-  private rawTimelineJson(gameId: number, puuid: string): string | undefined {
-    try {
-      const raw = new MatchSourceRepository(this.db).readLatestPayload({
-        ownerPuuid: puuid,
-        source: "league_client",
-        sourceMatchId: String(gameId),
-        kind: "timeline",
-      })
-      return raw === undefined ? undefined : canonicalJson(raw)
-    } catch {
-      return undefined
-    }
-  }
-
   private write(
     gameId: number,
     puuid: string,
-    riotMatchId: string | undefined,
     status: TimelineStatus,
     values: {
       fetchedAt?: number
       error?: string
       data?: CompactTimeline
-      raw?: LcuTimelineResponse
       sourcePayload?: RawPayloadIdentity
     } = {},
   ) {
-    if (status === "ready" && values.data) {
-      const dataJson = canonicalJson(values.data)
-      const dataSha256 = createHash("sha256").update(dataJson).digest("hex")
+    if (status === "ready") {
+      if (!values.data) throw new Error("ready_timeline_requires_data")
       const capturedAt = values.fetchedAt ?? Date.now()
-      this.db.prepare(`
-        INSERT INTO match_timeline_sources
-          (game_id, puuid, source, source_match_id, mapper_version, status,
-           data_json, data_sha256, event_categories_json, evidence_counts_json,
-           source_payload_sha256, captured_at, updated_at)
-        VALUES (?, ?, 'league_client', ?, ?, 'ready', ?, ?, '[]', ?, ?, ?, ?)
-        ON CONFLICT(game_id, puuid, source, mapper_version) DO UPDATE SET
-          source_match_id = excluded.source_match_id, status = 'ready',
-          data_json = excluded.data_json, data_sha256 = excluded.data_sha256,
-          event_categories_json = excluded.event_categories_json,
-          evidence_counts_json = excluded.evidence_counts_json,
-          source_payload_sha256 = excluded.source_payload_sha256,
-          captured_at = excluded.captured_at, updated_at = excluded.updated_at
-      `).run(
-        gameId, puuid, String(gameId), TIMELINE_MAPPER_VERSION, dataJson, dataSha256,
-        canonicalJson({
-          version: 1,
-          participants: { expected: null, observed: values.data.frames[0]?.participants.length ?? 0 },
-          frames: {
-            total: values.data.frames.length,
-            economy: values.data.frames.length,
-            progression: values.data.frames.length,
-            farm: values.data.frames.length,
-            position: values.data.frames.filter((frame) =>
-              frame.participants.some((participant) => participant.position)).length,
-          },
-          events: {
-            championKill: values.data.events.filter((event) => event.category === "kill").length,
-            item: values.data.events.filter((event) => event.category === "item").length,
-            neutralObjective: values.data.events.filter((event) => event.category === "objective").length,
-            structure: 0, ward: values.data.events.filter((event) => event.category === "vision").length,
-            levelExact: values.data.events.filter((event) => event.category === "level" && !event.approximate).length,
-            gameEnd: values.data.events.filter((event) => event.category === "game").length,
-            augmentSelection: 0, unknownVariant: 0,
-          },
-        }),
-        values.sourcePayload?.sha256 ?? null, capturedAt, Date.now(),
-      )
-      refreshTimelineCompatibilityCache(this.db, gameId, puuid)
-      this.db.prepare(`
-        UPDATE match_timeline_cache
-        SET riot_match_id = COALESCE(?, riot_match_id),
-            raw_json = COALESCE(?, raw_json)
-        WHERE game_id = ? AND puuid = ?
-      `).run(
-        riotMatchId ?? null,
-        values.raw ? canonicalJson(values.raw) : null,
+      new TimelineRepository(this.db).persistReady({
         gameId,
         puuid,
-      )
+        source: "league_client",
+        sourceMatchId: String(gameId),
+        mapperVersion: TIMELINE_MAPPER_VERSION,
+        timeline: values.data,
+        sourcePayloadSha256: values.sourcePayload?.sha256,
+        capturedAt,
+        fetchedAt: values.fetchedAt,
+      })
       return
     }
-    this.db.prepare(
-      `INSERT INTO match_timeline_cache
-       (game_id, puuid, riot_match_id, status, mapper_version,
-        fetched_at, last_error, data_json, raw_json, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(game_id, puuid) DO UPDATE SET
-         riot_match_id = excluded.riot_match_id,
-         status = excluded.status,
-         mapper_version = excluded.mapper_version,
-         fetched_at = excluded.fetched_at,
-         last_error = excluded.last_error,
-         data_json = excluded.data_json,
-         raw_json = COALESCE(excluded.raw_json, match_timeline_cache.raw_json),
-         updated_at = excluded.updated_at`,
-    ).run(
+    new TimelineRepository(this.db).persistStatus({
       gameId,
       puuid,
-      riotMatchId ?? null,
+      source: "league_client",
+      sourceMatchId: String(gameId),
+      mapperVersion: TIMELINE_MAPPER_VERSION,
       status,
-      TIMELINE_MAPPER_VERSION,
-      values.fetchedAt ?? null,
-      values.error ?? null,
-      values.data ? JSON.stringify(values.data) : null,
-      values.raw ? JSON.stringify(values.raw) : null,
-      Date.now(),
-    )
+      capturedAt: values.fetchedAt ?? Date.now(),
+      fetchedAt: values.fetchedAt,
+      error: values.error,
+    })
   }
 }

@@ -306,22 +306,6 @@ export class BackupManager {
     return true
   }
 
-  prepareRestore(db: Database.Database, fileName: string) {
-    const sourcePath = resolvedChild(this.backupDir, fileName)
-    const manifest = this.list().find((entry) => entry.fileName === fileName)
-    if (!manifest || !existsSync(sourcePath)) throw new Error("Backup not found")
-    if (manifest.integrity !== "ok") throw new Error("Backup integrity check failed")
-    if (this.hashFile(sourcePath) !== manifest.sha256) throw new Error("Backup hash mismatch")
-    inspect(sourcePath, this.DatabaseClass)
-    this.create(db, "pre-restore")
-    const intent: RestoreIntent = {
-      sourcePath,
-      databasePath: path.resolve(this.databasePath),
-      expectedHash: manifest.sha256,
-    }
-    writeFileSync(this.intentPath, JSON.stringify(intent), "utf8")
-  }
-
   async prepareRestoreAsync(db: Database.Database, fileName: string): Promise<void> {
     const sourcePath = resolvedChild(this.backupDir, fileName)
     const manifest = this.list().find((entry) => entry.fileName === fileName)

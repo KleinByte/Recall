@@ -1,6 +1,11 @@
 import type { Database } from "better-sqlite3"
 import { RECALL_GRADES, type RecallGrade } from "../../../src/shared/recall-grade.js"
-import { canonicalJson } from "./match-source-repo.js"
+import {
+  canonicalJson,
+  decodeStoredJsonBody,
+  gzipJsonTextV1,
+  type StoredJsonBodyRow,
+} from "./json-body-codec.js"
 
 export const GRADE_STATUSES = [
   "ready",
@@ -75,22 +80,6 @@ export interface CanonicalGradeWriteInput {
   referenceMetadata?: unknown
   results: ReadonlyMap<number, CanonicalGradeResultInput>
   attemptedAt?: number
-}
-
-export interface CanonicalGradeAttempt {
-  gameId: number
-  puuid: string
-  algorithmVersion: number
-  recipeId: string
-  ownerParticipantId: number | null
-  status: MatchGradeStatus
-  inputFingerprint: string
-  recallScore: number | null
-  evidenceCoverage: number
-  referenceSampleCount: number
-  referenceMetadata: unknown
-  statusReason: string | null
-  attemptedAt: number
 }
 
 /**
@@ -206,30 +195,39 @@ export class GradePersistenceRepository {
     assertIntegerAtLeast(input.sampleCount, 0, "grade_calibration_sample_count")
     const referencePopulationJson = canonicalJson(input.referencePopulation)
     const snapshotJson = canonicalJson(input.snapshot)
+    const encodedSnapshot = gzipJsonTextV1(snapshotJson)
     const createdAt = input.createdAt ?? this.now()
     const inserted = this.db.prepare(`
       INSERT OR IGNORE INTO grade_calibration_snapshots
         (calibration_id, calibration_hash, reference_population_json,
-         sample_count, snapshot_json, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
+         sample_count, snapshot_encoding, snapshot_uncompressed_bytes,
+         snapshot_compressed_bytes, snapshot_sha256, snapshot_payload, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(input.calibrationId, input.calibrationHash, referencePopulationJson,
-      input.sampleCount, snapshotJson, createdAt).changes
+      input.sampleCount, encodedSnapshot.encoding, encodedSnapshot.uncompressedBytes,
+      encodedSnapshot.compressedBytes, encodedSnapshot.sha256,
+      encodedSnapshot.payload, createdAt).changes
     const stored = this.db.prepare(`
       SELECT calibration_hash AS calibrationHash,
              reference_population_json AS referencePopulationJson,
-             sample_count AS sampleCount, snapshot_json AS snapshotJson,
+             sample_count AS sampleCount,
+             snapshot_encoding AS snapshotEncoding,
+             snapshot_uncompressed_bytes AS snapshotUncompressedBytes,
+             snapshot_compressed_bytes AS snapshotCompressedBytes,
+             snapshot_sha256 AS snapshotSha256,
+             snapshot_payload AS snapshotPayload,
              created_at AS createdAt
       FROM grade_calibration_snapshots WHERE calibration_id = ?
-    `).get(input.calibrationId) as {
+    `).get(input.calibrationId) as (StoredJsonBodyRow & {
       calibrationHash: string
       referencePopulationJson: string
       sampleCount: number
-      snapshotJson: string
       createdAt: number
-    } | undefined
+    }) | undefined
+    const storedSnapshotJson = stored ? decodeStoredJsonBody(stored).text : undefined
     if (!stored || stored.calibrationHash !== input.calibrationHash ||
         stored.referencePopulationJson !== referencePopulationJson ||
-        stored.sampleCount !== input.sampleCount || stored.snapshotJson !== snapshotJson ||
+        stored.sampleCount !== input.sampleCount || storedSnapshotJson !== snapshotJson ||
         (input.createdAt !== undefined && stored.createdAt !== input.createdAt)) {
       throw new Error("grade_calibration_registration_conflict")
     }
@@ -484,40 +482,6 @@ export class GradePersistenceRepository {
       if (matchCache.changes !== 1) throw new Error("canonical_grade_owner_cache_write_failed")
     })
     transaction()
-  }
-
-  getAttemptForRecipe(
-    gameId: number,
-    puuid: string,
-    recipeId: string,
-  ): CanonicalGradeAttempt | undefined {
-    const row = this.db.prepare(`
-      SELECT game_id AS gameId, puuid, algorithm_version AS algorithmVersion,
-             recipe_id AS recipeId, owner_participant_id AS ownerParticipantId,
-             grade_status AS status, input_fingerprint AS inputFingerprint,
-             role_fit_score AS recallScore, evidence_coverage AS evidenceCoverage,
-             reference_sample_count AS referenceSampleCount,
-             reference_metadata_json AS referenceMetadataJson,
-             status_reason AS statusReason, attempted_at AS attemptedAt
-      FROM match_grade_attempts
-      WHERE game_id = ? AND puuid = ? AND recipe_id = ?
-    `).get(gameId, puuid, recipeId) as Omit<CanonicalGradeAttempt, "referenceMetadata"> & {
-      referenceMetadataJson: string
-    } | undefined
-    if (!row) return undefined
-    const { referenceMetadataJson, ...attempt } = row
-    return { ...attempt, referenceMetadata: parseJson(referenceMetadataJson) }
-  }
-
-  getCurrentAttempt(
-    gameId: number,
-    puuid: string,
-    algorithmVersion: number,
-  ): CanonicalGradeAttempt | undefined {
-    const selected = this.getSelectedRecipe(algorithmVersion)
-    return selected
-      ? this.getAttemptForRecipe(gameId, puuid, selected.recipeId)
-      : undefined
   }
 
   getMatchesMissingRecipe(

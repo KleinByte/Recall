@@ -5,8 +5,6 @@ import type {
   TeamRow,
   TrackedMode,
 } from "../matches/types.js"
-import type { RecallGrade } from "../../../src/shared/recall-grade.js"
-import type { GradeBreakdown } from "../review/types.js"
 import {
   GRADE_CORE_FACT_CONTRACT_VERSION,
   GRADE_CORE_FIELDS,
@@ -14,8 +12,6 @@ import {
   isGradeCoreSource,
   type GradeCoreField,
 } from "../matches/grade-core-facts.js"
-import { createHash } from "node:crypto"
-import { canonicalJson } from "./match-source-repo.js"
 
 export interface LobbyFilter {
   puuid: string
@@ -28,15 +24,8 @@ export interface LobbyFilter {
   roles?: string[]
 }
 
-interface LegacyStoredGradeResult {
-  grade: RecallGrade
-  score: number
-  percentile: number
-  breakdown: GradeBreakdown
-}
-
 /** The whole scoreboard for one recorded game. */
-export interface MatchDetail {
+interface MatchDetail {
   participants: ParticipantRow[]
   teams: TeamRow[]
 }
@@ -76,18 +65,6 @@ export interface AugmentCatalogEntry {
   name: string
   rarity?: string
   iconPath?: string
-}
-
-function assertLegacyGradeWriterAvailable(db: Database): void {
-  const table = db.prepare(`
-    SELECT 1 FROM sqlite_master
-    WHERE type = 'table' AND name = 'grade_recipe_selections'
-  `).get()
-  if (!table) return
-  const selected = db.prepare(
-    "SELECT 1 FROM grade_recipe_selections WHERE algorithm_version = 3 LIMIT 1",
-  ).get()
-  if (selected) throw new Error("legacy_grade_writer_disabled_after_v3_cutover")
 }
 
 const COLUMNS = [
@@ -719,102 +696,6 @@ export class ParticipantsRepository {
     return insertAll(rows)
   }
 
-  setGrades(gameId: number, puuid: string, grades: Map<number, LegacyStoredGradeResult>) {
-    if (grades.size === 0) return
-    assertLegacyGradeWriterAvailable(this.db)
-    const update = this.db.prepare(
-      `UPDATE match_participants
-       SET grade = ?, grade_score = ?, grade_algorithm_version = ?,
-           grade_status = 'ready', grade_composite_percentile = ?
-       WHERE game_id = ? AND puuid = ? AND participant_id = ?`,
-    )
-    const saveBreakdown = this.db.prepare(
-      `INSERT OR REPLACE INTO match_grade_breakdowns
-       (game_id, puuid, participant_id, algorithm_version,
-        composite_percentile, components_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    )
-    const save = this.db.transaction(() => {
-      const first = grades.values().next().value as LegacyStoredGradeResult | undefined
-      if (!first) return
-      const algorithmVersion = first.breakdown.algorithmVersion
-      if ([...grades.values()].some((result) =>
-        result.breakdown.algorithmVersion !== algorithmVersion)) {
-        throw new Error("mixed_grade_algorithm_versions")
-      }
-      const owner = this.db.prepare(`
-        SELECT participant_id AS participantId FROM match_participants
-        WHERE game_id = ? AND puuid = ? AND is_player = 1
-      `).get(gameId, puuid) as { participantId: number } | undefined
-      if (!owner) throw new Error("grade_owner_participant_missing")
-      const fingerprint = createHash("sha256").update(canonicalJson({
-        algorithmVersion,
-        results: [...grades].sort(([left], [right]) => left - right).map(([participantId, result]) => ({
-          participantId,
-          grade: result.grade,
-          score: result.score,
-          compositePercentile: result.breakdown.compositePercentile,
-          components: result.breakdown.components,
-        })),
-      })).digest("hex")
-      this.db.prepare(`
-        INSERT INTO match_grade_attempts
-          (game_id, puuid, algorithm_version, owner_participant_id,
-           grade_status, input_fingerprint, attempted_at)
-        VALUES (?, ?, ?, ?, 'ready', ?, ?)
-        ON CONFLICT(game_id, puuid, algorithm_version) DO UPDATE SET
-          owner_participant_id = excluded.owner_participant_id,
-          grade_status = 'ready', input_fingerprint = excluded.input_fingerprint,
-          attempted_at = excluded.attempted_at
-      `).run(gameId, puuid, algorithmVersion, owner.participantId, fingerprint, Date.now())
-      const saveResult = this.db.prepare(`
-        INSERT INTO match_grade_results
-          (game_id, puuid, participant_id, algorithm_version, grade, grade_score,
-           composite_percentile, grade_status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'ready', ?)
-        ON CONFLICT(game_id, puuid, participant_id, algorithm_version) DO UPDATE SET
-          grade = excluded.grade, grade_score = excluded.grade_score,
-          composite_percentile = excluded.composite_percentile,
-          grade_status = 'ready', created_at = excluded.created_at
-      `)
-      const saveVersionedBreakdown = this.db.prepare(`
-        INSERT INTO match_grade_breakdown_versions
-          (game_id, puuid, participant_id, algorithm_version,
-           composite_percentile, components_json, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(game_id, puuid, participant_id, algorithm_version) DO UPDATE SET
-          composite_percentile = excluded.composite_percentile,
-          components_json = excluded.components_json, created_at = excluded.created_at
-      `)
-      for (const [participantId, result] of grades) {
-        const createdAt = Date.now()
-        update.run(
-          result.grade, result.score, result.breakdown.algorithmVersion,
-          result.breakdown.compositePercentile, gameId, puuid, participantId,
-        )
-        saveResult.run(
-          gameId, puuid, participantId, result.breakdown.algorithmVersion,
-          result.grade, result.score, result.breakdown.compositePercentile, createdAt,
-        )
-        saveVersionedBreakdown.run(
-          gameId, puuid, participantId, result.breakdown.algorithmVersion,
-          result.breakdown.compositePercentile,
-          JSON.stringify(result.breakdown.components), createdAt,
-        )
-        saveBreakdown.run(
-          gameId,
-          puuid,
-          participantId,
-          result.breakdown.algorithmVersion,
-          result.breakdown.compositePercentile,
-          JSON.stringify(result.breakdown.components),
-          Date.now(),
-        )
-      }
-    })
-    save()
-  }
-
   /** The full scoreboard for one game, ordered as it appears in the client. */
   getMatchDetail(gameId: number, puuid: string): MatchDetail {
     const participants = this.db
@@ -873,16 +754,6 @@ export class ParticipantsRepository {
         }))
     }
     return { participants: mapped, teams }
-  }
-
-  countGamesWithLobby(puuid: string): number {
-    const row = this.db
-      .prepare(
-        "SELECT COUNT(DISTINCT game_id) AS total FROM match_participants WHERE puuid = ?",
-      )
-      .get(puuid) as { total: number }
-
-    return row.total
   }
 
   /**
@@ -990,24 +861,6 @@ export class ParticipantsRepository {
     })
     save()
     return entries.length
-  }
-
-  deleteAll(puuid: string): number {
-    const remove = this.db.transaction(() => {
-      const participants = this.db
-        .prepare("DELETE FROM match_participants WHERE puuid = ?")
-        .run(puuid).changes
-      this.db.prepare("DELETE FROM match_teams WHERE puuid = ?").run(puuid)
-      return participants
-    })
-    return remove()
-  }
-
-  /** Column names, so a test can assert no identifying data is stored. */
-  columnNames(): string[] {
-    return (
-      this.db.pragma("table_info(match_participants)") as { name: string }[]
-    ).map((column) => column.name)
   }
 
   /**

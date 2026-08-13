@@ -5,7 +5,6 @@ import {
   type ConfidenceInterval,
 } from "./statistics.js"
 
-export const STATISTICAL_CONTRACT_VERSION = 3
 export const CONDITION_MINIMUM_ARM_GAMES = 8
 export const CONDITION_FDR_Q = .10
 

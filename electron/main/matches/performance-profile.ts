@@ -1,14 +1,8 @@
-import type {
-  GradeComponentObservation,
-  InsightObservation,
-  RviTimelineObservation,
-} from "../database/insights-repo.js"
 import {
-  MATCH_GRADE_RECIPE_ID,
+  DEFAULT_GRADE_RECIPE_ID,
 } from "./match-grade-recipe.js"
 import {
   aggregateRviProfile,
-  RVI_ALGORITHM_VERSION as CONTRACT_RVI_ALGORITHM_VERSION,
   RVI_VECTOR_KEYS,
   type RviCareerArmHeadlineAggregate,
   type RviHeadlineAggregate,
@@ -24,11 +18,11 @@ import {
   type PrimaryArchetype,
 } from "./match-grade-taxonomy.js"
 import { POSITIONS, type Position } from "./position.js"
-import { RVI_VECTOR_DEFINITIONS } from "./rvi-recipe.js"
+import {
+  RVI_VECTOR_DEFINITIONS,
+} from "./rvi-recipe.js"
 import type { ModeFamily } from "./types.js"
 
-export const RVI_ALGORITHM_VERSION = CONTRACT_RVI_ALGORITHM_VERSION
-export const PERFORMANCE_PROFILE_VERSION = RVI_ALGORITHM_VERSION
 export const PERFORMANCE_RECENT_GAMES = 20
 
 export type PerformanceConfidence = "learning" | "provisional" | "established"
@@ -119,13 +113,8 @@ export interface PerformanceProfileAuxiliary {
   }
 }
 
-/**
- * Renderer-compatible v2 DTO fields are retained at the top level. Exact v3
- * values and uncertainty are additionally exposed through headline, exact
- * responsibility scopes, and the auxiliary sample diagnostics.
- */
+/** Canonical profile with exact responsibility scopes and sample diagnostics. */
 export interface PerformanceProfile {
-  algorithmVersion: number
   recipeId: string
   scoringContext: PerformanceScoringContext
   weighting: RviResolvedWeighting
@@ -147,20 +136,9 @@ export interface PerformanceProfile {
   growthKey?: string
 }
 
-interface DeprecatedPerformanceProfileFields {
+export interface PerformanceProfileInput {
   /** Selected mode family controls which recipe arms are mode-capable. */
   family?: ModeFamily
-  /** @deprecated Supply rviObservations populated from exact-recipe match Grade artifacts. */
-  observations?: readonly InsightObservation[]
-  /** @deprecated Grade v2 component rows are not valid RVI inputs. */
-  gradeComponentHistory?: readonly GradeComponentObservation[]
-  /** @deprecated Timeline rows must arrive through exact-recipe RVI observations. */
-  timelineHistory?: readonly RviTimelineObservation[]
-  /** @deprecated Champion-class display ceilings were removed in RVI. */
-  championRoles?: ReadonlyMap<number, readonly string[]>
-}
-
-export interface PerformanceProfileInput extends DeprecatedPerformanceProfileFields {
   /** Exact-recipe, per-match match Grade Recall Score and RVI metric observations. */
   rviObservations: readonly RviMatchObservation[]
   /** Defaults to the currently bundled immutable match Grade recipe. */
@@ -168,25 +146,6 @@ export interface PerformanceProfileInput extends DeprecatedPerformanceProfileFie
   /** Equal match weights are authoritative unless half-life weighting is explicit. */
   weighting?: RviWeighting
   scoringContext?: PerformanceScoringContext
-}
-
-/**
- * Temporary compile-time bridge for DB/index/report callers. It intentionally
- * returns no profile: legacy rows cannot be promoted into authoritative v3
- * scores without their recipe identity and stored 0-100 metric percentiles.
- */
-export interface LegacyPerformanceProfileInput extends DeprecatedPerformanceProfileFields {
-  family: ModeFamily
-  observations: readonly InsightObservation[]
-  gradeComponentHistory: readonly GradeComponentObservation[]
-  rviObservations?: never
-  scoringContext?: PerformanceScoringContext
-}
-
-function isPerformanceProfileInput(
-  input: PerformanceProfileInput | LegacyPerformanceProfileInput,
-): input is PerformanceProfileInput {
-  return "rviObservations" in input && Array.isArray(input.rviObservations)
 }
 
 interface FamilyPresentation {
@@ -448,20 +407,11 @@ function profileDimension(
 
 export function buildPerformanceProfile(
   input: PerformanceProfileInput,
-): PerformanceProfile | undefined
-/** @deprecated Supply PerformanceProfileInput with rviObservations. */
-export function buildPerformanceProfile(
-  input: LegacyPerformanceProfileInput,
-): PerformanceProfile | undefined
-export function buildPerformanceProfile(
-  input: PerformanceProfileInput | LegacyPerformanceProfileInput,
 ): PerformanceProfile | undefined {
-  if (!isPerformanceProfileInput(input)) return undefined
-
   const scoringContext: PerformanceScoringContext = input.scoringContext === "match"
     ? "match"
     : "profile"
-  const recipeId = input.recipeId ?? MATCH_GRADE_RECIPE_ID
+  const recipeId = input.recipeId ?? DEFAULT_GRADE_RECIPE_ID
   const observations = orderedObservations(input.rviObservations)
   const aggregate = aggregateRviProfile({
     recipeId,
@@ -509,7 +459,6 @@ export function buildPerformanceProfile(
     : undefined
 
   return {
-    algorithmVersion: PERFORMANCE_PROFILE_VERSION,
     recipeId,
     scoringContext,
     weighting: aggregate.weighting,

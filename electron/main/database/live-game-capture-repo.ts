@@ -10,6 +10,11 @@ import type {
 } from "../riot/timeline-mapper.js"
 import type { ParticipantRow } from "../matches/types.js"
 import { resolvePosition } from "../matches/position.js"
+import {
+  decodeStoredJsonBody,
+  gzipCanonicalJsonV1,
+  type StoredJsonBodyRow,
+} from "./json-body-codec.js"
 
 const PERIODIC_SNAPSHOT_MS = 15_000
 
@@ -74,8 +79,20 @@ function withoutEvents(snapshot: LiveGameSnapshot): Omit<LiveGameSnapshot, "even
   return stored
 }
 
-function parseSnapshot(value: string): Omit<LiveGameSnapshot, "events"> {
-  return JSON.parse(value) as Omit<LiveGameSnapshot, "events">
+const SNAPSHOT_BODY_SELECT = `
+  snapshot_encoding AS snapshotEncoding,
+  snapshot_uncompressed_bytes AS snapshotUncompressedBytes,
+  snapshot_compressed_bytes AS snapshotCompressedBytes,
+  snapshot_sha256 AS snapshotSha256,
+  snapshot_payload AS snapshotPayload
+`
+
+function parseSnapshot(row: StoredJsonBodyRow): Omit<LiveGameSnapshot, "events"> {
+  return decodeStoredJsonBody(row).value as Omit<LiveGameSnapshot, "events">
+}
+
+function hasActivePlayerStatRunes(snapshot: Omit<LiveGameSnapshot, "events">) {
+  return (snapshot.activePlayer?.runes?.statRuneIds.length ?? 0) > 0 ? 1 : 0
 }
 
 function eventId(prefix: string, values: Array<string | number>) {
@@ -109,17 +126,25 @@ export class LiveGameCaptureRepository {
     let snapshotWritten = false
 
     if (stateChanged || periodic) {
+      const encoded = gzipCanonicalJsonV1(stored)
       snapshotWritten = this.db.prepare(
         `INSERT OR IGNORE INTO live_game_snapshots
-         (game_id, puuid, game_time_ms, captured_at, reason, snapshot_json)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+         (game_id, puuid, game_time_ms, captured_at, reason,
+          has_active_player_stat_runes, snapshot_encoding, snapshot_uncompressed_bytes,
+          snapshot_compressed_bytes, snapshot_sha256, snapshot_payload)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         gameId,
         puuid,
         gameTimeMs,
         snapshot.updatedAt,
         reason,
-        JSON.stringify(stored),
+        hasActivePlayerStatRunes(stored),
+        encoded.encoding,
+        encoded.uncompressedBytes,
+        encoded.compressedBytes,
+        encoded.sha256,
+        encoded.payload,
       ).changes > 0
       this.state.set(key, { gameTimeMs, stateFingerprint: fingerprint })
     }
@@ -157,12 +182,13 @@ export class LiveGameCaptureRepository {
 
   listSnapshots(gameId: number, puuid: string): StoredLiveGameSnapshot[] {
     return (this.db.prepare(
-      `SELECT reason, snapshot_json AS snapshotJson
+      `SELECT reason, ${SNAPSHOT_BODY_SELECT}
        FROM live_game_snapshots
        WHERE game_id = ? AND puuid = ?
        ORDER BY game_time_ms`,
-    ).all(gameId, puuid) as { reason: StoredLiveGameSnapshot["reason"]; snapshotJson: string }[])
-      .map((row) => ({ ...parseSnapshot(row.snapshotJson), reason: row.reason }))
+    ).all(gameId, puuid) as Array<StoredJsonBodyRow & {
+      reason: StoredLiveGameSnapshot["reason"]
+    }>).map((row) => ({ ...parseSnapshot(row), reason: row.reason }))
   }
 
   listEvents(gameId: number, puuid: string): LiveGameEvent[] {
@@ -320,10 +346,7 @@ export class LiveGameCaptureRepository {
         AND participant.puuid = snapshot.puuid
         AND participant.is_player = 1
        WHERE snapshot.puuid = ?
-         AND json_valid(snapshot.snapshot_json)
-         AND json_array_length(
-           json_extract(snapshot.snapshot_json, '$.activePlayer.runes.statRuneIds')
-         ) > 0
+         AND snapshot.has_active_player_stat_runes = 1
          AND (
            participant.rune_selections_json NOT LIKE '%"slot":6%'
            OR participant.rune_selections_json NOT LIKE '%"slot":7%'
@@ -392,25 +415,6 @@ export class LiveGameCaptureRepository {
       }
       return repaired
     })()
-  }
-
-  deleteAll(puuid: string) {
-    const deleted = this.db.transaction(() => {
-      const events = this.db.prepare(
-        "DELETE FROM live_game_events WHERE puuid = ?",
-      ).run(puuid).changes
-      const snapshots = this.db.prepare(
-        "DELETE FROM live_game_snapshots WHERE puuid = ?",
-      ).run(puuid).changes
-      return { events, snapshots }
-    })()
-    for (const key of this.state.keys()) {
-      if (key.endsWith(`:${puuid}`)) this.state.delete(key)
-    }
-    for (const key of this.seenEventIds.keys()) {
-      if (key.endsWith(`:${puuid}`)) this.seenEventIds.delete(key)
-    }
-    return deleted
   }
 
   enrichTimeline(
@@ -514,15 +518,15 @@ export class LiveGameCaptureRepository {
 
   private readLatestState(gameId: number, puuid: string): CaptureState | undefined {
     const row = this.db.prepare(
-      `SELECT game_time_ms AS gameTimeMs, snapshot_json AS snapshotJson
+      `SELECT game_time_ms AS gameTimeMs, ${SNAPSHOT_BODY_SELECT}
        FROM live_game_snapshots
        WHERE game_id = ? AND puuid = ?
        ORDER BY game_time_ms DESC LIMIT 1`,
-    ).get(gameId, puuid) as { gameTimeMs: number; snapshotJson: string } | undefined
+    ).get(gameId, puuid) as (StoredJsonBodyRow & { gameTimeMs: number }) | undefined
     if (!row) return undefined
     return {
       gameTimeMs: row.gameTimeMs,
-      stateFingerprint: stateFingerprint(parseSnapshot(row.snapshotJson)),
+      stateFingerprint: stateFingerprint(parseSnapshot(row)),
     }
   }
 }

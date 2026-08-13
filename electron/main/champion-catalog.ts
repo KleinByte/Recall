@@ -24,7 +24,7 @@ function champion(value: unknown): ChampionCatalogEntry | undefined {
     roles: Array.isArray(entry.roles)
       ? entry.roles.filter((role): role is string => typeof role === "string")
       : [],
-    // Always resolve from the current versioned Grade taxonomy. Persisted
+    // Always resolve from the canonical Grade taxonomy. Persisted
     // catalogs from older releases cannot leave the renderer with stale data.
     primaryArchetype: resolvePrimaryArchetype(entry.id),
     isVisibleInClient: entry.isVisibleInClient !== false,

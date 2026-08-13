@@ -70,8 +70,6 @@ const MIN_LOGLOSS_IMPROVEMENT = 0.02
 const REST_CAP_MINUTES = 90
 
 // Reference categories (excluded from one-hot encoding)
-const WEEKDAY_REFERENCE = "sunday"
-const ROLE_REFERENCE = "UTILITY"
 const QUEUE_REFERENCE = 420
 
 // Fixed vocabulary

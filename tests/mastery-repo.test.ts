@@ -52,7 +52,8 @@ describe("MasteryRepository", () => {
     repo.upsert("owner", "player", { ...snapshot, championPoints: 13_000, updatedAt: 2 })
 
     expect(repo.get("owner", "player", 1)?.championPoints).toBe(13_000)
-    expect(repo.deleteAll("owner")).toBe(1)
+    expect(db.prepare("DELETE FROM champion_mastery_cache WHERE owner_puuid = ?")
+      .run("owner").changes).toBe(1)
     expect(repo.get("owner", "player", 1)).toBeUndefined()
   })
 })

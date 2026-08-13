@@ -38,8 +38,6 @@ import { buildPredictiveSection, type PredictiveSection, type PredictiveSignal }
 export { buildPredictiveSection, type PredictiveSection, type PredictiveSignal }
 export { conditionFinding, benjaminiHochberg } from "./statistical-contract.js"
 
-export const SKILL_REPORT_VERSION = 3
-
 export type EvidenceLevel = "descriptive" | "comparative" | "experimental"
 export type EvidenceConfidence = "insufficient" | "low" | "medium" | "high"
 
@@ -1286,7 +1284,6 @@ function buildStyleDrift(
 }
 
 export interface SkillReport {
-  version: 3
   generatedAt: number
   scope: { modes: TrackedMode[]; family: ModeFamily }
   overview: {
@@ -1309,8 +1306,6 @@ export interface SkillReport {
       role?: string
       win: boolean
       grade?: string
-      /** Legacy/internal compatibility normal score. */
-      gradeScore?: number
       /** Authoritative Recall score on a fixed 0-100 scale. */
       recallScore?: number
       durationSecs: number
@@ -1329,8 +1324,6 @@ export interface SkillReport {
       wins: number
       winRate: number
       kda: number
-      /** Legacy/internal compatibility normal score. */
-      avgGradeScore?: number
       /** Average authoritative Recall score (0-100). */
       averageRecallScore?: number
       gradedGames: number
@@ -1349,7 +1342,7 @@ export interface SkillReport {
 
 export function buildSkillReport(input: SkillReportInput): SkillReport {
   const {
-    modes, family, generatedAt, summary, style, grades, lobby, contribution,
+    modes, family, generatedAt, summary, grades, lobby, contribution,
     pool, builds, observations, championStats, itemObservations, gradeComponentHistory,
     rvi, performanceTimelineHistory, duration, hours, weekdays,
   } = input
@@ -1397,7 +1390,6 @@ export function buildSkillReport(input: SkillReportInput): SkillReport {
   }
 
   return {
-    version: SKILL_REPORT_VERSION,
     generatedAt,
     scope: { modes, family },
     overview: {
@@ -1426,7 +1418,6 @@ export function buildSkillReport(input: SkillReportInput): SkillReport {
         role: observation.role,
         win: observation.win,
         grade: observation.grade,
-        gradeScore: observation.gradeScore,
         recallScore: observation.recallScore,
         durationSecs: observation.durationSecs,
         session: observation.session,
@@ -1453,7 +1444,6 @@ export function buildSkillReport(input: SkillReportInput): SkillReport {
         wins: champion.wins,
         winRate: champion.winRate,
         kda: champion.kda,
-        avgGradeScore: champion.avgGradeScore,
         averageRecallScore: champion.averageRecallScore,
         gradedGames: champion.gradedGames,
       })),

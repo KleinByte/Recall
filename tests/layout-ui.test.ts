@@ -20,7 +20,6 @@ describe("desktop page layout", () => {
     expect(dashboard).toContain('height="270px"')
     expect(dashboard).toContain("getRviProfile")
     expect(dashboard).toContain("PerformanceRadar")
-    expect(dashboard).not.toContain("StyleRadar")
     expect(dashboard).toMatch(/\.rank-panel,[\s\S]*\.rvi-panel \{[\s\S]*height: 360px/)
     expect(dashboard).toContain("var(--instrument-surface)")
     expect(dashboard).toContain("var(--instrument-border-soft)")
@@ -121,24 +120,25 @@ describe("desktop page layout", () => {
 
   it("aligns readable event tracks beneath the timeline graph", () => {
     const review = read("src/pages/ReviewPage.vue")
+    const timeline = read("src/features/review/use-review-timeline.ts")
 
     expect(review).toContain('class="gold-chart-wrap"')
     expect(review).toContain('class="timeline-event-tracks"')
     expect(review).toContain('class="event-track-marker"')
-    expect(review).toContain('label: "Deaths"')
-    expect(review).toContain('label: "Levels"')
-    expect(review).toContain('label: "Items"')
+    expect(timeline).toContain('label: "Deaths"')
+    expect(timeline).toContain('label: "Levels"')
+    expect(timeline).toContain('label: "Items"')
     expect(review).toContain("timelineMarkerIcon")
     expect(review).toContain("timelineMarkerTitle")
-    expect(review).toContain("sampleTimelineEvents(events, track.maximum)")
-    expect(review).toContain("timelineObjectiveIconUrl")
-    expect(review).toContain("abilityAsset(event)")
-    expect(review).toContain("killActor(event)")
+    expect(timeline).toContain("sampleTimelineEvents(events, track.maximum)")
+    expect(timeline).toContain("timelineObjectiveIconUrl")
+    expect(timeline).toContain("abilityAsset(event)")
+    expect(timeline).toContain("killActor(event)")
     expect(review).toContain("timelineKillIconUrl")
     expect(review).toContain('class="kill-matchup"')
     expect(review).toContain('class="blue-series"')
     expect(review).toContain('class="red-series"')
-    expect(review).toContain("timelineGoldDifferencePoints")
+    expect(timeline).toContain("timelineGoldDifferencePoints")
     expect(review).toContain("finalTimelineFrame.blueGold")
   })
 
@@ -304,11 +304,13 @@ describe("desktop page layout", () => {
 
   it("fills champion form cards with performance and evidence", () => {
     const dashboard = read("src/pages/DashboardPage.vue")
+    const championForm = read("src/features/dashboard/DashboardChampionForm.vue")
 
-    expect(dashboard).toContain("confidenceLabel(row.gradedGames)")
-    expect(dashboard).toContain("formatDecimal(row.kda, 2)")
-    expect(dashboard).toContain("formatPercent(row.winRate)")
-    expect(dashboard).toContain("Open a champion for its full breakdown")
+    expect(dashboard).toContain("<DashboardChampionForm")
+    expect(championForm).toContain("confidenceLabel(row.gradedGames)")
+    expect(championForm).toContain("formatDecimal(row.kda, 2)")
+    expect(championForm).toContain("formatPercent(row.winRate)")
+    expect(championForm).toContain("Open a champion for its full breakdown")
   })
 
   it("shows ranked history from the first reading and plots it on a time axis", () => {
@@ -394,7 +396,6 @@ describe("desktop page layout", () => {
     expect(insights).toContain("GradeDnaHeatmap")
     expect(insights).toContain("SkillContextExplorer")
     expect(insights).toContain(':outcomes="report.overview.outcomes"')
-    expect(insights).not.toContain("ChampionPoolTreemap")
     expect(insights).not.toContain("OutcomeTrendChart")
   })
 })

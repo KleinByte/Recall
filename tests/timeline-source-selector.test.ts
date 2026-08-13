@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { selectTimelineSource } from
-  "../electron/main/matches/timeline-source-selector.js"
+  "../electron/main/database/timeline-repo.js"
 import { TIMELINE_MAPPER_VERSION } from
   "../electron/main/riot/timeline-mapper.js"
 

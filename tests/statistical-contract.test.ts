@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { bootstrapSessionArithmeticMean, wilson95 } from "../electron/main/matches/statistics.js"
 import { benjaminiHochberg, conditionFinding } from "../electron/main/matches/statistical-contract.js"
 
-describe("statistics v3", () => {
+describe("statistics contract", () => {
   it("returns truthful Wilson intervals including zero and n=1", () => {
     expect(wilson95(0, 0)).toMatchObject({ value: null, interval: null })
     expect(wilson95(0, 1)).toMatchObject({ numerator: 0, denominator: 1, value: 0 })

@@ -101,9 +101,6 @@ const comparisonValue = (metric: LobbyMetric) =>
     ? formatPercent(metric.percentile)
     : metric.averageRank.toFixed(1)
 
-const comparisonUnit = (scope: "role" | "lobby") =>
-  scope === "role" ? "score" : ""
-
 const rviIdentity = computed(() => props.overview.performance
   ? classifyRviIdentity(props.overview.performance)
   : undefined)

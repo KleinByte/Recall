@@ -109,7 +109,7 @@ describe("LCU timeline ready integration", () => {
     const onReady = vi.fn(() => {
       const row = db.prepare(`
         SELECT status, mapper_version AS mapperVersion, data_json AS dataJson
-        FROM match_timeline_cache WHERE game_id = 1 AND puuid = ?
+        FROM selected_match_timelines WHERE game_id = 1 AND puuid = ?
       `).get(PUUID) as { status: string; mapperVersion: number; dataJson: string }
       observedStatus.push(`${row.status}:${row.mapperVersion}:${Boolean(row.dataJson)}`)
     })
@@ -205,17 +205,19 @@ describe("LCU timeline ready integration", () => {
       () => undefined,
     )
     await service.request(1, PUUID)
+    // v32 prunes old compact generations. Their canonical raw body remains
+    // sufficient for a local rebuild without another client request.
     db.prepare(`
-      UPDATE match_timeline_cache
-      SET mapper_version = ?, raw_json = NULL
-      WHERE game_id = 1 AND puuid = ?
-    `).run(TIMELINE_MAPPER_VERSION - 1, PUUID)
+      DELETE FROM match_timeline_sources
+      WHERE game_id = 1 AND puuid = ? AND source = 'league_client'
+    `).run(PUUID)
 
     request.mockClear()
     await service.queueRecentMatches(PUUID)
     expect(db.prepare(`
       SELECT mapper_version AS mapperVersion, status
-      FROM match_timeline_cache WHERE game_id = 1 AND puuid = ?
+      FROM match_timeline_sources
+      WHERE game_id = 1 AND puuid = ? AND source = 'league_client'
     `).get(PUUID)).toEqual({ mapperVersion: TIMELINE_MAPPER_VERSION, status: "ready" })
     expect(request).not.toHaveBeenCalled()
   })
@@ -224,10 +226,16 @@ describe("LCU timeline ready integration", () => {
     const db = database()
     const now = 1_000_000
     db.prepare(`
-      INSERT INTO match_timeline_cache
-        (game_id, puuid, riot_match_id, status, mapper_version, updated_at)
-      VALUES (1, ?, 'NA1_1', 'loading', ?, ?)
-    `).run(PUUID, TIMELINE_MAPPER_VERSION, now - LCU_TIMELINE_LOADING_STALE_MS - 1)
+      INSERT INTO match_timeline_sources
+        (game_id, puuid, source, source_match_id, status, mapper_version,
+         event_categories_json, evidence_counts_json, captured_at, updated_at)
+      VALUES (1, ?, 'league_client', '1', 'loading', ?, '[]', '{}', ?, ?)
+    `).run(
+      PUUID,
+      TIMELINE_MAPPER_VERSION,
+      now - LCU_TIMELINE_LOADING_STALE_MS - 1,
+      now - LCU_TIMELINE_LOADING_STALE_MS - 1,
+    )
     const request = vi.fn().mockResolvedValue(rawTimeline)
     const service = new LcuTimelineService(
       db,

@@ -81,10 +81,4 @@ export class ChampSelectRepository {
       row.assignedPosition = assigned.get(row.championId)
     }
   }
-
-  deleteAll(puuid: string) {
-    return this.db
-      .prepare("DELETE FROM champ_select_positions WHERE puuid = ?")
-      .run(puuid).changes
-  }
 }

@@ -183,7 +183,10 @@ describe("RiotHistoryBackfill", () => {
       matchesSkipped: 1,
     })
     expect(matches.countMatches(PUUID)).toBe(0)
-    expect(participants.countGamesWithLobby(PUUID)).toBe(0)
+    expect(db.prepare(`
+      SELECT COUNT(DISTINCT game_id) AS total
+      FROM match_participants WHERE puuid = ?
+    `).get(PUUID)).toEqual({ total: 0 })
   })
 
   it("uses a locally supplied Match-V5 PUUID and never calls Account-V1", async () => {
@@ -423,7 +426,7 @@ describe("RiotHistoryBackfill", () => {
     `).get(PUUID)).toEqual({ status: "ready", mapperVersion: TIMELINE_MAPPER_VERSION })
     expect(db.prepare(`
       SELECT status, mapper_version AS mapperVersion
-      FROM match_timeline_cache WHERE game_id = 9 AND puuid = ?
+      FROM selected_match_timelines WHERE game_id = 9 AND puuid = ?
     `).get(PUUID)).toEqual({ status: "ready", mapperVersion: TIMELINE_MAPPER_VERSION })
   })
 
@@ -525,12 +528,12 @@ describe("RiotHistoryBackfill", () => {
         AND mapper_version = ?
     `).get(PUUID, TIMELINE_MAPPER_VERSION)).toEqual({ status: "unavailable" })
     expect(db.prepare(`
-      SELECT cache.data_json = source.data_json AS sameData
-      FROM match_timeline_cache cache
+      SELECT selected.data_json = source.data_json AS sameData
+      FROM selected_match_timelines selected
       JOIN match_timeline_sources source
-        ON source.game_id = cache.game_id AND source.puuid = cache.puuid
+        ON source.game_id = selected.game_id AND source.puuid = selected.puuid
        AND source.source = 'league_client' AND source.mapper_version = ?
-      WHERE cache.game_id = 9 AND cache.puuid = ?
+      WHERE selected.game_id = 9 AND selected.puuid = ?
     `).get(TIMELINE_MAPPER_VERSION, PUUID)).toEqual({ sameData: 1 })
   })
 })

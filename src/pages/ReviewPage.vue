@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
+import { computed, nextTick, onMounted, ref, watch } from "vue"
 import { api } from "../helpers/api"
 import { useApiEvents } from "../helpers/use-api-events"
-import { useCoalescedTask } from "../helpers/use-coalesced-task"
+import { useReviewPageData } from "../features/review/use-review-page-data"
+import { useReviewTimeline } from "../features/review/use-review-timeline"
 import {
   championIconUrl,
   championNameById,
@@ -10,24 +11,14 @@ import {
   modeLabel,
 } from "../helpers/format"
 import {
-  itemIconUrl,
   loadGameAssets,
   normalizeAugmentId,
   timelineKillIconUrl,
-  timelineObjectiveIconUrl,
   type GameAssetCatalog,
 } from "../helpers/game-assets"
 import { focusReviewGameId, reviewMatch } from "../helpers/navigation"
 import { publicAssetUrl } from "../helpers/assets"
 import { lobbyStandings } from "../helpers/match-detail"
-import {
-  timelineChartDomain,
-  timelineChartX,
-  timelineChartY,
-  timelineGoldDifferencePoints,
-  timelineTeamGoldAt,
-  sampleTimelineEvents,
-} from "../helpers/timeline-chart"
 import GradeBadge from "../components/GradeBadge.vue"
 import AugmentInsightCard from "../components/AugmentInsightCard.vue"
 import MatchReviewHero from "../components/MatchReviewHero.vue"
@@ -51,59 +42,107 @@ import {
 } from "@fortawesome/free-solid-svg-icons"
 import type { Champion } from "../types/lol"
 import type {
-  MatchRow,
-  PerformanceDimensionScore,
-  PerformanceProfile,
-} from "../types/stats"
-import type { TrackedMode } from "../types/stats"
-import type {
-  AnnotationTag,
   ExperimentOutcomeValue,
-  MatchReview,
-  PracticeExperiment,
-  ReviewSession,
-  OwnerAugmentSummary,
   BaselineMetric,
   ReviewHighlight,
-  TimelineEvent,
 } from "../types/review"
 
-const props = defineProps<{ champions: Champion[] | null }>()
+defineProps<{ champions: Champion[] | null }>()
 const events = useApiEvents()
 type Tab = "review" | "sessions" | "bookmarks" | "experiments"
 type MatchTab = "overview" | "stats" | "timeline" | "probability"
 type InsightTab = "rvi" | "performance"
-type TimelineMapView = "deaths" | "playback"
 const tab = ref<Tab>("review")
 const matchTab = ref<MatchTab>("overview")
 const insightTab = ref<InsightTab>("rvi")
-const timelineMapView = ref<TimelineMapView>("deaths")
-const review = ref<MatchReview>()
-const gameRvi = ref<PerformanceProfile>()
-const careerRvi = ref<PerformanceProfile>()
-const sessions = ref<ReviewSession[]>([])
-const tags = ref<AnnotationTag[]>([])
-const experiments = ref<PracticeExperiment[]>([])
-const bookmarks = ref<MatchRow[]>([])
-const busy = ref(false)
-const error = ref("")
-const newTag = ref("")
-const experimentName = ref("")
-const experimentHypothesis = ref("")
-const experimentChampionIds = ref<number[]>([])
-const experimentModes = ref<TrackedMode[]>([])
-const timelineFilter = ref<"all" | "you" | "kills" | "objectives" | "items" | "levels" | "vision">("all")
-const timelineFilters = ["all", "you", "kills", "objectives", "items", "levels", "vision"] as const
-const timelineCursorTimestamp = ref(0)
 const assets = ref<GameAssetCatalog>({ version: "latest", items: {}, augments: {}, abilities: {} })
-const augmentSummary = ref<Record<number, OwnerAugmentSummary>>({})
-const augmentSummaryLoading = ref(false)
-let saveTimer: ReturnType<typeof setTimeout> | undefined
-let annotationSavesInFlight = 0
+let resetTimelinePresentation = () => {}
+const {
+  review,
+  careerRvi,
+  sessions,
+  tags,
+  experiments,
+  bookmarks,
+  busy,
+  error,
+  newTag,
+  experimentName,
+  experimentHypothesis,
+  experimentChampionIds,
+  experimentModes,
+  augmentSummary,
+  augmentSummaryLoading,
+  gameRviPresentation,
+  hasGameRviEvidence,
+  load,
+  queueNoteSave,
+  toggleBookmark,
+  toggleTag,
+  createTag,
+  loadTimeline,
+  refreshTimeline,
+  setBoundary,
+  createExperiment,
+  setExperimentStatus,
+  updateOutcome,
+  refreshCurrentWhenIdle,
+} = useReviewPageData({
+  resetMatchView() {
+    resetTimelinePresentation()
+    matchTab.value = "overview"
+    insightTab.value = "rvi"
+  },
+  showPerformanceBreakdown() {
+    insightTab.value = "performance"
+  },
+})
 
 const owner = computed(() =>
   review.value?.scoreboard.find((participant) => participant.isPlayer === 1),
 )
+const {
+  timelineMapView,
+  timelineFilter,
+  timelineFilters,
+  timelineCursorTimestamp,
+  timelineScrubbing,
+  timelineMapViewOptions,
+  timelineDomain,
+  timelineDifferencePoints,
+  finalTimelineFrame,
+  finalGoldDifference,
+  timelineGoldTicks,
+  compactGold,
+  signedCompactGold,
+  filteredTimelineEvents,
+  timelineEventTracks,
+  missingTimelineCategories,
+  hasApproximateLevels,
+  timelineFilterAvailable,
+  timelineFilterTitle,
+  participant,
+  killActor,
+  killTarget,
+  killActorName,
+  killTargetName,
+  eventTime,
+  itemName,
+  itemIcon,
+  timelineMarkerIcon,
+  timelineMarkerGlyph,
+  timelineMarkerClasses,
+  timelineMarkerTitle,
+  timelineEventDescription,
+  timelineCursor,
+  beginTimelineScrub,
+  updateTimelineScrub,
+  endTimelineScrub,
+  selectTimelineTimestamp,
+  moveTimelineCursor,
+  resetTimelineView,
+} = useReviewTimeline({ review, owner, assets })
+resetTimelinePresentation = resetTimelineView
 const matchLobbyStanding = computed(() => {
   const current = review.value
   if (!current) return undefined
@@ -130,24 +169,6 @@ const insightTabs = [
   { value: "performance", label: "Breakdown" },
 ]
 const matchTabOptions = matchTabs.map((item) => ({ value: item.id, label: item.label }))
-const timelineMapViewOptions = [
-  { value: "deaths", label: "Deaths" },
-  { value: "playback", label: "Playback" },
-]
-
-const rviDimensions = computed<PerformanceDimensionScore[]>(() =>
-  (gameRvi.value?.dimensions ?? []).map((dimension) => ({
-    ...dimension,
-    recentScore: careerRvi.value?.dimensions.find((entry) => entry.key === dimension.key)?.score ?? undefined,
-  })),
-)
-const gameRviPresentation = computed<PerformanceProfile | undefined>(() => gameRvi.value
-  ? { ...gameRvi.value, dimensions: rviDimensions.value }
-  : undefined)
-const hasGameRviEvidence = computed(() =>
-  gameRviPresentation.value?.dimensions.some((dimension) =>
-    dimension.score !== null || dimension.metrics.length > 0) ?? false)
-
 const matchBans = computed(() => (review.value?.teams ?? []).flatMap((team) => {
   try {
     return (JSON.parse(team.bans || "[]") as number[]).filter((id) => id > 0)
@@ -155,323 +176,6 @@ const matchBans = computed(() => (review.value?.teams ?? []).flatMap((team) => {
     return []
   }
 }))
-const timelineDomain = computed(() => {
-  const summary = review.value?.timeline.summary
-  return timelineChartDomain(summary?.frames ?? [], summary?.events ?? [])
-})
-const timelineDifferencePoints = computed(() => {
-  const frames = review.value?.timeline.summary?.frames ?? []
-  if (frames.length < 2) return ""
-  return timelineGoldDifferencePoints(frames, timelineDomain.value)
-})
-const finalTimelineFrame = computed(() => review.value?.timeline.summary?.frames.at(-1))
-const finalGoldDifference = computed(() =>
-  (finalTimelineFrame.value?.blueGold ?? 0) - (finalTimelineFrame.value?.redGold ?? 0),
-)
-const timelineGoldTicks = computed(() => [
-  timelineDomain.value.maximumDifference,
-  timelineDomain.value.maximumDifference / 2,
-  0,
-  -timelineDomain.value.maximumDifference / 2,
-  -timelineDomain.value.maximumDifference,
-].map((gold) => ({ gold, y: timelineChartY(gold, timelineDomain.value) })))
-const compactGold = (gold: number) => `${(gold / 1_000).toFixed(gold >= 10_000 ? 0 : 1)}k`
-const signedCompactGold = (gold: number) => gold === 0
-  ? "0"
-  : `${gold > 0 ? "+" : "−"}${compactGold(Math.abs(gold))}`
-const filteredTimelineEvents = computed(() => {
-  const events = review.value?.timeline.summary?.events ?? []
-  if (timelineFilter.value === "all") {
-    return events.filter((event) =>
-      event.category !== "level" || event.participantId === owner.value?.participantId,
-    )
-  }
-  if (timelineFilter.value === "you") {
-    return events.filter((event) =>
-      event.participantId === owner.value?.participantId ||
-      event.targetId === owner.value?.participantId ||
-      event.assistingParticipantIds?.includes(owner.value?.participantId ?? -1),
-    )
-  }
-  if (timelineFilter.value === "kills") {
-    return events.filter((event) => event.category === "kill")
-  }
-  if (timelineFilter.value === "objectives") {
-    return events.filter((event) =>
-      event.category === "objective",
-    )
-  }
-  if (timelineFilter.value === "items") return events.filter((event) => event.category === "item")
-  if (timelineFilter.value === "levels") return events.filter((event) => event.category === "level")
-  return events.filter((event) => event.category === "vision")
-})
-
-const timelineTrackMeta = [
-  { id: "kill", label: "Deaths", maximum: 60 },
-  { id: "level", label: "Levels", maximum: 36 },
-  { id: "item", label: "Items", maximum: 42 },
-  { id: "objective", label: "Objectives", maximum: 30 },
-  { id: "vision", label: "Vision", maximum: 30 },
-  { id: "game", label: "Match", maximum: 10 },
-] as const
-
-const timelineTrackSource = computed(() => {
-  const summary = review.value?.timeline.summary
-  if (!summary) return []
-  if (timelineFilter.value !== "all") return filteredTimelineEvents.value
-  const ownerId = owner.value?.participantId
-  return summary.events.filter((event) =>
-    event.category === "kill" ||
-    event.category === "objective" ||
-    event.category === "game" ||
-    (event.category === "level" && event.participantId === ownerId) ||
-    (
-      event.category === "item" &&
-      event.participantId === ownerId &&
-      [
-        "ITEM_PURCHASED",
-        "ITEM_TRANSFORM",
-        "ITEM_TRANSFORMED",
-        "ITEM_ACQUIRED",
-        "ITEM_OBSERVED",
-      ].includes(event.type)
-    ),
-  )
-})
-
-const timelineEventTracks = computed(() => timelineTrackMeta.flatMap((track) => {
-  const events = timelineTrackSource.value.filter((event) => event.category === track.id)
-  if (events.length === 0) return []
-  const laneByBucket = new Map<number, number>()
-  const markers = sampleTimelineEvents(events, track.maximum).map((event) => {
-    const x = timelineChartX(event.timestamp, timelineDomain.value)
-    const bucket = Math.round(x / 3)
-    const lane = laneByBucket.get(bucket) ?? 0
-    laneByBucket.set(bucket, lane + 1)
-    return { event, x, top: [21, 10, 32][lane % 3] }
-  })
-  return [{ ...track, markers }]
-}))
-const timelineEventCounts = computed(() => {
-  const counts = { kills: 0, objectives: 0, items: 0, levels: 0, vision: 0 }
-  for (const event of review.value?.timeline.summary?.events ?? []) {
-    if (event.category === "kill") counts.kills += 1
-    if (event.category === "objective") counts.objectives += 1
-    if (event.category === "item") counts.items += 1
-    if (event.category === "level") counts.levels += 1
-    if (event.category === "vision") counts.vision += 1
-  }
-  return counts
-})
-const missingTimelineCategories = computed(() => [
-  timelineEventCounts.value.items === 0 ? "item" : undefined,
-  timelineEventCounts.value.vision === 0 ? "vision" : undefined,
-].filter((category): category is string => Boolean(category)))
-const hasApproximateLevels = computed(() =>
-  review.value?.timeline.summary?.events.some((event) =>
-    event.category === "level" && event.approximate,
-  ) ?? false,
-)
-
-function timelineFilterAvailable(filter: typeof timelineFilters[number]) {
-  if (filter === "all" || filter === "you") return true
-  return timelineEventCounts.value[filter] > 0
-}
-
-function timelineFilterTitle(filter: typeof timelineFilters[number]) {
-  return timelineFilterAvailable(filter)
-    ? `${timelineEventCounts.value[filter as keyof typeof timelineEventCounts.value] ?? ""} ${filter} events`.trim()
-    : `The League Client did not include ${filter} events for this match.`
-}
-
-function participant(participantId?: number) {
-  return review.value?.scoreboard.find((entry) => entry.participantId === participantId)
-}
-
-function participantByName(name?: string) {
-  const normalized = name?.trim().toLocaleLowerCase()
-  if (!normalized) return undefined
-  return review.value?.scoreboard.find((entry) => {
-    const candidate = entry.summonerName?.trim().toLocaleLowerCase()
-    return candidate === normalized || candidate?.split("#")[0] === normalized.split("#")[0]
-  })
-}
-
-function killActor(event: TimelineEvent) {
-  return participant(event.participantId) ?? participantByName(event.actorName)
-}
-
-const killTarget = (event: TimelineEvent) => participant(event.targetId) ?? participantByName(event.targetName)
-const killActorName = (event: TimelineEvent) => killActor(event)?.summonerName ?? event.actorName ?? "Unknown killer"
-const killTargetName = (event: TimelineEvent) => killTarget(event)?.summonerName ?? event.targetName ?? `Player ${event.targetId ?? "unknown"}`
-
-function eventTime(timestamp: number) {
-  return `${Math.floor(timestamp / 60_000)}:${String(Math.floor(timestamp / 1_000) % 60).padStart(2, "0")}`
-}
-
-function objectiveName(value?: string) {
-  return (value ?? "Objective").replaceAll("_", " ").toLowerCase()
-    .replace(/\b\w/g, (letter) => letter.toUpperCase())
-}
-
-function itemId(event: TimelineEvent) {
-  return event.itemId ?? event.afterId ?? event.beforeId
-}
-
-function itemName(event: TimelineEvent) {
-  const id = itemId(event)
-  return assets.value.items[id ?? 0]?.name ?? `Item ${id ?? "unknown"}`
-}
-
-function itemIcon(event: TimelineEvent) {
-  const id = itemId(event)
-  return assets.value.items[id ?? 0]?.icon ?? itemIconUrl(id, assets.value.version)
-}
-
-function abilityAsset(event: TimelineEvent) {
-  if (event.type !== "SKILL_LEVEL_UP" || !event.skillSlot) return undefined
-  const championId = participant(event.participantId)?.championId
-  return championId ? assets.value.abilities[championId]?.[event.skillSlot - 1] : undefined
-}
-
-function abilityKey(skillSlot?: number) {
-  return skillSlot && skillSlot >= 1 && skillSlot <= 4
-    ? ["Q", "W", "E", "R"][skillSlot - 1]
-    : "ability"
-}
-
-function timelineMarkerIcon(event: TimelineEvent) {
-  if (event.category === "kill") {
-    return championIconUrl(killTarget(event)?.championId || 0)
-  }
-  if (event.category === "item") return itemIcon(event)
-  if (event.type === "SKILL_LEVEL_UP") return abilityAsset(event)?.icon
-  if (event.category === "objective") {
-    return timelineObjectiveIconUrl(event.type, event.objective, event.teamId)
-  }
-  return undefined
-}
-
-function timelineMarkerGlyph(event: TimelineEvent) {
-  if (event.category === "objective") return "◆"
-  if (event.type === "LEVEL_UP") return `${event.approximate ? "≈" : ""}${event.level ?? "↑"}`
-  if (event.type === "SKILL_LEVEL_UP") return abilityKey(event.skillSlot).toUpperCase()
-  if (event.category === "level") return "↑"
-  if (event.category === "vision") return "◉"
-  if (event.category === "game") return "■"
-  return "•"
-}
-
-function timelineMarkerClasses(event: TimelineEvent) {
-  const victim = event.category === "kill" ? killTarget(event) : undefined
-  return [
-    event.category,
-    victim?.teamId === 100 ? "blue-team" : victim?.teamId === 200 ? "red-team" : undefined,
-    event.targetId === owner.value?.participantId || event.participantId === owner.value?.participantId
-      ? "owner-event"
-      : undefined,
-  ]
-}
-
-function timelineMarkerTitle(event: TimelineEvent) {
-  const time = `${event.approximate ? "≈" : ""}${eventTime(event.timestamp)}`
-  if (event.category === "kill") {
-    const killer = killActorName(event)
-    return `${time} · ${killTargetName(event)} died to ${killer}`
-  }
-  if (event.category === "item") {
-    const player = participant(event.participantId)?.summonerName ?? `Player ${event.participantId}`
-    return `${time} · ${player} · ${itemName(event)}`
-  }
-  if (event.type === "SKILL_LEVEL_UP") {
-    const player = participant(event.participantId)?.summonerName ?? `Player ${event.participantId}`
-    const ability = abilityAsset(event)?.name ?? abilityKey(event.skillSlot)
-    return `${time} · ${player} ranked ${ability} (${abilityKey(event.skillSlot)})`
-  }
-  if (event.type === "LEVEL_UP") {
-    const player = participant(event.participantId)?.summonerName ?? `Player ${event.participantId}`
-    return `${time} · ${player} reached level ${event.level ?? "?"}`
-  }
-  return `${time} · ${objectiveName(event.objective || event.type)}`
-}
-
-function timelineEventDescription(event: TimelineEvent) {
-  if (event.type === "SKILL_LEVEL_UP") {
-    return `ranked ${abilityAsset(event)?.name ?? abilityKey(event.skillSlot)} (${abilityKey(event.skillSlot)})`
-  }
-  if (event.type === "LEVEL_UP") {
-    return `reached level ${event.level ?? "?"}${event.approximate ? " by this snapshot" : ""}`
-  }
-  return objectiveName(event.objective || event.type)
-}
-
-const timelineCursor = computed(() => {
-  const timestamp = timelineCursorTimestamp.value
-  const summary = review.value?.timeline.summary
-  if (timestamp === undefined || !summary) return undefined
-  const blueGold = timelineTeamGoldAt(timestamp, summary.frames, 100)
-  const redGold = timelineTeamGoldAt(timestamp, summary.frames, 200)
-  const difference = blueGold - redGold
-  let blueKills = 0
-  let redKills = 0
-  for (const event of summary.events) {
-    if (event.timestamp > timestamp || event.type !== "CHAMPION_KILL") continue
-    const teamId = event.teamId ?? killActor(event)?.teamId
-    if (teamId === 100) blueKills += 1
-    if (teamId === 200) redKills += 1
-  }
-  return {
-    timestamp,
-    x: timelineChartX(timestamp, timelineDomain.value),
-    blueGold,
-    redGold,
-    difference,
-    differenceY: timelineChartY(difference, timelineDomain.value),
-    blueKills,
-    redKills,
-  }
-})
-
-const timelineScrubbing = ref(false)
-
-function setTimelineCursor(event: PointerEvent) {
-  const target = event.currentTarget as HTMLElement
-  const rect = target.getBoundingClientRect()
-  const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
-  timelineCursorTimestamp.value = ratio * timelineDomain.value.maximumTimestamp
-}
-
-function beginTimelineScrub(event: PointerEvent) {
-  timelineScrubbing.value = true
-  const target = event.currentTarget as HTMLElement
-  target.setPointerCapture(event.pointerId)
-  setTimelineCursor(event)
-}
-
-function updateTimelineScrub(event: PointerEvent) {
-  if (timelineScrubbing.value) setTimelineCursor(event)
-}
-
-function endTimelineScrub(event: PointerEvent) {
-  if (!timelineScrubbing.value) return
-  setTimelineCursor(event)
-  timelineScrubbing.value = false
-  const target = event.currentTarget as HTMLElement
-  if (target.hasPointerCapture(event.pointerId)) target.releasePointerCapture(event.pointerId)
-}
-
-function selectTimelineTimestamp(timestamp: number) {
-  timelineCursorTimestamp.value = Math.max(
-    0,
-    Math.min(timelineDomain.value.maximumTimestamp, timestamp),
-  )
-}
-
-function moveTimelineCursor(direction: number) {
-  const step = 60_000
-  const current = timelineCursorTimestamp.value ?? 0
-  timelineCursorTimestamp.value = Math.max(0, Math.min(timelineDomain.value.maximumTimestamp, current + direction * step))
-}
 
 function augmentName(augmentId: number) {
   return assets.value.augments[augmentId]?.name ?? `Augment ${augmentId}`
@@ -479,178 +183,6 @@ function augmentName(augmentId: number) {
 
 function augmentIcon(augmentId: number, fallback?: string) {
   return assets.value.augments[augmentId]?.icon || fallback || publicAssetUrl("recall-icon.png")
-}
-
-async function loadAugmentSummaries() {
-  augmentSummaryLoading.value = true
-  try {
-    const summaries = await api.getOwnerAugmentSummaries()
-    augmentSummary.value = Object.fromEntries(
-      summaries.map((summary) => [summary.augmentId, summary]),
-    )
-  } catch {
-    augmentSummary.value = {}
-  } finally {
-    augmentSummaryLoading.value = false
-  }
-}
-
-async function load(gameId?: number) {
-  busy.value = true
-  error.value = ""
-  timelineFilter.value = "all"
-  timelineCursorTimestamp.value = 0
-  timelineMapView.value = "deaths"
-  matchTab.value = "overview"
-  insightTab.value = "rvi"
-  augmentSummary.value = {}
-  gameRvi.value = undefined
-  careerRvi.value = undefined
-  try {
-    const overview = await api.getReviewOverview()
-    const target = gameId ?? focusReviewGameId.value ?? overview.latest?.match.gameId
-    review.value = target ? await api.getMatchReview(target) : undefined
-    focusReviewGameId.value = null
-    const current = review.value
-    if (current?.scoreboard.some((participant) => participant.isPlayer === 1 && participant.augments?.length)) {
-      void loadAugmentSummaries()
-    }
-    if (current && current.match.modeFamily !== "other") {
-      const family = current.match.modeFamily
-      const [singleResult, careerResult] = await Promise.allSettled([
-        api.getRviProfile({
-          modeFamily: family,
-          sinceMs: current.match.playedAt - 1,
-          untilMs: current.match.playedAt + 1,
-        }, family, "match"),
-        api.getRviProfile({ modeFamily: family }, family),
-      ])
-      gameRvi.value = singleResult.status === "fulfilled" ? singleResult.value : undefined
-      careerRvi.value = careerResult.status === "fulfilled" ? careerResult.value : undefined
-      if (!gameRvi.value?.dimensions.some((dimension) =>
-        dimension.score !== null || dimension.metrics.length > 0)) insightTab.value = "performance"
-    }
-    const [sessionPage, storedTags, storedExperiments, bookmarkedPage] = await Promise.all([
-      api.getReviewSessions(),
-      api.listTags(),
-      api.listExperiments(),
-      api.listMatches({ bookmarked: true }, 1, 100),
-    ])
-    sessions.value = sessionPage.rows
-    tags.value = storedTags
-    experiments.value = storedExperiments
-    bookmarks.value = bookmarkedPage.rows
-  } catch (caught) {
-    error.value = (caught as Error).message
-  } finally {
-    busy.value = false
-  }
-}
-
-const refreshCurrent = useCoalescedTask(() => load(review.value?.match.gameId))
-
-function queueNoteSave() {
-  if (saveTimer) clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => void saveAnnotation(), 750)
-}
-
-async function saveAnnotation() {
-  const current = review.value
-  if (!current) return
-  if (saveTimer) clearTimeout(saveTimer)
-  saveTimer = undefined
-  const gameId = current.match.gameId
-  annotationSavesInFlight += 1
-  try {
-    const annotation = await api.saveAnnotation(gameId, {
-      note: current.annotation.note,
-      bookmarked: current.annotation.bookmarked,
-      tagIds: current.annotation.tags.map((tag) => tag.id),
-    })
-    if (review.value?.match.gameId === gameId) review.value.annotation = annotation
-  } finally {
-    annotationSavesInFlight -= 1
-  }
-}
-
-async function toggleBookmark() {
-  if (!review.value) return
-  review.value.annotation.bookmarked = !review.value.annotation.bookmarked
-  await saveAnnotation()
-  if (review.value.annotation.bookmarked) {
-    review.value.timeline = await api.getTimeline(review.value.match.gameId)
-  }
-}
-
-async function toggleTag(tag: AnnotationTag) {
-  if (!review.value) return
-  const selected = review.value.annotation.tags.some((entry) => entry.id === tag.id)
-  review.value.annotation.tags = selected
-    ? review.value.annotation.tags.filter((entry) => entry.id !== tag.id)
-    : [...review.value.annotation.tags, tag].slice(0, 20)
-  await saveAnnotation()
-}
-
-async function createTag() {
-  if (!newTag.value.trim()) return
-  tags.value = [...tags.value, await api.createTag(newTag.value)]
-    .filter((tag, index, all) => all.findIndex((entry) => entry.id === tag.id) === index)
-  newTag.value = ""
-}
-
-async function loadTimeline(retry = false) {
-  if (!review.value) return
-  review.value.timeline = { status: "loading" }
-  review.value.timeline = await api.requestTimeline(review.value.match.gameId, retry)
-}
-
-async function setBoundary(gameId: number, action: "split" | "join" | null) {
-  await api.setSessionBoundary(gameId, action)
-  sessions.value = (await api.getReviewSessions()).rows
-}
-
-async function createExperiment() {
-  if (!experimentName.value.trim()) return
-  await api.createExperiment({
-    name: experimentName.value,
-    hypothesis: experimentHypothesis.value,
-    championIds: experimentChampionIds.value,
-    modes: experimentModes.value,
-    status: "active",
-  })
-  experimentName.value = ""
-  experimentHypothesis.value = ""
-  experimentChampionIds.value = []
-  experimentModes.value = []
-  experiments.value = await api.listExperiments()
-}
-
-async function setExperimentStatus(
-  experiment: PracticeExperiment,
-  status: PracticeExperiment["status"],
-) {
-  await api.updateExperiment(experiment.id, {
-    ...experiment,
-    status,
-  })
-  experiments.value = await api.listExperiments()
-}
-
-async function updateOutcome(
-  experimentId: number,
-  outcome: ExperimentOutcomeValue,
-  note?: string,
-) {
-  if (!review.value) return
-  await api.setExperimentOutcome(
-    review.value.match.gameId,
-    experimentId,
-    outcome,
-    note ?? review.value.annotation.experimentOutcomes.find(
-      (entry) => entry.experimentId === experimentId,
-    )?.note ?? "",
-  )
-  review.value = await api.getMatchReview(review.value.match.gameId)
 }
 
 function date(value: number) {
@@ -757,19 +289,11 @@ onMounted(() => {
     }
   })
   events.on("review:updated", () => {
-    if (!saveTimer && annotationSavesInFlight === 0) void refreshCurrent()
+    refreshCurrentWhenIdle()
   })
   events.on("timeline:updated", (gameId: number) => {
-    if (review.value?.match.gameId === gameId) {
-      void api.getTimeline(gameId).then((state) => {
-        if (review.value) review.value.timeline = state
-      })
-    }
+    void refreshTimeline(gameId)
   })
-})
-
-onBeforeUnmount(() => {
-  if (saveTimer) void saveAnnotation()
 })
 </script>
 

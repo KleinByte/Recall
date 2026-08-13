@@ -1,14 +1,23 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
+import { UI_SCORE_RAMP, UI_THEME } from "../src/design/theme"
 
 const read = (path: string) => readFileSync(path, "utf8")
 
 describe("Recall shared UI system", () => {
   it("publishes semantic tokens and the non-CSS renderer bridge", () => {
     const tokens = read("src/design/tokens.css")
+    const generatedColors = read("src/design/theme-colors.generated.css")
+    const palette = JSON.parse(read("src/design/theme-colors.json")) as {
+      css: Record<string, string>
+      compatibility: Record<string, string>
+      canvas: Record<string, string>
+    }
     const theme = read("src/design/theme.ts")
+    const publishedTokens = `${generatedColors}\n${tokens}`
 
     expect(tokens).toContain('@import "./dial-tokens.css"')
+    expect(tokens).toContain('@import "./theme-colors.generated.css"')
     expect(tokens).toContain("Product and UI components consume --ui-* roles")
 
     const requiredTokens = [
@@ -43,20 +52,34 @@ describe("Recall shared UI system", () => {
     ]
 
     for (const token of requiredTokens) {
-      expect(tokens).toMatch(new RegExp(`--${token}:\\s*`))
+      expect(publishedTokens).toMatch(new RegExp(`--${token}:\\s*`))
     }
 
-    expect(tokens).toContain("--surface-0: var(--ui-canvas)")
-    expect(tokens).toContain("--text-primary: var(--ui-text)")
-    expect(tokens).toContain("--border-subtle: var(--ui-border)")
+    for (const [token, value] of [
+      ...Object.entries(palette.css),
+      ...Object.entries(palette.compatibility),
+    ]) {
+      expect(generatedColors).toContain(`--${token}: ${value};`)
+    }
+
+    expect(generatedColors).toContain("--surface-0: var(--ui-canvas)")
+    expect(generatedColors).toContain("--text-primary: var(--ui-text)")
+    expect(generatedColors).toContain("--border-subtle: var(--ui-border)")
 
     expect(theme).toContain("export const UI_THEME")
+    expect(theme).toContain('from "./theme-colors.generated"')
+    expect(theme).not.toMatch(/#[0-9a-f]{3,8}|rgba?\(/i)
     for (const role of ["accent", "live", "positive", "negative", "text", "grid", "teamBlue", "teamRed"]) {
-      expect(theme).toMatch(new RegExp(`\\b${role}:`))
+      expect(UI_THEME).toHaveProperty(role)
     }
+    // Canvas roles can intentionally differ from CSS roles to preserve the
+    // established chart rendering while still sharing one source file.
+    expect(UI_THEME.textMuted).toBe(palette.canvas.textMuted)
+    expect(UI_THEME.textMuted).toBe("#718198")
+    expect(UI_SCORE_RAMP).toHaveLength(5)
 
-    expect(tokens).toContain("--ui-page-ambient-energy:")
-    expect(tokens).toContain("--ui-control-background-hover:")
+    expect(generatedColors).toContain("--ui-page-ambient-energy:")
+    expect(generatedColors).toContain("--ui-control-background-hover:")
     expect(tokens).toContain("--ui-z-transition:")
   })
 

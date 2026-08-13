@@ -12,7 +12,7 @@ import {
   rviMetricPolicy,
 } from "../electron/main/matches/match-metric-registry.js"
 import {
-  RVI_RECIPE_DEFINITION_ID,
+  CURRENT_RVI_RECIPE_DEFINITION_ID,
   rviRecipeDefinition,
   rviRecipeIdForCalibration,
 } from "../electron/main/matches/rvi-recipe.js"
@@ -92,7 +92,7 @@ describe("Recall metric registry", () => {
 
   it("creates immutable identities that change with either referenced recipe", () => {
     const first = rviRecipeIdForCalibration("grade:a", "calibration:a")
-    expect(first).toContain(RVI_RECIPE_DEFINITION_ID)
+    expect(first).toContain(CURRENT_RVI_RECIPE_DEFINITION_ID)
     expect(rviRecipeIdForCalibration("grade:b", "calibration:a")).not.toBe(first)
     expect(rviRecipeIdForCalibration("grade:a", "calibration:b")).not.toBe(first)
     const definition = rviRecipeDefinition("grade:a", "calibration:a")

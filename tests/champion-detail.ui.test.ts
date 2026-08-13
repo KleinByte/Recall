@@ -115,10 +115,10 @@ describe("ChampionDetail RVI scope", () => {
     expect(wrapper.text()).toContain("Every performance value below uses ARAM games only")
   })
 
-  it("does not retain the legacy style-radar path", () => {
+  it("uses the current RVI profile and performance radar", () => {
     const source = readFileSync("src/components/ChampionDetail.vue", "utf8")
-    expect(source).not.toContain("StyleRadar")
-    expect(source).not.toContain("getStyleReport")
+
     expect(source).toContain("getRviProfile")
+    expect(source).toContain("PerformanceRadar")
   })
 })

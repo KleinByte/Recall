@@ -8,8 +8,8 @@ import type { CompactTimeline } from "../riot/timeline-mapper.js"
 import {
   MATCH_GRADE_ARM_KEYS,
   MATCH_GRADE_ARM_LABELS,
-  MATCH_GRADE_ALGORITHM_VERSION,
-  MATCH_GRADE_RECIPE_DEFINITION_ID,
+  CANONICAL_GRADE_STORAGE_PARTITION,
+  gradeRecipeDefinitionId,
 } from "../matches/match-grade-recipe.js"
 import {
   PRIMARY_ARCHETYPES,
@@ -30,7 +30,14 @@ import {
   metricDefinition,
   rviMetricPolicy,
 } from "../matches/match-metric-registry.js"
-import { RVI_RECIPE_DEFINITION_ID } from "../matches/rvi-recipe.js"
+import {
+  CANONICAL_RVI_STORAGE_PARTITION,
+} from "../matches/rvi-recipe.js"
+import {
+  getCompatibleGradeRecipeSelection,
+  getCompatibleRviRecipeSelection,
+  type CompatibleGradeRecipeSelection,
+} from "./grade-recipe-selection.js"
 import {
   GRADE_CORE_FACT_CONTRACT_VERSION,
   isGradeCoreSource,
@@ -132,8 +139,6 @@ export interface GradeComponentObservation {
   grade?: string
   /** Authoritative Recall score on a fixed 0-100 scale. */
   recallScore?: number
-  /** @deprecated Internal normal score retained for old consumers. */
-  gradeScore?: number
   session?: number
   sessionGame?: number
   restMinutes?: number
@@ -147,7 +152,7 @@ export interface GradeComponentObservation {
  * an algorithm version or from whichever breakdown happens to be newest.
  */
 export interface RviObservationSet {
-  algorithmVersion: typeof MATCH_GRADE_ALGORITHM_VERSION
+  algorithmVersion: typeof CANONICAL_GRADE_STORAGE_PARTITION
   recipeId: string
   calibrationId: string
   familyKeys: readonly RviVectorKey[]
@@ -160,8 +165,6 @@ export interface FinalItemObservation {
   role?: string
   /** Authoritative Recall score on a fixed 0-100 scale. */
   recallScore?: number
-  /** @deprecated Internal normal score retained for old consumers. */
-  gradeScore?: number
   itemIds: number[]
 }
 
@@ -306,11 +309,6 @@ const rate = (wins: number, games: number) => (games === 0 ? 0 : wins / games)
 const finiteInRange = (value: unknown, minimum: number, maximum: number): value is number =>
   typeof value === "number" && Number.isFinite(value) && value >= minimum && value <= maximum
 
-interface SelectedGradeRecipe {
-  recipeId: string
-  calibrationId: string
-}
-
 interface SelectedGradeResult {
   grade: string
   gradeScore: number
@@ -325,25 +323,6 @@ interface AccountSessionContext {
   priorChampionGames: number
 }
 
-function selectedGradeRecipe(db: Database): SelectedGradeRecipe | undefined {
-  return db.prepare(
-    `SELECT r.recipe_id AS recipeId, r.calibration_id AS calibrationId
-     FROM grade_recipe_selections s
-     JOIN grade_recipes r
-       ON r.algorithm_version = s.algorithm_version
-      AND r.recipe_id = s.recipe_id
-     WHERE s.algorithm_version = ?
-       AND r.calibration_id IS NOT NULL
-       AND r.recipe_id NOT LIKE 'legacy:%'
-       AND json_extract(r.definition_json, '$.recipeDefinitionId') = ?
-       AND r.recipe_id = ? || '@calibration:' || r.calibration_id`,
-  ).get(
-    MATCH_GRADE_ALGORITHM_VERSION,
-    MATCH_GRADE_RECIPE_DEFINITION_ID,
-    MATCH_GRADE_RECIPE_DEFINITION_ID,
-  ) as SelectedGradeRecipe | undefined
-}
-
 /**
  * Reads only ready owner results for the selected calibrated recipe. The
  * denormalized match columns are a display cache; analyses use the immutable
@@ -352,7 +331,7 @@ function selectedGradeRecipe(db: Database): SelectedGradeRecipe | undefined {
 function selectedGradeResults(
   db: Database,
   filter: StatsFilter,
-  selected: SelectedGradeRecipe | undefined,
+  selected: CompatibleGradeRecipeSelection | undefined,
 ): Map<number, SelectedGradeResult> {
   if (!selected) return new Map()
   const { conditions, params } = lobbyScope(filter)
@@ -377,7 +356,7 @@ function selectedGradeResults(
       AND a.role_fit_score = r.role_fit_score
      WHERE ${[...conditions, "p.is_player = 1"].join(" AND ")}`,
   ).all(
-    MATCH_GRADE_ALGORITHM_VERSION,
+    CANONICAL_GRADE_STORAGE_PARTITION,
     selected.recipeId,
     ...params,
   ) as Array<{ gameId: number; grade: string; gradeScore: number; recallScore: number }>
@@ -473,6 +452,7 @@ function parseGradeBreakdown(
   value: string,
   recipeId: string,
   recallScore: number,
+  recipeDefinitionId: string,
 ): ParsedGradeBreakdown | undefined {
   let parsed: unknown
   try {
@@ -483,8 +463,8 @@ function parseGradeBreakdown(
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined
   const breakdown = parsed as Record<string, unknown>
   const storedRecallScore = breakdown.recallScore ?? breakdown.roleFitScore
-  if (breakdown.algorithmVersion !== MATCH_GRADE_ALGORITHM_VERSION ||
-      breakdown.recipeDefinitionId !== MATCH_GRADE_RECIPE_DEFINITION_ID ||
+  if (breakdown.algorithmVersion !== CANONICAL_GRADE_STORAGE_PARTITION ||
+      breakdown.recipeDefinitionId !== recipeDefinitionId ||
       breakdown.recipeId !== recipeId ||
       typeof breakdown.primaryArchetype !== "string" ||
       !PRIMARY_ARCHETYPE_KEYS.has(breakdown.primaryArchetype) ||
@@ -1018,7 +998,11 @@ export class InsightsRepository {
    */
   getObservations(filter: StatsFilter): InsightObservation[] {
     const { where, params } = scope(filter)
-    const activeGrades = selectedGradeResults(this.db, filter, selectedGradeRecipe(this.db))
+    const activeGrades = selectedGradeResults(
+      this.db,
+      filter,
+      getCompatibleGradeRecipeSelection(this.db),
+    )
     const sessionContexts = accountSessionContexts(this.db, filter.puuid)
 
     // One query for all local metrics ordered by played_at, game_id
@@ -1221,7 +1205,7 @@ export class InsightsRepository {
     })
   }
 
-  /** Cached local-client timelines with the identity context RVI needs. */
+  /** Authoritatively selected timelines with the identity context RVI needs. */
   getRviTimelineHistory(filter: StatsFilter, limit = 240): RviTimelineObservation[] {
     const { conditions, params } = lobbyScope(filter)
     const rows = this.db.prepare(
@@ -1239,9 +1223,8 @@ export class InsightsRepository {
               ) AS opponentParticipantId
        FROM match_participants p
        JOIN matches m ON m.game_id = p.game_id AND m.puuid = p.puuid
-       JOIN match_timeline_cache t ON t.game_id = p.game_id AND t.puuid = p.puuid
+       JOIN selected_match_timelines t ON t.game_id = p.game_id AND t.puuid = p.puuid
        WHERE ${conditions.join(" AND ")} AND p.is_player = 1
-         AND t.status = 'ready' AND t.data_json IS NOT NULL
        ORDER BY m.played_at DESC, m.game_id DESC
        LIMIT ?`,
     ).all(...params, limit) as Array<{
@@ -1280,17 +1263,12 @@ export class InsightsRepository {
   * breakdown all agree on the exact recipe identity.
   */
   getRviObservations(filter: StatsFilter, limit?: number): RviObservationSet | undefined {
-    const selected = selectedGradeRecipe(this.db)
+    const selected = getCompatibleGradeRecipeSelection(this.db)
     if (!selected) return undefined
     const metricRepository = new MetricObservationsRepository(this.db)
-    const selectedRvi = metricRepository.getSelectedRecipe(MATCH_GRADE_ALGORITHM_VERSION)
-    if (selectedRvi && (selectedRvi.gradeRecipeId !== selected.recipeId ||
-        selectedRvi.calibrationId !== selected.calibrationId)) return undefined
-    if (selectedRvi && (!selectedRvi.definition || typeof selectedRvi.definition !== "object" ||
-        Array.isArray(selectedRvi.definition) ||
-        (selectedRvi.definition as Record<string, unknown>).recipeDefinitionId !==
-          RVI_RECIPE_DEFINITION_ID)) return undefined
-    const rviRecipeId = selectedRvi?.recipeId ?? selected.recipeId
+    const selectedRvi = getCompatibleRviRecipeSelection(this.db, selected)
+    if (!selectedRvi) return undefined
+    const publicRviRecipeId = selectedRvi.publicRecipeId
 
     const conditions = [
       "m.puuid = ?",
@@ -1312,7 +1290,7 @@ export class InsightsRepository {
     ]
     const params: (string | number)[] = [
       filter.puuid,
-      MATCH_GRADE_ALGORITHM_VERSION,
+      CANONICAL_GRADE_STORAGE_PARTITION,
       selected.recipeId,
     ]
 
@@ -1384,7 +1362,7 @@ export class InsightsRepository {
     if (selectedRvi) {
       for (const metric of metricRepository.getOwnerHistory(
         filter.puuid,
-        MATCH_GRADE_ALGORITHM_VERSION,
+        CANONICAL_RVI_STORAGE_PARTITION,
         selectedRvi.recipeId,
       )) {
         const key = `${metric.gameId}:${metric.participantId}`
@@ -1404,6 +1382,7 @@ export class InsightsRepository {
         row.breakdownJson,
         selected.recipeId,
         row.recallScore,
+        gradeRecipeDefinitionId(selected.identity),
       )
       if (!breakdown) return []
       const metrics = rviMetricsForMatch(
@@ -1413,7 +1392,7 @@ export class InsightsRepository {
       const vectorMaps = rviVectorMapsForMatch(breakdown)
       return [{
         matchId: row.gameId,
-        recipeId: rviRecipeId,
+        recipeId: publicRviRecipeId,
         playedAt: row.playedAt,
         recallScore: row.recallScore,
         ...vectorMaps,
@@ -1425,9 +1404,9 @@ export class InsightsRepository {
     }).reverse()
 
     return {
-      algorithmVersion: MATCH_GRADE_ALGORITHM_VERSION,
-      recipeId: rviRecipeId,
-      calibrationId: selected.calibrationId,
+      algorithmVersion: CANONICAL_RVI_STORAGE_PARTITION,
+      recipeId: publicRviRecipeId,
+      calibrationId: selected.publicCalibrationId,
       familyKeys: [...RVI_VECTOR_KEYS],
       observations,
     }
@@ -1435,17 +1414,18 @@ export class InsightsRepository {
 
   /** Chart-ready grade families for the exact selected match Grade recipe. */
   getGradeComponentHistory(filter: StatsFilter, limit = 60): GradeComponentObservation[] {
-    const selected = selectedGradeRecipe(this.db)
+    const selected = getCompatibleGradeRecipeSelection(this.db)
     return selected
-      ? this.getGradeComponentHistoryForRecipe(filter, limit, selected.recipeId)
+      ? this.getGradeComponentHistoryForRecipe(filter, limit, selected)
       : []
   }
 
   private getGradeComponentHistoryForRecipe(
     filter: StatsFilter,
     limit: number,
-    recipeId: string,
+    selected: CompatibleGradeRecipeSelection,
   ): GradeComponentObservation[] {
+    const recipeId = selected.recipeId
     const sessionContexts = accountSessionContexts(this.db, filter.puuid)
     const conditions = [
       "m.puuid = ?",
@@ -1466,7 +1446,7 @@ export class InsightsRepository {
     ]
     const params: (string | number)[] = [
       filter.puuid,
-      MATCH_GRADE_ALGORITHM_VERSION,
+      CANONICAL_GRADE_STORAGE_PARTITION,
       recipeId,
     ]
 
@@ -1537,7 +1517,12 @@ export class InsightsRepository {
 
     return rows.flatMap((row): GradeComponentObservation[] => {
       if (!finiteInRange(row.recallScore, 0, 100) || !Number.isFinite(row.gradeScore)) return []
-      const breakdown = parseGradeBreakdown(row.breakdownJson, recipeId, row.recallScore)
+      const breakdown = parseGradeBreakdown(
+        row.breakdownJson,
+        recipeId,
+        row.recallScore,
+        gradeRecipeDefinitionId(selected.identity),
+      )
       if (!breakdown) return []
       return [{
         gameId: row.gameId,
@@ -1546,7 +1531,6 @@ export class InsightsRepository {
         championId: row.championId,
         role: row.role ?? undefined,
         grade: row.grade,
-        gradeScore: row.gradeScore,
         recallScore: row.recallScore,
         ...sessionContexts.get(row.gameId),
         compositePercentile: row.recallScore / 100,
@@ -1564,7 +1548,11 @@ export class InsightsRepository {
   getFinalItemObservations(filter: StatsFilter): FinalItemObservation[] {
     const { conditions, params } = lobbyScope(filter)
     const all = [...conditions, "p.is_player = 1"].join(" AND ")
-    const activeGrades = selectedGradeResults(this.db, filter, selectedGradeRecipe(this.db))
+    const activeGrades = selectedGradeResults(
+      this.db,
+      filter,
+      getCompatibleGradeRecipeSelection(this.db),
+    )
 
     const rows = this.db
       .prepare(
@@ -1600,7 +1588,6 @@ export class InsightsRepository {
         championId: row.champion_id,
         role: row.role ?? undefined,
         recallScore: activeGrade?.recallScore,
-        gradeScore: activeGrade?.gradeScore,
         itemIds,
       }
     })

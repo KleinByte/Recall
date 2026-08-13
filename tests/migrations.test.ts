@@ -2,14 +2,21 @@
 // app, so it cannot load in the Node-based test runner. `better-sqlite3-node` is
 // the same version left at the Node ABI, used only by tests.
 import Database from "better-sqlite3-node"
+import { createHash } from "node:crypto"
 import { describe, expect, it } from "vitest"
 import {
   applyMigrations,
+  executeMigration,
   latestSchemaVersion,
   migrations,
 } from "../electron/main/database/migrations.js"
 import { MatchesRepository } from "../electron/main/database/matches-repo.js"
 import { buildMatchRow } from "./fixtures/matches.js"
+import { migrationRehearsalCounts } from "../scripts/migration-rehearsal-contract.js"
+import {
+  decodeStoredJsonBody,
+  type StoredJsonBodyRow,
+} from "../electron/main/database/json-body-codec.js"
 
 describe("applyMigrations", () => {
   it("keeps migration versions unique, ordered, and contiguous", () => {
@@ -44,7 +51,7 @@ describe("applyMigrations", () => {
 
   it("marks already-recorded bot queues as ineligible without deleting them", () => {
     const db = new Database(":memory:")
-    for (const migration of migrations.slice(0, 11)) db.exec(migration.up)
+    for (const migration of migrations.slice(0, 11)) executeMigration(db, migration)
     db.pragma("user_version = 11")
     const repo = new MatchesRepository(db)
     repo.insertMany([
@@ -66,7 +73,7 @@ describe("applyMigrations", () => {
 
   it("moves already-recorded Jade games into the League Classic family", () => {
     const db = new Database(":memory:")
-    for (const migration of migrations.slice(0, 16)) db.exec(migration.up)
+    for (const migration of migrations.slice(0, 16)) executeMigration(db, migration)
     db.pragma("user_version = 16")
     const repo = new MatchesRepository(db)
     repo.insertMany([
@@ -104,7 +111,7 @@ describe("applyMigrations", () => {
     for (let version = 1; version < latestSchemaVersion; version += 1) {
       const db = new Database(":memory:")
       for (const migration of migrations.slice(0, version)) {
-        db.exec(migration.up)
+        executeMigration(db, migration)
       }
       db.pragma(`user_version = ${version}`)
 
@@ -115,6 +122,153 @@ describe("applyMigrations", () => {
       expect(db.pragma("integrity_check", { simple: true })).toBe("ok")
       db.close()
     }
+  })
+
+  it("compresses v30 snapshot bodies without changing JSON bytes or identity", () => {
+    const db = new Database(":memory:")
+    db.pragma("foreign_keys = ON")
+    for (const migration of migrations.slice(0, 30)) executeMigration(db, migration)
+    db.pragma("user_version = 30")
+    const liveJson = '{"z":"召唤师","activePlayer":{"runes":{"statRuneIds":[5001]}}}'
+    const calibrationJson = '{ "clusterIds": [], "z": 1 }'
+    db.prepare(`
+      INSERT INTO live_game_snapshots
+        (game_id, puuid, game_time_ms, captured_at, reason, snapshot_json)
+      VALUES (77, 'migration-owner', 1234, 5678, 'state_change', ?)
+    `).run(liveJson)
+    db.prepare(`
+      INSERT INTO grade_calibration_snapshots
+        (calibration_id, calibration_hash, reference_population_json,
+         sample_count, snapshot_json, created_at)
+      VALUES ('calibration:migration', ?, '{"mode":"aram"}', 9, ?, 8765)
+    `).run("c".repeat(64), calibrationJson)
+    db.prepare(`
+      INSERT INTO grade_recipes
+        (recipe_id, algorithm_version, recipe_hash, calibration_id,
+         definition_json, created_at)
+      VALUES ('grade:migration', 3, ?, 'calibration:migration', '{}', 9000)
+    `).run("d".repeat(64))
+
+    applyMigrations(db)
+
+    const live = db.prepare(`
+      SELECT snapshot_encoding AS snapshotEncoding,
+             snapshot_uncompressed_bytes AS snapshotUncompressedBytes,
+             snapshot_compressed_bytes AS snapshotCompressedBytes,
+             snapshot_sha256 AS snapshotSha256,
+             snapshot_payload AS snapshotPayload,
+             has_active_player_stat_runes AS hasStatRunes,
+             captured_at AS capturedAt, reason
+      FROM live_game_snapshots WHERE game_id = 77
+    `).get() as StoredJsonBodyRow & {
+      hasStatRunes: number
+      capturedAt: number
+      reason: string
+    }
+    const calibration = db.prepare(`
+      SELECT snapshot_encoding AS snapshotEncoding,
+             snapshot_uncompressed_bytes AS snapshotUncompressedBytes,
+             snapshot_compressed_bytes AS snapshotCompressedBytes,
+             snapshot_sha256 AS snapshotSha256,
+             snapshot_payload AS snapshotPayload,
+             calibration_hash AS calibrationHash,
+             reference_population_json AS referencePopulationJson,
+             sample_count AS sampleCount, created_at AS createdAt
+      FROM grade_calibration_snapshots WHERE calibration_id = 'calibration:migration'
+    `).get() as StoredJsonBodyRow & {
+      calibrationHash: string
+      referencePopulationJson: string
+      sampleCount: number
+      createdAt: number
+    }
+
+    expect(decodeStoredJsonBody(live).text).toBe(liveJson)
+    expect(live).toMatchObject({
+      hasStatRunes: 1,
+      capturedAt: 5678,
+      reason: "state_change",
+      snapshotUncompressedBytes: Buffer.byteLength(liveJson),
+      snapshotSha256: createHash("sha256").update(liveJson).digest("hex"),
+    })
+    expect(decodeStoredJsonBody(calibration).text).toBe(calibrationJson)
+    expect(calibration).toMatchObject({
+      calibrationHash: "c".repeat(64),
+      referencePopulationJson: '{"mode":"aram"}',
+      sampleCount: 9,
+      createdAt: 8765,
+      snapshotUncompressedBytes: Buffer.byteLength(calibrationJson),
+      snapshotSha256: createHash("sha256").update(calibrationJson).digest("hex"),
+    })
+    expect(db.pragma("foreign_key_check")).toEqual([])
+    expect(db.pragma("foreign_keys", { simple: true })).toBe(1)
+    expect(db.prepare(`
+      SELECT name FROM sqlite_master
+      WHERE name IN ('live_game_snapshots_v31', 'grade_calibration_snapshots_v31')
+    `).all()).toEqual([])
+    expect(() => db.prepare(`
+      UPDATE grade_calibration_snapshots SET sample_count = 10
+      WHERE calibration_id = 'calibration:migration'
+    `).run()).toThrow("immutable")
+    db.close()
+  })
+
+  it("rolls v31 back atomically when a legacy live body is invalid JSON", () => {
+    const db = new Database(":memory:")
+    db.pragma("foreign_keys = ON")
+    for (const migration of migrations.slice(0, 30)) executeMigration(db, migration)
+    db.pragma("user_version = 30")
+    db.prepare(`
+      INSERT INTO live_game_snapshots
+        (game_id, puuid, game_time_ms, captured_at, reason, snapshot_json)
+      VALUES (1, 'owner', 1, 1, 'first', 'not-json')
+    `).run()
+
+    expect(() => applyMigrations(db)).toThrow("live_game_snapshot_body_invalid")
+    expect(db.pragma("user_version", { simple: true })).toBe(30)
+    expect(db.pragma("foreign_keys", { simple: true })).toBe(1)
+    expect(db.prepare(`
+      SELECT snapshot_json AS snapshotJson FROM live_game_snapshots
+    `).get()).toEqual({ snapshotJson: "not-json" })
+    expect(db.prepare(`
+      SELECT name FROM sqlite_master
+      WHERE name IN ('live_game_snapshots_v31', 'grade_calibration_snapshots_v31')
+    `).all()).toEqual([])
+    db.close()
+  })
+
+  it("rehearses populated schemas that predate participants and source payloads", () => {
+    const db = new Database(":memory:")
+    executeMigration(db, migrations[0])
+    db.pragma("user_version = 1")
+    new MatchesRepository(db).insertMany([buildMatchRow({ gameId: 7 })])
+
+    expect(migrationRehearsalCounts(db)).toEqual({
+      matches: 1,
+      participants: 0,
+      historyPages: 0,
+      distinctHistoryBodies: 0,
+      historyObservations: 0,
+      metricObservations: 0,
+      metricRecipeIdentities: 0,
+      liveSnapshots: 0,
+      gradeCalibrationSnapshots: 0,
+      timelineCacheRows: 0,
+      timelineCacheRawBodies: 0,
+      timelineSourceRows: 0,
+      timelineSourceKeys: 0,
+      currentTimelineSourceKeys: 0,
+      selectedTimelines: 0,
+      rawTimelineBodies: 0,
+      rawTimelineObservations: 0,
+    })
+    applyMigrations(db)
+    expect(migrationRehearsalCounts(db)).toMatchObject({
+      matches: 1,
+      participants: 0,
+      historyPages: 0,
+      historyObservations: 0,
+    })
+    db.close()
   })
 
   it("adds grade columns", () => {
@@ -146,7 +300,7 @@ describe("applyMigrations", () => {
       "sync_health",
       "match_grade_breakdowns",
       "session_boundary_overrides",
-      "match_timeline_cache",
+      "match_timeline_sources",
       "match_annotations",
       "annotation_tags",
       "practice_experiments",
@@ -164,17 +318,21 @@ describe("applyMigrations", () => {
     ).map((column) => column.name)
     expect(participantColumns).toContain("extended_metrics_json")
     expect(participantColumns).toContain("assigned_position")
-    const timelineColumns = (
-      db.pragma("table_info(match_timeline_cache)") as { name: string }[]
-    ).map((column) => column.name)
-    expect(timelineColumns).toContain("raw_json")
+    expect(db.prepare(`
+      SELECT name FROM sqlite_master
+      WHERE type = 'table' AND name = 'match_timeline_cache'
+    `).get()).toBeUndefined()
+    expect(db.prepare(`
+      SELECT name FROM sqlite_master
+      WHERE type = 'view' AND name = 'selected_match_timelines'
+    `).get()).toEqual({ name: "selected_match_timelines" })
   })
 
   it("upgrades an existing database without losing recorded games", () => {
     const db = new Database(":memory:")
 
     // A database created before grading existed.
-    db.exec(migrations[0].up)
+    executeMigration(db, migrations[0])
     db.pragma("user_version = 1")
     db.prepare(
       `INSERT INTO matches (
@@ -204,8 +362,8 @@ describe("applyMigrations", () => {
     const db = new Database(":memory:")
 
     // A database from before Summoner's Rift was tracked.
-    db.exec(migrations[0].up)
-    db.exec(migrations[1].up)
+    executeMigration(db, migrations[0])
+    executeMigration(db, migrations[1])
     db.pragma("user_version = 2")
     db.prepare(
       `INSERT INTO matches (
@@ -263,6 +421,7 @@ describe("applyMigrations", () => {
     ).all() as { name: string }[]).map((row) => row.name)
     expect(tables).toEqual(expect.arrayContaining([
       "rvi_recipes",
+      "rvi_recipe_storage_keys",
       "rvi_recipe_selections",
       "match_metric_observations",
     ]))
@@ -280,6 +439,7 @@ describe("applyMigrations", () => {
       "table_info(match_metric_observations)",
     ) as { name: string }[]).map((column) => column.name)
     expect(observationColumns).toEqual(expect.arrayContaining([
+      "recipe_key",
       "raw_evidence_state",
       "raw_value",
       "score_evidence_state",
@@ -289,6 +449,212 @@ describe("applyMigrations", () => {
       "source_quality",
       "derivation_id",
     ]))
+    expect(observationColumns).not.toEqual(expect.arrayContaining([
+      "algorithm_version",
+      "recipe_id",
+      "calibration_id",
+    ]))
+
+    const detailColumns = (db.pragma(
+      "table_info(match_metric_observation_details)",
+    ) as { name: string }[]).map((column) => column.name)
+    expect(detailColumns).toEqual([
+      "game_id", "puuid", "participant_id", "algorithm_version", "recipe_id",
+      "calibration_id", "metric_key", "raw_evidence_state",
+      "raw_evidence_reason", "raw_value", "score_evidence_state",
+      "score_evidence_reason", "score_value", "numerator", "denominator",
+      "opportunity_count", "unit", "comparison_scope", "reference_match_count",
+      "source", "source_quality", "derivation_id", "derived_at",
+    ])
+  })
+
+  it("compacts populated v29 metric recipes without changing their public rows", () => {
+    const db = new Database(":memory:")
+    db.pragma("foreign_keys = ON")
+    for (const migration of migrations.slice(0, 29)) executeMigration(db, migration)
+    db.pragma("user_version = 29")
+
+    new MatchesRepository(db).insertMany([
+      buildMatchRow({ gameId: 99, puuid: "metric-owner" }),
+    ])
+    db.prepare(`
+      INSERT INTO match_participants
+        (game_id, puuid, participant_id, team_id, is_player, champion_id, win,
+         kills, deaths, assists, gold_earned, damage_to_champions, damage_taken,
+         damage_self_mitigated, total_heal, time_ccing_others,
+         total_minions_killed, neutral_minions, vision_score, damage_objectives)
+      VALUES (99, 'metric-owner', 1, 100, 1, 84, 1,
+              2, 2, 2, 10000, 10000, 10000, 5000, 1000, 5, 50, 0, 10, 1000)
+    `).run()
+    db.prepare(`
+      INSERT INTO grade_calibration_snapshots
+        (calibration_id, calibration_hash, reference_population_json,
+         sample_count, snapshot_json, created_at)
+      VALUES ('calibration:test', ?, '{}', 1, '{}', 1000)
+    `).run("c".repeat(64))
+    db.prepare(`
+      INSERT INTO grade_recipes
+        (recipe_id, algorithm_version, recipe_hash, calibration_id,
+         definition_json, created_at)
+      VALUES ('grade:test', 3, ?, 'calibration:test', '{}', 1000)
+    `).run("f".repeat(64))
+    db.prepare(`
+      INSERT INTO rvi_recipes
+        (recipe_id, algorithm_version, recipe_hash, grade_recipe_id,
+         calibration_id, definition_json, created_at)
+      VALUES ('rvi:test-a', 3, ?, 'grade:test', 'calibration:test', '{}', 1000)
+    `).run("a".repeat(64))
+    db.prepare(`
+      INSERT INTO rvi_recipe_selections
+        (algorithm_version, recipe_id, selected_at)
+      VALUES (3, 'rvi:test-a', 1000)
+    `).run()
+    db.prepare(`
+      INSERT INTO match_metric_observations
+        (game_id, puuid, participant_id, algorithm_version, recipe_id,
+         calibration_id, metric_key, raw_evidence_state, raw_evidence_reason,
+         raw_value, score_evidence_state, score_evidence_reason, score_value,
+         numerator, denominator, opportunity_count, unit, comparison_scope,
+         reference_match_count, source, source_quality, derivation_id, derived_at)
+      VALUES (99, 'metric-owner', 1, 3, 'rvi:test-a', 'calibration:test',
+              'damage_share', 'observed', NULL, 0.4, 'observed', NULL, 0.6,
+              4, 10, NULL, 'ratio', 'position', 30, 'scoreboard', 'verified',
+              'summary', 1234)
+    `).run()
+
+    const before = db.prepare(
+      "SELECT * FROM match_metric_observations",
+    ).all()
+    expect(applyMigrations(db)).toBe(latestSchemaVersion)
+    expect(db.prepare(
+      "SELECT * FROM match_metric_observation_details",
+    ).all()).toEqual(before)
+    expect(db.pragma("foreign_key_check")).toEqual([])
+
+    expect(db.prepare(`
+      SELECT COUNT(*) AS count,
+             COUNT(DISTINCT recipe_key) AS recipeKeys
+      FROM match_metric_observations
+    `).get()).toEqual({ count: 1, recipeKeys: 1 })
+
+    db.prepare(`
+      INSERT INTO rvi_recipes
+        (recipe_id, algorithm_version, recipe_hash, grade_recipe_id,
+         calibration_id, definition_json, created_at)
+      VALUES ('rvi:test-b', 3, ?, 'grade:test', 'calibration:test', '{}', 2000)
+    `).run("b".repeat(64))
+    expect(db.prepare(`
+      SELECT COUNT(*) AS count FROM rvi_recipe_storage_keys
+      WHERE recipe_id IN ('rvi:test-a', 'rvi:test-b')
+    `).get()).toEqual({ count: 2 })
+
+    expect(() => db.prepare(`
+      UPDATE rvi_recipe_selections
+      SET recipe_id = 'rvi:test-b' WHERE algorithm_version = 3
+    `).run()).toThrow("rvi_recipe_purge_required")
+    expect(() => db.prepare(`
+      INSERT INTO match_metric_observations
+        (game_id, puuid, participant_id, recipe_key, metric_key,
+         raw_evidence_state, raw_value, score_evidence_state, score_value,
+         unit, source, source_quality, derivation_id, derived_at)
+      SELECT 99, 'metric-owner', 1, recipe_key, 'time_dead_share',
+             'observed', 0.1, 'observed', 0.2, 'ratio', 'scoreboard',
+             'verified', 'summary', 2000
+      FROM rvi_recipe_storage_keys WHERE recipe_id = 'rvi:test-b'
+    `).run()).toThrow("metric_observation_recipe_is_not_selected")
+    expect(() => db.prepare(`
+      UPDATE match_metric_observations
+      SET recipe_key = (
+        SELECT recipe_key FROM rvi_recipe_storage_keys
+        WHERE recipe_id = 'rvi:test-b'
+      )
+      WHERE metric_key = 'damage_share'
+    `).run()).toThrow("metric_observation_recipe_is_not_selected")
+    expect(() => db.prepare(
+      "DELETE FROM rvi_recipe_selections WHERE algorithm_version = 3",
+    ).run()).toThrow("rvi_recipe_purge_required")
+    expect(() => db.prepare(
+      "DELETE FROM rvi_recipes WHERE recipe_id = 'rvi:test-a'",
+    ).run()).toThrow()
+
+    db.prepare("DELETE FROM match_metric_observations").run()
+    db.prepare("DELETE FROM rvi_recipe_selections WHERE algorithm_version = 3").run()
+    db.prepare("DELETE FROM rvi_recipes WHERE recipe_id = 'rvi:test-a'").run()
+    expect(db.prepare(`
+      SELECT COUNT(*) AS count FROM rvi_recipe_storage_keys
+      WHERE recipe_id = 'rvi:test-a'
+    `).get()).toEqual({ count: 0 })
+    expect(db.pragma("foreign_key_check")).toEqual([])
+    db.close()
+  })
+
+  it("does not retain abandoned parallel pipeline tables", () => {
+    const db = new Database(":memory:")
+    applyMigrations(db)
+
+    const tables = new Set((db.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table'",
+    ).all() as { name: string }[]).map((row) => row.name))
+    for (const retired of [
+      "riot_history_runs",
+      "riot_match_ingestion",
+      "riot_history_run_matches",
+      "history_remediation_runs",
+      "match_enrichment_jobs",
+      "match_source_captures",
+      "match_source_capture_payloads",
+      "match_label_evaluation_versions",
+      "match_performance_label_versions",
+      "live_capture_compactions",
+      "artifact_publish_journal",
+      "maintenance_operations",
+      "release_cleanup_state",
+    ]) {
+      expect(tables.has(retired), retired).toBe(false)
+    }
+  })
+
+  it("rolls repeated history polls up without losing observation provenance", () => {
+    const db = new Database(":memory:")
+    for (const migration of migrations.slice(0, 27)) executeMigration(db, migration)
+    db.pragma("user_version = 27")
+
+    const insert = db.prepare(`
+      INSERT INTO match_source_payloads
+        (owner_puuid, source, source_match_id, game_id, kind, encoding,
+         payload, sha256, data_version, mapper_version,
+         serialization_version, mapping_status, mapping_error, mapped_at,
+         fetched_at)
+      VALUES (?, 'league_client', ?, NULL, 'history_page', 'gzip_json_v1',
+              ?, ?, NULL, 11, 1, 'mapped', NULL, ?, ?)
+    `)
+    const sameHash = "a".repeat(64)
+    insert.run("owner", "page:100:first", Buffer.from("same"), sameHash, 100, 100)
+    insert.run("owner", "page:200:second", Buffer.from("same"), sameHash, 200, 200)
+    insert.run(
+      "owner",
+      "page:300:changed",
+      Buffer.from("changed"),
+      "b".repeat(64),
+      300,
+      300,
+    )
+
+    expect(applyMigrations(db)).toBe(latestSchemaVersion)
+    expect(db.prepare(`
+      SELECT source_match_id AS sourceMatchId, sha256,
+             fetched_at AS fetchedAt, first_fetched_at AS firstFetchedAt,
+             last_fetched_at AS lastFetchedAt,
+             observation_count AS observationCount
+      FROM match_source_payloads
+      WHERE owner_puuid = 'owner' AND kind = 'history_page'
+      ORDER BY sha256
+    `).all()).toEqual([
+      { sourceMatchId: "recent:0:19", sha256: sameHash, fetchedAt: 200,
+        firstFetchedAt: 100, lastFetchedAt: 200, observationCount: 2 },
+      { sourceMatchId: "recent:0:19", sha256: "b".repeat(64), fetchedAt: 300,
+        firstFetchedAt: 300, lastFetchedAt: 300, observationCount: 1 },
+    ])
   })
 
   it("fills in per-minute rates for games recorded before those columns existed", () => {

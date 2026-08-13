@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { InsightObservation } from "../electron/main/database/insights-repo.js"
-import { MATCH_GRADE_RECIPE_ID } from "../electron/main/matches/match-grade-recipe.js"
+import { DEFAULT_GRADE_RECIPE_ID } from "../electron/main/matches/match-grade-recipe.js"
 import { buildPerformanceProfile } from "../electron/main/matches/performance-profile.js"
 import {
   RVI_VECTOR_KEYS,
@@ -52,7 +51,7 @@ function observation(
 ): RviMatchObservation {
   const base: RviMatchObservation = {
     matchId,
-    recipeId: MATCH_GRADE_RECIPE_ID,
+    recipeId: DEFAULT_GRADE_RECIPE_ID,
     playedAt: matchId * 1_000,
     recallScore: 50,
     familyPercentiles: familyScores(50),
@@ -75,14 +74,9 @@ function observation(
   }
 }
 
-describe("Recall Vector Index v3 performance-profile adapter", () => {
-  it("returns no profile for empty v3 input or legacy-only rows", () => {
+describe("Recall Vector Index performance-profile adapter", () => {
+  it("returns no profile for an empty canonical input", () => {
     expect(buildPerformanceProfile({ rviObservations: [] })).toBeUndefined()
-    expect(buildPerformanceProfile({
-      family: "sr",
-      observations: [] as InsightObservation[],
-      gradeComponentHistory: [],
-    })).toBeUndefined()
   })
 
   it("returns seven match arms plus career Range and averages available career arms", () => {
@@ -104,8 +98,7 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
       })),
     })!
 
-    expect(profile.algorithmVersion).toBe(3)
-    expect(profile.recipeId).toBe(MATCH_GRADE_RECIPE_ID)
+    expect(profile.recipeId).toBe(DEFAULT_GRADE_RECIPE_ID)
     expect(profile.score).toBe(67)
     expect(profile.headline).toMatchObject({
       source: "career_arm_mean",
@@ -409,22 +402,20 @@ describe("Recall Vector Index v3 performance-profile adapter", () => {
       familyPercentiles: familyScores(40),
     })
     const plain = buildPerformanceProfile({ rviObservations: [row] })!
-    const legacyDecorated = buildPerformanceProfile({
+    const aram = buildPerformanceProfile({
       rviObservations: [row],
       family: "aram",
-      timelineHistory: [],
-      championRoles: new Map([[54, ["marksman"]]]),
     })!
 
-    expect(legacyDecorated.score).toBe(plain.score)
-    expect(legacyDecorated.dimensions.map((dimension) => dimension.key)).toEqual([
+    expect(aram.score).toBe(plain.score)
+    expect(aram.dimensions.map((dimension) => dimension.key)).toEqual([
       "combat",
       "positioning_survival",
       "control_utility",
       "economy",
       "consistency_versatility",
     ])
-    expect(legacyDecorated.dimensions.flatMap((dimension) =>
+    expect(aram.dimensions.flatMap((dimension) =>
       dimension.metrics.map((metric) => metric.key))).toEqual([])
   })
 

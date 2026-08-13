@@ -15,7 +15,7 @@ const props = defineProps<{
 
 const graded = computed(() => props.history.filter((game) => Number.isFinite(game.recallScore)))
 const rollingWindow = computed(() => graded.value.length >= 14 ? 7 : graded.value.length >= 8 ? 5 : 3)
-const rolling = computed(() => graded.value.map((game, index) => {
+const rolling = computed(() => graded.value.map((_, index) => {
   if (index + 1 < rollingWindow.value) return null
   const values = graded.value
     .slice(index + 1 - rollingWindow.value, index + 1)

@@ -15,9 +15,7 @@ import type {
   GoalInput,
   GradeCount,
   InsightsReport,
-  LobbyComparison,
   LifetimeTotals,
-  MatchDetail,
   MatchPage,
   MatchQuery,
   MatchRow,
@@ -34,8 +32,6 @@ import type {
   StatsFilter,
   StatsMeta,
   StatsSummary,
-  StyleAxis,
-  StyleReport,
   SyncResult,
   TrackedMode,
 } from "../types/stats"
@@ -331,23 +327,6 @@ export const api = {
     return invoke("matches:champions")
   },
 
-  getStyleReport(
-    query: Partial<MatchQuery>,
-    family: ModeFamily,
-  ): Promise<StyleReport> {
-    return invoke("stats:style", query, family)
-  },
-
-  getLobbyComparison(
-    filter: Partial<StatsFilter>,
-  ): Promise<LobbyComparison | undefined> {
-    return invoke("stats:lobby", filter)
-  },
-
-  getMatchDetail(gameId: number): Promise<MatchDetail> {
-    return invoke("matches:detail", gameId)
-  },
-
   getInsights(
     filter: Partial<StatsFilter>,
     family: ModeFamily,
@@ -378,24 +357,10 @@ export const api = {
     return invoke("performance-reference:rebuild")
   },
 
-  getDrift(
-    query: Partial<MatchQuery>,
-    family: ModeFamily,
-  ): Promise<{ label: string; axes: StyleAxis[] }[]> {
-    return invoke("stats:drift", query, family)
-  },
-
   getRankedChampions(
     filter: Partial<StatsFilter>,
   ): Promise<ChampionRanking> {
     return invoke("champions:ranked", filter)
-  },
-
-  getMatchAxes(
-    gameId: number,
-    family: ModeFamily,
-  ): Promise<{ axes: StyleAxis[] }> {
-    return invoke("matches:axes", gameId, family)
   },
 
   getRecords(filter: Partial<StatsFilter>): Promise<PersonalRecord[]> {

@@ -4,6 +4,7 @@ import { applyMigrations } from "../electron/main/database/migrations.js"
 import { MatchesRepository } from "../electron/main/database/matches-repo.js"
 import { ParticipantsRepository } from "../electron/main/database/participants-repo.js"
 import { ChampSelectRepository } from "../electron/main/database/champ-select-repo.js"
+import { MatchSourceRepository } from "../electron/main/database/match-source-repo.js"
 import { MatchSync } from "../electron/main/match-sync.js"
 import type { LcuGame, ParticipantRow } from "../electron/main/matches/types.js"
 
@@ -163,6 +164,13 @@ let repo: MatchesRepository
 let participants: ParticipantsRepository
 let db: InstanceType<typeof Database>
 
+function countStoredLobbies(puuid: string): number {
+  const row = db.prepare(
+    "SELECT COUNT(DISTINCT game_id) AS total FROM match_participants WHERE puuid = ?",
+  ).get(puuid) as { total: number }
+  return row.total
+}
+
 beforeEach(() => {
   db = new Database(":memory:")
   applyMigrations(db)
@@ -201,6 +209,30 @@ describe("MatchSync", () => {
     expect(second.fetched).toBe(3)
     expect(second.inserted).toBe(0)
     expect(repo.countMatches(PUUID)).toBe(3)
+  })
+
+  it("stores an unchanged history window once across repeated polling", async () => {
+    const client = new FakeClient([1, 2, 3].map((id) => aramGame(id)))
+    const sources = new MatchSourceRepository(db)
+    const sync = new MatchSync(
+      client as never,
+      repo,
+      PUUID,
+      undefined,
+      undefined,
+      undefined,
+      sources,
+    )
+
+    await sync.syncNow()
+    await sync.syncNow()
+
+    expect(db.prepare(`
+      SELECT COUNT(*) AS count, observation_count AS observations
+      FROM match_source_payloads
+      WHERE owner_puuid = ? AND source = 'league_client'
+        AND source_match_id = 'recent:0:19' AND kind = 'history_page'
+    `).get(PUUID)).toEqual({ count: 1, observations: 2 })
   })
 
   it("adds only the newly played games when the window slides", async () => {
@@ -248,7 +280,7 @@ describe("MatchSync", () => {
       [1, PUUID],
       [2, PUUID],
     ])
-    expect(participants.countGamesWithLobby(PUUID)).toBe(2)
+    expect(countStoredLobbies(PUUID)).toBe(2)
   })
 
   it("does not regrade matches that already have a grade", async () => {
@@ -288,10 +320,10 @@ describe("MatchSync", () => {
 
     expect(result).toMatchObject({ fetched: 1, inserted: 1, graded: 0, lobbies: 0 })
     expect(repo.countMatches(PUUID)).toBe(1)
-    expect(participants.countGamesWithLobby(PUUID)).toBe(0)
+    expect(countStoredLobbies(PUUID)).toBe(0)
   })
 
-  it("delegates a complete Rift lobby to the v3 coordinator", async () => {
+  it("delegates a complete Rift lobby to the grading coordinator", async () => {
     const client = new FakeClient([riftGame(1)])
     client.buildDetail = buildFarmLobby
     const gradeStoredMatch = vi.fn(() => "ready" as const)
@@ -306,7 +338,7 @@ describe("MatchSync", () => {
     expect(gradeStoredMatch).toHaveBeenCalledWith(1, PUUID)
   })
 
-  it("records an LCU duration conflict before handing the lobby to v3", async () => {
+  it("records an LCU duration conflict before handing the lobby to grading", async () => {
     const client = new FakeClient([riftGame(1)])
     client.buildDetail = (gameId) => ({ ...buildFarmLobby(gameId), gameDuration: 1_300 })
     const gradeStoredMatch = vi.fn(() => {
@@ -324,7 +356,7 @@ describe("MatchSync", () => {
     expect(repo.getMatch(1, PUUID)?.durationQuality).toBe("inconsistent")
   })
 
-  it("delegates a complete ARAM lobby to the same v3 coordinator", async () => {
+  it("delegates a complete ARAM lobby to the same grading coordinator", async () => {
     const client = new FakeClient([aramGame(1)])
     client.buildDetail = buildFarmLobby
     const gradeStoredMatch = vi.fn(() => "ready" as const)
@@ -345,7 +377,7 @@ describe("MatchSync", () => {
 
     await sync.syncNow()
 
-    expect(participants.countGamesWithLobby(PUUID)).toBe(2)
+    expect(countStoredLobbies(PUUID)).toBe(2)
   })
 
   it("does not fetch a game twice to store its lobby", async () => {
@@ -364,7 +396,7 @@ describe("MatchSync", () => {
     // A game already recorded and graded, with no lobby stored.
     const client = new FakeClient([aramGame(1)])
     await new MatchSync(client as never, repo, PUUID).syncNow()
-    expect(participants.countGamesWithLobby(PUUID)).toBe(0)
+    expect(countStoredLobbies(PUUID)).toBe(0)
 
     const result = await new MatchSync(
       client as never,
@@ -374,7 +406,7 @@ describe("MatchSync", () => {
     ).syncNow()
 
     expect(result.lobbies).toBe(1)
-    expect(participants.countGamesWithLobby(PUUID)).toBe(1)
+    expect(countStoredLobbies(PUUID)).toBe(1)
   })
 
   it("stamps champion select assignments onto the player's own team", async () => {

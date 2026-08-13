@@ -1,4 +1,10 @@
-import { MATCH_GRADE_RECIPE_ID } from "./match-grade-recipe.js"
+import {
+  canonicalCalibrationIdentity,
+  CURRENT_GRADE_RECIPE_DEFINITION_ID,
+  DEFAULT_GRADE_RECIPE_ID,
+  LEGACY_GRADE_RECIPE_DEFINITION_ID,
+  type GradeRecipeIdentityKind,
+} from "./match-grade-recipe.js"
 import {
   CAREER_RVI_ARM_KEYS,
   PERFORMANCE_ARM_COPY,
@@ -10,15 +16,127 @@ import {
   type RviCapabilityVector,
 } from "./match-metric-registry.js"
 
-export const RVI_ALGORITHM_VERSION = 3 as const
-export const RVI_RECIPE_DEFINITION_ID =
+/** Legacy database partition used by the current RVI recipe. */
+export const CANONICAL_RVI_STORAGE_PARTITION = 3 as const
+
+export const CURRENT_RVI_RECIPE_DEFINITION_ID =
+  "recall.rvi.definition.dcd9eb30fa637a870a44d3c48dc458149b9892687a476992c3a7dc95be743b1b" as const
+export const LEGACY_RVI_RECIPE_DEFINITION_ID =
   "recall.rvi.v3.detail-definition.2026-08-10.r2" as const
-export const RVI_METRIC_REGISTRY_VERSION =
+const LEGACY_RVI_METRIC_REGISTRY_ID =
   "recall.rvi.v3.metric-registry.2026-08-10.r2" as const
-export const RVI_TIMELINE_POLICY_VERSION =
+const LEGACY_RVI_TIMELINE_POLICY_ID =
   "recall.rvi.v3.timeline.12s-1200u.2026-08-10.r2" as const
-export const RVI_VECTOR_POLICY_VERSION =
+const LEGACY_RVI_VECTOR_POLICY_ID =
   "recall.rvi.v3.seven-match-arms.profile-range.2026-08-10.r2" as const
+export const CURRENT_RVI_METRIC_REGISTRY_ID =
+  "recall.rvi.metric-registry.dfd1db11fa32b401ad54b2dc565620b71b3ed6b45520db7d955ab318fcb20088" as const
+export const CURRENT_RVI_TIMELINE_POLICY_ID =
+  "recall.rvi.timeline-policy.c9fae4966da7e965e076d6e4cb6a1a1d05a01a4141d9cab1a871ed8ab1d4a245" as const
+export const CURRENT_RVI_VECTOR_POLICY_ID =
+  "recall.rvi.vector-policy.77dcf16b09b2ade5469bfc058da241a3c6e2f1a28ec7f35ab9ea5acb3f613c72" as const
+
+export type RviRecipeIdentityKind = GradeRecipeIdentityKind
+
+export interface RviRecipeIdentityCandidate {
+  algorithmVersion: number
+  recipeId: string
+  gradeRecipeId: string
+  calibrationId: string
+  definition: unknown
+}
+
+const stableContractValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(stableContractValue)
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, stableContractValue(entry)]))
+  }
+  return value
+}
+
+const sameContractValue = (left: unknown, right: unknown) =>
+  JSON.stringify(stableContractValue(left)) === JSON.stringify(stableContractValue(right))
+
+const LEGACY_DEFAULT_GRADE_RECIPE_ID =
+  `${LEGACY_GRADE_RECIPE_DEFINITION_ID}@calibration:compatibility-lobby-rank-r1`
+
+/**
+ * Recipe names used to participate in the deterministic bootstrap seed. Map
+ * the canonical identity back to that frozen seed namespace so this naming
+ * cleanup cannot alter confidence intervals for an existing match sample.
+ */
+export function stableRviBootstrapSeedIdentity(recipeId: string): string {
+  if (recipeId === DEFAULT_GRADE_RECIPE_ID) return LEGACY_DEFAULT_GRADE_RECIPE_ID
+  return recipeId
+    .replace(
+      CURRENT_RVI_RECIPE_DEFINITION_ID,
+      LEGACY_RVI_RECIPE_DEFINITION_ID,
+    )
+    .replace(
+      CURRENT_GRADE_RECIPE_DEFINITION_ID,
+      LEGACY_GRADE_RECIPE_DEFINITION_ID,
+    )
+    .replaceAll("recall.grade.calibration.", "recall.grade.v3.calibration.")
+}
+
+function rviRecipeIdForDefinition(
+  definitionId: string,
+  gradeRecipeId: string,
+  calibrationId: string,
+) {
+  const grade = nonemptyIdentity(gradeRecipeId, "gradeRecipeId")
+  const calibration = nonemptyIdentity(calibrationId, "calibrationId")
+  return `${definitionId}@grade:${grade}@calibration:${calibration}`
+}
+
+export function rviRecipeIdForIdentity(
+  gradeRecipeId: string,
+  calibrationId: string,
+  identity: RviRecipeIdentityKind,
+): string {
+  return rviRecipeIdForDefinition(
+    identity === "canonical"
+      ? CURRENT_RVI_RECIPE_DEFINITION_ID
+      : LEGACY_RVI_RECIPE_DEFINITION_ID,
+    gradeRecipeId,
+    identity === "canonical" ? canonicalCalibrationIdentity(calibrationId) : calibrationId,
+  )
+}
+
+export function rviRecipeIdentityKind(
+  recipe: RviRecipeIdentityCandidate | undefined,
+  gradeRecipeId: string,
+  calibrationId: string,
+  gradeIdentity: GradeRecipeIdentityKind,
+): RviRecipeIdentityKind | undefined {
+  if (!recipe || recipe.algorithmVersion !== CANONICAL_RVI_STORAGE_PARTITION ||
+      recipe.gradeRecipeId !== gradeRecipeId || recipe.calibrationId !== calibrationId ||
+      !recipe.definition || typeof recipe.definition !== "object" ||
+      Array.isArray(recipe.definition)) return undefined
+  const expectedDefinition = gradeIdentity === "canonical"
+    ? CURRENT_RVI_RECIPE_DEFINITION_ID
+    : LEGACY_RVI_RECIPE_DEFINITION_ID
+  const definition = recipe.definition as Record<string, unknown>
+  const expected = rviRecipeDefinitionForIdentity(
+    gradeRecipeId,
+    calibrationId,
+    gradeIdentity,
+  )
+  return definition.recipeDefinitionId === expectedDefinition &&
+      sameContractValue(Object.keys(definition).sort(), Object.keys(expected).sort()) &&
+      Object.entries(expected).every(([key, value]) =>
+        sameContractValue(definition[key], value),
+      ) &&
+      recipe.recipeId === rviRecipeIdForIdentity(
+        gradeRecipeId,
+        calibrationId,
+        gradeIdentity,
+      )
+    ? gradeIdentity
+    : undefined
+}
 
 export interface RviVectorDefinition {
   key: RviCapabilityVector
@@ -55,27 +173,42 @@ export function rviRecipeIdForCalibration(
   gradeRecipeId: string,
   calibrationId: string,
 ): string {
-  const grade = nonemptyIdentity(gradeRecipeId, "gradeRecipeId")
-  const calibration = nonemptyIdentity(calibrationId, "calibrationId")
-  return `${RVI_RECIPE_DEFINITION_ID}@grade:${grade}@calibration:${calibration}`
+  return rviRecipeIdForIdentity(gradeRecipeId, calibrationId, "canonical")
 }
 
 export function rviRecipeDefinition(
   gradeRecipeId: string,
   calibrationId: string,
 ) {
+  return rviRecipeDefinitionForIdentity(gradeRecipeId, calibrationId, "canonical")
+}
+
+/** Exact persisted contract for a supported canonical or storage-alias identity. */
+export function rviRecipeDefinitionForIdentity(
+  gradeRecipeId: string,
+  calibrationId: string,
+  identity: RviRecipeIdentityKind,
+) {
   const grade = nonemptyIdentity(gradeRecipeId, "gradeRecipeId")
   const calibration = nonemptyIdentity(calibrationId, "calibrationId")
   return Object.freeze({
-    algorithmVersion: RVI_ALGORITHM_VERSION,
-    recipeDefinitionId: RVI_RECIPE_DEFINITION_ID,
-    recipeId: rviRecipeIdForCalibration(grade, calibration),
+    algorithmVersion: CANONICAL_RVI_STORAGE_PARTITION,
+    recipeDefinitionId: identity === "canonical"
+      ? CURRENT_RVI_RECIPE_DEFINITION_ID
+      : LEGACY_RVI_RECIPE_DEFINITION_ID,
+    recipeId: rviRecipeIdForIdentity(grade, calibration, identity),
     gradeRecipeId: grade,
     calibrationId: calibration,
     identities: Object.freeze({
-      metricRegistry: RVI_METRIC_REGISTRY_VERSION,
-      vectorPolicy: RVI_VECTOR_POLICY_VERSION,
-      timelinePolicy: RVI_TIMELINE_POLICY_VERSION,
+      metricRegistry: identity === "canonical"
+        ? CURRENT_RVI_METRIC_REGISTRY_ID
+        : LEGACY_RVI_METRIC_REGISTRY_ID,
+      vectorPolicy: identity === "canonical"
+        ? CURRENT_RVI_VECTOR_POLICY_ID
+        : LEGACY_RVI_VECTOR_POLICY_ID,
+      timelinePolicy: identity === "canonical"
+        ? CURRENT_RVI_TIMELINE_POLICY_ID
+        : LEGACY_RVI_TIMELINE_POLICY_ID,
     }),
     aggregation: Object.freeze({
       matchVectorMethod: "fixed_denominator_core_bundle_neutral_imputation" as const,
@@ -105,11 +238,11 @@ export function rviRecipeDefinition(
   })
 }
 
-const COMPATIBILITY_CALIBRATION_ID = "compatibility-lobby-rank-r1"
+const DEFAULT_CALIBRATION_ID = "default-lobby-rank"
 
-/** Compatibility definition for pure callers; persisted builds use the selected frozen id. */
-export const RVI_RECIPE = rviRecipeDefinition(
-  MATCH_GRADE_RECIPE_ID,
-  COMPATIBILITY_CALIBRATION_ID,
+/** Default definition for pure callers; persisted builds use the selected frozen id. */
+export const DEFAULT_RVI_RECIPE = rviRecipeDefinition(
+  DEFAULT_GRADE_RECIPE_ID,
+  DEFAULT_CALIBRATION_ID,
 )
-export const RVI_RECIPE_ID = RVI_RECIPE.recipeId
+export const DEFAULT_RVI_RECIPE_ID = DEFAULT_RVI_RECIPE.recipeId

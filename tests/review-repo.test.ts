@@ -75,7 +75,7 @@ describe("ReviewRepository", () => {
       tagIds: [tag.id],
     })
     reviews.setBoundaryOverride(1, PUUID, "split")
-    matches.deleteAll(PUUID)
+    db.prepare("DELETE FROM matches WHERE puuid = ?").run(PUUID)
     expect(db.prepare("SELECT COUNT(*) AS count FROM match_annotations").get())
       .toEqual({ count: 0 })
     expect(db.prepare("SELECT COUNT(*) AS count FROM match_annotation_tags").get())

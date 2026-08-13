@@ -7,43 +7,163 @@ import type { RecallGrade } from "../../../src/shared/recall-grade.js"
 import { GRADE_CORE_FACT_CONTRACT_VERSION } from "./grade-core-facts.js"
 import { POSITION_RESOLVER_VERSION } from "./position.js"
 
-export const MATCH_GRADE_ALGORITHM_VERSION = 3 as const
+/**
+ * Legacy database partition used by the current Grade recipe. Recipe identity,
+ * rather than this schema key, determines whether a derived artifact is current.
+ */
+export const CANONICAL_GRADE_STORAGE_PARTITION = 3 as const
 
 /**
- * Product version and scoring recipe are deliberately separate identities.
+ * Product releases and scoring recipes deliberately have separate identities.
  * Never reuse this value after changing a weight, threshold, taxonomy, or
  * calibration rule: stored match Grade artifacts use it as their recipe key.
  */
-export const MATCH_GRADE_RECIPE_DEFINITION_ID =
+export const CURRENT_GRADE_RECIPE_DEFINITION_ID =
+  "recall.grade.definition.2fdb9b4846e7ce0eeda3e425f0dc021a43f9f475776f01e7f0f58bd1857f8ec3" as const
+
+/**
+ * Exact identity emitted by the immediately preceding release. Existing
+ * installations may keep this immutable recipe selected: it describes the
+ * same arithmetic and, more importantly, points at their original frozen
+ * calibration. This is a storage alias, never a new-recipe default.
+ */
+export const LEGACY_GRADE_RECIPE_DEFINITION_ID =
   "recall.grade.v3.radar-arms.2026-08-10.r2" as const
 
 /**
- * Version of the missing/zero/no-opportunity semantics consumed by match Grade.
- * Bump this whenever an Evidence state changes how a metric is calibrated or
- * aggregated, even when the raw field contract itself is unchanged.
+ * Immutable identity of the missing/zero/no-opportunity semantics consumed by
+ * match Grade. Allocate a new identity whenever those semantics change.
  */
-export const MATCH_GRADE_EVIDENCE_POLICY_VERSION =
+export const CURRENT_GRADE_EVIDENCE_POLICY_ID =
+  "recall.grade.evidence-policy.74c7d442902b1b59fb31522517a10948889d123f1626173ee51d9a4111911f72" as const
+export const LEGACY_GRADE_EVIDENCE_POLICY_ID =
   "recall.grade.v3.evidence.2026-08-10.r2" as const
-export const MATCH_GRADE_CLUSTER_ID_POLICY_VERSION =
+export const CURRENT_GRADE_CLUSTER_POLICY_ID =
   "canonical_platform_game_id.r1" as const
+
+export type GradeRecipeIdentityKind = "canonical" | "legacy_identity_alias"
+
+export const gradeRecipeDefinitionId = (identity: GradeRecipeIdentityKind) =>
+  identity === "canonical"
+    ? CURRENT_GRADE_RECIPE_DEFINITION_ID
+    : LEGACY_GRADE_RECIPE_DEFINITION_ID
+
+export const gradeEvidencePolicyId = (identity: GradeRecipeIdentityKind) =>
+  identity === "canonical"
+    ? CURRENT_GRADE_EVIDENCE_POLICY_ID
+    : LEGACY_GRADE_EVIDENCE_POLICY_ID
+
+export interface GradeRecipeIdentityCandidate {
+  algorithmVersion: number
+  recipeId: string
+  calibrationId: string | null
+  definition: unknown
+}
+
+const definitionIdentity = (definition: unknown): string | undefined =>
+  definition && typeof definition === "object" && !Array.isArray(definition)
+    ? (definition as Record<string, unknown>).recipeDefinitionId as string | undefined
+    : undefined
+
+const stableContractValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(stableContractValue)
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, stableContractValue(entry)]))
+  }
+  return value
+}
+
+const sameContractValue = (left: unknown, right: unknown) =>
+  JSON.stringify(stableContractValue(left)) === JSON.stringify(stableContractValue(right))
+
+function definitionMatchesIdentity(
+  definition: Record<string, unknown>,
+  identity: GradeRecipeIdentityKind,
+): boolean {
+  const expected = gradeRecipeContractForIdentity(identity)
+  const expectedKeys = [
+    ...Object.keys(expected),
+    "calibrationHash",
+    "calibrationId",
+    "referencePopulation",
+  ].sort()
+  return sameContractValue(Object.keys(definition).sort(), expectedKeys) &&
+    Object.entries(expected).every(([key, value]) =>
+    sameContractValue(definition[key], value),
+    )
+}
+
+/** Classifies only the two exact recipe identities supported by this build. */
+export function gradeRecipeIdentityKind(
+  recipe: GradeRecipeIdentityCandidate | undefined,
+): GradeRecipeIdentityKind | undefined {
+  if (!recipe?.calibrationId ||
+      recipe.algorithmVersion !== CANONICAL_GRADE_STORAGE_PARTITION) return undefined
+  const definitionId = definitionIdentity(recipe.definition)
+  const definition = recipe.definition as Record<string, unknown>
+  if (definitionId === CURRENT_GRADE_RECIPE_DEFINITION_ID &&
+      recipe.recipeId === recipeIdForCalibration(recipe.calibrationId) &&
+      definitionMatchesIdentity(definition, "canonical")) return "canonical"
+  if (definitionId === LEGACY_GRADE_RECIPE_DEFINITION_ID &&
+      recipe.calibrationId.startsWith("recall.grade.v3.calibration.") &&
+      recipe.recipeId === recipeIdForDefinition(
+        LEGACY_GRADE_RECIPE_DEFINITION_ID,
+        recipe.calibrationId,
+      ) && definitionMatchesIdentity(definition, "legacy_identity_alias")) {
+    return "legacy_identity_alias"
+  }
+  return undefined
+}
 
 /**
  * A persisted recipe id includes the immutable calibration snapshot identity.
  * The snapshot id should be a content hash (or another immutable id) supplied
  * by the calibration store, not a mutable label such as "current".
  */
-export function recipeIdForCalibration(calibrationSnapshotId: string): string {
+function recipeIdForDefinition(
+  definitionId: string,
+  calibrationSnapshotId: string,
+): string {
   const snapshot = calibrationSnapshotId.trim()
   if (!snapshot || !/^[A-Za-z0-9._:-]+$/.test(snapshot)) {
     throw new TypeError("calibrationSnapshotId must be a non-empty immutable identifier")
   }
-  return `${MATCH_GRADE_RECIPE_DEFINITION_ID}@calibration:${snapshot}`
+  return `${definitionId}@calibration:${snapshot}`
 }
 
-/** Only for old gradeLobby callers while they migrate to a real snapshot. */
-export const MATCH_GRADE_RECIPE_ID = recipeIdForCalibration("compatibility-lobby-rank-r1")
+/** Keeps an old snapshot FK opaque while removing its retired label from new ids. */
+export function canonicalCalibrationIdentity(calibrationSnapshotId: string): string {
+  return calibrationSnapshotId.replace(
+    /^recall\.grade\.v3\.calibration\./,
+    "recall.grade.calibration.",
+  )
+}
 
-export const MATCH_GRADE_TAXONOMY_VERSION = "recall.archetypes.2026-08-10.r3" as const
+export function recipeIdForCalibration(calibrationSnapshotId: string): string {
+  return recipeIdForDefinition(
+    CURRENT_GRADE_RECIPE_DEFINITION_ID,
+    canonicalCalibrationIdentity(calibrationSnapshotId),
+  )
+}
+
+export function recipeIdForIdentity(
+  calibrationSnapshotId: string,
+  identity: GradeRecipeIdentityKind,
+): string {
+  return recipeIdForDefinition(
+    gradeRecipeDefinitionId(identity),
+    identity === "canonical"
+      ? canonicalCalibrationIdentity(calibrationSnapshotId)
+      : calibrationSnapshotId,
+  )
+}
+
+/** Default identity for pure callers; persisted builds use the selected frozen snapshot. */
+export const DEFAULT_GRADE_RECIPE_ID = recipeIdForCalibration("default-lobby-rank")
+
+export const CURRENT_GRADE_TAXONOMY_ID = "recall.archetypes.2026-08-10.r3" as const
 
 export const MATCH_GRADE_ARM_KEYS = MATCH_RVI_ARM_KEYS
 export type MatchGradeArmKey = MatchRviArmKey
@@ -175,10 +295,10 @@ export const MATCH_GRADE_SCORE_THRESHOLDS: readonly (readonly [RecallGrade, numb
     Object.freeze(["C-", 7.35] as const),
   ])
 
-export const MATCH_GRADE_RECIPE = Object.freeze({
-  algorithmVersion: MATCH_GRADE_ALGORITHM_VERSION,
-  recipeDefinitionId: MATCH_GRADE_RECIPE_DEFINITION_ID,
-  taxonomyVersion: MATCH_GRADE_TAXONOMY_VERSION,
+export const CURRENT_GRADE_RECIPE = Object.freeze({
+  algorithmVersion: CANONICAL_GRADE_STORAGE_PARTITION,
+  recipeDefinitionId: CURRENT_GRADE_RECIPE_DEFINITION_ID,
+  taxonomyVersion: CURRENT_GRADE_TAXONOMY_ID,
   calibration: Object.freeze({
     method: "shrunk_mid_ecdf" as const,
     stages: Object.freeze([
@@ -190,14 +310,14 @@ export const MATCH_GRADE_RECIPE = Object.freeze({
     finalCompositeRootKappa: 0,
     percentileClamp: Object.freeze([.01, .99] as const),
     clusterUnit: "match" as const,
-    clusterIdentity: MATCH_GRADE_CLUSTER_ID_POLICY_VERSION,
+    clusterIdentity: CURRENT_GRADE_CLUSTER_POLICY_ID,
     scope: "tracked_mode_and_ruleset_key" as const,
     minimumScopeMatches: 10,
   }),
   sourceContracts: Object.freeze({
     positionResolverVersion: POSITION_RESOLVER_VERSION,
     gradeCoreFactContractVersion: GRADE_CORE_FACT_CONTRACT_VERSION,
-    evidencePolicyVersion: MATCH_GRADE_EVIDENCE_POLICY_VERSION,
+    evidencePolicyVersion: CURRENT_GRADE_EVIDENCE_POLICY_ID,
   }),
   aggregation: Object.freeze({
     method: "fixed_denominator_core_bundle_neutral_imputation" as const,
@@ -210,13 +330,26 @@ export const MATCH_GRADE_RECIPE = Object.freeze({
     responsibilityTiers: Object.freeze({ ...RESPONSIBILITY_TIERS }),
   }),
   // This property name is part of the persisted recipe definition. Keep it
-  // stable so existing installations retain the same recipe hash.
+  // stable so a recipe identity continues to hash deterministically.
   roleFitLetterThresholds: MATCH_GRADE_SCORE_THRESHOLDS,
   compatibilityScore: Object.freeze({
     transform: "inverse_normal_of_role_fit" as const,
     usedForLetters: false,
   }),
 })
+
+/** Exact persisted contract for a supported identity, excluding snapshot metadata. */
+export function gradeRecipeContractForIdentity(identity: GradeRecipeIdentityKind) {
+  if (identity === "canonical") return CURRENT_GRADE_RECIPE
+  return {
+    ...CURRENT_GRADE_RECIPE,
+    recipeDefinitionId: LEGACY_GRADE_RECIPE_DEFINITION_ID,
+    sourceContracts: {
+      ...CURRENT_GRADE_RECIPE.sourceContracts,
+      evidencePolicyVersion: LEGACY_GRADE_EVIDENCE_POLICY_ID,
+    },
+  }
+}
 
 export function gradeForRecallScore(score: number): RecallGrade {
   return MATCH_GRADE_SCORE_THRESHOLDS.find(([, minimum]) => score >= minimum)?.[0] ?? "D"

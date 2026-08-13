@@ -19,7 +19,6 @@ import {
   championIconUrl,
   championNameById,
   formatCompact,
-  formatDecimal,
   formatRecordValue,
   formatRelativeDate,
   modeLabel,

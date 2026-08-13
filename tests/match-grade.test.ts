@@ -9,6 +9,7 @@ import {
   type MatchGradeParticipantInput,
 } from "../electron/main/matches/match-grade.js"
 import {
+  CURRENT_GRADE_EVIDENCE_POLICY_ID,
   MATCH_GRADE_METRIC_KEYS,
   MATCH_GRADE_SCORE_THRESHOLDS,
   gradeForRecallScore,
@@ -53,7 +54,7 @@ describe("match Grade compatibility math exports", () => {
     expect(rankPercentile([1, 2, 2, 4], 2)).toBe(.5)
   })
 
-  it("keeps the old magnitude helper isolated from the v3 core", () => {
+  it("keeps the old magnitude helper isolated from the canonical core", () => {
     expect(magnitudeScore([0, 10], 10)).toBe(1)
     expect(magnitudeScore([0, 10], 0, "inverse")).toBe(1)
     expect(componentScore([0, 10], 10)).toMatchObject({
@@ -78,7 +79,7 @@ describe("match Grade pure scoring contract", () => {
     expect(result.compositePercentile).toBe(result.lobbyPercentile)
     expect(result.breakdown.recipeId).toContain("@calibration:sha256.deadbeef")
     expect(result.breakdown).toMatchObject({
-      evidencePolicyVersion: expect.stringContaining("recall.grade.v3.evidence"),
+      evidencePolicyVersion: CURRENT_GRADE_EVIDENCE_POLICY_ID,
       positionResolverVersion: expect.any(Number),
       gradeCoreFactContractVersion: expect.any(Number),
     })

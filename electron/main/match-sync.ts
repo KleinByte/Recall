@@ -15,10 +15,9 @@ import {
   type GameDetail,
 } from "./matches/map-participants.js"
 import { fetchQueues, type QueueIndex } from "./matches/queues.js"
-import type { LcuGame, MatchRow, ModeFamily } from "./matches/types.js"
+import type { LcuGame, MatchRow } from "./matches/types.js"
 import {
   MatchSourceRepository,
-  gzipCanonicalJsonV1,
   type RawPayloadIdentity,
 } from "./database/match-source-repo.js"
 import { LCU_MATCH_MAPPER_VERSION } from "./matches/map-match.js"
@@ -92,10 +91,12 @@ export class MatchSync {
       games = response.games?.games ?? []
       if (this.sourceRepository) {
         const capturedAt = Date.now()
-        const sha = gzipCanonicalJsonV1(response).sha256
         const page = this.sourceRepository.persistRawPayload({
           ownerPuuid: this.puuid, source: "league_client",
-          sourceMatchId: `page:${capturedAt}:${sha.slice(0, 12)}`,
+          // The content hash is already part of the payload primary key. Keep
+          // the endpoint window stable so unchanged polling updates fetched_at
+          // instead of storing another identical blob every five minutes.
+          sourceMatchId: `recent:0:${WINDOW_SIZE - 1}`,
           kind: "history_page", body: response,
           mapperVersion: LCU_MATCH_MAPPER_VERSION, fetchedAt: capturedAt,
         })
@@ -170,8 +171,7 @@ export class MatchSync {
           `/lol-match-history/v1/games/${gameId}`,
         )
         const raw = this.captureLobbyDetail(detail)
-        const family = windowRows.find((row) => row.gameId === gameId)?.modeFamily
-        if (this.storeLobby(detail, family, raw)) stored += 1
+        if (this.storeLobby(detail, raw)) stored += 1
       } catch (error) {
         console.warn(
           `Could not read the lobby for game ${gameId}: ${(error as Error).message}`,
@@ -185,7 +185,6 @@ export class MatchSync {
 
   private storeLobby(
     detail: GameDetail,
-    family?: ModeFamily,
     raw?: RawPayloadIdentity,
   ): boolean {
     if (!this.participants) return false
@@ -236,7 +235,6 @@ export class MatchSync {
             match,
             player: owner,
             participants: rows,
-            teams,
           })),
         )
       }

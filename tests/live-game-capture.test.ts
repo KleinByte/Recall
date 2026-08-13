@@ -5,6 +5,10 @@ import {
   LiveGameCaptureRepository,
 } from "../electron/main/database/live-game-capture-repo.js"
 import { applyMigrations } from "../electron/main/database/migrations.js"
+import {
+  decodeStoredJsonBody,
+  type StoredJsonBodyRow,
+} from "../electron/main/database/json-body-codec.js"
 import { ParticipantsRepository } from "../electron/main/database/participants-repo.js"
 import type { LiveGameSnapshot } from "../electron/main/game-client.js"
 import type { ParticipantRow } from "../electron/main/matches/types.js"
@@ -258,9 +262,34 @@ describe("LiveGameCaptureRepository", () => {
       expect.objectContaining({ id: 1, name: "GameStart" }),
     ])
 
-    expect(repo.deleteAll("owner")).toEqual({ events: 1, snapshots: 3 })
-    expect(repo.listSnapshots(10, "owner")).toEqual([])
-    expect(repo.listEvents(10, "owner")).toEqual([])
+    expect(db.prepare("SELECT COUNT(*) AS count FROM live_game_events WHERE puuid = ?")
+      .get("owner")).toEqual({ count: 1 })
+    expect(db.prepare("SELECT COUNT(*) AS count FROM live_game_snapshots WHERE puuid = ?")
+      .get("owner")).toEqual({ count: 3 })
+    const body = db.prepare(`
+      SELECT snapshot_encoding AS snapshotEncoding,
+             snapshot_uncompressed_bytes AS snapshotUncompressedBytes,
+             snapshot_compressed_bytes AS snapshotCompressedBytes,
+             snapshot_sha256 AS snapshotSha256,
+             snapshot_payload AS snapshotPayload,
+             typeof(snapshot_payload) AS payloadType
+      FROM live_game_snapshots
+      WHERE game_id = 10 AND puuid = 'owner'
+      ORDER BY game_time_ms LIMIT 1
+    `).get() as StoredJsonBodyRow & { payloadType: string }
+    expect(body.payloadType).toBe("blob")
+    expect(body.snapshotCompressedBytes).toBe(body.snapshotPayload.length)
+    expect(decodeStoredJsonBody(body).value).toEqual(expect.objectContaining({
+      gameTime: 2,
+      available: true,
+    }))
+
+    // A fresh instance has no in-memory capture state, so this exercises the
+    // durable latest-body reader before deciding whether another row is due.
+    const restarted = new LiveGameCaptureRepository(db as never)
+    expect(restarted.record(10, "owner", snapshot(23, {
+      allies: changed.allies,
+    })).snapshotWritten).toBe(false)
   })
 
   it("derives honest item observations and tighter level milestones", () => {

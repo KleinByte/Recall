@@ -4,7 +4,10 @@ import {
   canonicalJson,
   decodeCanonicalJsonV1,
   gzipCanonicalJsonV1,
+  MatchSourceRepository,
 } from "../electron/main/database/match-source-repo.js"
+import Database from "better-sqlite3-node"
+import { applyMigrations } from "../electron/main/database/migrations.js"
 
 describe("canonical source payloads", () => {
   it("sorts object keys recursively while preserving arrays", () => {
@@ -28,5 +31,38 @@ describe("canonical source payloads", () => {
     expect(() => decodeCanonicalJsonV1(encoded.payload, "0".repeat(64))).toThrow("sha256")
     expect(() => decodeCanonicalJsonV1(Buffer.concat([encoded.payload, Buffer.from([0])]), encoded.sha256))
       .toThrow("trailing")
+  })
+})
+
+describe("raw source observation provenance", () => {
+  it("retains first/last observation times and count for identical bodies", () => {
+    const db = new Database(":memory:")
+    applyMigrations(db)
+    const sources = new MatchSourceRepository(db)
+    const input = {
+      ownerPuuid: "owner",
+      source: "league_client" as const,
+      sourceMatchId: "recent:0:19",
+      kind: "history_page" as const,
+      body: { games: { games: [] } },
+      mapperVersion: 11,
+    }
+
+    sources.persistRawPayload({ ...input, fetchedAt: 3_000 })
+    sources.persistRawPayload({ ...input, fetchedAt: 1_000 })
+    sources.persistRawPayload({ ...input, fetchedAt: 5_000 })
+
+    expect(db.prepare(`
+      SELECT fetched_at AS fetchedAt, first_fetched_at AS firstFetchedAt,
+             last_fetched_at AS lastFetchedAt,
+             observation_count AS observationCount
+      FROM match_source_payloads
+    `).get()).toEqual({
+      fetchedAt: 5_000,
+      firstFetchedAt: 1_000,
+      lastFetchedAt: 5_000,
+      observationCount: 3,
+    })
+    db.close()
   })
 })

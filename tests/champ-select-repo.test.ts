@@ -64,7 +64,6 @@ describe("ChampSelectRepository", () => {
     repo.record(7, "other", [{ championId: 64, position: "MIDDLE" }])
 
     expect(repo.positionsFor(7, PUUID).get(64)).toBe("JUNGLE")
-    expect(repo.deleteAll(PUUID)).toBe(2)
     expect(repo.positionsFor(7, "other").get(64)).toBe("MIDDLE")
   })
 })

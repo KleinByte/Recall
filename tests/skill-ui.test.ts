@@ -122,7 +122,6 @@ describe("Skill Overview", () => {
     expect(profile).toContain("metric.formula")
     expect(overview).not.toMatch(/<PerformanceProfile[\s\S]*?:champions="champions"/)
     expect(profile).not.toContain("remaining weights rebalance")
-    expect(engine).toContain("RVI_ALGORITHM_VERSION")
     expect(engine).toContain("RVI_VECTOR_DEFINITIONS")
     expect(vocabulary).toContain('label: "Macro"')
     expect(vocabulary).toContain("Staying alive and avoiding costly deaths")
@@ -167,12 +166,10 @@ describe("Skill Overview", () => {
     expect(overview).toContain("gradedGames")
   })
 
-  it("removes the duplicate playstyle presentation", () => {
+  it("uses one RVI performance profile", () => {
     const overview = read("src/components/skill/SkillOverview.vue")
 
-    expect(overview).not.toContain("StyleRadar")
-    expect(overview).not.toContain("StyleDeltaChart")
-    expect(overview).not.toContain("DriftChart")
+    expect(overview).toContain("<PerformanceProfile")
     expect(overview).toContain(':identity="rviIdentity"')
   })
 
@@ -206,8 +203,6 @@ describe("Skill Insights", () => {
     expect(insights).toContain("GradeJourneyChart")
     expect(insights).toContain("GradeDnaHeatmap")
     expect(insights).toContain("EvidenceForestPlot")
-    expect(insights).not.toContain("PlayCalendarChart")
-    expect(insights).not.toContain("ChampionPoolTreemap")
     expect(insights).not.toContain("OutcomeTrendChart")
   })
 

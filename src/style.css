@@ -63,7 +63,7 @@ a:focus-visible,
   box-shadow: var(--ui-shadow-focus);
 }
 
-/* Shared control recipe. Legacy class names remain supported during migration. */
+/* Shared control recipe used by native form controls and compact actions. */
 .league-button {
   display: inline-flex;
   align-items: center;
@@ -147,7 +147,7 @@ a:focus-visible,
 .league-input::placeholder { color: var(--ui-text-faint); }
 .league-input::-webkit-search-cancel-button { font-size: 14px; cursor: pointer; }
 
-/* Shared progress recipe. MiniBar and legacy feature meters both consume it. */
+/* Shared progress recipe used by MiniBar and feature meters. */
 .track {
   display: block;
   width: 100%;

@@ -1,18 +1,22 @@
 import type { Evidence, EvidenceState } from "../../../src/shared/measurement.js"
-import { observed } from "../../../src/shared/measurement.js"
 import type { RecallGrade } from "../../../src/shared/recall-grade.js"
 import type { NormalizedPosition } from "./position.js"
 import {
   MATCH_GRADE_ARM_KEYS,
   MATCH_GRADE_ARM_LABELS,
   MATCH_GRADE_DIAGNOSTIC_METRIC_KEYS,
-  MATCH_GRADE_EVIDENCE_POLICY_VERSION,
-  MATCH_GRADE_ALGORITHM_VERSION,
-  MATCH_GRADE_RECIPE,
-  MATCH_GRADE_RECIPE_DEFINITION_ID,
-  MATCH_GRADE_RECIPE_ID,
+  CURRENT_GRADE_EVIDENCE_POLICY_ID,
+  CANONICAL_GRADE_STORAGE_PARTITION,
+  CURRENT_GRADE_RECIPE,
+  CURRENT_GRADE_RECIPE_DEFINITION_ID,
+  DEFAULT_GRADE_RECIPE_ID,
+  LEGACY_GRADE_EVIDENCE_POLICY_ID,
+  gradeEvidencePolicyId,
+  gradeRecipeDefinitionId,
   gradeForRecallScore,
   recipeIdForCalibration,
+  recipeIdForIdentity,
+  type GradeRecipeIdentityKind,
   type MatchGradeArmKey,
   type MatchGradeMetricKey,
   type ResponsibilityTier,
@@ -26,7 +30,7 @@ import {
   type MatchGradeModeContext,
   type PrimaryArchetype,
 } from "./match-grade-taxonomy.js"
-import { clampCalibrationPercentile, normalQuantile } from "./match-grade-calibration.js"
+import { normalQuantile } from "./match-grade-calibration.js"
 import {
   RVI_METRIC_POLICIES,
   metricDefinition,
@@ -34,10 +38,10 @@ import {
 } from "./match-metric-registry.js"
 
 export {
-  MATCH_GRADE_ALGORITHM_VERSION,
-  MATCH_GRADE_RECIPE,
-  MATCH_GRADE_RECIPE_DEFINITION_ID,
-  MATCH_GRADE_RECIPE_ID,
+  CANONICAL_GRADE_STORAGE_PARTITION,
+  CURRENT_GRADE_RECIPE,
+  CURRENT_GRADE_RECIPE_DEFINITION_ID,
+  DEFAULT_GRADE_RECIPE_ID,
   recipeIdForCalibration,
 }
 
@@ -92,6 +96,8 @@ export interface MatchGradeLobbyInput {
   context: MatchGradeModeContext
   /** Immutable calibration snapshot id or content hash. */
   calibrationSnapshotId: string
+  /** Storage-only identity alias for a frozen recipe created by the prior release. */
+  recipeIdentity?: GradeRecipeIdentityKind
 }
 
 export interface GradeComponent {
@@ -144,14 +150,16 @@ export interface GradeResult {
   /** Compatibility alias for old repositories. */
   compositePercentile: number
   breakdown: {
-    algorithmVersion: 3
+    algorithmVersion: typeof CANONICAL_GRADE_STORAGE_PARTITION
     recipeDefinitionId: string
     recipeId: string
     calibrationSnapshotId: string
     taxonomyVersion: string
     positionResolverVersion: number
     gradeCoreFactContractVersion: number
-    evidencePolicyVersion: typeof MATCH_GRADE_EVIDENCE_POLICY_VERSION
+    evidencePolicyVersion:
+      | typeof CURRENT_GRADE_EVIDENCE_POLICY_ID
+      | typeof LEGACY_GRADE_EVIDENCE_POLICY_ID
     calibrationClusterPolicy: string
     context: MatchGradeModeContext
     position: NormalizedPosition
@@ -177,17 +185,12 @@ export interface GradeResult {
 
 export interface MatchGradeOutcome {
   status: MatchGradeStatus
-  algorithmVersion: 3
+  algorithmVersion: typeof CANONICAL_GRADE_STORAGE_PARTITION
   recipeDefinitionId: string
   recipeId?: string
   results: Map<number, GradeResult>
   reason?: string
 }
-
-const EMPTY_OUTCOME_BASE = {
-  algorithmVersion: MATCH_GRADE_ALGORITHM_VERSION,
-  recipeDefinitionId: MATCH_GRADE_RECIPE_DEFINITION_ID,
-} as const
 
 const mean = (values: readonly number[]) =>
   values.reduce((sum, value) => sum + value, 0) / values.length
@@ -201,7 +204,7 @@ export function rankPercentile(values: readonly number[], value: number): number
   return (values.length - 1 - better - (tied - 1) / 2) / (values.length - 1)
 }
 
-/** Compatibility formula only; the v3 recipe itself uses calibrated ECDFs. */
+/** Compatibility formula only; the canonical recipe itself uses calibrated ECDFs. */
 export function magnitudeScore(
   values: readonly number[],
   value: number,
@@ -234,8 +237,13 @@ export function componentScore(
   }
 }
 
-const emptyOutcome = (status: Exclude<MatchGradeStatus, "ready">, reason?: string): MatchGradeOutcome => ({
-  ...EMPTY_OUTCOME_BASE,
+const emptyOutcome = (
+  status: Exclude<MatchGradeStatus, "ready">,
+  reason?: string,
+  identity: GradeRecipeIdentityKind = "canonical",
+): MatchGradeOutcome => ({
+  algorithmVersion: CANONICAL_GRADE_STORAGE_PARTITION,
+  recipeDefinitionId: gradeRecipeDefinitionId(identity),
   status,
   results: new Map(),
   ...(reason ? { reason } : {}),
@@ -595,15 +603,23 @@ function diagnosticMetricsFor(player: MatchGradeParticipantInput): GradeDiagnost
 
 /** Pure match Grade scorer. No database, clock, random, or mutable global inputs. */
 export function scoreMatchLobby(input: MatchGradeLobbyInput): MatchGradeOutcome {
+  const recipeIdentity = input.recipeIdentity ?? "canonical"
   const responsibility = resolveResponsibilityLobby(input)
   if (responsibility.status !== "ready") {
-    return emptyOutcome(responsibility.status, responsibility.reason)
+    return emptyOutcome(responsibility.status, responsibility.reason, recipeIdentity)
   }
   let recipeId: string
   try {
-    recipeId = recipeIdForCalibration(input.calibrationSnapshotId)
+    recipeId = recipeIdForIdentity(
+      input.calibrationSnapshotId,
+      recipeIdentity,
+    )
   } catch {
-    return emptyOutcome("missing_source_fact", "invalid_calibration_snapshot_id")
+    return emptyOutcome(
+      "missing_source_fact",
+      "invalid_calibration_snapshot_id",
+      recipeIdentity,
+    )
   }
 
   for (const entry of responsibility.resolved) {
@@ -612,17 +628,21 @@ export function scoreMatchLobby(input: MatchGradeLobbyInput): MatchGradeOutcome 
       return emptyOutcome(
         "missing_core_metric",
         `participant:${entry.player.participantId}:role_fit:${evidence?.reason ?? evidence?.state ?? "missing"}`,
+        recipeIdentity,
       )
     }
     if (!Number.isFinite(evidence.value) || evidence.value < 0 || evidence.value > 1) {
       return emptyOutcome(
         "missing_core_metric",
         `participant:${entry.player.participantId}:role_fit:percentile_out_of_range`,
+        recipeIdentity,
       )
     }
   }
 
   const composites = responsibility.resolved.map((entry) => entry.composite)
+  const definitionId = gradeRecipeDefinitionId(recipeIdentity)
+  const evidencePolicyId = gradeEvidencePolicyId(recipeIdentity)
   const results = new Map<number, GradeResult>()
   for (const entry of responsibility.resolved) {
     const recallScorePercentile = (entry.player.responsibilityEvidence as {
@@ -640,16 +660,16 @@ export function scoreMatchLobby(input: MatchGradeLobbyInput): MatchGradeOutcome 
       lobbyPercentile,
       compositePercentile: lobbyPercentile,
       breakdown: {
-        algorithmVersion: MATCH_GRADE_ALGORITHM_VERSION,
-        recipeDefinitionId: MATCH_GRADE_RECIPE_DEFINITION_ID,
+        algorithmVersion: CANONICAL_GRADE_STORAGE_PARTITION,
+        recipeDefinitionId: definitionId,
         recipeId,
         calibrationSnapshotId: input.calibrationSnapshotId,
-        taxonomyVersion: MATCH_GRADE_RECIPE.taxonomyVersion,
-        positionResolverVersion: MATCH_GRADE_RECIPE.sourceContracts.positionResolverVersion,
+        taxonomyVersion: CURRENT_GRADE_RECIPE.taxonomyVersion,
+        positionResolverVersion: CURRENT_GRADE_RECIPE.sourceContracts.positionResolverVersion,
         gradeCoreFactContractVersion:
-          MATCH_GRADE_RECIPE.sourceContracts.gradeCoreFactContractVersion,
-        evidencePolicyVersion: MATCH_GRADE_RECIPE.sourceContracts.evidencePolicyVersion,
-        calibrationClusterPolicy: MATCH_GRADE_RECIPE.calibration.clusterIdentity,
+          CURRENT_GRADE_RECIPE.sourceContracts.gradeCoreFactContractVersion,
+        evidencePolicyVersion: evidencePolicyId,
+        calibrationClusterPolicy: CURRENT_GRADE_RECIPE.calibration.clusterIdentity,
         context: { ...input.context },
         position: entry.player.position,
         primaryArchetype: entry.archetype,
@@ -671,7 +691,8 @@ export function scoreMatchLobby(input: MatchGradeLobbyInput): MatchGradeOutcome 
     })
   }
   return {
-    ...EMPTY_OUTCOME_BASE,
+    algorithmVersion: CANONICAL_GRADE_STORAGE_PARTITION,
+    recipeDefinitionId: definitionId,
     status: "ready",
     recipeId,
     results,

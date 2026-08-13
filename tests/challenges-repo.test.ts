@@ -41,14 +41,14 @@ const row = (overrides: Partial<LcuChallenge> = {}) =>
 
 describe("ChallengesRepository", () => {
   it("stores challenges", () => {
-    repo.upsertMany([row({ id: 1 }), row({ id: 2 })])
+    repo.saveSnapshot([row({ id: 1 }), row({ id: 2 })], [])
 
     expect(repo.countChallenges(PUUID)).toBe(2)
   })
 
   it("updates an existing challenge rather than duplicating it", () => {
-    repo.upsertMany([row({ id: 1, currentValue: 10 })])
-    repo.upsertMany([row({ id: 1, currentValue: 42, currentLevel: "PLATINUM" })])
+    repo.saveSnapshot([row({ id: 1, currentValue: 10 })], [])
+    repo.saveSnapshot([row({ id: 1, currentValue: 42, currentLevel: "PLATINUM" })], [])
 
     expect(repo.countChallenges(PUUID)).toBe(1)
 
@@ -58,10 +58,10 @@ describe("ChallengesRepository", () => {
   })
 
   it("hides retired challenges unless asked for them", () => {
-    repo.upsertMany([
+    repo.saveSnapshot([
       row({ id: 1 }),
       row({ id: 2, retireTimestamp: 1_700_000 }),
-    ])
+    ], [])
 
     expect(repo.getAll({ puuid: PUUID })).toHaveLength(1)
     expect(
@@ -70,11 +70,11 @@ describe("ChallengesRepository", () => {
   })
 
   it("filters by category, level and list type", () => {
-    repo.upsertMany([
+    repo.saveSnapshot([
       row({ id: 1, category: "TEAMWORK", currentLevel: "GOLD" }),
       row({ id: 2, category: "COLLECTION", currentLevel: "IRON" }),
       row({ id: 3, category: "COLLECTION", idListType: "CHAMPION" }),
-    ])
+    ], [])
 
     expect(repo.getAll({ puuid: PUUID, category: "COLLECTION" })).toHaveLength(2)
     expect(repo.getAll({ puuid: PUUID, level: "IRON" })).toHaveLength(1)
@@ -84,19 +84,19 @@ describe("ChallengesRepository", () => {
   })
 
   it("searches by name and description", () => {
-    repo.upsertMany([
+    repo.saveSnapshot([
       row({ id: 1, name: "All Random All Champions" }),
       row({ id: 2, name: "Perfectionist" }),
-    ])
+    ], [])
 
     expect(repo.getAll({ puuid: PUUID, search: "Random" })).toHaveLength(1)
   })
 
   it("reports stored progress for change detection", () => {
-    repo.upsertMany([
+    repo.saveSnapshot([
       row({ id: 1, currentValue: 10, currentLevel: "GOLD" }),
       row({ id: 2, currentValue: 3, currentLevel: "IRON" }),
-    ])
+    ], [])
 
     const snapshot = repo.getProgressSnapshot(PUUID)
 
@@ -105,7 +105,7 @@ describe("ChallengesRepository", () => {
   })
 
   it("keeps history in chronological order", () => {
-    repo.recordHistory([
+    repo.saveSnapshot([row({ id: 1 })], [
       {
         challengeId: 1,
         puuid: PUUID,
@@ -136,10 +136,9 @@ describe("ChallengesRepository", () => {
       currentLevel: "GOLD",
     }
 
-    repo.recordHistory([entry])
-    const written = repo.recordHistory([entry])
+    repo.saveSnapshot([row({ id: 1 })], [entry])
+    repo.saveSnapshot([row({ id: 1 })], [entry])
 
-    expect(written).toBe(0)
     expect(repo.getHistory(1, PUUID)).toHaveLength(1)
   })
 })

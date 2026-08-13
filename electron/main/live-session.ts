@@ -194,7 +194,6 @@ export async function readLiveSession(
   } else {
     const teamOne = roster(data.teamOne, 0)
     const teamTwo = roster(data.teamTwo, 100)
-    const localIsTeamOne = teamOne.some((entry) => entry.puuid === localPuuid)
     const localIsTeamTwo = teamTwo.some((entry) => entry.puuid === localPuuid)
 
     if (localIsTeamTwo) {

@@ -61,7 +61,7 @@ export interface DataTrustReport {
     totalStoredMatches: number
     eligibleStatisticalMatches: number
     gradableMatches: number
-    currentVersionEligibleGrades: number
+    eligibleGrades: number
     intentionallyUngradedModes: number
     gradeCoverage: number | null
     endpoint: SyncHealth
@@ -125,14 +125,12 @@ export interface GradeComponent {
 }
 
 export interface GradeBreakdown {
-  algorithmVersion: number
   recipeId?: string
   recallScore?: number
   lobbyPercentile?: number
   compositePercentile: number
   components: GradeComponent[]
   unavailableReason?: string
-  version?: number
 }
 
 export interface BaselineMetric {

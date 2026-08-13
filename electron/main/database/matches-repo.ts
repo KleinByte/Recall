@@ -19,7 +19,8 @@ import {
   PERSONAL_RECORD_RIFT_QUEUE_IDS,
 } from "../matches/eligibility.js"
 import { MAX_ANALYTIC_MATCH_DURATION_SECS } from "../../../src/helpers/time-contract-core.js"
-import { MATCH_GRADE_ALGORITHM_VERSION } from "../matches/match-grade-recipe.js"
+import { CANONICAL_GRADE_STORAGE_PARTITION } from "../matches/match-grade-recipe.js"
+import { getCompatibleGradeRecipeSelection } from "./grade-recipe-selection.js"
 
 export interface StatsFilter {
   puuid: string
@@ -111,7 +112,7 @@ export interface MatchPage {
   pageSize: number
 }
 
-function hasSelectedGradeRecipe(db: Database): boolean {
+function hasAnyGradeRecipeSelection(db: Database): boolean {
   const table = db.prepare(`
     SELECT 1 FROM sqlite_master
     WHERE type = 'table' AND name = 'grade_recipe_selections'
@@ -119,13 +120,27 @@ function hasSelectedGradeRecipe(db: Database): boolean {
   if (!table) return false
   return !!db.prepare(
     "SELECT 1 FROM grade_recipe_selections WHERE algorithm_version = ? LIMIT 1",
-  ).get(MATCH_GRADE_ALGORITHM_VERSION)
+  ).get(CANONICAL_GRADE_STORAGE_PARTITION)
 }
 
-function assertLegacyGradeWriterAvailable(db: Database): void {
-  if (hasSelectedGradeRecipe(db)) {
-    throw new Error("legacy_grade_writer_disabled_after_v3_cutover")
+/**
+ * `undefined` means a pre-selection database where legacy caches remain the
+ * only available data; `null` means an incompatible selection whose caches
+ * must be hidden; a string is the one exact compatible recipe readers expose.
+ */
+interface VisibleGradeRecipe {
+  storageRecipeId: string
+  publicRecipeId: string
+}
+type GradeRecipeVisibility = VisibleGradeRecipe | null | undefined
+
+function gradeRecipeVisibility(db: Database): GradeRecipeVisibility {
+  const selected = getCompatibleGradeRecipeSelection(db)
+  if (selected) return {
+    storageRecipeId: selected.recipeId,
+    publicRecipeId: selected.publicRecipeId,
   }
+  return hasAnyGradeRecipeSelection(db) ? null : undefined
 }
 
 interface GradeAggregate {
@@ -210,6 +225,7 @@ function selectedRecipeGradeAggregate(
   db: Database,
   clause: string,
   params: Array<string | number>,
+  recipeId: string,
 ): GradeAggregate {
   const row = db.prepare(`
     WITH scoped_matches AS (
@@ -220,12 +236,10 @@ function selectedRecipeGradeAggregate(
            AVG(r.role_fit_score) AS averageRecallScore,
            COUNT(r.role_fit_score) AS gradedGames
     FROM scoped_matches sm
-    JOIN grade_recipe_selections s
-      ON s.algorithm_version = ?
     JOIN match_grade_attempts a
       ON a.game_id = sm.scoped_game_id AND a.puuid = sm.scoped_puuid
-     AND a.algorithm_version = s.algorithm_version
-     AND a.recipe_id = s.recipe_id
+     AND a.algorithm_version = ?
+     AND a.recipe_id = ?
      AND a.grade_status = 'ready'
      AND a.owner_participant_id IS NOT NULL
     JOIN match_grade_results r
@@ -236,7 +250,7 @@ function selectedRecipeGradeAggregate(
      AND r.grade_status = 'ready'
      AND r.role_fit_score IS NOT NULL
      AND a.role_fit_score = r.role_fit_score
-  `).get(...params, MATCH_GRADE_ALGORITHM_VERSION) as {
+  `).get(...params, CANONICAL_GRADE_STORAGE_PARTITION, recipeId) as {
     avgGradeScore: number | null
     averageRecallScore: number | null
     gradedGames: number
@@ -252,6 +266,7 @@ function selectedRecipeChampionGrades(
   db: Database,
   clause: string,
   params: Array<string | number>,
+  recipeId: string,
 ): Map<number, GradeAggregate> {
   const rows = db.prepare(`
     WITH scoped_matches AS (
@@ -264,12 +279,10 @@ function selectedRecipeChampionGrades(
            AVG(r.role_fit_score) AS averageRecallScore,
            COUNT(r.role_fit_score) AS gradedGames
     FROM scoped_matches sm
-    JOIN grade_recipe_selections s
-      ON s.algorithm_version = ?
     JOIN match_grade_attempts a
       ON a.game_id = sm.scoped_game_id AND a.puuid = sm.scoped_puuid
-     AND a.algorithm_version = s.algorithm_version
-     AND a.recipe_id = s.recipe_id
+     AND a.algorithm_version = ?
+     AND a.recipe_id = ?
      AND a.grade_status = 'ready'
      AND a.owner_participant_id IS NOT NULL
     JOIN match_grade_results r
@@ -281,7 +294,7 @@ function selectedRecipeChampionGrades(
      AND r.role_fit_score IS NOT NULL
      AND a.role_fit_score = r.role_fit_score
     GROUP BY sm.scoped_champion_id
-  `).all(...params, MATCH_GRADE_ALGORITHM_VERSION) as Array<{
+  `).all(...params, CANONICAL_GRADE_STORAGE_PARTITION, recipeId) as Array<{
     championId: number
     avgGradeScore: number | null
     averageRecallScore: number | null
@@ -298,6 +311,7 @@ function selectedRecipeGradeDistribution(
   db: Database,
   clause: string,
   params: Array<string | number>,
+  recipeId: string,
 ): GradeCount[] {
   return db.prepare(`
     WITH scoped_matches AS (
@@ -306,12 +320,10 @@ function selectedRecipeGradeDistribution(
     )
     SELECT r.grade, COUNT(*) AS count
     FROM scoped_matches sm
-    JOIN grade_recipe_selections s
-      ON s.algorithm_version = ?
     JOIN match_grade_attempts a
       ON a.game_id = sm.scoped_game_id AND a.puuid = sm.scoped_puuid
-     AND a.algorithm_version = s.algorithm_version
-     AND a.recipe_id = s.recipe_id
+     AND a.algorithm_version = ?
+     AND a.recipe_id = ?
      AND a.grade_status = 'ready'
      AND a.owner_participant_id IS NOT NULL
     JOIN match_grade_results r
@@ -323,7 +335,7 @@ function selectedRecipeGradeDistribution(
      AND r.role_fit_score IS NOT NULL
      AND a.role_fit_score = r.role_fit_score
     GROUP BY r.grade
-  `).all(...params, MATCH_GRADE_ALGORITHM_VERSION) as GradeCount[]
+  `).all(...params, CANONICAL_GRADE_STORAGE_PARTITION, recipeId) as GradeCount[]
 }
 
 
@@ -563,7 +575,7 @@ export class MatchesRepository {
     const row = this.db
       .prepare("SELECT * FROM matches WHERE game_id = ? AND puuid = ?")
       .get(gameId, puuid) as Record<string, never> | undefined
-    return row ? toMatchRow(row) : undefined
+    return row ? toMatchRow(row, gradeRecipeVisibility(this.db)) : undefined
   }
 
   /**
@@ -765,76 +777,6 @@ export class MatchesRepository {
     return row.oldest ?? undefined
   }
 
-  /** Records a grade derived from the full lobby for one stored match. */
-  setGrade(
-    gameId: number,
-    puuid: string,
-    grade: string,
-    score: number,
-    compositePercentile = 0.5,
-    algorithmVersion = 2,
-  ) {
-    assertLegacyGradeWriterAvailable(this.db)
-    this.db
-      .prepare(
-        `UPDATE matches
-         SET grade = ?, grade_score = ?, grade_algorithm_version = ?,
-             grade_status = 'ready', grade_composite_percentile = ?
-         WHERE game_id = ? AND puuid = ?`,
-      )
-      .run(grade, score, algorithmVersion, compositePercentile, gameId, puuid)
-  }
-
-  /**
-   * Matches stored without a grade.
-   *
-   * Grading needs an extra request per game for the full lobby, so it is done
-   * separately from recording the match itself. Newest games are graded first
-   * because older ones fall out of the client's history and can never be
-   * graded afterwards.
-   */
-  getUngradedMatches(
-    puuid: string,
-    limit: number,
-  ): { gameId: number; modeFamily: ModeFamily }[] {
-    return this.db
-      .prepare(
-        `SELECT game_id AS gameId, mode_family AS modeFamily FROM matches
-         WHERE puuid = ? AND is_matched = 1 AND grade IS NULL
-           AND mode_family IN ('sr', 'aram', 'classic')
-         ORDER BY played_at DESC
-         LIMIT ?`,
-      )
-      .all(puuid, limit) as { gameId: number; modeFamily: ModeFamily }[]
-  }
-
-  /**
-   * Graded matches whose stored breakdown came from an older algorithm.
-   *
-   * Only lobbies stored in full can be regraded offline, so the query skips
-   * matches without ten saved participants rather than reselecting them on
-   * every pass.
-   */
-  getOutdatedGradeMatches(
-    version: number,
-    limit: number,
-  ): { gameId: number; puuid: string }[] {
-    return this.db
-      .prepare(
-        `SELECT m.game_id AS gameId, m.puuid FROM matches m
-         WHERE m.is_matched = 1 AND m.grade IS NOT NULL
-           AND m.mode_family IN ('sr', 'aram', 'classic')
-           AND (SELECT COUNT(*) FROM match_participants p
-                WHERE p.game_id = m.game_id AND p.puuid = m.puuid) >= 10
-           AND COALESCE((SELECT MAX(b.algorithm_version)
-                FROM match_grade_breakdowns b
-                WHERE b.game_id = m.game_id AND b.puuid = m.puuid), 0) < ?
-         ORDER BY m.played_at DESC
-         LIMIT ?`,
-      )
-      .all(version, limit) as { gameId: number; puuid: string }[]
-  }
-
   /**
    * How often each grade was earned.
    *
@@ -842,11 +784,18 @@ export class MatchesRepository {
    * games it is showing, right down to a single champion.
    */
   getGradeDistribution(query: MatchQuery): GradeCount[] {
-    const { clause, params } = buildQuery(query)
+    const visibility = gradeRecipeVisibility(this.db)
+    const { clause, params } = buildQuery(query, visibility)
 
-    if (hasSelectedGradeRecipe(this.db)) {
-      return selectedRecipeGradeDistribution(this.db, clause, params)
+    if (visibility) {
+      return selectedRecipeGradeDistribution(
+        this.db,
+        clause,
+        params,
+        visibility.storageRecipeId,
+      )
     }
+    if (visibility === null) return []
 
     return this.db
       .prepare(
@@ -864,7 +813,8 @@ export class MatchesRepository {
    * that describe exactly the games it is displaying.
    */
   getSummary(query: MatchQuery): StatsSummary {
-    const { clause, params } = buildQuery(query)
+    const visibility = gradeRecipeVisibility(this.db)
+    const { clause, params } = buildQuery(query, visibility)
 
     const totals = this.db
       .prepare(
@@ -897,9 +847,16 @@ export class MatchesRepository {
       .all(...params) as { win: number }[]
 
     const games = totals.games
-    const gradeAggregate = hasSelectedGradeRecipe(this.db)
-      ? selectedRecipeGradeAggregate(this.db, clause, params)
-      : {
+    const gradeAggregate = visibility
+      ? selectedRecipeGradeAggregate(
+          this.db,
+          clause,
+          params,
+          visibility.storageRecipeId,
+        )
+      : visibility === null
+        ? { gradedGames: 0 }
+        : {
           avgGradeScore: totals.avgGradeScore ?? undefined,
           averageRecallScore: totals.averageRecallScore ?? undefined,
           gradedGames: totals.gradedGames,
@@ -1174,9 +1131,16 @@ export class MatchesRepository {
       )
       .all(...params) as Record<string, number>[]
 
-    const selectedGrades = hasSelectedGradeRecipe(this.db)
-      ? selectedRecipeChampionGrades(this.db, clause, params)
+    const visibility = gradeRecipeVisibility(this.db)
+    const selectedGrades = visibility
+      ? selectedRecipeChampionGrades(
+          this.db,
+          clause,
+          params,
+          visibility.storageRecipeId,
+        )
       : undefined
+    const hideGradeCaches = visibility === null
 
     return rows.map((row) => ({
       championId: row.championId,
@@ -1188,13 +1152,19 @@ export class MatchesRepository {
       avgAssists: row.avgAssists,
       kda: computeKda(row.totalKills, row.totalDeaths, row.totalAssists),
       avgDamageToChampions: row.avgDamageToChampions,
-      avgGradeScore: selectedGrades
+      avgGradeScore: hideGradeCaches
+        ? undefined
+        : selectedGrades
         ? selectedGrades.get(row.championId)?.avgGradeScore
         : row.avgGradeScore ?? undefined,
-      averageRecallScore: selectedGrades
+      averageRecallScore: hideGradeCaches
+        ? undefined
+        : selectedGrades
         ? selectedGrades.get(row.championId)?.averageRecallScore
         : row.averageRecallScore ?? undefined,
-      gradedGames: selectedGrades
+      gradedGames: hideGradeCaches
+        ? 0
+        : selectedGrades
         ? selectedGrades.get(row.championId)?.gradedGames ?? 0
         : row.gradedGames,
     }))
@@ -1215,7 +1185,7 @@ export class MatchesRepository {
     query: MatchQuery,
     window: MatchWindow = {},
   ): StyleAverages | undefined {
-    const { clause, params } = buildQuery(query)
+    const { clause, params } = buildQuery(query, gradeRecipeVisibility(this.db))
 
     // A negative limit means no limit in SQLite, and an offset needs one.
     const limit = window.limit ?? -1
@@ -1283,7 +1253,8 @@ export class MatchesRepository {
       )
       .all(...params, limit) as Record<string, never>[]
 
-    return rows.map(toMatchRow)
+    const visibility = gradeRecipeVisibility(this.db)
+    return rows.map((row) => toMatchRow(row, visibility))
   }
 
   /** Recent win/loss flags ordered oldest to newest, for the form strip. */
@@ -1310,7 +1281,8 @@ export class MatchesRepository {
       )
       .all(puuid) as Record<string, never>[]
 
-    return rows.map(toMatchRow)
+    const visibility = gradeRecipeVisibility(this.db)
+    return rows.map((row) => toMatchRow(row, visibility))
   }
 
   /**
@@ -1325,7 +1297,8 @@ export class MatchesRepository {
     page: number,
     pageSize: number,
   ): MatchPage {
-    const { clause, params } = buildQuery(query)
+    const visibility = gradeRecipeVisibility(this.db)
+    const { clause, params } = buildQuery(query, visibility)
 
     const { total } = this.db
       .prepare(`SELECT COUNT(*) AS total FROM matches ${clause}`)
@@ -1374,12 +1347,17 @@ export class MatchesRepository {
                   AS assigned_position,
                 ${LOBBY_PLACE_SQL}
          FROM matches ${clause}
-         ORDER BY ${orderBy(query)}
+         ORDER BY ${orderBy(query, visibility)}
          LIMIT ? OFFSET ?`,
       )
       .all(...params, size, (current - 1) * size) as Record<string, never>[]
 
-    return { rows: rows.map(toMatchRow), total, page: current, pageSize: size }
+    return {
+      rows: rows.map((row) => toMatchRow(row, visibility)),
+      total,
+      page: current,
+      pageSize: size,
+    }
   }
 
   /**
@@ -1490,8 +1468,8 @@ export class MatchesRepository {
   private recordTimelines(puuid: string, gameIds: ReadonlySet<number>) {
     const rows = this.db.prepare(
       `SELECT game_id AS gameId, data_json AS dataJson
-       FROM match_timeline_cache
-       WHERE puuid = ? AND status = 'ready' AND data_json IS NOT NULL`,
+       FROM selected_match_timelines
+       WHERE puuid = ?`,
     ).all(puuid) as Array<{ gameId: number; dataJson: string }>
     const result = new Map<number, CompactTimeline>()
     for (const row of rows) {
@@ -1499,7 +1477,7 @@ export class MatchesRepository {
       try {
         result.set(row.gameId, JSON.parse(row.dataJson) as CompactTimeline)
       } catch {
-        // A corrupt cache entry should not hide match-backed records.
+        // A corrupt compact source should not hide match-backed records.
       }
     }
     return result
@@ -1521,17 +1499,6 @@ export class MatchesRepository {
       : []))
   }
 
-  /** How long one recorded game ran, for scoring that game on its own. */
-  getMatchDuration(gameId: number, puuid: string): number {
-    const row = this.db
-      .prepare(
-        "SELECT duration_secs AS durationSecs FROM matches WHERE game_id = ? AND puuid = ?",
-      )
-      .get(gameId, puuid) as { durationSecs: number } | undefined
-
-    return row?.durationSecs ?? 0
-  }
-
   /** Champions the player has actually played, for filter options. */
   getPlayedChampionIds(puuid: string): number[] {
     const rows = this.db
@@ -1542,17 +1509,6 @@ export class MatchesRepository {
       .all(puuid) as { id: number }[]
 
     return rows.map((row) => row.id)
-  }
-
-  deleteAll(puuid: string): number {
-    return this.db.transaction(() => {
-      // Live captures intentionally have no match foreign key because they
-      // are written before the post-game match row exists.
-      this.db.prepare("DELETE FROM live_game_events WHERE puuid = ?").run(puuid)
-      this.db.prepare("DELETE FROM live_game_snapshots WHERE puuid = ?").run(puuid)
-      return this.db.prepare("DELETE FROM matches WHERE puuid = ?").run(puuid)
-        .changes
-    })()
   }
 }
 
@@ -1570,7 +1526,7 @@ const SORT_COLUMNS: Record<string, string> = {
 }
 
 /**
- * Read one authoritative owner score from the exact recipe selected for v3.
+ * Read one authoritative owner score from the exact selected Grade recipe.
  *
  * `matches.grade_score` and `matches.role_fit_score` are renderer caches. A
  * rebuild can leave those columns stale without changing the immutable result,
@@ -1578,22 +1534,18 @@ const SORT_COLUMNS: Record<string, string> = {
  * The fallback preserves history browsing in databases that have not crossed
  * the recipe-selection cutover yet.
  */
-function selectedOwnerScore(column: "grade_score" | "role_fit_score"): string {
+const sqlString = (value: string) => `'${value.replaceAll("'", "''")}'`
+
+function selectedOwnerScore(
+  column: "grade_score" | "role_fit_score",
+  visibility: GradeRecipeVisibility,
+): string {
   const cacheColumn = column === "grade_score" ? "grade_score" : "role_fit_score"
-  return `CASE
-    WHEN EXISTS (
-      SELECT 1 FROM grade_recipe_selections selected
-      WHERE selected.algorithm_version = ${MATCH_GRADE_ALGORITHM_VERSION}
-    ) THEN (
+  if (visibility === undefined) return `matches.${cacheColumn}`
+  if (visibility === null) return "NULL"
+  return `(
       SELECT result.${column}
-      FROM grade_recipe_selections selected
-      JOIN match_grade_attempts attempt
-        ON attempt.game_id = matches.game_id
-       AND attempt.puuid = matches.puuid
-       AND attempt.algorithm_version = selected.algorithm_version
-       AND attempt.recipe_id = selected.recipe_id
-       AND attempt.grade_status = 'ready'
-       AND attempt.owner_participant_id IS NOT NULL
+      FROM match_grade_attempts attempt
       JOIN match_grade_results result
         ON result.game_id = attempt.game_id
        AND result.puuid = attempt.puuid
@@ -1603,11 +1555,14 @@ function selectedOwnerScore(column: "grade_score" | "role_fit_score"): string {
        AND result.grade_status = 'ready'
        AND result.role_fit_score IS NOT NULL
        AND attempt.role_fit_score = result.role_fit_score
-      WHERE selected.algorithm_version = ${MATCH_GRADE_ALGORITHM_VERSION}
+      WHERE attempt.game_id = matches.game_id
+       AND attempt.puuid = matches.puuid
+       AND attempt.algorithm_version = ${CANONICAL_GRADE_STORAGE_PARTITION}
+       AND attempt.recipe_id = ${sqlString(visibility.storageRecipeId)}
+       AND attempt.grade_status = 'ready'
+       AND attempt.owner_participant_id IS NOT NULL
       LIMIT 1
-    )
-    ELSE matches.${cacheColumn}
-  END`
+    )`
 }
 
 /**
@@ -1637,9 +1592,9 @@ const LOBBY_PLACE_SQL = `
     WHERE mp.game_id = matches.game_id AND mp.puuid = matches.puuid
   ), 0) AS lobby_size`
 
-function orderBy(query: MatchQuery): string {
+function orderBy(query: MatchQuery, visibility: GradeRecipeVisibility): string {
   const column = query.sortBy === "grade"
-    ? selectedOwnerScore("role_fit_score")
+    ? selectedOwnerScore("role_fit_score", visibility)
     : SORT_COLUMNS[query.sortBy ?? "played_at"] ?? "played_at"
   const direction = query.sortDir === "asc" ? "ASC" : "DESC"
 
@@ -1647,7 +1602,7 @@ function orderBy(query: MatchQuery): string {
   return `${column} ${direction}, game_id ${direction}`
 }
 
-function buildQuery(query: MatchQuery) {
+function buildQuery(query: MatchQuery, visibility: GradeRecipeVisibility) {
   const { clause, params } = buildFilter(query)
   const conditions = [clause.replace(/^WHERE /, "")]
 
@@ -1662,12 +1617,12 @@ function buildQuery(query: MatchQuery) {
   if (query.result === "loss") conditions.push("win = 0")
 
   if (query.minGradeScore !== undefined) {
-    conditions.push(`${selectedOwnerScore("grade_score")} >= ?`)
+    conditions.push(`${selectedOwnerScore("grade_score", visibility)} >= ?`)
     params.push(query.minGradeScore)
   }
 
   if (query.minRecallScore !== undefined) {
-    conditions.push(`${selectedOwnerScore("role_fit_score")} >= ?`)
+    conditions.push(`${selectedOwnerScore("role_fit_score", visibility)} >= ?`)
     params.push(query.minRecallScore)
   }
 
@@ -1868,7 +1823,15 @@ function computeLongestWinStreak(results: boolean[]): number {
   return longest
 }
 
-function toMatchRow(row: Record<string, never>): MatchRow {
+function toMatchRow(
+  row: Record<string, never>,
+  visibility: GradeRecipeVisibility,
+): MatchRow {
+  const gradeVisible = visibility === undefined || (
+    visibility !== null && visibility !== undefined &&
+    row.grade_algorithm_version === CANONICAL_GRADE_STORAGE_PARTITION &&
+    row.grade_recipe_id === visibility.storageRecipeId
+  )
   return {
     gameId: row.game_id,
     puuid: row.puuid,
@@ -1910,14 +1873,18 @@ function toMatchRow(row: Record<string, never>): MatchRow {
     visionScore: row.vision_score,
     endedInSurrender: row.ended_in_surrender,
     endedInEarlySurrender: row.ended_in_early_surrender,
-    grade: row.grade ?? undefined,
-    gradeScore: row.grade_score ?? undefined,
-    gradeAlgorithmVersion: row.grade_algorithm_version ?? undefined,
-    recallScore: row.role_fit_score ?? undefined,
-    gradeRecipeId: row.grade_recipe_id ?? undefined,
-    gradeStatus: row.grade_status ?? undefined,
-    gradeEvidenceCoverage: row.grade_evidence_coverage ?? undefined,
-    gradeReferenceSampleCount: row.grade_reference_sample_count ?? undefined,
+    grade: gradeVisible ? row.grade ?? undefined : undefined,
+    gradeScore: gradeVisible ? row.grade_score ?? undefined : undefined,
+    gradeAlgorithmVersion: gradeVisible ? row.grade_algorithm_version ?? undefined : undefined,
+    recallScore: gradeVisible ? row.role_fit_score ?? undefined : undefined,
+    gradeRecipeId: gradeVisible
+      ? (visibility?.publicRecipeId ?? row.grade_recipe_id ?? undefined)
+      : undefined,
+    gradeStatus: gradeVisible ? row.grade_status ?? undefined : undefined,
+    gradeEvidenceCoverage: gradeVisible ? row.grade_evidence_coverage ?? undefined : undefined,
+    gradeReferenceSampleCount: gradeVisible
+      ? row.grade_reference_sample_count ?? undefined
+      : undefined,
     modeFamily: row.mode_family,
     isRanked: row.is_ranked,
     lane: row.lane ?? undefined,
@@ -1945,7 +1912,7 @@ function toMatchRow(row: Record<string, never>): MatchRow {
       ? (row.label_names as unknown as string).split(" · ")
       : undefined,
     experimentCount: row.experiment_count ?? undefined,
-    lobbyPlace: row.lobby_place || undefined,
+    lobbyPlace: gradeVisible ? row.lobby_place || undefined : undefined,
     lobbySize: row.lobby_size || undefined,
   }
 }

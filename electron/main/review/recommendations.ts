@@ -54,7 +54,7 @@ export interface RecommendationDirection {
   draws: number
 }
 
-/** Fixed latest-ten versus preceding-ten Grade-v3 posterior comparison. */
+/** Fixed latest-ten versus preceding-ten Grade posterior comparison. */
 export function recommendationDirection(
   input: readonly RecommendationGame[],
   family: string,

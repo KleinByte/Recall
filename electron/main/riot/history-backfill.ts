@@ -307,7 +307,6 @@ export class RiotHistoryBackfill {
               match: mapped.match,
               player: owner,
               participants: mapped.participants,
-              teams: mapped.teams,
             }) : [],
           )
 

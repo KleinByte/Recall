@@ -23,7 +23,6 @@ import {
 import { parseMerakiFile } from "./helpers/utils"
 import type { AramStats, Champion, Summoner } from "./types/lol"
 import type { MatchRow, PersonalRecord } from "./types/stats"
-import type { StoredSettings } from "./types/app"
 import type { LiveSession } from "./types/live"
 import type { RecordNotification } from "./types/notifications"
 import type { UpdateStatus } from "./types/update"

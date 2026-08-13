@@ -8,6 +8,8 @@ import EmptyState from "../components/ui/EmptyState.vue"
 import MiniBar from "../components/ui/MiniBar.vue"
 import Panel from "../components/ui/Panel.vue"
 import TelemetryBoard from "../components/ui/TelemetryBoard.vue"
+import DashboardChampionForm from "../features/dashboard/DashboardChampionForm.vue"
+import DashboardRecentGames from "../features/dashboard/DashboardRecentGames.vue"
 import { api } from "../helpers/api"
 import { useApiEvents } from "../helpers/use-api-events"
 import { useCoalescedTask } from "../helpers/use-coalesced-task"
@@ -19,14 +21,10 @@ import {
 import { openChampion, openMatch } from "../helpers/navigation"
 import { performanceMomentum } from "../helpers/momentum"
 import {
-  championIconUrl,
-  championNameById,
   formatDecimal,
   formatDuration,
   formatPercent,
-  formatRelativeDate,
   formatStreak,
-  modeLabel,
 } from "../helpers/format"
 import { recallGradeFromRecallScore } from "../shared/recall-grade"
 import type { Champion } from "../types/lol"
@@ -52,7 +50,7 @@ const PerformanceRadar = defineAsyncComponent(
   () => import("../components/skill/PerformanceRadar.vue"),
 )
 
-const props = defineProps<{
+defineProps<{
   champions: Champion[] | null
   connected: boolean
 }>()
@@ -203,12 +201,6 @@ const recentFormRate = computed(() => form.value.length
   ? recentFormWins.value / form.value.length
   : 0)
 
-const confidenceLabel = (games: number) => {
-  if (games >= 12) return "Strong read"
-  if (games >= 5) return "Fair read"
-  return "Early read"
-}
-
 const playedToday = computed(() => session.value?.games ?? 0)
 
 /** League points won or lost since midnight, across the ranked queues. */
@@ -312,7 +304,6 @@ const nearlyThere = computed(() =>
     .slice(0, 6),
 )
 
-const championName = (id: number) => championNameById(props.champions, id)
 </script>
 
 <template>
@@ -404,35 +395,11 @@ const championName = (id: number) => championNameById(props.champions, id)
         </Panel>
 
         <Panel v-if="recent.length" title="Recent games" class="dashboard-panel recent-panel">
-            <ul class="game-list">
-              <li
-                v-for="game in recent"
-                :key="game.gameId"
-                class="game"
-                :class="game.win ? 'won' : 'lost'"
-                @click="openMatch(game)"
-              >
-                <GradeBadge :grade="game.grade" />
-                <img
-                  :src="championIconUrl(game.championId)"
-                  :alt="championName(game.championId)"
-                  class="portrait"
-                />
-                <div class="game-body">
-                  <div class="game-name">{{ championName(game.championId) }}</div>
-                  <div class="muted game-meta">
-                    {{ game.queueName ?? modeLabel(game.mode) }} ·
-                    {{ formatDuration(game.durationSecs) }}
-                  </div>
-                </div>
-                <div class="numeric game-kda">
-                  {{ game.kills }}/{{ game.deaths }}/{{ game.assists }}
-                </div>
-                <div class="muted game-date">
-                  {{ formatRelativeDate(game.playedAt) }}
-                </div>
-              </li>
-            </ul>
+          <DashboardRecentGames
+            :games="recent"
+            :champions="champions"
+            @open-match="openMatch"
+          />
         </Panel>
 
         <Panel
@@ -441,52 +408,11 @@ const championName = (id: number) => championNameById(props.champions, id)
             meta="Performance adjusted for sample size"
             class="dashboard-panel champions-panel"
           >
-            <p class="muted champion-intro">
-              Your highest average Recall Score among champions with at least five graded games.
-            </p>
-            <ol class="champion-list">
-              <li v-for="(row, index) in ranking.best" :key="row.championId">
-                <button
-                  type="button"
-                  class="champion"
-                  @click="openChampion(row.championId)"
-                >
-                  <span class="numeric champion-rank">{{ index + 1 }}</span>
-                  <img
-                    :src="championIconUrl(row.championId)"
-                    :alt="championName(row.championId)"
-                    class="portrait"
-                  />
-                  <span class="champion-copy">
-                    <strong class="champion-name">{{ championName(row.championId) }}</strong>
-                    <span class="muted champion-evidence">
-                      {{ confidenceLabel(row.gradedGames) }} · {{ row.gradedGames }} graded
-                    </span>
-                  </span>
-                  <span class="champion-stats">
-                    <span>
-                      <strong class="numeric">{{ row.games }}</strong>
-                      <small>games</small>
-                    </span>
-                    <span>
-                      <strong
-                        class="numeric"
-                        :class="row.winRate >= 0.5 ? 'win-text' : 'loss-text'"
-                      >{{ formatPercent(row.winRate) }}</strong>
-                      <small>win rate</small>
-                    </span>
-                    <span>
-                      <strong class="numeric">{{ formatDecimal(row.kda, 2) }}</strong>
-                      <small>KDA</small>
-                    </span>
-                  </span>
-                  <span class="champion-grade">
-                    <GradeBadge :grade="recallGradeFromRecallScore(row.recallScore)" size="lg" />
-                  </span>
-                </button>
-              </li>
-            </ol>
-            <p class="muted champion-footnote">Open a champion for its full breakdown.</p>
+          <DashboardChampionForm
+            :rows="ranking.best"
+            :champions="champions"
+            @open-champion="openChampion"
+          />
         </Panel>
 
       </section>
@@ -796,224 +722,6 @@ h1 {
   container-type: inline-size;
 }
 
-.game-list,
-.champion-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.game {
-  position: relative;
-  display: grid;
-  grid-template-columns: 34px 28px 1fr auto auto;
-  align-items: center;
-  gap: var(--space-3);
-  min-height: 48px;
-  padding: 7px 9px;
-  overflow: hidden;
-  border: 1px solid rgba(200, 170, 109, .1);
-  border-radius: var(--radius-sm);
-  background: rgba(6, 13, 22, .36);
-  cursor: pointer;
-  font-size: 12px;
-  transition: border-color var(--instrument-motion-fast) ease, background var(--instrument-motion-fast) ease;
-}
-
-.game::before {
-  content: "";
-  position: absolute;
-  inset: 7px auto 7px 0;
-  width: 2px;
-  background: transparent;
-}
-
-.game.won {
-  --game-state: var(--win);
-}
-
-.game.lost {
-  --game-state: var(--loss);
-}
-
-.game.won::before,
-.game.lost::before { background: var(--game-state); }
-
-.game:hover {
-  border-color: var(--instrument-border-soft);
-  background: rgba(23, 64, 92, .2);
-}
-
-.game:hover .game-name {
-  color: var(--gold);
-}
-
-.game-name {
-  color: var(--text-primary);
-  font: 13px var(--font-heading);
-}
-
-.game-meta,
-.game-date {
-  font-size: 11px;
-}
-
-.game-kda {
-  color: var(--instrument-title);
-}
-
-.champion {
-  position: relative;
-  display: grid;
-  grid-template-columns: 18px 42px minmax(0, 1fr) 52px;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  padding: var(--space-2);
-  overflow: hidden;
-  background: linear-gradient(105deg, rgba(14, 26, 42, .88), rgba(6, 13, 22, .54));
-  border: 1px solid rgba(200, 170, 109, .13);
-  border-radius: var(--radius-sm);
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  font-size: 13px;
-  transition: border-color var(--instrument-motion-fast) ease, background var(--instrument-motion-fast) ease;
-}
-
-.champion:hover {
-  border-color: var(--instrument-border);
-  background: linear-gradient(105deg, rgba(23, 64, 92, .38), rgba(14, 26, 42, .8));
-}
-
-.champion:hover .champion-name {
-  color: var(--gold);
-}
-
-.champion-name {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-primary);
-  font-family: var(--font-heading);
-}
-
-.champion-list {
-  gap: var(--space-2);
-}
-
-.champion-list > li {
-  min-width: 0;
-}
-
-.champion-intro,
-.champion-footnote {
-  font-size: 11px;
-}
-
-.champion-intro {
-  margin: 0 0 var(--space-3);
-  max-width: 66ch;
-}
-
-.champion-footnote {
-  margin: var(--space-3) 0 0;
-  text-align: right;
-}
-
-.champion-rank {
-  color: var(--instrument-title);
-  font-size: 14px;
-  text-align: center;
-}
-
-.champion-copy {
-  min-width: 0;
-}
-
-.champion-evidence {
-  display: block;
-  margin-top: 2px;
-  font-size: 12px;
-}
-
-.champion-stats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(54px, 1fr));
-  grid-column: 3 / -1;
-  gap: var(--space-1);
-}
-
-.champion-grade {
-  grid-column: 4;
-  grid-row: 1;
-  justify-self: end;
-}
-
-.champion-stats > span {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  padding-right: var(--space-2);
-  border-right: 1px solid var(--instrument-border-soft);
-}
-
-.champion-stats strong {
-  color: var(--text-primary);
-  font-size: 13px;
-}
-
-.champion-stats strong.win-text {
-  color: var(--win);
-}
-
-.champion-stats strong.loss-text {
-  color: var(--loss);
-}
-
-.champion-stats small {
-  color: var(--text-muted);
-  font-size: 11px;
-  letter-spacing: .5px;
-  text-transform: uppercase;
-}
-
-.portrait {
-  width: 26px;
-  height: 26px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--instrument-border-soft);
-  object-fit: cover;
-}
-
-.champion .portrait {
-  width: 42px;
-  height: 42px;
-}
-
-@container (min-width: 650px) {
-  .champion {
-    grid-template-columns: 18px 42px minmax(84px, 1fr) minmax(168px, 1.2fr) 54px;
-  }
-
-  .champion-stats,
-  .champion-grade {
-    grid-column: auto;
-    grid-row: auto;
-  }
-}
-
-@container (max-width: 430px) {
-  .champion { grid-template-columns: 18px 36px minmax(0, 1fr) 44px; }
-  .champion .portrait { width: 36px; height: 36px; }
-  .champion-stats { grid-column: 1 / -1; }
-}
-
 .small {
   font-size: 11px;
 }
@@ -1162,9 +870,6 @@ h1 {
 }
 
 @media (max-width: 620px) {
-  .game { grid-template-columns: 34px 28px minmax(0, 1fr) auto; gap: var(--space-2); }
-  .game-date { display: none; }
-
   .dashboard-hero { align-items: flex-start; padding: 16px !important; }
   .overall { width: 100%; align-items: flex-start; text-align: left; }
   .overall-readout { justify-content: flex-start; }

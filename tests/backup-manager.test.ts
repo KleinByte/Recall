@@ -15,6 +15,13 @@ import {
   latestSchemaVersion,
 } from "../electron/main/database/migrations.js"
 import { MatchesRepository } from "../electron/main/database/matches-repo.js"
+import { GradePersistenceRepository } from
+  "../electron/main/database/grade-persistence-repo.js"
+import {
+  decodeStoredJsonBody,
+  gzipJsonTextV1,
+  type StoredJsonBodyRow,
+} from "../electron/main/database/json-body-codec.js"
 import { buildMatchRow } from "./fixtures/matches.js"
 
 let root: string
@@ -109,25 +116,66 @@ describe("BackupManager", () => {
     expect(backups.list()).toHaveLength(1)
   })
 
-  it("creates a pre-restore generation and restores after restart", () => {
-    const selected = manager().create(db as never, "manual")
+  it("creates a pre-restore generation and restores after restart", async () => {
+    const live = gzipJsonTextV1('{"captured":"召唤师"}')
+    db.prepare(`
+      INSERT INTO live_game_snapshots
+        (game_id, puuid, game_time_ms, captured_at, reason,
+         has_active_player_stat_runes, snapshot_encoding,
+         snapshot_uncompressed_bytes, snapshot_compressed_bytes,
+         snapshot_sha256, snapshot_payload)
+      VALUES (1, 'test-puuid', 1000, 2000, 'first', 0, ?, ?, ?, ?, ?)
+    `).run(live.encoding, live.uncompressedBytes, live.compressedBytes,
+      live.sha256, live.payload)
+    new GradePersistenceRepository(db).registerCalibration({
+      calibrationId: "backup-calibration",
+      calibrationHash: "a".repeat(64),
+      referencePopulation: { mode: "aram" },
+      sampleCount: 1,
+      snapshot: { frozen: true },
+      createdAt: 3000,
+    })
+    const selected = await manager().createAsync(db as never, "manual")
     db.prepare("DELETE FROM matches").run()
-    manager().prepareRestore(db as never, selected.fileName)
+    await manager().prepareRestoreAsync(db as never, selected.fileName)
     db.close()
     expect(manager().applyRestoreIntent(latestSchemaVersion)).toBe(true)
     db = new Database(databasePath)
     expect(db.prepare("SELECT COUNT(*) AS count FROM matches").get())
       .toEqual({ count: 1 })
+    const restoredLive = db.prepare(`
+      SELECT snapshot_encoding AS snapshotEncoding,
+             snapshot_uncompressed_bytes AS snapshotUncompressedBytes,
+             snapshot_compressed_bytes AS snapshotCompressedBytes,
+             snapshot_sha256 AS snapshotSha256,
+             snapshot_payload AS snapshotPayload,
+             captured_at AS capturedAt
+      FROM live_game_snapshots
+    `).get() as StoredJsonBodyRow & { capturedAt: number }
+    const restoredCalibration = db.prepare(`
+      SELECT snapshot_encoding AS snapshotEncoding,
+             snapshot_uncompressed_bytes AS snapshotUncompressedBytes,
+             snapshot_compressed_bytes AS snapshotCompressedBytes,
+             snapshot_sha256 AS snapshotSha256,
+             snapshot_payload AS snapshotPayload,
+             created_at AS createdAt
+      FROM grade_calibration_snapshots
+      WHERE calibration_id = 'backup-calibration'
+    `).get() as StoredJsonBodyRow & { createdAt: number }
+    expect(decodeStoredJsonBody(restoredLive).text).toBe('{"captured":"召唤师"}')
+    expect(restoredLive.capturedAt).toBe(2000)
+    expect(decodeStoredJsonBody(restoredCalibration).value).toEqual({ frozen: true })
+    expect(restoredCalibration.createdAt).toBe(3000)
     expect(manager().list().some((backup) => backup.reason === "pre-restore"))
       .toBe(true)
   })
 
-  it("rejects a changed backup and path traversal without touching the active database", () => {
-    const selected = manager().create(db as never, "manual")
+  it("rejects a changed backup and path traversal without touching the active database", async () => {
+    const selected = await manager().createAsync(db as never, "manual")
     const original = readFileSync(databasePath)
     appendFileSync(path.join(backupDir, selected.fileName), "changed")
-    expect(() => manager().prepareRestore(db as never, selected.fileName))
-      .toThrow("Backup")
+    await expect(manager().prepareRestoreAsync(db as never, selected.fileName))
+      .rejects.toThrow("Backup")
     expect(() => manager().delete("../stats.db")).toThrow("Invalid backup path")
     expect(readFileSync(databasePath)).toEqual(original)
   })

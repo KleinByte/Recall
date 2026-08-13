@@ -10,25 +10,7 @@ import type { ChampionStatRow } from "../database/matches-repo.js"
 import { buildStyleProfile, type StyleAxis } from "./style.js"
 import type { ModeFamily, ParticipantRow } from "./types.js"
 
-/**
- * How many games of evidence the player's own average is worth.
- *
- * A champion played once has said almost nothing, and treating its result as
- * fact puts a single lucky game at the top of the list. Weighting the player's
- * overall average as though it were three games means one game moves the
- * needle a quarter of the way, while five games mostly speak for themselves.
- */
-export const PRIOR_WEIGHT = 3
-
 export type Confidence = "thin" | "fair" | "solid"
-
-export function shrinkToward(
-  value: number,
-  games: number,
-  baseline: number,
-): number {
-  return (games * value + PRIOR_WEIGHT * baseline) / (games + PRIOR_WEIGHT)
-}
 
 export function confidenceOf(games: number): Confidence {
   if (games >= 12) return "solid"
@@ -42,8 +24,6 @@ export interface RankedChampion {
   gradedGames: number
   winRate: number
   kda: number
-  rawGrade?: number
-  adjustedGrade: number
   /** Visible authoritative Recall average; never reliability-shrunk. */
   recallScore?: number
   confidence: Confidence
@@ -57,7 +37,6 @@ export interface RankedChampion {
  */
 export function rankChampions(
   rows: ChampionStatRow[],
-  baseline: number,
 ): RankedChampion[] {
   return rows
     .filter((row) => row.gradedGames >= 5 && Number.isFinite(row.avgGradeScore))
@@ -67,24 +46,17 @@ export function rankChampions(
       gradedGames: row.gradedGames,
       winRate: row.winRate,
       kda: row.kda,
-      rawGrade: row.avgGradeScore,
       recallScore: row.averageRecallScore,
-      adjustedGrade: shrinkToward(
-        row.avgGradeScore!,
-        row.gradedGames,
-        baseline,
-      ),
       confidence: confidenceOf(row.gradedGames),
     }))
     .sort((a, b) =>
-      b.adjustedGrade - a.adjustedGrade ||
+      (b.recallScore ?? -Infinity) - (a.recallScore ?? -Infinity) ||
       b.gradedGames - a.gradedGames ||
       a.championId - b.championId)
 }
 
 export function splitChampionSignals(
   rows: ChampionStatRow[],
-  baseline: number,
 ): { main: RankedChampion[]; earlySignals: RankedChampion[] } {
   const earlySignals = rows
     .filter((row) => row.gradedGames >= 1 && row.gradedGames <= 4 &&
@@ -95,16 +67,14 @@ export function splitChampionSignals(
       gradedGames: row.gradedGames,
       winRate: row.winRate,
       kda: row.kda,
-      rawGrade: row.avgGradeScore,
       recallScore: row.averageRecallScore,
-      adjustedGrade: shrinkToward(row.avgGradeScore!, row.gradedGames, baseline),
       confidence: confidenceOf(row.gradedGames),
     }))
     .sort((a, b) =>
-      b.adjustedGrade - a.adjustedGrade ||
+      (b.recallScore ?? -Infinity) - (a.recallScore ?? -Infinity) ||
       b.gradedGames - a.gradedGames ||
       a.championId - b.championId)
-  return { main: rankChampions(rows, baseline), earlySignals }
+  return { main: rankChampions(rows), earlySignals }
 }
 
 /**

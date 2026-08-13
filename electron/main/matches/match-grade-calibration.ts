@@ -1,4 +1,4 @@
-import { MATCH_GRADE_RECIPE } from "./match-grade-recipe.js"
+import { CURRENT_GRADE_RECIPE } from "./match-grade-recipe.js"
 
 export type CalibrationMatchId = string | number
 
@@ -34,7 +34,7 @@ export interface CalibrationResult {
   source: "local_shrunk" | "parent_fallback" | "neutral_fallback"
 }
 
-const [MIN_PERCENTILE, MAX_PERCENTILE] = MATCH_GRADE_RECIPE.calibration.percentileClamp
+const [MIN_PERCENTILE, MAX_PERCENTILE] = CURRENT_GRADE_RECIPE.calibration.percentileClamp
 
 const matchKey = (matchId: CalibrationMatchId) => `${typeof matchId}:${String(matchId)}`
 const validObservation = (entry: CalibrationObservation) =>
@@ -142,7 +142,7 @@ export function shrunkMidEcdf(
   cohort: CalibrationCohort,
   options: CalibrationOptions = {},
 ): CalibrationResult {
-  const kappa = options.kappa ?? MATCH_GRADE_RECIPE.calibration.defaultKappa
+  const kappa = options.kappa ?? CURRENT_GRADE_RECIPE.calibration.defaultKappa
   if (!Number.isFinite(kappa) || kappa < 0) throw new RangeError("kappa must be finite and non-negative")
   const rootKappa = options.rootKappa ?? kappa
   if (!Number.isFinite(rootKappa) || rootKappa < 0) {
