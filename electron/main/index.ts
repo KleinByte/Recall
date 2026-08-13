@@ -1328,6 +1328,18 @@ async function startRiotHistoryBackfill(
       recall: getMatchGradingService(),
       sourceRepository: new MatchSourceRepository(getDatabase()),
       matchPuuid,
+      riotId: {
+        gameName: active.summoner.gameName,
+        tagLine: active.summoner.tagLine,
+      },
+      onAccountResolved: (resolvedMatchPuuid) => {
+        saveRiotAccount(
+          active.summoner,
+          resolvedMatchPuuid,
+          active.regionalRoute!,
+          active.platformId ?? "",
+        )
+      },
       onProgress: (state) => {
         if (revision !== riotBackfillRevision) return
         broadcast(win, "riot-history:updated", state)

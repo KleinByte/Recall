@@ -34,10 +34,13 @@ describe("League data-source boundary", () => {
     expect(main).toContain('ipcMain.handle("riot-history:retry"')
     expect(main).toContain('ipcMain.handle("riot-history:reimport-details"')
     expect(main).not.toContain("/lol/match/v5/")
-    expect(history).not.toContain("/riot/account/v1/")
+    expect(history).toContain("/riot/account/v1/accounts/by-riot-id/")
   })
 
-  it("rejects every Web API path outside the three Match-V5 history shapes", () => {
+  it("allows only account resolution and the three Match-V5 history shapes", () => {
+    expect(() => assertAllowedMatchV5Path(
+      "/riot/account/v1/accounts/by-riot-id/Recall%20Player/NA1",
+    )).not.toThrow()
     expect(() => assertAllowedMatchV5Path(
       "/lol/match/v5/matches/by-puuid/synthetic_owner/ids?start=0&count=100",
     )).not.toThrow()
@@ -48,7 +51,7 @@ describe("League data-source boundary", () => {
       "/lol/match/v5/matches/NA1_123/timeline",
     )).not.toThrow()
     for (const path of [
-      "/riot/account/v1/accounts/by-riot-id/a/b",
+      "/riot/account/v1/accounts/by-puuid/a",
       "/lol/league/v4/entries/by-summoner/a",
       "/lol/champion-mastery/v4/champion-masteries/by-puuid/a",
       "/lol/challenges/v1/player-data/a",
@@ -60,7 +63,7 @@ describe("League data-source boundary", () => {
     const settings = read("src/pages/SettingsPage.vue")
     const review = read("src/pages/ReviewPage.vue")
 
-    expect(settings).toContain("Used only for the full Match-V5 history import")
+    expect(settings).toContain("Used only to resolve the signed-in Riot ID")
     expect(review).toContain("Recent timelines come directly from the connected League client")
     expect(review).not.toContain("Add a Riot API key in Settings if needed")
   })

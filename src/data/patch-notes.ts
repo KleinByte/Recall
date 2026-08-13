@@ -21,6 +21,14 @@ function note(
 /** Shipped releases, newest first. */
 export const patchNotes: readonly PatchNoteRelease[] = [
   note(
+    "3.2.1",
+    "2026-08-12",
+    "Match history import fix",
+    "Match-V5 history imports refresh the signed-in account identity before scanning.",
+    "Fixed invalid-request errors caused by a stale cached Riot PUUID.",
+    "Kept Riot Web API access limited to identity resolution and explicit history imports.",
+  ),
+  note(
     "3.2.0",
     "2026-08-12",
     "Stronger analysis and data trust",

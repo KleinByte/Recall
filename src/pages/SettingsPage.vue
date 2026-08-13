@@ -451,10 +451,11 @@ const formatDate = (value?: number) =>
 
     <Panel title="Riot API" class="riot-panel">
       <p class="muted note">
-        Used only for the full Match-V5 history import you start here. Normal
-        post-game details, scoreboards, and recent timelines come directly from
-        the connected League client without a developer key. The key is encrypted
-        by your operating system and is never shown again.
+        Used only to resolve the signed-in Riot ID and run the full Match-V5
+        history import you start here. Normal post-game details, scoreboards, and
+        recent timelines come directly from the connected League client without a
+        developer key. The key is encrypted by your operating system and is never
+        shown again.
       </p>
       <p class="muted note">
         Paste the Web API key beginning with <code>RGAPI-</code>. An RSO client

@@ -40,6 +40,11 @@ interface RiotMatchTimelineDto {
 interface BackfillOptions {
   api?: MatchApi
   matchPuuid?: string
+  riotId?: {
+    gameName: string
+    tagLine: string
+  }
+  onAccountResolved?: (matchPuuid: string) => void
   onProgress?: (state: RiotBackfillState) => void
   champSelect?: ChampSelectRepository
   recall?: MatchGradingService
@@ -85,7 +90,9 @@ function completeMappedTimeline(
 export class RiotHistoryBackfill {
   private readonly api: MatchApi
   private readonly progress: RiotBackfillRepository
-  private readonly matchPuuid: string
+  private readonly cachedMatchPuuid: string
+  private readonly riotId: BackfillOptions["riotId"]
+  private readonly onAccountResolved: (matchPuuid: string) => void
   private readonly onProgress: (state: RiotBackfillState) => void
   private readonly champSelect?: ChampSelectRepository
   private readonly recall?: MatchGradingService
@@ -104,7 +111,9 @@ export class RiotHistoryBackfill {
     this.api =
       options.api ?? new RiotApiClient(this.apiKey, this.regionalRoute)
     this.progress = progress
-    this.matchPuuid = options.matchPuuid ?? puuid
+    this.cachedMatchPuuid = options.matchPuuid ?? puuid
+    this.riotId = options.riotId
+    this.onAccountResolved = options.onAccountResolved ?? (() => undefined)
     this.onProgress = options.onProgress ?? (() => undefined)
     this.champSelect = options.champSelect
     this.recall = options.recall
@@ -125,7 +134,7 @@ export class RiotHistoryBackfill {
       : restart ? undefined : persistedStart
     let state = existing
     try {
-      const matchPuuid = this.matchPuuid
+      const matchPuuid = await this.resolveMatchPuuid(signal)
       if (
         !restart &&
         existing?.status === "complete" &&
@@ -371,6 +380,28 @@ export class RiotHistoryBackfill {
       this.onProgress(state)
       throw error
     }
+  }
+
+  /**
+   * The League client exposes a local account UUID, while Match-V5 requires
+   * Riot's public PUUID. Refresh it from the signed-in Riot ID so an old cache
+   * cannot permanently break history imports after Riot rotates identifiers.
+   */
+  private async resolveMatchPuuid(signal?: AbortSignal): Promise<string> {
+    if (!this.riotId) return this.cachedMatchPuuid
+
+    const account = await this.api.get<{ puuid?: unknown }>(
+      `/riot/account/v1/accounts/by-riot-id/` +
+        `${encodeURIComponent(this.riotId.gameName)}/` +
+        `${encodeURIComponent(this.riotId.tagLine)}`,
+      "account",
+      signal,
+    )
+    if (typeof account.puuid !== "string" || account.puuid.length === 0) {
+      throw new Error("Riot's account response did not include a PUUID")
+    }
+    this.onAccountResolved(account.puuid)
+    return account.puuid
   }
 
   private async captureTimeline(

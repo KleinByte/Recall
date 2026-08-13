@@ -122,7 +122,22 @@ describe("RiotApiClient", () => {
     await expect(client.get("/lol/match/v5/matches/NA1_1", "detail")).rejects.toThrow(message)
   })
 
-  it("rejects Account-V1 before making a request", async () => {
+  it("identifies Account-V1 failures during PUUID refresh", async () => {
+    const client = new RiotApiClient("RGAPI-test", "americas", {
+      fetch: vi.fn().mockResolvedValue(new Response("", { status: 400 })),
+      limiter: {
+        acquire: vi.fn().mockResolvedValue(undefined),
+        observe: vi.fn(),
+      } as never,
+    })
+
+    await expect(client.get(
+      "/riot/account/v1/accounts/by-riot-id/Recall%20Player/NA1",
+      "account",
+    )).rejects.toThrow("Account-V1 request as invalid (400)")
+  })
+
+  it("rejects unsupported Riot APIs before making a request", async () => {
     const fetcher = vi.fn()
     const client = new RiotApiClient("RGAPI-test", "americas", {
       fetch: fetcher,

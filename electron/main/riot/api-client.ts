@@ -42,8 +42,8 @@ interface RiotApiClientOptions {
 
 const RETRYABLE = new Set([500, 502, 503, 504])
 
-function failureMessage(status: number) {
-  const api = "Match-V5"
+function failureMessage(status: number, scope: string) {
+  const api = scope === "account" ? "Account-V1" : "Match-V5"
   switch (status) {
     case 400:
       return (
@@ -69,13 +69,19 @@ const MATCH_ID = "[A-Za-z0-9_-]{1,96}"
 const PUUID = "[A-Za-z0-9_-]{1,128}"
 const LIST_PATH = new RegExp(`^/lol/match/v5/matches/by-puuid/${PUUID}/ids(?:\\?[^#]*)?$`)
 const ARTIFACT_PATH = new RegExp(`^/lol/match/v5/matches/${MATCH_ID}(?:/timeline)?$`)
+const ACCOUNT_BY_RIOT_ID_PATH =
+  /^\/riot\/account\/v1\/accounts\/by-riot-id\/[^/?#]{1,192}\/[^/?#]{1,64}$/
 
-/** Rejects every Riot Web API path outside explicit Match-V5 history. */
-export function assertAllowedMatchV5Path(path: string): void {
-  if (!LIST_PATH.test(path) && !ARTIFACT_PATH.test(path)) {
+/** Rejects every Riot Web API path outside identity resolution and Match-V5 history. */
+export function assertAllowedRiotHistoryPath(path: string): void {
+  if (!LIST_PATH.test(path) && !ARTIFACT_PATH.test(path) &&
+      !ACCOUNT_BY_RIOT_ID_PATH.test(path)) {
     throw new Error("riot_web_api_path_not_allowed")
   }
 }
+
+/** Backwards-compatible name for callers that only need the boundary assertion. */
+export const assertAllowedMatchV5Path = assertAllowedRiotHistoryPath
 
 export class RiotApiClient {
   private readonly fetcher: typeof fetch
@@ -97,7 +103,7 @@ export class RiotApiClient {
   }
 
   async get<T>(path: string, scope: string, signal?: AbortSignal): Promise<T> {
-    assertAllowedMatchV5Path(path)
+    assertAllowedRiotHistoryPath(path)
     let transientAttempts = 0
 
     while (true) {
@@ -153,7 +159,7 @@ export class RiotApiClient {
       }
 
       throw new RiotApiError(
-        failureMessage(response.status),
+        failureMessage(response.status, scope),
         response.status,
       )
     }
