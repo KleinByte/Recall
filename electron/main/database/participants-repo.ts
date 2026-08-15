@@ -230,6 +230,22 @@ function participantInsertSql(columns: readonly ParticipantColumn[]): string {
   const assignments = columns
     .filter((column) => !PARTICIPANT_KEY_COLUMNS.has(column))
     .map((column) => {
+      if (column === "rune_selections_json") {
+        const shardCount = (value: string) => `(
+          (${value} LIKE '%"slot":6%') +
+          (${value} LIKE '%"slot":7%') +
+          (${value} LIKE '%"slot":8%')
+        )`
+        // The LCU post-game scoreboard omits bonus shards. Keep a page captured
+        // from Live Client Data or Match-V5 unless the replacement is at least
+        // as complete; otherwise a later local refresh silently erases slots 6-8.
+        return `${column} = CASE
+          WHEN ${shardCount(`excluded.${column}`)} >=
+               ${shardCount(`match_participants.${column}`)}
+          THEN excluded.${column}
+          ELSE match_participants.${column}
+        END`
+      }
       if (protectsCompleteCore &&
           (GRADE_CORE_VALUE_COLUMNS.has(column) ||
            GRADE_CORE_METADATA_COLUMNS.has(column))) {

@@ -3,6 +3,7 @@ import { computed } from "vue"
 import GradeBadge from "../GradeBadge.vue"
 import RankedHistoryPanel from "../RankedHistoryPanel.vue"
 import PerformanceProfile from "./PerformanceProfile.vue"
+import RviBuildingState from "./RviBuildingState.vue"
 import OutcomeTrendChart from "./OutcomeTrendChart.vue"
 import MiniBar from "../ui/MiniBar.vue"
 import Panel from "../ui/Panel.vue"
@@ -18,7 +19,15 @@ import {
   GRADE_ORDER,
 } from "../../helpers/format"
 import { recallGradeFromRecallScore } from "../../shared/recall-grade"
-import type { LobbyMetric, ModeFamily, RankedHistory, SkillReport } from "../../types/stats"
+import type {
+  LobbyMetric,
+  ModeFamily,
+  PerformanceReferenceStatus,
+  RankedHistory,
+  RiotHistoryBackfillState,
+  SkillReport,
+  TrackedMode,
+} from "../../types/stats"
 import type { Champion } from "../../types/lol"
 
 const props = defineProps<{
@@ -27,6 +36,11 @@ const props = defineProps<{
   champions: Champion[] | null
   ranked: RankedHistory[]
   rviArmDetailsOpen: boolean
+  referenceStatus?: PerformanceReferenceStatus
+  scopeModes: readonly TrackedMode[]
+  connected: boolean
+  riotKeyConfigured: boolean
+  riotHistory?: RiotHistoryBackfillState
 }>()
 
 const emit = defineEmits<{
@@ -114,6 +128,16 @@ const rviIdentity = computed(() => props.overview.performance
       :identity="rviIdentity"
       :rvi-arm-details-open="rviArmDetailsOpen"
       @update:rvi-arm-details-open="emit('update:rviArmDetailsOpen', $event)"
+    />
+    <RviBuildingState
+      v-else
+      :reference-status="referenceStatus"
+      :modes="scopeModes"
+      :recorded-games="summary.games"
+      :graded-games="summary.gradedGames"
+      :connected="connected"
+      :riot-key-configured="riotKeyConfigured"
+      :riot-history="riotHistory"
     />
 
     <TelemetryBoard

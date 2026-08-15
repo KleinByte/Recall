@@ -1065,8 +1065,17 @@ async function startSession(
   // A configured Match-V5 key gives the recipe cutover one chance to enrich
   // the full stored history before its local reference is frozen. This is a
   // one-time cost: the direct-cutover predicate becomes false after rebuild.
-  if (getMatchGradingService().needsDirectCutover() && regionalRoute && readRiotApiKey()) {
+  const riotApiKey = readRiotApiKey()
+  if (getMatchGradingService().needsDirectCutover() && regionalRoute && riotApiKey) {
     await startRiotHistoryBackfill(win, true)
+  } else if (regionalRoute && riotApiKey) {
+    const history = getRiotBackfills().get(summoner.puuid, regionalRoute)
+    // A normal disconnect persists "paused"; a process crash may leave the
+    // durable row as "running". Resume either state from its exact Match-V5
+    // offset without making a completed or never-requested import automatic.
+    if (history?.status === "paused" || history?.status === "running") {
+      void startRiotHistoryBackfill(win, false)
+    }
   }
   if (!isCurrent() || session?.client !== client) return
   await runSync(win)

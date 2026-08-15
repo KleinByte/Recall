@@ -168,9 +168,15 @@ describe("Skill Overview", () => {
 
   it("uses one RVI performance profile", () => {
     const overview = read("src/components/skill/SkillOverview.vue")
+    const building = read("src/components/skill/RviBuildingState.vue")
 
     expect(overview).toContain("<PerformanceProfile")
     expect(overview).toContain(':identity="rviIdentity"')
+    expect(overview).toContain("<RviBuildingState")
+    expect(building).toContain("RVI is building")
+    expect(building).toContain("more needed")
+    expect(building).toContain("latest 20 games")
+    expect(building).toContain("Import older matches")
   })
 
   it("keeps the useful scoped outcome visuals", () => {

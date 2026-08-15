@@ -246,9 +246,15 @@ function retryRiotHistory() {
 
 function reimportRiotDetails() {
   riotKeyMessage.value =
-    "Re-importing historical match details for augments and newly supported fields…"
+    "Scanning full Match-V5 history beyond the League client's latest 20 games…"
   void api.reimportRiotDetails()
 }
+
+const historyImportAction = computed(() => {
+  if (riotHistory.value?.status === "running") return "Importing full history…"
+  if (riotHistory.value) return "Re-scan full history"
+  return "Import older matches"
+})
 
 function runUpdateAction(command: "retry" | "install") {
   if (command === "retry") void api.retryUpdate()
@@ -513,12 +519,13 @@ const formatDate = (value?: number) =>
         <UiButton
           :disabled="riotHistory?.status === 'running'"
           @click="reimportRiotDetails">
-          Enrich historical details
+          {{ historyImportAction }}
         </UiButton>
       </div>
       <p v-if="riotKeyConfigured" class="muted note">
-        Replays Match‑V5 history through the shared rate limiter to capture augments
-        and newly supported fields. Progress is durable and resumes after restart.
+        Scans every Match‑V5 page Riot makes available—not only the League client's
+        latest 20 games—and captures augments and other detailed fields. Progress is
+        durable and resumes after restart.
       </p>
     </Panel>
 

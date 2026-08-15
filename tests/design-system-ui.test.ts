@@ -212,6 +212,8 @@ describe("Recall shared UI system", () => {
     expect(runePage).toContain("classic-rune-board.webp")
     expect(runePage).toContain("classic-masteries-empty.webp")
     expect(runePage).toContain('<Teleport to="body">')
+    expect(runePage).toContain("3/3 captured")
+    expect(runePage).toContain("LCU match history omits bonus shards")
 
     const grade = read("src/components/GradeBadge.vue")
     const augment = read("src/components/AugmentInsightCard.vue")

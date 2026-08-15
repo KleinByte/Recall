@@ -29,7 +29,8 @@ describe("League data-source boundary", () => {
 
     expect(history).toContain("new RiotApiClient")
     expect(main).toContain("startRiotHistoryBackfill")
-    expect(main.match(/startRiotHistoryBackfill\(win/g)).toHaveLength(3)
+    expect(main.match(/startRiotHistoryBackfill\(win/g)).toHaveLength(4)
+    expect(main).toContain('history?.status === "paused" || history?.status === "running"')
     expect(main).toContain('ipcMain.handle("riot-api-key:save"')
     expect(main).toContain('ipcMain.handle("riot-history:retry"')
     expect(main).toContain('ipcMain.handle("riot-history:reimport-details"')

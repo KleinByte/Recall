@@ -307,6 +307,26 @@ describe("ParticipantsRepository", () => {
     expect(detail.teams[0].dragonKills).toBe(3)
   })
 
+  it("does not let an LCU retry erase previously captured bonus shards", () => {
+    const fullPage = [
+      ...[8005, 9111, 9104, 8014, 8345, 8347].map((runeId, slot) => ({
+        runeId, slot, var1: 0, var2: 0, var3: 0, kind: "modern" as const,
+      })),
+      ...[5005, 5008, 5001].map((runeId, index) => ({
+        runeId, slot: 6 + index, var1: 0, var2: 0, var3: 0, kind: "modern" as const,
+      })),
+    ]
+    repo.insertMany([participant({ isPlayer: 1, runeSelections: fullPage })])
+    repo.insertMany([participant({
+      isPlayer: 1,
+      runeSelections: fullPage.filter((selection) => selection.slot < 6),
+    })])
+
+    expect(repo.getMatchDetail(1, PUUID).participants[0].runeSelections
+      ?.filter((selection) => selection.slot >= 6)
+      .map((selection) => selection.runeId)).toEqual([5005, 5008, 5001])
+  })
+
   it("repairs partial team rows without letting a later partial retry erase facts", () => {
     repo.insertMany(lobby(1, 30000))
     repo.insertTeams([team()])

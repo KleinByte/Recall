@@ -154,6 +154,44 @@ describe("RiotHistoryBackfill", () => {
     expect(updates).toEqual(["running", "running", "running", "complete"])
   })
 
+  it("continues past the League client's latest 20 games and across Match-V5 pages", async () => {
+    const firstPage = Array.from({ length: 100 }, (_, index) => `NA1_${index + 1}`)
+    const api = {
+      get: vi.fn(async (path: string) => {
+        if (path.includes("/ids?")) {
+          return path.includes("start=100") ? ["NA1_101"] : firstPage
+        }
+        return dto(Number(path.match(/(\d+)$/)![1]))
+      }),
+    }
+    const backfill = new RiotHistoryBackfill(
+      "key",
+      "americas",
+      PUUID,
+      matches,
+      participants,
+      new Map(),
+      progress,
+      { api: api as never },
+    )
+
+    const state = await backfill.run(true)
+    const idRequests = api.get.mock.calls
+      .map(([path]) => String(path))
+      .filter((path) => path.includes("/ids?"))
+
+    expect(idRequests).toHaveLength(2)
+    expect(idRequests[0]).toContain("start=0&count=100")
+    expect(idRequests[1]).toContain("start=100&count=100")
+    expect(state).toMatchObject({
+      status: "complete",
+      idsScanned: 101,
+      matchesImported: 101,
+      nextOffset: 101,
+    })
+    expect(matches.countMatches(PUUID)).toBe(101)
+  })
+
   it("counts bot games as skipped instead of importing them", async () => {
     const api = {
       get: vi.fn(async (path: string) => {

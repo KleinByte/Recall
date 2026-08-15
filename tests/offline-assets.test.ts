@@ -65,6 +65,7 @@ describe("offline renderer assets", () => {
   })
 
   it("routes dynamic public art through the embedded-build base", () => {
+    const assets = readFileSync("src/helpers/assets.ts", "utf8")
     const spells = readFileSync("src/helpers/ddragon.ts", "utf8")
     const runes = readFileSync("src/helpers/runes.ts", "utf8")
     const mark = readFileSync("src/components/RecallMark.vue", "utf8")
@@ -74,6 +75,7 @@ describe("offline renderer assets", () => {
     expect(runes).toContain("publicAssetUrl(`game-data/rune-styles/${styleId}.png`)")
     expect(mark).toContain(":src=\"publicAssetUrl(assetName)\"")
     expect(mark).toContain('"recall-r.png" : "recall-icon.png"')
+    expect(assets).toContain("new URL(relative, document.baseURI).href")
     expect(spells).not.toContain("return `/game-data/spells/")
     expect(runes).not.toContain("? `/game-data/runes/")
   })

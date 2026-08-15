@@ -25,7 +25,13 @@ import {
 } from "../helpers/ranked-seasons"
 import type { SkillTab, SkillViewPreferences } from "../shared/skill-preferences"
 import type { Champion } from "../types/lol"
-import type { RankedHistory, SkillReport, StatsFilter } from "../types/stats"
+import type {
+  PerformanceReferenceStatus,
+  RankedHistory,
+  RiotHistoryBackfillState,
+  SkillReport,
+  StatsFilter,
+} from "../types/stats"
 
 const SkillInsights = defineAsyncComponent(() => import("../components/skill/SkillInsights.vue"))
 const SkillAnalyze = defineAsyncComponent(() => import("../components/skill/SkillAnalyze.vue"))
@@ -72,6 +78,9 @@ const loading = ref(true)
 const failed = ref(false)
 const oldestPlayedAt = ref<number | undefined>()
 const playedChampionIds = ref<number[]>([])
+const referenceStatus = ref<PerformanceReferenceStatus>()
+const riotKeyConfigured = ref(false)
+const riotHistory = ref<RiotHistoryBackfillState>()
 let countsRequest = 0
 let reportRequest = 0
 
@@ -197,6 +206,16 @@ async function persistSkillPreferences() {
 const refreshAll = useCoalescedTask(applyFilters)
 const refreshReport = useCoalescedTask(loadReport)
 
+async function loadBuildStatus() {
+  const [reference, riot] = await Promise.all([
+    api.getPerformanceReferenceStatus(),
+    api.getRiotApiKeyStatus(),
+  ])
+  referenceStatus.value = reference
+  riotKeyConfigured.value = riot.configured
+  riotHistory.value = riot.history
+}
+
 onMounted(async () => {
   try {
     const [preferences, meta, championIds, rankedHistory] = await Promise.all([
@@ -226,12 +245,18 @@ onMounted(async () => {
   } catch {
     // The normal empty state handles an account without recorded matches.
   }
-  await Promise.all([loadCounts(), loadReport()])
+  await Promise.all([loadCounts(), loadReport(), loadBuildStatus().catch(() => undefined)])
   events.on("stats:updated", () => void refreshAll())
   events.on("ranked:updated", async () => {
     ranked.value = await api.getRankedHistory()
   })
   events.on("lcu:status", () => void refreshReport())
+  events.on("performance-reference:updated", (status: PerformanceReferenceStatus) => {
+    referenceStatus.value = status
+  })
+  events.on("riot-history:updated", (status: RiotHistoryBackfillState) => {
+    riotHistory.value = status
+  })
 })
 </script>
 
@@ -338,6 +363,11 @@ onMounted(async () => {
           :champions="champions"
           :ranked="ranked"
           :rvi-arm-details-open="rviArmDetailsOpen"
+          :reference-status="referenceStatus"
+          :scope-modes="selectedScope.modes"
+          :connected="connected"
+          :riot-key-configured="riotKeyConfigured"
+          :riot-history="riotHistory"
           @update:rvi-arm-details-open="setRviArmDetailsOpen"
         />
         <SkillInsights

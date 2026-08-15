@@ -91,6 +91,15 @@ const statSlots = computed(() => primaryStyle.value?.slots.filter((slot) => slot
 const keystone = computed(() => selections.value.find((entry) => entry.slot === 0)
   ?? selections.value.find((entry) => entry.slot < 6))
 const selectedRuneCount = computed(() => selections.value.filter((entry) => entry.slot < 6).length)
+const capturedShardCount = computed(() => new Set(
+  selections.value.filter((entry) => entry.slot >= 6 && entry.slot <= 8)
+    .map((entry) => entry.slot),
+).size)
+const shardCaptureLabel = computed(() => capturedShardCount.value === 3
+  ? "3/3 captured"
+  : capturedShardCount.value > 0
+    ? `${capturedShardCount.value}/3 captured`
+    : "Not captured")
 const selectedMeta = computed(() => selections.value.map((selection) => ({
   selection,
   meta: runeMetadata.value[selection.runeId],
@@ -218,7 +227,9 @@ const hideBroken = (event: Event) => { (event.currentTarget as HTMLImageElement)
                 <img :src="runeIconUrl(id)" :alt="title(id)" @error="hideBroken" />
               </span>
             </div>
-            <div class="shard-divider"><span>Bonuses</span></div>
+            <div class="shard-divider">
+              <span>Bonuses</span><small>{{ shardCaptureLabel }}</small>
+            </div>
             <div v-for="(slot, shardRow) in statSlots" :key="slot.label" class="rune-row shard-row">
               <span v-for="id in slot.perks" :key="id" class="rune-node shard-node"
                 :class="{ selected: shardChosen(id, shardRow), unselected: !shardChosen(id, shardRow) }"
@@ -226,6 +237,10 @@ const hideBroken = (event: Event) => { (event.currentTarget as HTMLImageElement)
                 <img :src="runeIconUrl(id)" :alt="title(id)" @error="hideBroken" />
               </span>
             </div>
+            <p v-if="capturedShardCount < 3" class="shard-capture-note">
+              LCU match history omits bonus shards; Recall saves them when the
+              in-game Active Player feed or Match-V5 supplies them.
+            </p>
           </section>
         </div>
 
@@ -328,6 +343,8 @@ const hideBroken = (event: Event) => { (event.currentTarget as HTMLImageElement)
 .secondary-node img { width: 32px; height: 32px; }
 .shard-divider { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: var(--ui-text-label); letter-spacing: .7px; text-transform: uppercase; }
 .shard-divider::before, .shard-divider::after { content: ""; flex: 1; height: 1px; background: rgba(200,170,109,.18); }
+.shard-divider small { color: var(--text-muted); font: 10px var(--font-body); letter-spacing: .2px; text-transform: none; }
+.shard-capture-note { margin: 0; color: var(--text-muted); font-size: 10px; line-height: 1.35; text-align: center; }
 .shard-row { min-height: 34px; }
 .shard-node { width: 27px; height: 27px; border-width: 1px; }
 .shard-node img { width: 23px; height: 23px; }
