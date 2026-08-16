@@ -23,6 +23,10 @@ import {
   formatRelativeDate,
   modeLabel,
 } from "../helpers/format"
+import {
+  isRecognizedRankedQueue,
+  rankedQueueLabel,
+} from "../helpers/ranked-queues"
 import type { Champion } from "../types/lol"
 import type {
   ChallengeRow,
@@ -38,12 +42,6 @@ const props = defineProps<{
   connected: boolean
 }>()
 const events = useApiEvents()
-
-const QUEUE_LABELS: Record<string, string> = {
-  RANKED_SOLO_5x5: "Solo/Duo",
-  RANKED_FLEX_SR: "Flex",
-  RANKED_PREMADE_5x5: "Flex",
-}
 
 /** Ladder points per tier, matching how the main process scores a rank. */
 const POINTS_PER_TIER = 400
@@ -189,10 +187,10 @@ onMounted(() => {
 
 const rankedQueues = computed(() =>
   ranked.value
-    .filter((entry) => QUEUE_LABELS[entry.queue] && entry.points.length > 0)
+    .filter((entry) => isRecognizedRankedQueue(entry.queue) && entry.points.length > 0)
     .map((entry) => ({
       ...entry,
-      label: QUEUE_LABELS[entry.queue],
+      label: rankedQueueLabel(entry.queue),
       latest: entry.points[entry.points.length - 1],
       change:
         entry.points.length > 1

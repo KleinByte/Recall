@@ -5,7 +5,6 @@ const read = (path: string) => readFileSync(path, "utf8")
 const packageJson = JSON.parse(read("package.json")) as {
   packageManager: string
   engines: { node: string; pnpm: string }
-  pnpm?: { onlyBuiltDependencies?: string[] }
   scripts: Record<string, string>
   dependencies: Record<string, string>
   devDependencies: Record<string, string>
@@ -24,7 +23,11 @@ describe("development environment contract", () => {
 
     const dockerfile = read("Dockerfile.dev")
     expect(dockerfile).toContain(`FROM node:${nodeVersion}-bookworm`)
-    expect(dockerfile).toContain(`corepack prepare pnpm@${pnpmVersion} --activate`)
+    expect(dockerfile).toContain(`npm install --global pnpm@${pnpmVersion}`)
+    expect(dockerfile.indexOf("COPY scripts/rebuild-node-native.mjs"))
+      .toBeLessThan(dockerfile.indexOf("RUN pnpm install --frozen-lockfile"))
+    expect(read("docker/start-dev.sh"))
+      .toContain("pnpm exec vite --host 0.0.0.0 --port 3344")
 
     for (const workflow of [
       ".github/workflows/release.yml",
@@ -42,22 +45,21 @@ describe("development environment contract", () => {
   })
 
   it("keeps native build policy compatible and both SQLite ABIs in lockstep", () => {
-    expect(read(".npmrc")).toContain("package-import-method=copy")
-
-    // pnpm 9 reads this policy from package.json; newer pnpm releases read
-    // the workspace copy. Keep both until the pinned package manager changes.
-    expect([...(packageJson.pnpm?.onlyBuiltDependencies ?? [])].sort())
-      .toEqual(["better-sqlite3", "electron", "electron-winstaller", "esbuild"])
-
     const workspace = read("pnpm-workspace.yaml")
-    expect(workspace).toContain("onlyBuiltDependencies:")
-    expect(workspace).toContain("  - better-sqlite3")
-    expect(workspace).toContain("  - electron")
-    expect(workspace).toContain("  - electron-winstaller")
-    expect(workspace).toContain("  - esbuild")
+    expect(workspace).toContain("nodeLinker: hoisted")
+    expect(workspace).toContain("packageImportMethod: copy")
+    expect(workspace).toContain("allowBuilds:")
+    expect(workspace).toContain("  better-sqlite3: true")
+    expect(workspace).toContain("  electron: true")
+    expect(workspace).toContain("  electron-winstaller: true")
+    expect(workspace).toContain("  esbuild: true")
 
     expect(packageJson.scripts["rebuild:electron"])
       .toBe("electron-builder install-app-deps")
+
+    const builder = read("electron-builder.json")
+    expect(builder).toContain("better-sqlite3/prebuilds/*.node")
+    expect(builder).toContain("!node_modules/better-sqlite3/build/**/*")
     expect(packageJson.devDependencies).not.toHaveProperty("@electron/rebuild")
     expect(read("scripts/rebuild-node-native.mjs")).not.toContain('"--force"')
 
@@ -107,6 +109,7 @@ describe("development environment contract", () => {
     const vite = read("vite.config.ts")
     expect(vite).toContain("rendererEntryBudgetBytes = 250 * 1024")
     expect(vite).toContain("recall-renderer-entry-budget")
-    expect(vite).toContain('return "chart-engine"')
+    expect(vite).toContain("rolldownOptions:")
+    expect(vite).toContain("chunkSizeWarningLimit: 700")
   })
 })

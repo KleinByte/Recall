@@ -90,6 +90,10 @@ describe("desktop page layout", () => {
     expect(hero).not.toContain("<StatTile")
     expect(hero).toMatch(/\.hero-labels article \{[\s\S]*min-height: 30px/)
     expect(hero).toMatch(/\.record-chips > span \{[\s\S]*min-height: 34px/)
+    expect(hero).toContain("<HoverCard")
+    expect(hero).toContain("What this label means")
+    expect(hero).toContain("evidenceRows(label)")
+    expect(hero).not.toContain(':title="`${label.tooltip}')
   })
 
   it("uses distinct champion-select and in-game live layouts", () => {

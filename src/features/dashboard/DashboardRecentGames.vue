@@ -31,7 +31,7 @@ const championName = (id: number) => championNameById(props.champions, id)
       :class="game.win ? 'won' : 'lost'"
       @click="emit('openMatch', game)"
     >
-      <GradeBadge :grade="game.grade" />
+      <GradeBadge :grade="game.grade" :status="game.gradeStatus" />
       <img
         :src="championIconUrl(game.championId)"
         :alt="championName(game.championId)"

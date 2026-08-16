@@ -2,7 +2,7 @@ import fs from "node:fs"
 import { defineConfig, type Plugin } from "vite"
 import vue from "@vitejs/plugin-vue"
 import electron from "vite-plugin-electron/simple"
-import pkg from "./package.json"
+import pkg from "./package.json" with { type: "json" }
 
 // Pure JavaScript dependencies used by the main process are bundled so their
 // transitive dependency trees cannot be pruned by the desktop packager. Keep
@@ -29,21 +29,6 @@ function rendererEntryBudget(): Plugin {
       }
     },
   }
-}
-
-/**
- * Keep the renderer's long-lived framework dependencies independently
- * cacheable. Page components remain Vite-managed async chunks; these groups
- * are intentionally limited to stable library boundaries so a small feature
- * edit does not produce a fragile graph of vendor micro-chunks.
- */
-function rendererChunk(id: string): string | undefined {
-  if (!id.includes("node_modules")) return undefined
-  if (id.includes("/zrender/")) return "chart-renderer"
-  if (id.includes("/echarts/")) return "chart-engine"
-  if (id.includes("/@fortawesome/")) return "icons"
-  if (id.includes("/vue/") || id.includes("/@vue/")) return "vue"
-  return undefined
 }
 
 // https://vitejs.dev/config/
@@ -80,7 +65,7 @@ export default defineConfig(({ command }) => {
               sourcemap,
               minify: isBuild,
               outDir: "dist-electron/main",
-              rollupOptions: {
+              rolldownOptions: {
                 external: mainProcessExternals,
               },
             },
@@ -95,7 +80,7 @@ export default defineConfig(({ command }) => {
               sourcemap: sourcemap ? "inline" : undefined, // #332
               minify: isBuild,
               outDir: "dist-electron/preload",
-              rollupOptions: {
+              rolldownOptions: {
                 external: ["electron"],
               },
             },
@@ -117,15 +102,10 @@ export default defineConfig(({ command }) => {
       })(),
     clearScreen: false,
     build: {
-      // ECharts is deliberately isolated and loaded with chart-bearing pages.
-      // Its engine is larger than Vite's generic 500 kB warning threshold,
-      // while the actual startup entry remains well below this budget.
+      // ECharts is loaded only with chart-bearing pages. Rolldown's default
+      // chunk graph preserves the package's internal execution order; the
+      // startup entry remains independently enforced by the budget plugin.
       chunkSizeWarningLimit: 700,
-      rollupOptions: {
-        output: {
-          manualChunks: rendererChunk,
-        },
-      },
     },
   }
 })

@@ -21,10 +21,11 @@ const props = defineProps<{
 }>()
 
 const references = computed<PerformanceModeReferenceStatus[]>(() => {
+  if (!props.referenceStatus) return []
   const byMode = new Map(
-    props.referenceStatus?.modeReferences.map((reference) => [reference.mode, reference]),
+    props.referenceStatus.modeReferences.map((reference) => [reference.mode, reference]),
   )
-  const requiredMatches = props.referenceStatus?.requiredMatches ?? 10
+  const requiredMatches = props.referenceStatus.requiredMatches
   return props.modes.map((mode) => byMode.get(mode) ?? {
     mode,
     state: "building",

@@ -2707,7 +2707,10 @@ async function main() {
     await ensureRecallFrozen()
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    console.error(`Could not initialise Recall's database: ${message}`)
+    console.error(
+      "Could not initialise Recall's database:",
+      error instanceof Error ? error.stack ?? error.message : error,
+    )
     dialog.showErrorBox(
       "Recall could not open your history",
       `${message}\n\nYour database was left untouched at:\n${getDatabasePath()}`,

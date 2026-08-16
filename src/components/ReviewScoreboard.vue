@@ -141,7 +141,7 @@ const aramLabel = computed(() => props.match.mode === "mayhem" ? "Mayhem" : "ARA
 
         <div class="place-cell">
           <span v-if="place(row)" :class="{ mvp: place(row) === 1 }">{{ ordinal(place(row) ?? 0) }}</span>
-          <GradeBadge v-else :grade="row.grade" />
+          <GradeBadge v-else :grade="row.grade" :status="row.gradeStatus" />
         </div>
 
         <div

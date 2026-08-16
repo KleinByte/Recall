@@ -188,13 +188,13 @@ Recall never restarts itself, and app updates preserve the local database.
 
 ## Build from source
 
-Recall's development toolchain is pinned to Node.js 22.23.1 and pnpm 9.15.9.
+Recall's development toolchain is pinned to Node.js 24.19.0 LTS and pnpm 11.22.0.
 Version managers can read `.node-version`; Corepack reads the exact pnpm version
 from `package.json`.
 
 ```sh
 corepack enable
-corepack prepare pnpm@9.15.9 --activate
+corepack prepare pnpm@11.22.0 --activate
 pnpm install
 pnpm dev
 ```

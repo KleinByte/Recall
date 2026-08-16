@@ -10,6 +10,7 @@
   "files": [
     "dist",
     "dist-electron",
+    "!node_modules/better-sqlite3/build/**/*",
     "!node_modules/better-sqlite3/deps/**/*",
     "!node_modules/better-sqlite3/src/**/*",
     "!node_modules/better-sqlite3/binding.gyp",
@@ -20,7 +21,7 @@
     "NOTICE"
   ],
   "asarUnpack": [
-    "**/node_modules/better-sqlite3/build/Release/*.node"
+    "**/node_modules/better-sqlite3/prebuilds/*.node"
   ],
   "win": {
     "target": [

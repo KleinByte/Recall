@@ -246,7 +246,10 @@ onMounted(async () => {
     // The normal empty state handles an account without recorded matches.
   }
   await Promise.all([loadCounts(), loadReport(), loadBuildStatus().catch(() => undefined)])
-  events.on("stats:updated", () => void refreshAll())
+  events.on("stats:updated", () => {
+    void refreshAll()
+    void loadBuildStatus().catch(() => undefined)
+  })
   events.on("ranked:updated", async () => {
     ranked.value = await api.getRankedHistory()
   })

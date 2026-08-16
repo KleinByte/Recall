@@ -133,7 +133,7 @@ const itemName = (itemId: number) => itemAsset(itemId).name
               />
             </span>
 
-            <GradeBadge :grade="match.grade" />
+            <GradeBadge :grade="match.grade" :status="match.gradeStatus" />
           </section>
 
           <section class="performance" aria-label="Performance summary">

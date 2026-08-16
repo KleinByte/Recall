@@ -21,6 +21,14 @@ function note(
 /** Shipped releases, newest first. */
 export const patchNotes: readonly PatchNoteRelease[] = [
   note(
+    "3.2.2",
+    "2026-08-14",
+    "Clearer RVI loading",
+    "RVI reports now show their analysis progress while Recall builds them.",
+    "Replaced an empty RVI state with a visible building indicator.",
+    "Kept the report responsive while background analysis finishes.",
+  ),
+  note(
     "3.2.1",
     "2026-08-12",
     "Match history import fix",

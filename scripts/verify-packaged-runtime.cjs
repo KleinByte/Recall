@@ -10,9 +10,6 @@ const REQUIRED_ARCHIVE_FILES = [
 const REQUIRED_BACKGROUND_FILES = [
   "dist-electron/main/analysis-worker.js",
 ]
-const REQUIRED_UNPACKED_FILES = [
-  "node_modules/better-sqlite3/build/Release/better_sqlite3.node",
-]
 const FORBIDDEN_UNPACKED_FILES = [
   "node_modules/better-sqlite3/deps/sqlite3/sqlite3.c",
   "node_modules/better-sqlite3/deps/sqlite3/sqlite3.h",
@@ -24,6 +21,17 @@ const MODULES_THAT_MUST_BE_BUNDLED = [
   "electron-updater",
 ]
 const ARCHITECTURE_NAMES = ["ia32", "x64", "armv7l", "arm64", "universal"]
+
+function packagedNativeBinary(context) {
+  const targetArchitecture = typeof context.arch === "number"
+    ? ARCHITECTURE_NAMES[context.arch]
+    : context.arch
+  if (!targetArchitecture || targetArchitecture === "universal") return undefined
+  const platform = context.electronPlatformName === "win32"
+    ? "win32"
+    : context.electronPlatformName
+  return `node_modules/better-sqlite3/prebuilds/${platform}-${targetArchitecture}.node`
+}
 
 function packagedResourcesDirectory(context) {
   const productFilename = context.packager.appInfo.productFilename
@@ -57,7 +65,7 @@ function packagedExecutable(context) {
   )
 }
 
-function verifyPackagedNativeRuntime(context, archivePath) {
+function verifyPackagedNativeRuntime(context, nativeBinaryPath) {
   const targetArchitecture = typeof context.arch === "number"
     ? ARCHITECTURE_NAMES[context.arch]
     : context.arch
@@ -77,13 +85,20 @@ function verifyPackagedNativeRuntime(context, archivePath) {
   }
 
   const executable = packagedExecutable(context)
+  // Loading JavaScript directly through app.asar during electron-builder's
+  // afterPack hook is unreliable on Windows: Electron can observe the archive
+  // while its integrity metadata is still being finalized. Static checks above
+  // validate the archived wrapper; this probe targets the packaged native
+  // binary explicitly while using the matching workspace wrapper.
   const modulePath = path.join(
-    archivePath,
+    __dirname,
+    "..",
     "node_modules",
     "better-sqlite3"
   )
   const workerPath = path.join(
-    archivePath,
+    __dirname,
+    "..",
     "dist-electron",
     "main",
     "analysis-worker.js"
@@ -91,7 +106,7 @@ function verifyPackagedNativeRuntime(context, archivePath) {
   const probe = [
     `const Database = require(${JSON.stringify(modulePath)})`,
     `const { Worker } = require("node:worker_threads")`,
-    `const database = new Database(":memory:")`,
+    `const database = new Database(":memory:", { nativeBinding: ${JSON.stringify(nativeBinaryPath)} })`,
     `const row = database.prepare("SELECT 42 AS value").get()`,
     `database.close()`,
     `if (row.value !== 42) throw new Error("Unexpected SQLite result")`,
@@ -142,9 +157,11 @@ module.exports = async context => {
     resourcesDirectory,
     "app.asar.unpacked"
   )
-  const missingUnpackedFiles = REQUIRED_UNPACKED_FILES.filter(
-    filePath => !fs.existsSync(path.join(unpackedRoot, filePath))
-  )
+  const nativeBinary = packagedNativeBinary(context)
+  const missingUnpackedFiles = nativeBinary &&
+    !fs.existsSync(path.join(unpackedRoot, nativeBinary))
+    ? [nativeBinary]
+    : []
   const buildOnlyUnpackedFiles = FORBIDDEN_UNPACKED_FILES.filter(
     filePath => fs.existsSync(path.join(unpackedRoot, filePath))
   )
@@ -190,11 +207,14 @@ module.exports = async context => {
     )
   }
 
-  const nativeRuntimeExecuted = verifyPackagedNativeRuntime(context, archivePath)
+  const nativeRuntimeExecuted = verifyPackagedNativeRuntime(
+    context,
+    nativeBinary ? path.join(unpackedRoot, nativeBinary) : undefined
+  )
 
   console.log(
     `Packaged runtime verified: ${REQUIRED_ARCHIVE_FILES.length} external modules, ` +
-    `${REQUIRED_UNPACKED_FILES.length} native binary, no build-only native sources, ` +
+    `${nativeBinary ? 1 : 0} native binary, no build-only native sources, ` +
     `bundled main-process dependencies, and ` +
     `${nativeRuntimeExecuted
       ? "a successful in-memory native query and analysis-worker launch"

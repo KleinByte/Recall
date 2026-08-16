@@ -343,8 +343,8 @@ const hideBroken = (event: Event) => { (event.currentTarget as HTMLImageElement)
 .secondary-node img { width: 32px; height: 32px; }
 .shard-divider { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: var(--ui-text-label); letter-spacing: .7px; text-transform: uppercase; }
 .shard-divider::before, .shard-divider::after { content: ""; flex: 1; height: 1px; background: rgba(200,170,109,.18); }
-.shard-divider small { color: var(--text-muted); font: 10px var(--font-body); letter-spacing: .2px; text-transform: none; }
-.shard-capture-note { margin: 0; color: var(--text-muted); font-size: 10px; line-height: 1.35; text-align: center; }
+.shard-divider small { color: var(--text-muted); font: 11px var(--font-body); letter-spacing: .2px; text-transform: none; }
+.shard-capture-note { margin: 0; color: var(--text-muted); font-size: 11px; line-height: 1.35; text-align: center; }
 .shard-row { min-height: 34px; }
 .shard-node { width: 27px; height: 27px; border-width: 1px; }
 .shard-node img { width: 23px; height: 23px; }

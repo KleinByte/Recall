@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue"
 import { FontAwesomeIcon } from "@fortawesome/vue-fontawesome"
 import { faMedal, faTrophy } from "@fortawesome/free-solid-svg-icons"
 import GradeBadge from "./GradeBadge.vue"
+import HoverCard from "./ui/HoverCard.vue"
 import TelemetryGrid from "./ui/TelemetryGrid.vue"
 import { labelIcon } from "../helpers/label-icons"
 import { lobbyStandings } from "../helpers/match-detail"
@@ -83,8 +84,28 @@ watch(() => props.review.match.gameId, () => {
   showAllLabels.value = false
 })
 
-const evidence = (label: MatchReview["labels"][number]) =>
-  Object.entries(label.evidence).map(([key, value]) => `${key}: ${value}`).join(", ")
+const readableKey = (key: string) => {
+  const words = key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replaceAll("_", " ")
+    .toLowerCase()
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
+const evidenceRows = (label: MatchReview["labels"][number]) =>
+  Object.entries(label.evidence).map(([key, value]) => ({
+    label: readableKey(key),
+    value: typeof value === "boolean" ? (value ? "Yes" : "No") : String(value),
+  }))
+
+const sourceLabel = (label: MatchReview["labels"][number]) =>
+  label.source === "timeline" ? "Timeline verified" : "Match summary"
+
+const confidenceLabel = (label: MatchReview["labels"][number]) => ({
+  exact: "Exact evidence",
+  strong: "Strong evidence",
+  inferred: "Inferred evidence",
+}[label.confidence])
 </script>
 
 <template>
@@ -115,7 +136,7 @@ const evidence = (label: MatchReview["labels"][number]) =>
       <span v-if="standing?.place === 1" class="mvp-badge">
         <FontAwesomeIcon :icon="faMedal" aria-hidden="true" /> MVP
       </span>
-      <GradeBadge :grade="review.match.grade" size="lg" />
+      <GradeBadge :grade="review.match.grade" :status="review.match.gradeStatus" size="lg" />
       <button
         class="league-button bookmark"
         :aria-pressed="review.annotation.bookmarked"
@@ -156,15 +177,47 @@ const evidence = (label: MatchReview["labels"][number]) =>
     </div>
 
     <div v-if="review.labels.length" class="hero-labels" aria-label="Game labels">
-      <article
+      <HoverCard
         v-for="label in visibleLabels"
         :key="label.id"
-        :class="label.polarity"
-        :title="`${label.tooltip} Evidence: ${evidence(label)}`"
+        class="hero-label-anchor"
+        :label="`${label.name}. ${label.tooltip}`"
+        :width="350"
       >
-        <span class="label-icon"><FontAwesomeIcon :icon="labelIcon(label.id)" aria-hidden="true" /></span>
-        <span><strong>{{ label.name }}</strong><small>{{ label.tooltip }}</small></span>
-      </article>
+        <article :class="label.polarity">
+          <span class="label-icon"><FontAwesomeIcon :icon="labelIcon(label.id)" aria-hidden="true" /></span>
+          <span><strong>{{ label.name }}</strong><small>{{ label.tooltip }}</small></span>
+        </article>
+
+        <template #content>
+          <section class="label-definition-card" :class="label.polarity">
+            <header>
+              <span class="definition-icon"><FontAwesomeIcon :icon="labelIcon(label.id)" aria-hidden="true" /></span>
+              <span>
+                <small>{{ readableKey(label.category) }} · {{ readableKey(label.polarity) }}</small>
+                <strong>{{ label.name }}</strong>
+              </span>
+            </header>
+
+            <div class="label-meaning">
+              <small>What this label means</small>
+              <p>{{ label.tooltip }}</p>
+            </div>
+
+            <dl v-if="evidenceRows(label).length" class="label-evidence">
+              <div v-for="row in evidenceRows(label)" :key="row.label">
+                <dt>{{ row.label }}</dt>
+                <dd>{{ row.value }}</dd>
+              </div>
+            </dl>
+
+            <footer>
+              <span>{{ sourceLabel(label) }}</span>
+              <span>{{ confidenceLabel(label) }}</span>
+            </footer>
+          </section>
+        </template>
+      </HoverCard>
       <button
         v-if="review.labels.length > 6"
         type="button"
@@ -190,7 +243,37 @@ const evidence = (label: MatchReview["labels"][number]) =>
 .record-holders { display: flex; align-items: center; gap: 10px; padding: 7px 11px; border-bottom: 1px solid rgba(200,170,109,.16); background: radial-gradient(circle at 7% 50%, rgba(10,200,220,.08), transparent 32%), linear-gradient(90deg, rgba(200,170,109,.06), rgba(1,10,19,.12)); }
 .record-heading { display: flex; align-items: center; flex: 0 0 auto; gap: 7px; color: var(--gold-bright); }.record-heading > svg { width: 13px; height: 13px; color: var(--cyan); filter: drop-shadow(0 0 5px rgba(10,200,220,.38)); }.record-heading > span { display: flex; flex-direction: column; }.record-heading strong { font: var(--ui-text-label) var(--font-heading); letter-spacing: .6px; text-transform: uppercase; }.record-heading small { margin-top: 1px; color: var(--text-muted); font-size: var(--ui-text-micro); }
 .record-chips { display: flex; flex: 1; flex-wrap: wrap; gap: 5px; min-width: 0; }.record-chips > span { display: grid; grid-template-columns: minmax(0, auto) auto; align-items: center; gap: 7px; min-width: 118px; max-width: 210px; min-height: 34px; padding: 4px 7px 4px 9px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--gold) 34%, var(--border-subtle)); border-radius: 5px; background: color-mix(in srgb, var(--gold) 6%, var(--surface-1)); box-shadow: inset 2px 0 var(--gold-dim); }.record-chips small { display: none; }.record-chips strong { overflow: hidden; color: var(--text-secondary); font-size: var(--ui-text-label); text-overflow: ellipsis; white-space: nowrap; }.record-chips b { color: var(--gold-bright); font: var(--ui-text-label) var(--font-heading); white-space: nowrap; }
-.hero-labels { display: flex; flex-wrap: wrap; gap: 5px; padding: 7px 11px 8px; background: rgba(1,10,19,.1); }.hero-labels article { --label-tone: var(--gold); display: inline-flex; align-items: center; gap: 5px; min-width: 0; min-height: 30px; max-width: 230px; padding: 3px 8px 3px 5px; border: 1px solid color-mix(in srgb, var(--label-tone) 30%, var(--border-subtle)); border-radius: 999px; background: color-mix(in srgb, var(--label-tone) 6%, var(--surface-1)); color: var(--gold-bright); box-shadow: inset 2px 0 color-mix(in srgb, var(--label-tone) 64%, transparent); }.hero-labels article.negative { --label-tone: var(--loss); color: color-mix(in srgb, var(--loss) 80%, white); }.hero-labels article.mixed { --label-tone: var(--text-muted); color: var(--text-secondary); }.label-icon { display: grid; place-items: center; width: 20px; height: 20px; flex: 0 0 20px; border-radius: 50%; background: color-mix(in srgb, var(--label-tone) 9%, var(--surface-0)); color: currentColor; font-size: var(--ui-text-micro); }.hero-labels article > span:last-child { display: block; min-width: 0; }.hero-labels strong { display: block; overflow: hidden; color: currentColor; font: var(--ui-text-label) var(--font-heading); text-overflow: ellipsis; text-transform: uppercase; letter-spacing: .4px; white-space: nowrap; }.hero-labels small { display: none; }
+.hero-labels { display: flex; flex-wrap: wrap; gap: 5px; padding: 7px 11px 8px; background: rgba(1,10,19,.1); }
+.hero-label-anchor { border-radius: 999px; }
+.hero-labels article { --label-tone: var(--gold); display: inline-flex; align-items: center; gap: 5px; min-width: 0; min-height: 30px; max-width: 230px; padding: 3px 8px 3px 5px; border: 1px solid color-mix(in srgb, var(--label-tone) 30%, var(--border-subtle)); border-radius: 999px; background: color-mix(in srgb, var(--label-tone) 6%, var(--surface-1)); color: var(--gold-bright); box-shadow: inset 2px 0 color-mix(in srgb, var(--label-tone) 64%, transparent); cursor: help; transition: border-color 120ms ease, background 120ms ease, transform 120ms ease; }
+.hero-labels article:hover { border-color: color-mix(in srgb, var(--label-tone) 65%, var(--border-subtle)); background: color-mix(in srgb, var(--label-tone) 11%, var(--surface-1)); transform: translateY(-1px); }
+.hero-labels article.negative { --label-tone: var(--loss); color: color-mix(in srgb, var(--loss) 80%, white); }
+.hero-labels article.mixed { --label-tone: var(--text-muted); color: var(--text-secondary); }
+.label-icon { display: grid; place-items: center; width: 20px; height: 20px; flex: 0 0 20px; border-radius: 50%; background: color-mix(in srgb, var(--label-tone) 9%, var(--surface-0)); color: currentColor; font-size: var(--ui-text-micro); }
+.hero-labels article > span:last-child { display: block; min-width: 0; }
+.hero-labels strong { display: block; overflow: hidden; color: currentColor; font: var(--ui-text-label) var(--font-heading); text-overflow: ellipsis; text-transform: uppercase; letter-spacing: .4px; white-space: nowrap; }
+.hero-labels article small { display: none; }
+
+.label-definition-card { --definition-tone: var(--ui-accent); position: relative; padding: 15px; }
+.label-definition-card.negative { --definition-tone: var(--ui-negative); }
+.label-definition-card.mixed { --definition-tone: var(--ui-text-muted); }
+.label-definition-card::after { position: absolute; top: 0; right: 18px; width: 54px; height: 2px; background: linear-gradient(90deg, transparent, var(--definition-tone), transparent); box-shadow: 0 0 12px color-mix(in srgb, var(--definition-tone) 45%, transparent); content: ""; }
+.label-definition-card header { display: flex; align-items: center; gap: 11px; }
+.definition-icon { display: grid; place-items: center; width: 42px; height: 42px; flex: 0 0 42px; border: 1px solid color-mix(in srgb, var(--definition-tone) 52%, var(--ui-border)); border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--definition-tone) 18%, transparent), var(--ui-surface-inset-color)); color: var(--definition-tone); box-shadow: 0 0 18px color-mix(in srgb, var(--definition-tone) 12%, transparent); }
+.definition-icon svg { width: 17px; height: 17px; }
+.label-definition-card header > span:last-child { display: grid; min-width: 0; gap: 2px; }
+.label-definition-card header small { color: var(--definition-tone); font: var(--ui-text-micro) var(--ui-font-heading); letter-spacing: 1px; text-transform: uppercase; }
+.label-definition-card header strong { overflow: hidden; color: var(--ui-text-heading); font: 18px var(--ui-font-display); letter-spacing: .35px; text-overflow: ellipsis; white-space: nowrap; }
+.label-meaning { margin-top: 12px; padding: 10px 11px; border-left: 2px solid color-mix(in srgb, var(--definition-tone) 62%, transparent); background: color-mix(in srgb, var(--definition-tone) 5%, var(--ui-surface-inset-color)); }
+.label-meaning small { color: var(--ui-text-muted); font: var(--ui-text-micro) var(--ui-font-heading); letter-spacing: .8px; text-transform: uppercase; }
+.label-meaning p { margin: 4px 0 0; color: var(--ui-text); font-size: var(--ui-text-body); line-height: 1.45; }
+.label-evidence { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin: 10px 0 0; overflow: hidden; border: 1px solid var(--ui-divider); border-radius: var(--ui-radius-sm); background: var(--ui-divider); }
+.label-evidence div { display: grid; min-width: 0; gap: 2px; padding: 7px 9px; background: var(--ui-surface-inset-color); }
+.label-evidence div:last-child:nth-child(odd) { grid-column: 1 / -1; }
+.label-evidence dt { overflow: hidden; color: var(--ui-text-muted); font-size: var(--ui-text-micro); text-overflow: ellipsis; white-space: nowrap; }
+.label-evidence dd { margin: 0; overflow: hidden; color: var(--ui-text-heading); font: var(--ui-text-support) var(--ui-font-numeric); text-overflow: ellipsis; white-space: nowrap; }
+.label-definition-card footer { display: flex; gap: 6px; margin-top: 10px; }
+.label-definition-card footer span { padding: 3px 6px; border: 1px solid color-mix(in srgb, var(--definition-tone) 24%, var(--ui-divider)); border-radius: 999px; color: var(--ui-text-muted); font-size: var(--ui-text-micro); }
 .reveal-card { min-height: 34px; padding: 4px 8px; border: 1px dashed var(--border-strong); border-radius: 5px; background: color-mix(in srgb, var(--surface-2) 72%, transparent); color: var(--gold); font: var(--ui-text-label) var(--font-heading); letter-spacing: .4px; cursor: pointer; }.reveal-card:hover { border-color: var(--gold); background: color-mix(in srgb, var(--gold) 7%, var(--surface-2)); }.label-reveal { min-height: 30px; border-radius: 999px; }
 @media (max-width: 880px) { .hero-main { align-items: flex-start; flex-wrap: wrap; }.hero-kpis :deep(.readings) { grid-template-columns: repeat(3, minmax(0, 1fr)); }.bookmark { margin-left: auto; }.record-holders { align-items: flex-start; flex-direction: column; } }
 @media (max-width: 600px) { .hero-kpis :deep(.readings) { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

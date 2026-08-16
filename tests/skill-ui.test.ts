@@ -177,6 +177,9 @@ describe("Skill Overview", () => {
     expect(building).toContain("more needed")
     expect(building).toContain("latest 20 games")
     expect(building).toContain("Import older matches")
+
+    const page = read("src/pages/SkillPage.vue")
+    expect(page).toContain("void loadBuildStatus().catch")
   })
 
   it("keeps the useful scoped outcome visuals", () => {

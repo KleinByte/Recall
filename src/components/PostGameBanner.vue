@@ -72,7 +72,7 @@ const visibleRecords = computed(() => props.records.slice(0, 3))
       </div>
     </div>
 
-    <GradeBadge :grade="match.grade" size="lg" />
+    <GradeBadge :grade="match.grade" :status="match.gradeStatus" size="lg" />
     <Button class="review" variant="primary" size="compact" @click="emit('review', match.gameId)">
       Review game
     </Button>

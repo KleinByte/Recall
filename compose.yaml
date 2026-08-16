@@ -19,7 +19,7 @@ services:
       - recall-dev-user-data:/recall-data
 
   sqlite:
-    image: keinos/sqlite3:3.46.1
+    image: keinos/sqlite3:3.53.4
     profiles: [tools]
     entrypoint: ["sqlite3", "/recall-data/stats.db"]
     volumes:

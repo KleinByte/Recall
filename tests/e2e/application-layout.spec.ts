@@ -32,7 +32,7 @@ test("the real Electron shell remains readable without page-level overflow", asy
   }
   const application = await electron.launch({
     executablePath: electronExecutable,
-    args: ["."],
+    args: ["--no-sandbox", "--disable-gpu", "."],
     cwd: repositoryRoot,
     env: {
       ...environment,

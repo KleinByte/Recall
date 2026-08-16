@@ -229,7 +229,7 @@ onBeforeUnmount(() => {
               {{ formatRelativeDate(activeMatch.playedAt) }}
             </small>
           </div>
-          <GradeBadge :grade="activeMatch.grade" />
+          <GradeBadge :grade="activeMatch.grade" :status="activeMatch.gradeStatus" />
         </header>
 
         <div class="pop-stats">

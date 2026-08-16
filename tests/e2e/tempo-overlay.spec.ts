@@ -31,7 +31,7 @@ test("Alt+T Tempo overlay surface is transparent, reusable, and lockable", async
 
   const application = await electron.launch({
     executablePath: electronExecutable,
-    args: ["."],
+    args: ["--no-sandbox", "--disable-gpu", "."],
     cwd: repositoryRoot,
     env: {
       ...environment,

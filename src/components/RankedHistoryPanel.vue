@@ -7,6 +7,7 @@ import {
   pointsForSeason,
   seasonsWithRankedHistory,
 } from "../helpers/ranked-seasons"
+import { rankedQueueLabel } from "../helpers/ranked-queues"
 import type { RankedHistory } from "../types/stats"
 
 const props = withDefaults(defineProps<{
@@ -18,18 +19,9 @@ const props = withDefaults(defineProps<{
   compact: false,
 })
 
-const QUEUE_LABELS: Record<string, string> = {
-  RANKED_SOLO_5x5: "Solo/Duo",
-  RANKED_FLEX_SR: "Flex",
-  RANKED_PREMADE_5x5: "Ranked 5s",
-}
-
-const queueLabel = (queue: string) => QUEUE_LABELS[queue] ??
-  queue.replace(/^RANKED_/, "").replaceAll("_", " ")
-
 const queues = computed(() => props.histories
   .filter((history) => history.points.length > 0)
-  .map((history) => ({ queue: history.queue, label: queueLabel(history.queue) }))
+  .map((history) => ({ queue: history.queue, label: rankedQueueLabel(history.queue) }))
   .sort((left, right) => {
     if (left.queue === "RANKED_SOLO_5x5") return -1
     if (right.queue === "RANKED_SOLO_5x5") return 1
@@ -157,7 +149,7 @@ const historyMeta = computed(() => {
       <RankGraph :points="points" :height="compact ? '150px' : '220px'" />
     </template>
     <p v-else class="muted empty-period">
-      No {{ queueLabel(selectedQueue) }} readings were recorded during {{ periodLabel }}.
+      No {{ rankedQueueLabel(selectedQueue) }} readings were recorded during {{ periodLabel }}.
     </p>
   </Panel>
 </template>

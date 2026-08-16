@@ -346,8 +346,15 @@ onMounted(() => {
           />
         </div>
         <div v-else-if="insightTab === 'rvi'" class="rvi-empty" role="tabpanel">
-          <strong>Match RVI evidence is unavailable</strong>
-          <span>The selected Recall recipe has no inspectable metric observations for this game.</span>
+          <strong>
+            {{ review.match.gradeStatus === 'calibrating'
+              ? 'Match RVI is still building'
+              : 'Match RVI evidence is unavailable' }}
+          </strong>
+          <span v-if="review.match.gradeStatus === 'calibrating'">
+            Recall recorded this game, but its mode still needs a frozen comparison baseline.
+          </span>
+          <span v-else>The selected Recall recipe has no inspectable metric observations for this game.</span>
           <Button size="compact" @click="insightTab = 'performance'">Open breakdown</Button>
         </div>
       </section>
@@ -358,7 +365,10 @@ onMounted(() => {
             <div><span class="eyebrow">Performance model</span><h2 class="section-title">Why this grade</h2></div>
             <span v-if="review.grade" class="algorithm-label">Compared by archetype and position</span>
           </div>
-          <p v-if="review.grade?.unavailableReason" class="muted">{{ review.grade.unavailableReason }}</p>
+          <p v-if="review.match.gradeStatus === 'calibrating'" class="muted">
+            Grade is still building while Recall creates this mode's comparison baseline.
+          </p>
+          <p v-else-if="review.grade?.unavailableReason" class="muted">{{ review.grade.unavailableReason }}</p>
           <div v-else-if="review.grade" class="grade-story">
             <div class="grade-score">
               <span>Recall Score</span>
@@ -753,7 +763,7 @@ onMounted(() => {
           <div v-for="(match, index) in session.matches" :key="match.gameId" class="match-control">
             <button class="match-chip" @click="tab = 'review'; reviewMatch(match.gameId)">
               <img :src="championIconUrl(match.championId)" alt="" />
-              <GradeBadge :grade="match.grade" />
+              <GradeBadge :grade="match.grade" :status="match.gradeStatus" />
             </button>
             <details v-if="index > 0 || session !== sessions.at(-1)" class="boundary">
               <summary aria-label="Session boundary options">⋯</summary>
@@ -773,7 +783,7 @@ onMounted(() => {
         @click="tab = 'review'; reviewMatch(match.gameId)">
         <img :src="championIconUrl(match.championId)" alt="" />
         <span>{{ championNameById(champions, match.championId) }} · {{ modeLabel(match.mode) }} · {{ date(match.playedAt) }}</span>
-        <GradeBadge :grade="match.grade" />
+        <GradeBadge :grade="match.grade" :status="match.gradeStatus" />
       </button>
       <p v-if="bookmarks.length === 0" class="muted">No bookmarked matches yet.</p>
     </section>
