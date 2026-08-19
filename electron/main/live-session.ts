@@ -23,6 +23,7 @@ export interface LiveSession {
   queueName?: string
   mode?: TrackedMode
   gameMode?: string
+  gameType?: string
   mapId?: number
   secondsRemaining?: number
   localPlayerCellId?: number
@@ -149,8 +150,9 @@ export async function readLiveSession(
   const data = (flow.gameData ?? {}) as Record<string, any>
   const queue = (data.queue ?? {}) as Record<string, any>
   const queueId = number(queue.id) ?? number(data.queueId)
+  const gameType = text(queue.type) ?? text(data.gameType)
   const gameMode =
-    text(data.gameMode) ?? text(queue.gameMode) ?? text(queue.type)
+    text(data.gameMode) ?? text(queue.gameMode) ?? gameType
   const mapId = number(data.mapId) ?? number(queue.mapId)
   const result: LiveSession = {
     phase,
@@ -159,6 +161,7 @@ export async function readLiveSession(
     queueName: typeof queue.name === "string" ? queue.name : undefined,
     mode: modeFor(queueId, gameMode, mapId),
     gameMode,
+    gameType,
     mapId,
     benchChampionIds: [],
     allies: [],

@@ -4,6 +4,8 @@ import { CANONICAL_GRADE_STORAGE_PARTITION } from "../matches/match-grade-recipe
 import { CANONICAL_RVI_STORAGE_PARTITION } from "../matches/rvi-recipe.js"
 
 export const ACCOUNT_SCOPED_DELETE_ORDER = [
+  "pathing_analysis_runs", "camp_clear_events", "camp_state_events",
+  "champion_track_chunks", "minimap_capture_sessions",
   "grade_rebuild_runs", "riot_history_backfill",
   "augment_enrichment_jobs", "match_metric_observations",
   "match_grade_breakdown_versions",

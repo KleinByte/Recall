@@ -15,8 +15,10 @@ import electronUpdater from "electron-updater"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
 import os from "node:os"
+import { rm } from "node:fs/promises"
 import Store from "electron-store"
 import { SettingsStore, type UiSettings } from "./settings-store.js"
+import type { MinimapVisionDebugSnapshot, MinimapVisionDebugStatus } from "../../src/types/app.js"
 import { MatchSourceRepository } from "./database/match-source-repo.js"
 import { resolveDisplayTimezone } from "./matches/time-contract.js"
 import { openDatabase } from "./database/connection.js"
@@ -75,6 +77,17 @@ import type {
 import { migrateLegacyUserData } from "./migrate-user-data.js"
 import { readLiveSession, type LivePhase, type LiveSession } from "./live-session.js"
 import { GameClient, readLiveGameSnapshot } from "./game-client.js"
+import {
+  createRecallMinimapIntegration,
+  type RecallMinimapIntegration,
+} from "./minimap/recall-minimap-integration.js"
+import { encodeMinimapDebugPng } from "./minimap/minimap-debug-sampler.js"
+import type { MinimapDebugFrameEvent } from "./minimap/minimap-telemetry-coordinator.js"
+import {
+  calibrationHintsFromLeagueSettings,
+  readLeagueMinimapSettings,
+} from "./minimap/league-minimap-settings.js"
+import { MinimapTelemetryRepository } from "./database/minimap-telemetry-repo.js"
 import { LiveTempoTracker } from "./live-analysis.js"
 import { fetchQueues } from "./matches/queues.js"
 import { RiotHistoryBackfill } from "./riot/history-backfill.js"
@@ -204,6 +217,7 @@ interface Session {
   timer: NodeJS.Timeout
   liveTimer: NodeJS.Timeout
   gameClient: GameClient
+  minimapTelemetry: RecallMinimapIntegration
 }
 
 let session: Session | undefined
@@ -215,6 +229,28 @@ let tempoOverlayRequestedVisible = false
 let tempoOverlayLocked = false
 let tempoOverlayShortcutRegistered = false
 let tempoOverlayMoveSave: NodeJS.Timeout | undefined
+let minimapVisionDebugWindow: BrowserWindow | undefined
+let minimapVisionDebugRequestedVisible = false
+let minimapVisionDebugLocked = false
+let minimapVisionDebugMoveSave: NodeJS.Timeout | undefined
+let latestMinimapVisionDebug: MinimapVisionDebugSnapshot = {
+  enabled: false,
+  state: "idle",
+  updatedAt: 0,
+  proposals: [],
+  detections: [],
+  confirmed: [],
+  camps: [],
+  health: {
+    achievedFps: 0,
+    captureAttempts: 0,
+    processedFrames: 0,
+    rejectedFrames: 0,
+    calibrationFailures: 0,
+  },
+}
+let lastMinimapDebugPublishAt = 0
+let minimapDebugGameId: number | undefined
 let liveRevision = 0
 let liveGameReading = false
 let liveSession: LiveSession = {
@@ -271,6 +307,19 @@ let shutdownPreparing: Promise<void> | undefined
 
 function trackDatabaseTask<T>(task: Promise<T>): Promise<T> {
   return databaseWrites.track(task)
+}
+
+function trackMinimapTelemetry(task: Promise<void>) {
+  void trackDatabaseTask(task)
+    .catch((error) => {
+      console.warn(`Minimap telemetry failed: ${(error as Error).message}`)
+    })
+    .finally(() => {
+      // A stream can fail before the first minimap frame exists. Publish the
+      // settled health immediately so the debug overlay shows that failure
+      // instead of waiting for the next live-client polling tick.
+      publishMinimapDebugHealth()
+    })
 }
 
 function collectionDisabled(): boolean {
@@ -885,6 +934,249 @@ function resetTempoOverlayPosition(mainWindow: BrowserWindow) {
   return tempoOverlayStatus()
 }
 
+const MINIMAP_DEBUG_OVERLAY_WIDTH = 430
+const MINIMAP_DEBUG_OVERLAY_HEIGHT = 505
+
+function minimapVisionDebugStatus(): MinimapVisionDebugStatus {
+  return { visible: minimapVisionDebugRequestedVisible, locked: minimapVisionDebugLocked }
+}
+
+function sendMinimapVisionDebugUpdate(mainWindow: BrowserWindow) {
+  const status = minimapVisionDebugStatus()
+  broadcast(mainWindow, "minimap-vision-debug:status", status)
+  if (minimapVisionDebugWindow && !minimapVisionDebugWindow.isDestroyed()) {
+    minimapVisionDebugWindow.webContents.send("minimap-vision-debug:status", status)
+    minimapVisionDebugWindow.webContents.send("minimap-vision-debug:update", latestMinimapVisionDebug)
+  }
+}
+
+function fittedMinimapVisionDebugPosition(position?: { x: number; y: number }) {
+  const display = position
+    ? screen.getDisplayMatching({ x: position.x, y: position.y, width: MINIMAP_DEBUG_OVERLAY_WIDTH, height: MINIMAP_DEBUG_OVERLAY_HEIGHT })
+    : screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+  const area = display.workArea
+  const fallback = { x: area.x + 24, y: area.y + area.height - MINIMAP_DEBUG_OVERLAY_HEIGHT - 24 }
+  const requested = position ?? fallback
+  return {
+    x: Math.min(Math.max(requested.x, area.x), area.x + Math.max(0, area.width - MINIMAP_DEBUG_OVERLAY_WIDTH)),
+    y: Math.min(Math.max(requested.y, area.y), area.y + Math.max(0, area.height - MINIMAP_DEBUG_OVERLAY_HEIGHT)),
+  }
+}
+
+function saveMinimapVisionDebugPosition() {
+  if (!minimapVisionDebugWindow || minimapVisionDebugWindow.isDestroyed()) return
+  const [x, y] = minimapVisionDebugWindow.getPosition()
+  settingsStore.setMain("minimap-vision-overlay-position", { x, y })
+}
+
+function keepMinimapVisionDebugOnScreen() {
+  if (!minimapVisionDebugWindow || minimapVisionDebugWindow.isDestroyed()) return
+  const [x, y] = minimapVisionDebugWindow.getPosition()
+  const fitted = fittedMinimapVisionDebugPosition({ x, y })
+  minimapVisionDebugWindow.setPosition(fitted.x, fitted.y)
+}
+
+function createMinimapVisionDebugWindow(mainWindow: BrowserWindow) {
+  if (minimapVisionDebugWindow && !minimapVisionDebugWindow.isDestroyed()) return minimapVisionDebugWindow
+  const stored = settingsStore.getMain("minimap-vision-overlay-position")
+  const position = fittedMinimapVisionDebugPosition(stored)
+  const overlay = new BrowserWindow({
+    title: "Recall Minimap CV Debug",
+    x: position.x,
+    y: position.y,
+    width: MINIMAP_DEBUG_OVERLAY_WIDTH,
+    height: MINIMAP_DEBUG_OVERLAY_HEIGHT,
+    frame: false,
+    transparent: true,
+    backgroundColor: "#00000000",
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    focusable: false,
+    movable: true,
+    resizable: false,
+    show: false,
+    webPreferences: { preload, nodeIntegration: false, contextIsolation: true, webSecurity: true },
+  })
+  minimapVisionDebugWindow = overlay
+  overlay.setAlwaysOnTop(true, "screen-saver")
+  // Keep the diagnostic pixels out of ordinary desktop capture paths.
+  overlay.setContentProtection(true)
+  overlay.setMenuBarVisibility(false)
+  overlay.on("move", () => {
+    if (minimapVisionDebugMoveSave) clearTimeout(minimapVisionDebugMoveSave)
+    minimapVisionDebugMoveSave = setTimeout(saveMinimapVisionDebugPosition, 200)
+  })
+  overlay.on("page-title-updated", (event) => event.preventDefault())
+  overlay.on("closed", () => {
+    if (minimapVisionDebugMoveSave) clearTimeout(minimapVisionDebugMoveSave)
+    minimapVisionDebugMoveSave = undefined
+    minimapVisionDebugWindow = undefined
+    minimapVisionDebugRequestedVisible = false
+    minimapVisionDebugLocked = false
+    sendMinimapVisionDebugUpdate(mainWindow)
+  })
+  overlay.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
+  overlay.webContents.on("did-finish-load", () => {
+    overlay.webContents.send("minimap-vision-debug:status", minimapVisionDebugStatus())
+    overlay.webContents.send("minimap-vision-debug:update", latestMinimapVisionDebug)
+    if (minimapVisionDebugRequestedVisible) overlay.showInactive()
+  })
+  if (VITE_DEV_SERVER_URL) {
+    const overlayUrl = new URL(VITE_DEV_SERVER_URL)
+    overlayUrl.searchParams.set("surface", "minimap-vision-debug")
+    void overlay.loadURL(overlayUrl.toString())
+  } else {
+    void overlay.loadFile(indexHtml, { query: { surface: "minimap-vision-debug" } })
+  }
+  return overlay
+}
+
+function setMinimapVisionDebugLocked(mainWindow: BrowserWindow, locked: boolean) {
+  if (settingsStore.getMain("minimap-vision-overlay-enabled") !== true) {
+    return minimapVisionDebugStatus()
+  }
+  const overlay = createMinimapVisionDebugWindow(mainWindow)
+  minimapVisionDebugLocked = locked
+  overlay.setIgnoreMouseEvents(locked, { forward: true })
+  sendMinimapVisionDebugUpdate(mainWindow)
+  return minimapVisionDebugStatus()
+}
+
+function toggleMinimapVisionDebugOverlay(mainWindow: BrowserWindow) {
+  if (settingsStore.getMain("minimap-vision-overlay-enabled") !== true) {
+    minimapVisionDebugRequestedVisible = false
+    minimapVisionDebugWindow?.hide()
+    return minimapVisionDebugStatus()
+  }
+  minimapVisionDebugRequestedVisible = !minimapVisionDebugRequestedVisible
+  const overlay = createMinimapVisionDebugWindow(mainWindow)
+  minimapVisionDebugLocked = false
+  overlay.setIgnoreMouseEvents(false)
+  if (minimapVisionDebugRequestedVisible && !overlay.webContents.isLoadingMainFrame()) overlay.showInactive()
+  if (!minimapVisionDebugRequestedVisible) overlay.hide()
+  if (session) trackMinimapTelemetry(session.minimapTelemetry.update(liveSession))
+  sendMinimapVisionDebugUpdate(mainWindow)
+  return minimapVisionDebugStatus()
+}
+
+function resetMinimapVisionDebugPosition(mainWindow: BrowserWindow) {
+  if (settingsStore.getMain("minimap-vision-overlay-enabled") !== true) {
+    return minimapVisionDebugStatus()
+  }
+  settingsStore.deleteMain("minimap-vision-overlay-position")
+  const overlay = createMinimapVisionDebugWindow(mainWindow)
+  const position = fittedMinimapVisionDebugPosition()
+  overlay.setPosition(position.x, position.y)
+  saveMinimapVisionDebugPosition()
+  return minimapVisionDebugStatus()
+}
+
+function publishMinimapDebugFrame(event: MinimapDebugFrameEvent) {
+  // PNG encoding and IPC are intentionally bounded; the capture loop remains
+  // real-time while the overlay displays the latest available frame.
+  const now = Date.now()
+  if (now - lastMinimapDebugPublishAt < 333) return
+  lastMinimapDebugPublishAt = now
+  minimapDebugGameId = event.gameId
+  const { sample, health, frame } = event
+  latestMinimapVisionDebug = {
+    enabled: true,
+    state: health.state,
+    updatedAt: Date.now(),
+    frameSequence: frame.frameSequence,
+    gameTimeMs: sample.gameTimeMs,
+    // This is the canonical inner-map crop only. The desktop frame is never
+    // sent to a renderer or persisted by this path.
+    imageData: `data:image/png;base64,${Buffer.from(encodeMinimapDebugPng(frame)).toString("base64")}`,
+    calibration: sample.calibration,
+    proposals: sample.markerProposals.slice(0, 32).map((proposal) => ({
+      team: proposal.team,
+      x: proposal.center.x,
+      y: proposal.center.y,
+      radius: proposal.radius,
+      confidence: proposal.ringConfidence,
+    })),
+    detections: sample.detections.slice(0, 32).map((observation) => ({
+      championName: observation.championName,
+      team: observation.team,
+      x: observation.position.x,
+      y: observation.position.y,
+      confidence: Math.min(1, observation.identityConfidence * observation.positionConfidence),
+    })),
+    confirmed: sample.confirmed.slice(0, 32).map((observation) => ({
+      championName: observation.championName,
+      team: observation.team,
+      x: observation.position.x,
+      y: observation.position.y,
+      confidence: Math.min(1, observation.identityConfidence * observation.positionConfidence),
+      continuity: observation.continuity,
+    })),
+    camps: sample.campStates.slice(0, 64).map((camp) => ({
+      campKey: camp.campKey,
+      state: camp.state,
+      confidence: camp.sourceConfidence,
+    })),
+    health: {
+      achievedFps: health.achievedFps,
+      captureAttempts: health.captureAttempts,
+      processedFrames: health.processedFrames,
+      rejectedFrames: health.rejectedFrames,
+      calibrationFailures: health.calibrationFailures,
+      lastErrorCode: health.lastErrorCode,
+    },
+  }
+  if (minimapVisionDebugWindow && !minimapVisionDebugWindow.isDestroyed()) {
+    minimapVisionDebugWindow.webContents.send("minimap-vision-debug:update", latestMinimapVisionDebug)
+  }
+}
+
+function clearMinimapVisionDebugOverlay(mainWindow: BrowserWindow) {
+  minimapDebugGameId = undefined
+  minimapVisionDebugRequestedVisible = false
+  minimapVisionDebugLocked = false
+  minimapVisionDebugWindow?.hide()
+  latestMinimapVisionDebug = {
+    enabled: false,
+    state: "idle",
+    updatedAt: Date.now(),
+    proposals: [],
+    detections: [],
+    confirmed: [],
+    camps: [],
+    health: {
+      achievedFps: 0,
+      captureAttempts: 0,
+      processedFrames: 0,
+      rejectedFrames: 0,
+      calibrationFailures: 0,
+    },
+  }
+  sendMinimapVisionDebugUpdate(mainWindow)
+}
+
+function publishMinimapDebugHealth() {
+  if (!minimapVisionDebugRequestedVisible || !session ||
+      settingsStore.getMain("minimap-vision-overlay-enabled") !== true) return
+  const health = session.minimapTelemetry.getHealth()
+  latestMinimapVisionDebug = {
+    ...latestMinimapVisionDebug,
+    enabled: true,
+    state: health.state,
+    updatedAt: Date.now(),
+    health: {
+      achievedFps: health.achievedFps,
+      captureAttempts: health.captureAttempts,
+      processedFrames: health.processedFrames,
+      rejectedFrames: health.rejectedFrames,
+      calibrationFailures: health.calibrationFailures,
+      lastErrorCode: health.lastErrorCode,
+    },
+  }
+  if (minimapVisionDebugWindow && !minimapVisionDebugWindow.isDestroyed()) {
+    minimapVisionDebugWindow.webContents.send("minimap-vision-debug:update", latestMinimapVisionDebug)
+  }
+}
+
 function broadcastLive(win: BrowserWindow) {
   broadcast(win, "live:updated", liveSession)
   if (tempoOverlayWindow && !tempoOverlayWindow.isDestroyed()) {
@@ -892,6 +1184,14 @@ function broadcastLive(win: BrowserWindow) {
   }
   if (liveSession.phase === "Idle" && tempoOverlayRequestedVisible) {
     hideTempoOverlay(win)
+  }
+  if (liveSession.phase === "Idle" ||
+      (minimapDebugGameId !== undefined && liveSession.gameId !== minimapDebugGameId)) {
+    if (minimapVisionDebugRequestedVisible || latestMinimapVisionDebug.enabled) {
+      clearMinimapVisionDebugOverlay(win)
+    }
+  } else {
+    publishMinimapDebugHealth()
   }
 }
 
@@ -1014,12 +1314,55 @@ async function startSession(
     summoner.puuid,
   )
   const events = new LcuEventStream(credentials)
+  const gameClient = new GameClient()
+  const minimapTelemetry = createRecallMinimapIntegration({
+    gameClient,
+    database: getDatabase(),
+    puuid: summoner.puuid,
+    getEnabled: () => !collectionDisabled() &&
+      settingsStore.getMain("minimap-telemetry-enabled") !== false,
+    getDataDragonVersion: () => settingsStore.getMain("ddragon-version"),
+    getDebugEnabled: () =>
+      settingsStore.getMain("minimap-vision-debug-enabled") === true,
+    getDebugOverlayEnabled: () =>
+      settingsStore.getMain("minimap-vision-overlay-enabled") === true &&
+      minimapVisionDebugRequestedVisible,
+    onDebugFrame: publishMinimapDebugFrame,
+    debugDirectory: path.join(app.getPath("userData"), "Minimap Vision Debug"),
+    getCalibrationHints: async () => {
+      const configured = process.env.RECALL_LEAGUE_GAME_CONFIG?.trim()
+      const systemDrive = process.env.SystemDrive ?? "C:"
+      const programFiles = process.env.ProgramFiles
+      const candidates = [
+        configured,
+        path.join(systemDrive, "Riot Games", "League of Legends", "Config", "game.cfg"),
+        programFiles
+          ? path.join(programFiles, "Riot Games", "League of Legends", "Config", "game.cfg")
+          : undefined,
+      ].filter((candidate): candidate is string => Boolean(candidate))
+      let lastReadError: unknown
+      for (const candidate of [...new Set(candidates)]) {
+        try {
+          const settings = await readLeagueMinimapSettings(candidate)
+          return calibrationHintsFromLeagueSettings(
+            settings,
+            screen.getPrimaryDisplay().scaleFactor,
+          )
+        } catch (error) {
+          lastReadError = error
+          // Try the next known League installation location.
+        }
+      }
+      throw lastReadError ?? new Error("league_game_config_unavailable")
+    },
+  })
 
   events.on("end-of-game", () => {
     broadcast(win, "end-of-game")
     void trackDatabaseTask(catchFinishedGame(win))
   })
   events.on("game-end", () => {
+    trackMinimapTelemetry(minimapTelemetry.completeMatch())
     clearLiveSession(win)
     void trackDatabaseTask(catchFinishedGame(win))
   })
@@ -1042,7 +1385,6 @@ async function startSession(
   })
   events.start()
 
-  const gameClient = new GameClient()
   session = {
     credentials,
     client,
@@ -1058,6 +1400,7 @@ async function startSession(
       LIVE_GAME_REFRESH_INTERVAL_MS,
     ),
     gameClient,
+    minimapTelemetry,
   }
 
   broadcast(win, "lcu:status", { connected: true, summoner })
@@ -1093,11 +1436,13 @@ function stopSession(win: BrowserWindow): number {
   riotBackfillRevision += 1
   riotBackfillAbort?.abort()
   riotBackfillAbort = undefined
-  clearInterval(session.timer)
-  clearInterval(session.liveTimer)
-  session.events.stop()
-  session.client.close()
-  session.gameClient.close()
+  const active = session
+  clearInterval(active.timer)
+  clearInterval(active.liveTimer)
+  active.events.stop()
+  trackMinimapTelemetry(active.minimapTelemetry.stop())
+  active.client.close()
+  active.gameClient.close()
   session = undefined
   clearLiveSession(win)
 
@@ -1151,6 +1496,7 @@ async function refreshLiveSession(win: BrowserWindow, phase: LivePhase) {
       storeAssignedPositions(next.gameId)
     }
     liveSession = next
+    trackMinimapTelemetry(session.minimapTelemetry.update(liveSession))
     broadcastLive(win)
     if (phase === "InProgress") {
       storeAssignedPositions(next.gameId)
@@ -1188,9 +1534,11 @@ async function refreshLiveGameData(win: BrowserWindow) {
     }
     liveSession = {
       ...liveSession,
+      gameType: liveSession.gameType ?? game.gameType,
       game,
       updatedAt: game.updatedAt,
     }
+    trackMinimapTelemetry(session.minimapTelemetry.update(liveSession))
     broadcastLive(win)
   } catch {
     // Port 2999 is unavailable during the loading transition and immediately
@@ -1740,6 +2088,10 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
   ipcMain.handle("tempo-overlay:toggle", () => toggleTempoOverlay(win))
   ipcMain.handle("tempo-overlay:lock", () => setTempoOverlayLocked(win, true))
   ipcMain.handle("tempo-overlay:reset-position", () => resetTempoOverlayPosition(win))
+  ipcMain.handle("minimap-vision-debug:status", () => minimapVisionDebugStatus())
+  ipcMain.handle("minimap-vision-debug:toggle", () => toggleMinimapVisionDebugOverlay(win))
+  ipcMain.handle("minimap-vision-debug:lock", () => setMinimapVisionDebugLocked(win, true))
+  ipcMain.handle("minimap-vision-debug:reset-position", () => resetMinimapVisionDebugPosition(win))
 
   registerUpdaterIpc(ipcMain, updaterService)
 
@@ -1763,6 +2115,31 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
   ipcMain.handle("settings:launch-at-login:set", (_event, value: unknown) => {
     const enabled = settingsStore.setRenderer("launch-at-login", value) as boolean
     configureLoginItem(enabled)
+    return enabled
+  })
+  ipcMain.handle("settings:minimap-telemetry:get", () =>
+    settingsStore.getRenderer("minimap-telemetry-enabled") ?? true)
+  ipcMain.handle("settings:minimap-telemetry:set", (_event, value: unknown) => {
+    const enabled = settingsStore.setRenderer("minimap-telemetry-enabled", value) as boolean
+    if (session) trackMinimapTelemetry(session.minimapTelemetry.update(liveSession))
+    return enabled
+  })
+  ipcMain.handle("settings:minimap-vision-debug:get", () =>
+    settingsStore.getRenderer("minimap-vision-debug-enabled") ?? false)
+  ipcMain.handle("settings:minimap-vision-debug:set", (_event, value: unknown) =>
+  {
+    const enabled = settingsStore.setRenderer("minimap-vision-debug-enabled", value) as boolean
+    if (session) trackMinimapTelemetry(session.minimapTelemetry.update(liveSession))
+    return enabled
+  })
+  ipcMain.handle("settings:minimap-vision-overlay:get", () =>
+    settingsStore.getRenderer("minimap-vision-overlay-enabled") ?? false)
+  ipcMain.handle("settings:minimap-vision-overlay:set", (_event, value: unknown) => {
+    const enabled = settingsStore.setRenderer("minimap-vision-overlay-enabled", value) as boolean
+    if (!enabled && (minimapVisionDebugRequestedVisible || latestMinimapVisionDebug.enabled)) {
+      clearMinimapVisionDebugOverlay(win)
+    }
+    if (session) trackMinimapTelemetry(session.minimapTelemetry.update(liveSession))
     return enabled
   })
   ipcMain.handle("settings:display-timezone:get", () => {
@@ -1814,6 +2191,13 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
   ipcMain.handle("review:overview", () =>
     getReviewService(win).overview(withPuuid().puuid),
   )
+  ipcMain.handle("review:jungle-pathing", (_event, rawGameId: unknown) => {
+    const gameId = integer(rawGameId, "Game id")
+    return new MinimapTelemetryRepository(getDatabase()).getReview(
+      gameId,
+      withPuuid().puuid,
+    )
+  })
   ipcMain.handle("augments:owner-summary", (_event, rawAugmentId: unknown, rawChampionId: unknown) =>
     getParticipants().getOwnerAugmentSummaries(
       withPuuid().puuid,
@@ -2129,6 +2513,13 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
   }))
 
   ipcMain.handle("live:get", () => liveSession)
+  ipcMain.handle("minimap-telemetry:health", () =>
+    session?.minimapTelemetry.getHealth() ?? {
+      state: "idle",
+      processedFrames: 0,
+      droppedFrames: 0,
+      averageProcessingMs: 0,
+    })
 
   ipcMain.handle("lcu:request", (_event, requestPath: string) =>
     requireSession().client.request(requestPath),
@@ -2560,6 +2951,13 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
 
       const backup = await getBackupManager().createAsync(getDatabase(), "pre-clear")
       const result = new ClearHistoryService(getDatabase()).clear(puuid, backup)
+      // Debug samples are bounded minimap-only artifacts, but are still
+      // account-session evidence. Clear the dedicated root after the
+      // transaction; failures do not invalidate the successful DB clear.
+      await rm(path.join(app.getPath("userData"), "Minimap Vision Debug"), {
+        recursive: true,
+        force: true,
+      }).catch(() => undefined)
       if (settingsStore.getMain("last-puuid") === puuid) {
         settingsStore.deleteMain("last-puuid")
       }
@@ -2740,6 +3138,8 @@ async function main() {
   }
   screen.on("display-removed", keepTempoOverlayOnScreen)
   screen.on("display-metrics-changed", keepTempoOverlayOnScreen)
+  screen.on("display-removed", keepMinimapVisionDebugOnScreen)
+  screen.on("display-metrics-changed", keepMinimapVisionDebugOnScreen)
   void updater.start()
 
   // A second launch reveals the running copy rather than starting another.
@@ -2763,6 +3163,8 @@ async function main() {
     globalShortcut.unregister("Alt+T")
     screen.removeListener("display-removed", keepTempoOverlayOnScreen)
     screen.removeListener("display-metrics-changed", keepTempoOverlayOnScreen)
+    screen.removeListener("display-removed", keepMinimapVisionDebugOnScreen)
+    screen.removeListener("display-metrics-changed", keepMinimapVisionDebugOnScreen)
   })
 
   // The window only hides, so this fires solely on a real quit. Recall must

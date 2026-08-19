@@ -28,7 +28,11 @@ export interface SettingsValues {
   "display-timezone": string
   "last-seen-patch-notes-version": string
   "launch-at-login": boolean
+  "minimap-telemetry-enabled": boolean
+  "minimap-vision-debug-enabled": boolean
+  "minimap-vision-overlay-enabled": boolean
   "tempo-overlay-position": TempoOverlayPosition
+  "minimap-vision-overlay-position": TempoOverlayPosition
   "last-puuid": string
   "riot-api-key-encrypted": string
   "champion-catalog": unknown[]
@@ -149,8 +153,26 @@ export const SETTINGS_REGISTRY: { [K in SettingsKey]: RegistryEntry<SettingsValu
     class: "machine_preference", rendererRead: true, rendererWrite: true, fullBackup: false,
     validate: (value) => typeof value === "boolean" ? value : undefined,
   },
+  "minimap-telemetry-enabled": {
+    class: "machine_preference", rendererRead: true, rendererWrite: true, fullBackup: false,
+    validate: (value) => typeof value === "boolean" ? value : undefined,
+  },
+  "minimap-vision-debug-enabled": {
+    class: "machine_preference", rendererRead: true, rendererWrite: true, fullBackup: false,
+    validate: (value) => typeof value === "boolean" ? value : undefined,
+  },
+  "minimap-vision-overlay-enabled": {
+    class: "machine_preference", rendererRead: true, rendererWrite: true,
+    fullBackup: false,
+    validate: (value) => typeof value === "boolean" ? value : undefined,
+  },
   "tempo-overlay-position": {
     class: "machine_preference", rendererRead: false, rendererWrite: false, fullBackup: false,
+    validate: tempoOverlayPosition,
+  },
+  "minimap-vision-overlay-position": {
+    class: "machine_preference", rendererRead: false, rendererWrite: false,
+    fullBackup: false,
     validate: tempoOverlayPosition,
   },
   "last-puuid": {

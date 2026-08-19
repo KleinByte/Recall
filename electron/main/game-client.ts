@@ -58,6 +58,7 @@ export interface LiveGameSnapshot {
   available: boolean
   gameTime: number
   gameMode?: string
+  gameType?: string
   mapName?: string
   mapNumber?: number
   localTeam?: string
@@ -257,6 +258,7 @@ export async function readLiveGameSnapshot(
     available: true,
     gameTime: number(stats.gameTime),
     gameMode: text(stats.gameMode),
+    gameType: text(stats.gameType),
     mapName: text(stats.mapName),
     mapNumber: number(stats.mapNumber) || undefined,
     localTeam: local?.team,

@@ -154,6 +154,28 @@ describe("readLiveSession", () => {
     expect(live.localPlayerCellId).toBe(live.allies[0].cellId)
   })
 
+  it("preserves Practice queue type separately from CLASSIC game mode", async () => {
+    const live = await readLiveSession(client({
+      "/lol-gameflow/v1/session": {
+        gameData: {
+          gameId: 99,
+          gameMode: "CLASSIC",
+          mapId: 11,
+          queue: {
+            id: 0,
+            gameMode: "CLASSIC",
+            type: "PRACTICETOOL",
+          },
+          teamOne: [],
+          teamTwo: [],
+        },
+      },
+    }) as never, "InProgress")
+
+    expect(live.gameMode).toBe("CLASSIC")
+    expect(live.gameType).toBe("PRACTICETOOL")
+  })
+
   it("does not resolve identities hidden by ranked champion select", async () => {
     const calls: string[] = []
     const rankedClient = {

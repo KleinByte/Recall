@@ -1,8 +1,9 @@
 import type { AramStats, Challenge, Champion, Summoner } from "../types/lol"
 import type { RawChallenge } from "../types/lcu"
 import type { UpdateStatus } from "../types/update"
-import type { StoredSettings, TempoOverlayStatus } from "../types/app"
+import type { MinimapVisionDebugStatus, StoredSettings, TempoOverlayStatus } from "../types/app"
 import type { SkillViewPreferences } from "../shared/skill-preferences"
+import type { MinimapPathingReview } from "../shared/minimap/review"
 import type {
   ChallengeFilter,
   ChallengeHistoryRow,
@@ -171,6 +172,22 @@ export const api = {
     return invoke("tempo-overlay:reset-position")
   },
 
+  getMinimapVisionDebugStatus(): Promise<MinimapVisionDebugStatus> {
+    return invoke("minimap-vision-debug:status")
+  },
+
+  toggleMinimapVisionDebugOverlay(): Promise<MinimapVisionDebugStatus> {
+    return invoke("minimap-vision-debug:toggle")
+  },
+
+  lockMinimapVisionDebugOverlay(): Promise<MinimapVisionDebugStatus> {
+    return invoke("minimap-vision-debug:lock")
+  },
+
+  resetMinimapVisionDebugPosition(): Promise<MinimapVisionDebugStatus> {
+    return invoke("minimap-vision-debug:reset-position")
+  },
+
   getStatus(): Promise<{ connected: boolean; summoner: Summoner | null }> {
     return invoke("lcu:status")
   },
@@ -230,6 +247,30 @@ export const api = {
 
   saveLaunchAtLogin(value: boolean): Promise<boolean> {
     return invoke("settings:launch-at-login:set", value)
+  },
+
+  getMinimapTelemetryEnabled(): Promise<boolean> {
+    return invoke("settings:minimap-telemetry:get")
+  },
+
+  saveMinimapTelemetryEnabled(value: boolean): Promise<boolean> {
+    return invoke("settings:minimap-telemetry:set", value)
+  },
+
+  getMinimapVisionDebugEnabled(): Promise<boolean> {
+    return invoke("settings:minimap-vision-debug:get")
+  },
+
+  saveMinimapVisionDebugEnabled(value: boolean): Promise<boolean> {
+    return invoke("settings:minimap-vision-debug:set", value)
+  },
+
+  getMinimapVisionDebugOverlayEnabled(): Promise<boolean> {
+    return invoke("settings:minimap-vision-overlay:get")
+  },
+
+  saveMinimapVisionDebugOverlayEnabled(value: boolean): Promise<boolean> {
+    return invoke("settings:minimap-vision-overlay:set", value)
   },
 
   getDisplayTimezone(): Promise<{ timeZone: string; override?: string }> {
@@ -471,6 +512,10 @@ export const api = {
 
   getMatchReview(gameId: number): Promise<MatchReview> {
     return invoke("review:match", gameId)
+  },
+
+  getJunglePathingReview(gameId: number): Promise<MinimapPathingReview> {
+    return invoke("review:jungle-pathing", gameId)
   },
 
   getOwnerAugmentSummaries(

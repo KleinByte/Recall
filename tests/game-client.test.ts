@@ -11,6 +11,7 @@ describe("readLiveGameSnapshot", () => {
       "/liveclientdata/gamestats": {
         gameTime: 725.4,
         gameMode: "ARAM",
+        gameType: "MATCHED_GAME",
         mapName: "Howling Abyss",
         mapNumber: 12,
       },
@@ -96,6 +97,7 @@ describe("readLiveGameSnapshot", () => {
 
     expect(snapshot.available).toBe(true)
     expect(snapshot.gameTime).toBe(725.4)
+    expect(snapshot.gameType).toBe("MATCHED_GAME")
     expect(snapshot.allies).toHaveLength(2)
     expect(snapshot.enemies).toHaveLength(1)
     expect(snapshot.allies[0]).toMatchObject({

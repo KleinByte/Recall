@@ -51,6 +51,9 @@ const riotHistory = ref<RiotHistoryBackfillState>()
 const trust = ref<DataTrustReport>()
 const trustBusy = ref(false)
 const launchAtLogin = ref(true)
+const minimapTelemetryEnabled = ref(true)
+const minimapVisionDebugEnabled = ref(false)
+const minimapVisionOverlayEnabled = ref(false)
 const displayTimezone = ref("")
 const resolvedTimezone = ref("UTC")
 const timezoneMessage = ref("")
@@ -106,6 +109,15 @@ onMounted(() => {
   events.on("data-trust:updated", () => void refreshTrust())
   void api.getLaunchAtLogin().then((value) => {
     launchAtLogin.value = value !== false
+  })
+  void api.getMinimapTelemetryEnabled().then((value) => {
+    minimapTelemetryEnabled.value = value !== false
+  })
+  void api.getMinimapVisionDebugEnabled().then((value) => {
+    minimapVisionDebugEnabled.value = value === true
+  })
+  void api.getMinimapVisionDebugOverlayEnabled().then((value) => {
+    minimapVisionOverlayEnabled.value = value === true
   })
   void api.getDisplayTimezone().then((value) => {
     displayTimezone.value = value.override ?? ""
@@ -168,6 +180,29 @@ async function useSystemTimezone() {
   displayTimezone.value = ""
   resolvedTimezone.value = result.timeZone
   timezoneMessage.value = "Using the system timezone."
+}
+
+function setMinimapTelemetryEnabled(value: boolean) {
+  minimapTelemetryEnabled.value = value
+  void api.saveMinimapTelemetryEnabled(value)
+}
+
+function setMinimapVisionDebugEnabled(value: boolean) {
+  minimapVisionDebugEnabled.value = value
+  void api.saveMinimapVisionDebugEnabled(value)
+}
+
+function setMinimapVisionOverlayEnabled(value: boolean) {
+  minimapVisionOverlayEnabled.value = value
+  void api.saveMinimapVisionDebugOverlayEnabled(value)
+}
+
+async function toggleMinimapVisionOverlay() {
+  await api.toggleMinimapVisionDebugOverlay()
+}
+
+async function resetMinimapVisionOverlayPosition() {
+  await api.resetMinimapVisionDebugPosition()
 }
 
 async function toggleTempoOverlay() {
@@ -383,6 +418,55 @@ const formatDate = (value?: number) =>
           <span class="muted hint">Opens hidden in the notification area so game recording is ready.</span>
         </span>
       </label>
+
+      <label class="setting">
+        <input type="checkbox" :checked="minimapTelemetryEnabled"
+          @change="setMinimapTelemetryEnabled(($event.target as HTMLInputElement).checked)" />
+        <span>
+          Track minimap movement and jungle clears
+          <span class="muted hint">
+            Requires Advanced jungle timers in League's Interface settings. Recall processes the game window
+            locally and normally stores only confirmed points and timings.
+          </span>
+        </span>
+      </label>
+
+      <label class="setting">
+        <input type="checkbox" :checked="minimapVisionDebugEnabled"
+          :disabled="!minimapTelemetryEnabled"
+          @change="setMinimapVisionDebugEnabled(($event.target as HTMLInputElement).checked)" />
+        <span>
+          Keep temporary minimap vision samples
+          <span class="muted hint">
+            Saves bounded minimap-only crops and detection overlays from normal matches for detector
+            tuning. It never saves the full game window and excludes Practice Tool.
+          </span>
+        </span>
+      </label>
+
+      <label class="setting">
+        <input type="checkbox" :checked="minimapVisionOverlayEnabled"
+          :disabled="!minimapTelemetryEnabled"
+          @change="setMinimapVisionOverlayEnabled(($event.target as HTMLInputElement).checked)" />
+        <span>
+          Enable minimap CV debug overlay
+          <span class="muted hint">
+            Opt-in, click-through diagnostics showing only the bounded minimap ROI, calibration, detections, and camp states.
+            It never displays the full desktop.
+          </span>
+        </span>
+      </label>
+
+      <div v-if="minimapVisionOverlayEnabled" class="tempo-overlay-setting">
+        <div>
+          <strong>Minimap CV debug window</strong>
+          <span class="muted hint">Place it once, then lock it so League input passes through.</span>
+        </div>
+        <div class="actions">
+          <UiButton type="button" @click="toggleMinimapVisionOverlay">Show / hide</UiButton>
+          <UiButton type="button" variant="ghost" @click="resetMinimapVisionOverlayPosition">Reset position</UiButton>
+        </div>
+      </div>
 
       <div class="timezone-setting">
         <UiField label="Display timezone" compact>

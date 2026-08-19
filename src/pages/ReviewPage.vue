@@ -29,6 +29,7 @@ import MatchPlaybackMap from "../components/MatchPlaybackMap.vue"
 import WinProbabilityChart from "../components/WinProbabilityChart.vue"
 import RviPerformanceProfile from "../components/skill/PerformanceProfile.vue"
 import MatchRviSummary from "../components/review/MatchRviSummary.vue"
+import JunglePathingReview from "../features/minimap-telemetry/JunglePathingReview.vue"
 import PageHeader from "../components/ui/PageHeader.vue"
 import Tabs from "../components/ui/Tabs.vue"
 import Button from "../components/ui/Button.vue"
@@ -475,6 +476,8 @@ onMounted(() => {
             :assets="assets"
           />
         </div>
+
+        <JunglePathingReview class="card" :game-id="review.match.gameId" />
 
         <section v-if="owner?.augments?.length" class="owner-augment-context">
           <header>

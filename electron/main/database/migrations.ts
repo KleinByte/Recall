@@ -10,6 +10,12 @@ import {
   migrateTimelineStorageV32,
   verifyTimelineStorageV32,
 } from "./timeline-storage-migration.js"
+import {
+  MINIMAP_TELEMETRY_V33_UP,
+  MINIMAP_TELEMETRY_V34_UP,
+  verifyMinimapTelemetryV33,
+  verifyMinimapTelemetryV34,
+} from "./minimap-telemetry-schema.js"
 
 export interface Migration {
   version: number
@@ -2452,6 +2458,19 @@ export const migrations: Migration[] = [
     migrate: migrateTimelineStorageV32,
     after: TIMELINE_STORAGE_V32_AFTER,
     verify: verifyTimelineStorageV32,
+  },
+  {
+    // Compact visible-minimap telemetry and post-game-only path reconstruction.
+    version: 33,
+    up: MINIMAP_TELEMETRY_V33_UP,
+    verify: verifyMinimapTelemetryV33,
+  },
+  {
+    // Persist bounded numeric capture-quality aggregates so an inaccurate or
+    // stalled vision session can be rejected without retaining full frames.
+    version: 34,
+    up: MINIMAP_TELEMETRY_V34_UP,
+    verify: verifyMinimapTelemetryV34,
   },
 ]
 

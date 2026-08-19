@@ -22,8 +22,10 @@
     "src/helpers/time-contract-core.ts",
     "src/shared/champion-archetypes.ts",
     "src/shared/measurement.ts",
+    "src/shared/minimap/**/*.ts",
     "src/shared/performance-vocabulary.ts",
     "src/shared/recall-grade.ts",
-    "src/shared/skill-preferences.ts"
+    "src/shared/skill-preferences.ts",
+    "src/types/app.ts"
   ]
 }

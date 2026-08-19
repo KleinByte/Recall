@@ -52,6 +52,54 @@ function insertLobby(db: InstanceType<typeof Database>, gameId: number, puuid: s
   }
 }
 
+function insertMinimapTelemetry(
+  db: InstanceType<typeof Database>,
+  gameId: number,
+  puuid: string,
+) {
+  const suffix = `${gameId}-${puuid}`
+  db.prepare(`
+    INSERT INTO minimap_capture_sessions
+      (session_id, game_id, puuid, capture_backend, started_at,
+       detector_version, status)
+    VALUES (?, ?, ?, 'electron_desktop_capture', 1, 1, 'complete')
+  `).run(`capture-${suffix}`, gameId, puuid)
+  db.prepare(`
+    INSERT INTO champion_track_chunks
+      (game_id, puuid, participant_key, champion_name, team, is_local,
+       chunk_start_ms, chunk_end_ms, point_count, encoding,
+       uncompressed_bytes, compressed_bytes, payload_sha256, payload,
+       detector_version)
+    VALUES (?, ?, 'ally:local', 'Ahri', 'ally', 1, 1000, 1000, 1,
+            'gzip_delta_json_v1', 1, 18, ?, ?, 1)
+  `).run(gameId, puuid, "a".repeat(64), Buffer.alloc(18))
+  db.prepare(`
+    INSERT INTO camp_state_events
+      (game_id, puuid, camp_key, game_time_ms, state, source,
+       confidence, provider_version, created_at)
+    VALUES (?, ?, 'west_blue', 1000, 'alive', 'minimap_cv', 1, 1, 1)
+  `).run(gameId, puuid)
+  db.prepare(`
+    INSERT INTO camp_clear_events
+      (game_id, puuid, camp_key, cleared_at_ms, source, source_confidence,
+       attribution, attribution_confidence, evidence_json,
+       algorithm_version, created_at)
+    VALUES (?, ?, 'west_blue', 2000, 'minimap_cv', 1, 'local', 1, '{}', 1, 1)
+  `).run(gameId, puuid)
+  db.prepare(`
+    INSERT INTO pathing_analysis_runs
+      (analysis_id, game_id, puuid, input_hash, graph_version, model_version,
+       mode, status, coverage_json, created_at)
+    VALUES (?, ?, ?, ?, 1, 1, 'postgame_smoothed', 'complete', '{}', 1)
+  `).run(`analysis-${suffix}`, gameId, puuid, String(gameId).repeat(64).slice(0, 64))
+  db.prepare(`
+    INSERT INTO path_segments
+      (analysis_id, participant_key, start_time_ms, end_time_ms, kind,
+       points_json, confidence, model_version)
+    VALUES (?, 'ally:local', 1000, 2000, 'observed', '[]', 1, 1)
+  `).run(`analysis-${suffix}`)
+}
+
 function gradeResults(): Map<number, CanonicalGradeResultInput> {
   return new Map(Array.from({ length: 10 }, (_, index) => {
     const participantId = index + 1
@@ -80,6 +128,8 @@ describe("ClearHistoryService Recall lifecycle", () => {
     ])
     insertLobby(db, 1, "remove-me")
     insertLobby(db, 2, "keep-me")
+    insertMinimapTelemetry(db, 1, "remove-me")
+    insertMinimapTelemetry(db, 2, "keep-me")
     const timelineSources = new MatchSourceRepository(db)
     const retainedRaw = timelineSources.persistRawPayload({
       ownerPuuid: "keep-me",
@@ -211,6 +261,20 @@ describe("ClearHistoryService Recall lifecycle", () => {
     expect(db.prepare(`
       SELECT COUNT(*) AS count FROM live_game_snapshots WHERE puuid = 'remove-me'
     `).get()).toEqual({ count: 0 })
+    for (const table of [
+      "minimap_capture_sessions",
+      "champion_track_chunks",
+      "camp_state_events",
+      "camp_clear_events",
+      "pathing_analysis_runs",
+    ]) {
+      expect(db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE puuid = ?`)
+        .get("remove-me"), table).toEqual({ count: 0 })
+      expect(db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE puuid = ?`)
+        .get("keep-me"), table).toEqual({ count: 1 })
+    }
+    expect(db.prepare("SELECT COUNT(*) AS count FROM path_segments").get())
+      .toEqual({ count: 1 })
     const retainedLive = db.prepare(`
       SELECT snapshot_encoding AS snapshotEncoding,
              snapshot_uncompressed_bytes AS snapshotUncompressedBytes,

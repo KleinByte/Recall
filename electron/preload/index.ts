@@ -140,7 +140,8 @@ function useLoading() {
 
 const { appendLoading, removeLoading } = useLoading()
 const isTempoOverlay = new URLSearchParams(location.search).get("surface") === "tempo-overlay"
-if (!isTempoOverlay) domReady().then(appendLoading)
+const isMinimapDebugOverlay = new URLSearchParams(location.search).get("surface") === "minimap-vision-debug"
+if (!isTempoOverlay && !isMinimapDebugOverlay) domReady().then(appendLoading)
 
 window.onmessage = (ev) => {
   ev.data.payload === "removeLoading" && removeLoading()
