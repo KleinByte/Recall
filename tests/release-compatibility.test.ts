@@ -50,6 +50,7 @@ describe("Windows update compatibility", () => {
     const signedConfig = readFileSync("electron-builder.azure.cjs", "utf8")
     const storeConfig = readFileSync("electron-builder.store.cjs", "utf8")
     const releaseWorkflow = readFileSync(".github/workflows/release.yml", "utf8")
+    const defenderScan = readFileSync("scripts/scan-store-installer.ps1", "utf8")
 
     expect(pkg.scripts["store:package"]).toContain("package:store")
     expect(pkg.scripts["store:package"]).toContain("store:defender")
@@ -71,5 +72,7 @@ describe("Windows update compatibility", () => {
     expect(releaseWorkflow).toContain("Recall-Windows-Setup.store-inventory.json")
     expect(releaseWorkflow).toContain("Recall-Windows-Setup.sha256")
     expect(releaseWorkflow).toContain("expected immutable URL")
+    expect(defenderScan).toContain("[System.Security.Cryptography.SHA256]::Create()")
+    expect(defenderScan).not.toContain("Get-FileHash")
   })
 })

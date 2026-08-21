@@ -49,7 +49,15 @@ if ($scanExitCode -ne 0) {
   throw "Microsoft Defender rejected or could not scan the installer (exit $scanExitCode): $($scanOutput.Trim())"
 }
 
-$hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+$sha256 = [System.Security.Cryptography.SHA256]::Create()
+$installerStream = [System.IO.File]::OpenRead($installer)
+try {
+  $hashBytes = $sha256.ComputeHash($installerStream)
+  $hash = -join ($hashBytes | ForEach-Object { $_.ToString("x2") })
+} finally {
+  $installerStream.Dispose()
+  $sha256.Dispose()
+}
 $reportPath = Join-Path (Split-Path -Parent $installer) "Recall-Windows-Setup.defender.json"
 $report = [ordered]@{
   format = "recall-microsoft-defender-scan"
