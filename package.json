@@ -1,6 +1,6 @@
 {
   "name": "recall",
-  "version": "3.2.2",
+  "version": "3.3.0",
   "main": "dist-electron/main/index.js",
   "description": "League of Legends challenge and ARAM stat tracker that remembers what the client forgets.",
   "author": "KleinByte",
@@ -30,8 +30,13 @@
     "test:e2e": "playwright test",
     "verify": "pnpm check:repo && pnpm typecheck && pnpm test && pnpm build:renderer && pnpm doctor:native",
     "verify:ci": "pnpm verify && pnpm test:e2e && pnpm package:smoke",
-    "release": "pnpm verify && pnpm test:e2e && electron-builder --publish always",
-    "release:signed": "pnpm verify && pnpm test:e2e && electron-builder --config electron-builder.azure.cjs --publish never",
+    "release": "pnpm store:package",
+    "package:store": "electron-builder --config electron-builder.store.cjs --publish never",
+    "store:defender": "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/scan-store-installer.ps1",
+    "store:installer-test": "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/test-store-installer.ps1",
+    "store:verify": "node scripts/verify-store-installer.cjs",
+    "store:package": "pnpm verify && pnpm test:e2e && pnpm package:store && pnpm store:defender && pnpm store:verify",
+    "release:signed": "pnpm store:package",
     "build": "pnpm verify && electron-builder",
     "preview": "vite preview",
     "sync:classic-items": "node scripts/sync-classic-items.mjs",
@@ -74,6 +79,7 @@
   },
   "dependencies": {
     "better-sqlite3": "13.0.3",
-    "ws": "^8.21.3"
+    "ws": "^8.21.3",
+    "@techstark/opencv-js": "5.0.0-release.1"
   }
 }

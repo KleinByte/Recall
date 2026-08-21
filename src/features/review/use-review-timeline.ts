@@ -23,6 +23,8 @@ interface ReviewTimelineOptions {
   review: Ref<MatchReview | undefined>
   owner: ComputedRef<ParticipantRow | undefined>
   assets: Ref<GameAssetCatalog>
+  /** Extends every timeline surface to the same match/CV playback clock. */
+  playbackMaximumTimestamp?: ComputedRef<number>
 }
 
 const timelineTrackMeta = [
@@ -39,7 +41,12 @@ const timelineTrackMeta = [
  * controller. Match loading remains in useReviewPageData so this module stays
  * synchronous and deterministic for a supplied review.
  */
-export function useReviewTimeline({ review, owner, assets }: ReviewTimelineOptions) {
+export function useReviewTimeline({
+  review,
+  owner,
+  assets,
+  playbackMaximumTimestamp,
+}: ReviewTimelineOptions) {
   const timelineMapView = ref<TimelineMapView>("deaths")
   const timelineFilter = ref<TimelineFilter>("all")
   const timelineFilters = ["all", "you", "kills", "objectives", "items", "levels", "vision"] as const
@@ -52,7 +59,14 @@ export function useReviewTimeline({ review, owner, assets }: ReviewTimelineOptio
 
   const timelineDomain = computed(() => {
     const summary = review.value?.timeline.summary
-    return timelineChartDomain(summary?.frames ?? [], summary?.events ?? [])
+    const domain = timelineChartDomain(summary?.frames ?? [], summary?.events ?? [])
+    return {
+      ...domain,
+      maximumTimestamp: Math.max(
+        domain.maximumTimestamp,
+        playbackMaximumTimestamp?.value ?? 0,
+      ),
+    }
   })
   const timelineDifferencePoints = computed(() => {
     const frames = review.value?.timeline.summary?.frames ?? []

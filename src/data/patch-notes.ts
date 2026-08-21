@@ -21,6 +21,16 @@ function note(
 /** Shipped releases, newest first. */
 export const patchNotes: readonly PatchNoteRelease[] = [
   note(
+    "3.3.0",
+    "2026-08-20",
+    "Sharper playback and jungle reviews",
+    "Computer vision, match playback, and jungle clear analysis are more accurate, useful, and efficient.",
+    "Added visible-minimap computer vision with off-thread processing and confidence-aware champion tracking.",
+    "Unified playback evidence, improved map calibration, and fixed cropped minimap debugging.",
+    "Added per-match jungle clear splits plus champion average, fastest, and longest full-clear times.",
+    "Expanded review, Skill, Progress, release safety, update recovery, and the public product tour.",
+  ),
+  note(
     "3.2.2",
     "2026-08-14",
     "Clearer RVI loading",

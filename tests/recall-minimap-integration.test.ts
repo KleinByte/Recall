@@ -6,6 +6,24 @@ vi.mock("electron", () => ({
   nativeImage: { createFromBuffer: vi.fn() },
 }))
 
+vi.mock("../electron/main/vision/vision-worker-client.js", () => ({
+  VisionWorkerClient: class {
+    readonly restarts = 0
+    readonly runtime = { engine: "opencv_js", opencvVersion: "test" }
+    readonly state = "ready"
+    async initialize() { return this.runtime }
+    async setRoster() {}
+    async setCampTemplates() {}
+    async calibrate() {
+      return { diagnostics: { evaluatedCandidates: 0, visuallyValidCandidates: 0 } }
+    }
+    async processFrame() { throw new Error("no_test_frame") }
+    async reset() {}
+    async ping() { return this.runtime }
+    async close() {}
+  },
+}))
+
 import {
   hasAuthoritativeCaptureClassification,
   isPracticeToolSession,
@@ -66,14 +84,16 @@ function runningCaptureBackend() {
 }
 
 describe("RecallMinimapIntegration session policy", () => {
-  it("excludes a CLASSIC Practice session before capture starts", async () => {
-    const { database, sql } = databaseStub()
+  it("admits a CLASSIC Practice session for capture and debug tuning", async () => {
+    const { database } = databaseStub()
+    const captureBackend = unavailableCaptureBackend()
     const integration = new RecallMinimapIntegration({
       gameClient: { request: vi.fn() },
       database,
       puuid: "owner",
       getEnabled: () => true,
       getDataDragonVersion: () => undefined,
+      captureBackend,
     })
     const state = integration as unknown as {
       lastGameId?: number
@@ -84,17 +104,11 @@ describe("RecallMinimapIntegration session policy", () => {
 
     expect(isPracticeToolSession(practiceSession)).toBe(true)
     await integration.update(practiceSession)
-    await integration.completeMatch()
+    await integration.stop()
 
     expect(integration.getHealth().state).toBe("idle")
     expect(state.lastGameId).toBeUndefined()
-    expect(state.lastRosterSignature).toBe("")
-    expect(sql.some((statement) =>
-      /INSERT INTO minimap_capture_sessions/i.test(statement),
-    )).toBe(false)
-    expect(sql.some((statement) =>
-      /INSERT INTO pathing_analysis_runs/i.test(statement),
-    )).toBe(false)
+    expect(captureBackend.start).toHaveBeenCalledOnce()
   })
 
   it("retries calibration hints after a transient read failure", async () => {
@@ -180,12 +194,14 @@ describe("RecallMinimapIntegration session policy", () => {
 
   it("reads the final game id after pending updates settle", async () => {
     const { database, sql } = databaseStub()
+    const onPathingReviewUpdated = vi.fn()
     const integration = new RecallMinimapIntegration({
       gameClient: { request: vi.fn() },
       database,
       puuid: "owner",
       getEnabled: () => true,
       getDataDragonVersion: () => undefined,
+      onPathingReviewUpdated,
       captureBackend: unavailableCaptureBackend(),
     })
 
@@ -197,6 +213,7 @@ describe("RecallMinimapIntegration session policy", () => {
     expect(sql.some((statement) =>
       /INSERT INTO pathing_analysis_runs/i.test(statement),
     )).toBe(true)
+    expect(onPathingReviewUpdated).toHaveBeenCalledWith(normalSession.gameId)
   })
 
   it("stops the old capture before an InProgress game id change", async () => {

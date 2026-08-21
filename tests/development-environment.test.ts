@@ -57,9 +57,14 @@ describe("development environment contract", () => {
     expect(packageJson.scripts["rebuild:electron"])
       .toBe("electron-builder install-app-deps")
 
-    const builder = read("electron-builder.json")
-    expect(builder).toContain("better-sqlite3/prebuilds/*.node")
-    expect(builder).toContain("!node_modules/better-sqlite3/build/**/*")
+    const builder = JSON.parse(read("electron-builder.json")) as {
+      asarUnpack: string[]
+      files: string[]
+    }
+    expect(builder.asarUnpack).toEqual([
+      "**/node_modules/better-sqlite3/prebuilds/win32-x64.node",
+    ])
+    expect(builder.files).toContain("!node_modules/better-sqlite3/build/**/*")
     expect(packageJson.devDependencies).not.toHaveProperty("@electron/rebuild")
     expect(read("scripts/rebuild-node-native.mjs")).not.toContain('"--force"')
 
@@ -85,10 +90,10 @@ describe("development environment contract", () => {
     expect(packageJson.scripts["verify:ci"]).toContain("pnpm verify")
     expect(packageJson.scripts["verify:ci"]).toContain("pnpm test:e2e")
     expect(packageJson.scripts["verify:ci"]).toContain("pnpm package:smoke")
-    expect(packageJson.scripts.release).toContain("pnpm verify")
-    expect(packageJson.scripts.release).toContain("pnpm test:e2e")
-    expect(packageJson.scripts["release:signed"]).toContain("pnpm verify")
-    expect(packageJson.scripts["release:signed"]).toContain("pnpm test:e2e")
+    expect(packageJson.scripts["store:package"]).toContain("pnpm verify")
+    expect(packageJson.scripts["store:package"]).toContain("pnpm test:e2e")
+    expect(packageJson.scripts.release).toBe("pnpm store:package")
+    expect(packageJson.scripts["release:signed"]).toBe("pnpm store:package")
 
     const verificationWorkflow = read(".github/workflows/verify.yml")
     expect(verificationWorkflow).toContain("pull_request:")

@@ -24,7 +24,7 @@ const emit = defineEmits<{
   >
     <div class="body">
       <strong>Recall {{ status.version }} is ready to install.</strong>
-      <span>The update will restart Recall and finish in the background.</span>
+      <span>The update will restart Recall and show installation progress.</span>
     </div>
     <Button class="restart" variant="primary" size="compact" @click="emit('install')">
       Restart to update

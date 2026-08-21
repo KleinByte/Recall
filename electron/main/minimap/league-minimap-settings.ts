@@ -48,12 +48,15 @@ export function parseLeagueGameConfig(source: string): LeagueMinimapSettings {
     values.set(`${section}.${key}`, value)
   }
 
-  const flip = finiteNumber(values.get("hud.flipminimap"))
-  const scale = finiteNumber(values.get("hud.minimapscale"))
+  const firstValue = (...keys: string[]) => keys
+    .map((key) => values.get(key))
+    .find((value) => value !== undefined)
+  const flip = finiteNumber(firstValue("hud.flipminimap", "general.flipminimap"))
+  const scale = finiteNumber(firstValue("hud.minimapscale", "general.minimapscale"))
   const placement = flip === 1 ? "left" : flip === 0 ? "right" : undefined
   return {
     placement,
-    minimapScale: scale !== undefined && scale >= 0.5 && scale <= 2
+    minimapScale: scale !== undefined && scale >= 0.5 && scale <= 3
       ? scale
       : undefined,
     resolutionWidth: positiveInteger(values.get("general.width")),

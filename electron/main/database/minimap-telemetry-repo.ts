@@ -1,11 +1,17 @@
 import { randomUUID } from "node:crypto"
 import type {
   CampClearEvent,
+  CampKey,
   CampStateObservation,
   ChampionPositionObservation,
   MinimapCalibration,
   PathSegment,
 } from "../../../src/shared/minimap/contracts.js"
+import {
+  deriveInitialJungleClear,
+  type ChampionJungleClearStats,
+  type JungleClearSample,
+} from "../../../src/shared/minimap/jungle-clear.js"
 import { decodeTrackChunk, encodeTrackChunk, type EncodedTrackChunk } from "./minimap-track-codec.js"
 
 export interface StatementLike {
@@ -57,6 +63,30 @@ interface CampClearRow {
   algorithmVersion: number
 }
 
+interface ChampionJungleClearRow {
+  gameId: number
+  championId: number
+  playedAt: number
+  win: number
+  campKey: CampKey | null
+  clearedAtMs: number | null
+  respawnAtMs: number | null
+  source: CampClearEvent["source"] | null
+  sourceConfidence: number | null
+  attribution: CampClearEvent["attribution"] | null
+  attributionConfidence: number | null
+  evidenceJson: string | null
+  routeIndex: number | null
+  algorithmVersion: number | null
+}
+
+interface PathParticipantRow {
+  participantKey: string
+  championName: string
+  team: "ally" | "enemy"
+  isLocal: number
+}
+
 interface PathRunRow {
   analysisId: string
   gameId: number
@@ -106,6 +136,12 @@ export interface PathingReviewData {
     completedAt?: number
     errorCode?: string
   }
+  participants: Array<{
+    participantKey: string
+    championName: string
+    team: "ally" | "enemy"
+    isLocal: boolean
+  }>
   segments: PathSegment[]
   campClears: CampClearEvent[]
 }
@@ -330,7 +366,7 @@ export class MinimapTelemetryRepository {
       event.puuid,
       event.campKey,
       Math.round(event.clearedAtMs),
-      event.respawnAtMs ? Math.round(event.respawnAtMs) : null,
+      event.respawnAtMs !== undefined ? Math.round(event.respawnAtMs) : null,
       event.source,
       event.sourceConfidence,
       event.attribution,
@@ -399,6 +435,126 @@ export class MinimapTelemetryRepository {
       routeIndex: row.routeIndex ?? undefined,
       algorithmVersion: row.algorithmVersion,
     }))
+  }
+
+  getChampionJungleClearStats(
+    puuid: string,
+    championId: number,
+  ): ChampionJungleClearStats {
+    const rows = this.db.prepare(`
+      SELECT m.game_id AS gameId, m.champion_id AS championId,
+             m.played_at AS playedAt, m.win,
+             c.camp_key AS campKey, c.cleared_at_ms AS clearedAtMs,
+             c.respawn_at_ms AS respawnAtMs, c.source,
+             c.source_confidence AS sourceConfidence, c.attribution,
+             c.attribution_confidence AS attributionConfidence,
+             c.evidence_json AS evidenceJson, c.route_index AS routeIndex,
+             c.algorithm_version AS algorithmVersion
+      FROM matches m
+      LEFT JOIN camp_clear_events c
+        ON c.game_id = m.game_id AND c.puuid = m.puuid
+       AND c.attribution = 'local'
+      WHERE m.puuid = ? AND m.champion_id = ? AND m.is_matched = 1
+        AND (
+          UPPER(COALESCE(m.resolved_position, '')) = 'JUNGLE'
+          OR UPPER(COALESCE(m.role, '')) IN ('JUNGLE', 'JUNGLER')
+          OR EXISTS (
+            SELECT 1 FROM match_participants owner
+            WHERE owner.game_id = m.game_id AND owner.puuid = m.puuid
+              AND owner.is_player = 1
+              AND (
+                UPPER(COALESCE(owner.resolved_position, '')) = 'JUNGLE'
+                OR UPPER(COALESCE(owner.match_v5_team_position, '')) = 'JUNGLE'
+                OR UPPER(COALESCE(owner.match_v5_individual_position, '')) = 'JUNGLE'
+                OR UPPER(COALESCE(owner.assigned_position, '')) IN ('JUNGLE', 'JUNGLER')
+                OR owner.spell1_id = 11 OR owner.spell2_id = 11
+              )
+          )
+        )
+      ORDER BY m.played_at DESC, m.game_id DESC, c.cleared_at_ms
+    `).all(puuid, championId) as ChampionJungleClearRow[]
+
+    const games = new Map<number, {
+      championId: number
+      playedAt: number
+      win: number
+      events: CampClearEvent[]
+    }>()
+    for (const row of rows) {
+      let game = games.get(row.gameId)
+      if (!game) {
+        game = {
+          championId: row.championId,
+          playedAt: row.playedAt,
+          win: row.win,
+          events: [],
+        }
+        games.set(row.gameId, game)
+      }
+      if (row.campKey === null || row.clearedAtMs === null ||
+          row.source === null || row.sourceConfidence === null ||
+          row.attribution === null || row.attributionConfidence === null ||
+          row.algorithmVersion === null) continue
+      game.events.push({
+        gameId: row.gameId,
+        puuid,
+        campKey: row.campKey,
+        clearedAtMs: row.clearedAtMs,
+        respawnAtMs: row.respawnAtMs ?? undefined,
+        source: row.source,
+        sourceConfidence: row.sourceConfidence,
+        attribution: row.attribution,
+        attributionConfidence: row.attributionConfidence,
+        evidence: parseJson(row.evidenceJson ?? "", {
+          campTransition: false,
+          localPositionObserved: false,
+          transitionConfidence: 0,
+        }),
+        routeIndex: row.routeIndex ?? undefined,
+        algorithmVersion: row.algorithmVersion,
+      })
+    }
+
+    let telemetryGames = 0
+    const samples: JungleClearSample[] = []
+    for (const [gameId, game] of games) {
+      const clear = deriveInitialJungleClear(game.events)
+      if (clear.camps.length > 0) telemetryGames += 1
+      if (!clear.complete || clear.clearTimeMs === undefined || clear.confidence === undefined) {
+        continue
+      }
+      samples.push({
+        gameId,
+        championId: game.championId,
+        playedAt: game.playedAt,
+        win: game.win,
+        clearTimeMs: clear.clearTimeMs,
+        route: clear.camps.map((event) => event.campKey),
+        confidence: clear.confidence,
+      })
+    }
+    samples.sort((left, right) => right.playedAt - left.playedAt || right.gameId - left.gameId)
+    const fastest = samples.reduce<JungleClearSample | undefined>(
+      (best, sample) => !best || sample.clearTimeMs < best.clearTimeMs ? sample : best,
+      undefined,
+    )
+    const longest = samples.reduce<JungleClearSample | undefined>(
+      (best, sample) => !best || sample.clearTimeMs > best.clearTimeMs ? sample : best,
+      undefined,
+    )
+
+    return {
+      championId,
+      jungleGames: games.size,
+      telemetryGames,
+      samples,
+      averageClearTimeMs: samples.length
+        ? Math.round(samples.reduce((total, sample) => total + sample.clearTimeMs, 0) /
+          samples.length)
+        : undefined,
+      fastest,
+      longest,
+    }
   }
 
   findPathingAnalysis(input: {
@@ -511,6 +667,14 @@ export class MinimapTelemetryRepository {
       WHERE analysis_id = ?
       ORDER BY participant_key, start_time_ms, end_time_ms
     `).all(run.analysisId) as PathSegmentRow[] : []
+    const participants = this.db.prepare(`
+      SELECT participant_key AS participantKey, champion_name AS championName,
+             team, is_local AS isLocal
+      FROM champion_track_chunks
+      WHERE game_id = ? AND puuid = ?
+      GROUP BY participant_key, champion_name, team, is_local
+      ORDER BY is_local DESC, team, champion_name
+    `).all(gameId, puuid) as PathParticipantRow[]
     return {
       analysis: run ? {
         analysisId: run.analysisId,
@@ -525,6 +689,12 @@ export class MinimapTelemetryRepository {
         completedAt: run.completedAt ?? undefined,
         errorCode: run.errorCode ?? undefined,
       } : undefined,
+      participants: participants.map((participant) => ({
+        participantKey: participant.participantKey,
+        championName: participant.championName,
+        team: participant.team,
+        isLocal: participant.isLocal === 1,
+      })),
       segments: rows.map((row) => ({
         gameId,
         participantKey: row.participantKey,

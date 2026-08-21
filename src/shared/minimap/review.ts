@@ -16,6 +16,12 @@ export interface MinimapPathingAnalysisSummary {
 
 export interface MinimapPathingReview {
   analysis?: MinimapPathingAnalysisSummary
+  participants?: Array<{
+    participantKey: string
+    championName: string
+    team: "ally" | "enemy"
+    isLocal: boolean
+  }>
   segments: PathSegment[]
   campClears: CampClearEvent[]
 }

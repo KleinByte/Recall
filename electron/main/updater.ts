@@ -40,6 +40,8 @@ interface UpdaterServiceOptions {
   isPackaged: boolean
   publish: (status: UpdateStatus) => void
   beforeInstall?: () => void | Promise<void>
+  beginInstall?: (version: string) => void | Promise<void>
+  cancelInstall?: () => void | Promise<void>
 }
 
 const ERROR_MESSAGE =
@@ -50,6 +52,8 @@ export function createUpdaterService({
   isPackaged,
   publish,
   beforeInstall = () => undefined,
+  beginInstall = () => undefined,
+  cancelInstall = () => undefined,
 }: UpdaterServiceOptions): UpdaterService {
   let current: UpdateStatus = { kind: "up-to-date" }
   let checkInProgress = false
@@ -147,11 +151,22 @@ export function createUpdaterService({
 
     async install() {
       if (current.kind !== "downloaded") return false
+      const version = current.version
       try {
+        // Persist the cross-version guard while this process still owns the
+        // ordinary single-instance lock. It is removed if preparation fails.
+        await beginInstall(version)
         await beforeInstall()
-        updater.quitAndInstall(true, true)
+        // Keep the NSIS progress window visible. The renderer covers database
+        // preparation, then Windows shows that installation is still active.
+        updater.quitAndInstall(false, true)
         return true
       } catch (error) {
+        try {
+          await cancelInstall()
+        } catch (cleanupError) {
+          console.warn("[updater] could not clear update guard:", cleanupError)
+        }
         console.error("[updater] could not prepare database for install:", error)
         set({
           kind: "error",

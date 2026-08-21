@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   configuredLcuLockfilePath,
+  leagueInstallDirectoryFromLockfilePath,
   parseLeagueClientInstallPath,
   parseLcuLockfile,
 } from "../electron/main/lcu-discovery.js"
@@ -55,5 +56,11 @@ describe("configuredLcuLockfilePath", () => {
     expect(configuredLcuLockfilePath({ RECALL_LCU_LOCKFILE: "/league-client/lockfile" }))
       .toBe(path.resolve("/league-client/lockfile"))
     expect(configuredLcuLockfilePath({ RECALL_LCU_LOCKFILE: "  " })).toBeUndefined()
+  })
+
+  it("derives game.cfg discovery from an explicitly mounted League lockfile", () => {
+    expect(leagueInstallDirectoryFromLockfilePath(
+      path.join("C:", "Riot Games", "League of Legends", "lockfile"),
+    )).toBe(path.resolve(path.join("C:", "Riot Games", "League of Legends")))
   })
 })

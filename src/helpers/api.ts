@@ -4,6 +4,7 @@ import type { UpdateStatus } from "../types/update"
 import type { MinimapVisionDebugStatus, StoredSettings, TempoOverlayStatus } from "../types/app"
 import type { SkillViewPreferences } from "../shared/skill-preferences"
 import type { MinimapPathingReview } from "../shared/minimap/review"
+import type { ChampionJungleClearStats } from "../shared/minimap/jungle-clear"
 import type {
   ChallengeFilter,
   ChallengeHistoryRow,
@@ -516,6 +517,10 @@ export const api = {
 
   getJunglePathingReview(gameId: number): Promise<MinimapPathingReview> {
     return invoke("review:jungle-pathing", gameId)
+  },
+
+  getChampionJungleClearStats(championId: number): Promise<ChampionJungleClearStats> {
+    return invoke("stats:champion-jungle-clears", championId)
   },
 
   getOwnerAugmentSummaries(

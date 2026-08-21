@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest"
 import {
   assignRosterIdentities,
-  ChampionMarkerDetector,
+  CHAMPION_MARKER_DETECTOR_VERSION,
   createChampionMarkerTemplate,
 } from "../electron/main/minimap/champion-marker-detector.js"
+import { OpenCvChampionDetector } from "../electron/main/vision/opencv-champion-detector.js"
+import { loadOpenCv } from "../electron/main/vision/opencv-runtime.js"
 import { ChampionTracker } from "../electron/main/minimap/champion-tracker.js"
 import type {
   ChampionPositionObservation,
@@ -84,7 +86,7 @@ function observation(
     identityConfidence: 0.95,
     positionConfidence: 0.92,
     frameSequence,
-    detectorVersion: 2,
+    detectorVersion: CHAMPION_MARKER_DETECTOR_VERSION,
   }
 }
 
@@ -122,107 +124,91 @@ describe("champion marker precision", () => {
     ], 0.70, 0.06)).toEqual([])
   })
 
-  it("keeps touching ally and enemy rings as separate proposals", () => {
+  it("keeps touching ally and enemy rings as separate proposals", async () => {
     const canvas = frame(100, 80, [8, 10, 12, 255])
     const enemyIcon = patternedIcon(15)
     const allyIcon = patternedIcon(15, 2)
     drawMarker(canvas, enemyIcon, 35, 35, [255, 20, 20, 255])
     drawMarker(canvas, allyIcon, 56, 35, [20, 185, 250, 255])
-    const detector = new ChampionMarkerDetector()
-
-    const found = detector.detect({
-      frame: canvas,
-      templates: [
-        createChampionMarkerTemplate({
-          participantKey: "enemy:ahri",
-          championName: "Ahri",
-          team: "enemy",
-          isLocal: false,
-        }, enemyIcon),
-        createChampionMarkerTemplate({
-          participantKey: "ally:zac",
-          championName: "Zac",
-          team: "ally",
-          isLocal: true,
-        }, allyIcon),
-      ],
-      gameId: 7,
-      gameTimeMs: 12_345,
-    })
-
-    expect(found.map((item) => item.participantKey)).toEqual([
-      "ally:zac",
-      "enemy:ahri",
+    const detector = new OpenCvChampionDetector(await loadOpenCv())
+    detector.setTemplates([
+      createChampionMarkerTemplate({
+        participantKey: "enemy:ahri",
+        championName: "Ahri",
+        team: "enemy",
+        isLocal: false,
+      }, enemyIcon),
+      createChampionMarkerTemplate({
+        participantKey: "ally:zac",
+        championName: "Zac",
+        team: "ally",
+        isLocal: true,
+      }, allyIcon),
     ])
+    try {
+      const found = detector.detect({ frame: canvas, gameId: 7, gameTimeMs: 12_345 })
+      expect(found.observations.map((item) => item.participantKey)).toEqual([
+        "ally:zac",
+        "enemy:ahri",
+      ])
+      expect(found.proposals).toHaveLength(2)
+    } finally { detector.close() }
   })
 
-  it("retains identity detail for the screenshot's 1.5-scale champion rings", () => {
+  it("retains identity detail for the screenshot's 1.5-scale champion rings", async () => {
     const canvas = frame(120, 100, [8, 10, 12, 255])
     const icon = patternedIcon(23, 3)
     drawMarker(canvas, icon, 60, 50, [255, 20, 20, 255], 11, 15)
-    const detector = new ChampionMarkerDetector()
-
-    const found = detector.detect({
-      frame: canvas,
-      templates: [
-        createChampionMarkerTemplate({
-          participantKey: "enemy:ahri",
-          championName: "Ahri",
-          team: "enemy",
-          isLocal: false,
-        }, icon),
-      ],
-      gameId: 7,
-      gameTimeMs: 12_345,
-    })
-
-    expect(found).toHaveLength(1)
-    expect(found[0]).toMatchObject({
+    const detector = new OpenCvChampionDetector(await loadOpenCv())
+    detector.setTemplates([createChampionMarkerTemplate({
       participantKey: "enemy:ahri",
-      detectorVersion: 2,
-    })
+      championName: "Ahri",
+      team: "enemy",
+      isLocal: false,
+    }, icon)])
+    try {
+      const found = detector.detect({ frame: canvas, gameId: 7, gameTimeMs: 12_345 })
+      expect(found.observations).toHaveLength(1)
+      expect(found.observations[0]).toMatchObject({
+        participantKey: "enemy:ahri",
+        detectorVersion: CHAMPION_MARKER_DETECTOR_VERSION,
+      })
+    } finally { detector.close() }
   })
 
-  it("rejects a coloured ring whose portrait has no roster match", () => {
+  it("rejects a coloured ring whose portrait has no roster match", async () => {
     const canvas = frame(80, 80, [8, 10, 12, 255])
     const unrelated = frame(15, 15, [127, 127, 127, 255])
     drawMarker(canvas, unrelated, 40, 40, [255, 20, 20, 255])
-    const detector = new ChampionMarkerDetector()
-
-    const found = detector.detect({
-      frame: canvas,
-      templates: [
-        createChampionMarkerTemplate({
-          participantKey: "enemy:ahri",
-          championName: "Ahri",
-          team: "enemy",
-          isLocal: false,
-        }, patternedIcon(15)),
-      ],
-      gameId: 7,
-      gameTimeMs: 12_345,
-    })
-
-    expect(found).toEqual([])
-    expect(detector.getProposalFootprints()).toEqual([expect.objectContaining({
+    const detector = new OpenCvChampionDetector(await loadOpenCv())
+    detector.setTemplates([createChampionMarkerTemplate({
+      participantKey: "enemy:ahri",
+      championName: "Ahri",
       team: "enemy",
-      center: {
-        x: expect.closeTo(40 / 79),
-        y: expect.closeTo(40 / 79),
-      },
-      radius: expect.closeTo(21 / 79 / 2),
-    })])
+      isLocal: false,
+    }, patternedIcon(15))])
+    try {
+      const found = detector.detect({ frame: canvas, gameId: 7, gameTimeMs: 12_345 })
+      expect(found.observations).toEqual([])
+      expect(found.proposals).toEqual([expect.objectContaining({
+        team: "enemy",
+        center: {
+          x: expect.closeTo(40 / 79),
+          y: expect.closeTo(40 / 79),
+        },
+        radius: expect.closeTo(21 / 79 / 2),
+      })])
 
-    detector.detect({
-      frame: frame(80, 80, [8, 10, 12, 255]),
-      templates: [],
-      gameId: 7,
-      gameTimeMs: 12_470,
-    })
-    expect(detector.getProposalFootprints()).toEqual([])
+      const empty = detector.detect({
+        frame: frame(80, 80, [8, 10, 12, 255]),
+        gameId: 7,
+        gameTimeMs: 12_470,
+      })
+      expect(empty.proposals).toEqual([])
+    } finally { detector.close() }
   })
 
-  it("bounds the identity-free proposal snapshot", () => {
+  it("bounds the identity-free proposal snapshot", async () => {
     const canvas = frame(240, 120, [8, 10, 12, 255])
     const icon = frame(9, 9, [127, 127, 127, 255])
     for (let y = 12; y <= 108; y += 24) {
@@ -230,15 +216,12 @@ describe("champion marker precision", () => {
         drawMarker(canvas, icon, x, y, [255, 20, 20, 255], 6, 9)
       }
     }
-    const detector = new ChampionMarkerDetector()
-
-    expect(detector.detect({
-      frame: canvas,
-      templates: [],
-      gameId: 7,
-      gameTimeMs: 12_345,
-    })).toEqual([])
-    expect(detector.getProposalFootprints()).toHaveLength(32)
+    const detector = new OpenCvChampionDetector(await loadOpenCv())
+    try {
+      const found = detector.detect({ frame: canvas, gameId: 7, gameTimeMs: 12_345 })
+      expect(found.observations).toEqual([])
+      expect(found.proposals).toHaveLength(32)
+    } finally { detector.close() }
   })
 })
 

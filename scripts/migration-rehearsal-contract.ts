@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import type Database from "better-sqlite3-node"
 
 function scalar(db: Database.Database, sql: string): number {
@@ -152,6 +153,69 @@ export function migrationRehearsalCounts(db: Database.Database) {
         WHERE source IN ('league_client', 'match_v5') AND kind = 'timeline'
       `,
     ) : 0,
+  }
+}
+
+export interface MigrationCvInvariants {
+  captureSessions: number
+  calibrations: number
+  championTrackChunks: number
+  championTrackPoints: number
+  championTrackCompressedBytes: number
+  championTrackPayloadDigest: string
+  campStateEvents: number
+  campClearEvents: number
+  pathingAnalysisRuns: number
+  pathSegments: number
+}
+
+/**
+ * Byte/provenance-sensitive invariants for CV telemetry introduced in v33/v34.
+ * These values must be identical across any unrelated schema migration. The
+ * aggregate digest hashes immutable stored payload hashes rather than inflating
+ * the compressed track BLOBs during rehearsal.
+ */
+export function migrationCvInvariants(db: Database.Database): MigrationCvInvariants {
+  const trackRows = hasColumns(db, "champion_track_chunks", [
+    "game_id", "puuid", "participant_key", "chunk_start_ms", "point_count",
+    "compressed_bytes", "payload_sha256",
+  ]) ? db.prepare(`
+    SELECT game_id AS gameId, puuid, participant_key AS participantKey,
+           chunk_start_ms AS chunkStartMs, point_count AS pointCount,
+           compressed_bytes AS compressedBytes, payload_sha256 AS payloadSha256
+    FROM champion_track_chunks
+    ORDER BY game_id, puuid, participant_key, chunk_start_ms
+  `).all() as Array<{
+    gameId: number
+    puuid: string
+    participantKey: string
+    chunkStartMs: number
+    pointCount: number
+    compressedBytes: number
+    payloadSha256: string
+  }> : []
+  const payloadDigest = createHash("sha256")
+  let championTrackPoints = 0
+  let championTrackCompressedBytes = 0
+  for (const row of trackRows) {
+    championTrackPoints += Number(row.pointCount)
+    championTrackCompressedBytes += Number(row.compressedBytes)
+    payloadDigest.update(`${row.gameId}\0${row.puuid}\0${row.participantKey}\0${row.chunkStartMs}\0${row.payloadSha256}\n`)
+  }
+  const count = (table: string) => hasTable(db, table)
+    ? scalar(db, `SELECT COUNT(*) AS count FROM ${table}`)
+    : 0
+  return {
+    captureSessions: count("minimap_capture_sessions"),
+    calibrations: count("minimap_calibrations"),
+    championTrackChunks: trackRows.length,
+    championTrackPoints,
+    championTrackCompressedBytes,
+    championTrackPayloadDigest: payloadDigest.digest("hex"),
+    campStateEvents: count("camp_state_events"),
+    campClearEvents: count("camp_clear_events"),
+    pathingAnalysisRuns: count("pathing_analysis_runs"),
+    pathSegments: count("path_segments"),
   }
 }
 

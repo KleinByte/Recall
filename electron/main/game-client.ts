@@ -146,6 +146,13 @@ interface RawEvent {
   KillStreak?: number
 }
 
+interface RawAllGameData {
+  gameData?: Record<string, unknown>
+  activePlayer?: RawActivePlayer
+  allPlayers?: RawPlayer[]
+  events?: { Events?: RawEvent[] }
+}
+
 const number = (value: unknown, fallback = 0) =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback
 
@@ -195,7 +202,45 @@ function identity(value?: string) {
   return value?.trim().toLocaleLowerCase()
 }
 
-function mapPlayer(entry: RawPlayer, activeRiotId?: string): LiveGamePlayer {
+function identityCandidates(value: {
+  riotId?: string
+  riotIdGameName?: string
+  riotIdTagLine?: string
+  summonerName?: string
+}) {
+  const explicitRiotId = text(value.riotId)
+  const gameName = text(value.riotIdGameName)
+  const tagLine = text(value.riotIdTagLine)
+  const summonerName = text(value.summonerName)
+  const candidates = [
+    explicitRiotId,
+    gameName && tagLine ? `${gameName}#${tagLine}` : undefined,
+    gameName,
+    summonerName,
+  ].flatMap((entry) => identity(entry) ?? [])
+  return [...new Set(candidates)]
+}
+
+function baseIdentity(value: string) {
+  return value.split("#", 1)[0]
+}
+
+/** Uses exact identifiers first and only falls back to a unique game name. */
+function localPlayerIndex(active: RawActivePlayer, players: RawPlayer[]) {
+  const activeCandidates = new Set(identityCandidates(active))
+  const playerCandidates = players.map(identityCandidates)
+  const exact = playerCandidates.flatMap((candidates, index) =>
+    candidates.some((candidate) => activeCandidates.has(candidate)) ? [index] : [])
+  if (exact.length === 1) return exact[0]
+  if (exact.length > 1) return undefined
+
+  const activeBases = new Set([...activeCandidates].map(baseIdentity))
+  const baseMatches = playerCandidates.flatMap((candidates, index) =>
+    candidates.some((candidate) => activeBases.has(baseIdentity(candidate))) ? [index] : [])
+  return baseMatches.length === 1 ? baseMatches[0] : undefined
+}
+
+function mapPlayer(entry: RawPlayer, isLocal: boolean): LiveGamePlayer {
   const spells = [
     entry.summonerSpells?.summonerSpellOne?.displayName,
     entry.summonerSpells?.summonerSpellTwo?.displayName,
@@ -210,10 +255,7 @@ function mapPlayer(entry: RawPlayer, activeRiotId?: string): LiveGamePlayer {
     level: number(entry.level),
     isDead: entry.isDead === true,
     respawnTimer: number(entry.respawnTimer),
-    isLocal: Boolean(
-      activeRiotId &&
-      identity(entryRiotId) === identity(activeRiotId),
-    ),
+    isLocal,
     scores: {
       kills: number(entry.scores?.kills),
       deaths: number(entry.scores?.deaths),
@@ -234,18 +276,16 @@ function mapPlayer(entry: RawPlayer, activeRiotId?: string): LiveGamePlayer {
   }
 }
 
-export async function readLiveGameSnapshot(
-  client: GameClientLike,
-): Promise<LiveGameSnapshot> {
-  const [stats, active, players, eventData] = await Promise.all([
-    client.request<Record<string, unknown>>("/liveclientdata/gamestats"),
-    client.request<RawActivePlayer>("/liveclientdata/activeplayer"),
-    client.request<RawPlayer[]>("/liveclientdata/playerlist"),
-    client.request<{ Events?: RawEvent[] }>("/liveclientdata/eventdata"),
-  ])
+function mapLiveGameSnapshot(
+  stats: Record<string, unknown>,
+  active: RawActivePlayer,
+  players: RawPlayer[],
+  eventData: { Events?: RawEvent[] },
+): LiveGameSnapshot {
   const activeRiotId = riotId(active)
   const runePage = mapRunePage(active.fullRunes)
-  const mappedPlayers = players.map((entry) => mapPlayer(entry, activeRiotId))
+  const localIndex = localPlayerIndex(active, players)
+  const mappedPlayers = players.map((entry, index) => mapPlayer(entry, index === localIndex))
   const local = mappedPlayers.find((entry) => entry.isLocal)
   const allies = local
     ? mappedPlayers.filter((entry) => entry.team === local.team)
@@ -286,6 +326,39 @@ export async function readLiveGameSnapshot(
     })),
     updatedAt: Date.now(),
   }
+}
+
+export async function readLiveGameSnapshot(
+  client: GameClientLike,
+): Promise<LiveGameSnapshot> {
+  try {
+    // The documented aggregate endpoint is one internally consistent snapshot
+    // and avoids rejecting the entire live model because an optional subset
+    // endpoint (most commonly event data during loading) is briefly unavailable.
+    const all = await client.request<RawAllGameData>("/liveclientdata/allgamedata")
+    if (!all.gameData || !all.activePlayer || !Array.isArray(all.allPlayers)) {
+      throw new Error("live_client_allgamedata_incomplete")
+    }
+    return mapLiveGameSnapshot(
+      all.gameData,
+      all.activePlayer,
+      all.allPlayers,
+      all.events ?? {},
+    )
+  } catch {
+    // Keep compatibility with clients or test doubles that expose only the
+    // documented subset endpoints. Events are optional for the live roster.
+  }
+
+  const [stats, active, players, eventData] = await Promise.all([
+    client.request<Record<string, unknown>>("/liveclientdata/gamestats"),
+    client.request<RawActivePlayer>("/liveclientdata/activeplayer"),
+    client.request<RawPlayer[]>("/liveclientdata/playerlist"),
+    client.request<{ Events?: RawEvent[] }>("/liveclientdata/eventdata")
+      .catch(() => ({ Events: [] })),
+  ])
+  if (!Array.isArray(players)) throw new Error("live_client_playerlist_invalid")
+  return mapLiveGameSnapshot(stats, active, players, eventData)
 }
 
 /**

@@ -64,8 +64,20 @@ describe("Recall desktop window shell", () => {
     const builder = read("electron-builder.json")
     const html = read("index.html")
 
-    expect(main.match(/path\.join\(process\.env\.VITE_PUBLIC, "favicon\.ico"\)/g)).toHaveLength(2)
+    expect(main.match(/path\.join\(process\.env\.VITE_PUBLIC, "favicon\.ico"\)/g)).toHaveLength(3)
     expect(builder).toContain('"icon": "public/favicon.ico"')
     expect(html).toContain('<link rel="icon" href="/favicon.ico" />')
+  })
+
+  it("suspends cosmetic main-window rendering during games and keeps DevTools opt-in", () => {
+    const main = read("electron/main/index.ts")
+    const app = read("src/App.vue")
+    const style = read("src/style.css")
+
+    expect(main).toContain('process.env.RECALL_OPEN_DEVTOOLS === "1"')
+    expect(main).toContain("if (OPEN_DEVTOOLS) win.webContents.openDevTools()")
+    expect(app).toContain("document.documentElement.dataset.livePhase = live.phase")
+    expect(style).toContain('html[data-live-phase="InProgress"] .app-window *')
+    expect(style).toContain("animation-play-state: paused !important")
   })
 })

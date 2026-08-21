@@ -5,13 +5,18 @@ import type {
   CampStateObservation,
   ChampionTrackSnapshot,
   MinimapCalibration,
+  RgbaFrame,
 } from "../../../src/shared/minimap/contracts.js"
 import { normalizedDistance } from "../../../src/shared/minimap/contracts.js"
 import { MinimapTelemetryRepository } from "../database/minimap-telemetry-repo.js"
 import { CAMP_BY_KEY } from "../jungle/camp-map.js"
 import { CampAttributionEngine } from "../jungle/camp-attribution-engine.js"
 import { CampStateMachine } from "../jungle/camp-state-machine.js"
-import { CampTemplateBank, CampVisualDetector } from "../jungle/camp-visual-detector.js"
+import {
+  CAMP_VISUAL_DETECTOR_VERSION,
+  CampTemplateBank,
+} from "../jungle/camp-visual-detector.js"
+import { LiveClientCampInference } from "../jungle/live-client-camp-inference.js"
 import {
   JungleEvidenceAccumulator,
   readJungleEvidenceSample,
@@ -19,25 +24,22 @@ import {
   type JungleEvidenceDelta,
 } from "../jungle/live-jungle-evidence.js"
 import {
+  MINIMAP_CALIBRATION_VERSION,
   calibrationMatchesHints,
   createCalibrationContextSignature,
-  evaluateMinimapVisual,
-  MinimapLocator,
   validateCalibration,
   type MinimapCalibrationHints,
 } from "./calibration.js"
 import type { MinimapCaptureBackend } from "./capture-backend.js"
 import {
   CHAMPION_MARKER_DETECTOR_VERSION,
-  ChampionMarkerDetector,
-  type ChampionMarkerProposalFootprint,
   type ChampionMarkerTemplate,
 } from "./champion-marker-detector.js"
 import { ChampionTracker } from "./champion-tracker.js"
 import { GameClockSynchronizer } from "./game-clock-synchronizer.js"
-import { cropFrame, resizeFrameBilinear } from "./image-ops.js"
 import { MinimapDebugSampler } from "./minimap-debug-sampler.js"
 import type { MinimapDebugSample } from "./minimap-debug-sampler.js"
+import { VisionWorkerClient, type VisionWorkerPortClient } from "../vision/vision-worker-client.js"
 
 export interface MinimapTelemetryContext {
   phase: "Idle" | "ChampSelect" | "InProgress"
@@ -62,16 +64,22 @@ export interface MinimapTelemetryCoordinatorOptions {
   clockPollIntervalMs: number
   campPollIntervalMs: number
   calibrationValidationIntervalMs: number
+  fullFrameRefreshIntervalMs: number
   maximumConsecutiveFailures: number
+  startupRetryBaseMs: number
+  startupRetryMaximumMs: number
 }
 
 const DEFAULT_OPTIONS: MinimapTelemetryCoordinatorOptions = {
-  targetFps: 8,
+  targetFps: 4,
   canonicalSize: 320,
   clockPollIntervalMs: 500,
-  campPollIntervalMs: 500,
+  campPollIntervalMs: 750,
   calibrationValidationIntervalMs: 2_000,
+  fullFrameRefreshIntervalMs: 30_000,
   maximumConsecutiveFailures: 12,
+  startupRetryBaseMs: 1_500,
+  startupRetryMaximumMs: 15_000,
 }
 
 export interface MinimapTelemetryHealth {
@@ -91,6 +99,47 @@ export interface MinimapTelemetryHealth {
   lastEvidenceErrorCode?: string
   debugSampleCount?: number
   debugErrorCode?: string
+  startupAttempts: number
+  nextRetryAt?: number
+  eligibilityReason?: "eligible" | "phase_not_in_progress" | "game_id_unavailable" |
+    "map_not_summoners_rift" | "classification_pending"
+  backendState?: ReturnType<MinimapCaptureBackend["getHealth"]>["state"]
+  sourceId?: string
+  sourceName?: string
+  discoveredWindowCount?: number
+  candidateSourceCount?: number
+  candidateSourceNames?: string[]
+  sourceDiscoveryAttempts?: number
+  captureMode?: "display" | "legacy"
+  captureStage?: string
+  frameDeliveryMode?: "paint" | "snapshot"
+  paintEventCount?: number
+  paintSizeMismatchCount?: number
+  snapshotCaptureCount?: number
+  lastPaintSize?: string
+  rendererFrameSerial?: number
+  lastErrorDetail?: string
+  rosterCount?: number
+  templateCount?: number
+  localTemplateAvailable?: boolean
+  templateErrorCode?: string
+  calibrationCandidatesEvaluated?: number
+  calibrationCandidatesValid?: number
+  calibrationBestScore?: number
+  calibrationFailureReason?: string
+  calibrationVariance?: number
+  calibrationEdgeDensity?: number
+  calibrationColoredRatio?: number
+  inferredCampClears?: number
+  clockSampleCount?: number
+  clockReady?: boolean
+  visionEngine?: "opencv_js"
+  opencvVersion?: string
+  visionWorkerState?: "idle" | "initializing" | "ready" | "failed" | "closed"
+  visionWorkerRestarts?: number
+  visionProcessingMs?: number
+  visionChampionMs?: number
+  visionCampMs?: number
 }
 
 export interface MinimapDebugFrameEvent {
@@ -144,10 +193,10 @@ export class MinimapTelemetryCoordinator {
   private readonly evidence = new JungleEvidenceAccumulator()
   private readonly campStates = new CampStateMachine()
   private readonly attribution = new CampAttributionEngine()
-  private readonly markerDetector = new ChampionMarkerDetector()
+  private readonly liveCampInference = new LiveClientCampInference()
   private readonly championTracker = new ChampionTracker()
-  private readonly locator = new MinimapLocator()
-  private readonly campDetector: CampVisualDetector
+  private readonly campTemplates: CampTemplateBank
+  private readonly vision: VisionWorkerPortClient
   private context?: MinimapTelemetryContext
   private calibration?: MinimapCalibration
   private calibrationHints: MinimapCalibrationHints = {}
@@ -157,18 +206,20 @@ export class MinimapTelemetryCoordinator {
   private evidenceTask?: Promise<void>
   private stopping?: Promise<void>
   private captureSessionId?: string
-  // A failed startup is terminal for the current game. The game-client
-  // poller can report the same InProgress context repeatedly; retrying here
-  // would create a new zero-frame DB session and Chromium capture window on
-  // every poll. A different game (or leaving InProgress) clears the latch.
-  private failedStartGameId?: number
+  private startInFlight?: Promise<void>
+  private startupGameId?: number
+  private nextStartAttemptAt = 0
+  private startupRetryTimer?: ReturnType<typeof setTimeout>
+  private needsSessionReset = true
   private activeSourceFingerprint?: string
   private latestTracks: ChampionTrackSnapshot[] = []
   private readonly trackHistory: TrackHistorySample[] = []
   private readonly evidenceHistory: EvidenceHistorySample[] = []
+  private readonly lastRecordedClearAt = new Map<CampKey, number>()
   private lastCampObservations: CampStateObservation[] = []
   private lastCampPollMs = Number.NEGATIVE_INFINITY
   private lastCalibrationValidationMs = Number.NEGATIVE_INFINITY
+  private lastFullFrameCaptureMs = Number.NEGATIVE_INFINITY
   private calibrationValidationFailures = 0
   private localClearCount = 0
   private consecutiveFailures = 0
@@ -188,13 +239,48 @@ export class MinimapTelemetryCoordinator {
     options: Partial<MinimapTelemetryCoordinatorOptions> = {},
     private readonly debugSampler?: MinimapDebugSampler,
     private readonly onDebugFrame?: (event: MinimapDebugFrameEvent) => void,
+    vision: VisionWorkerPortClient = new VisionWorkerClient(),
   ) {
     this.options = { ...DEFAULT_OPTIONS, ...options }
-    this.campDetector = new CampVisualDetector(campTemplates)
+    this.campTemplates = campTemplates
+    this.vision = vision
   }
 
-  setTemplates(templates: ChampionMarkerTemplate[]) {
-    this.templates = [...templates]
+  setTemplates(
+    templates: ChampionMarkerTemplate[],
+    status: {
+      rosterCount?: number
+      localParticipantKey?: string
+      errorCode?: string
+    } = {},
+  ) {
+    this.templates = templates.map((template) => ({
+      ...template,
+      rgba: Uint8Array.from(template.rgba),
+    }))
+    this.setTemplateStatus(status)
+    const sessionId = this.captureSessionId
+    const gameId = this.context?.gameId
+    if (sessionId && gameId !== undefined && this.abort) {
+      void this.vision.setRoster(sessionId, gameId, this.templates).catch((error) => {
+        this.health.templateErrorCode = error instanceof Error
+          ? error.message
+          : "vision_roster_update_failed"
+      })
+    }
+  }
+
+  setTemplateStatus(status: {
+    rosterCount?: number
+    localParticipantKey?: string
+    errorCode?: string
+  } = {}) {
+    this.health.rosterCount = status.rosterCount
+    this.health.templateCount = this.templates.length
+    this.health.localTemplateAvailable = status.localParticipantKey
+      ? this.templates.some((template) => template.participantKey === status.localParticipantKey)
+      : undefined
+    this.health.templateErrorCode = status.errorCode
   }
 
   setCalibration(calibration: MinimapCalibration | undefined) {
@@ -211,19 +297,28 @@ export class MinimapTelemetryCoordinator {
   }
 
   async updateContext(context: MinimapTelemetryContext) {
-    this.context = context
-    if (
-      this.failedStartGameId !== undefined &&
-      (context.phase !== "InProgress" || context.gameId !== this.failedStartGameId)
-    ) {
-      this.failedStartGameId = undefined
+    const activeGameChanged = this.startupGameId !== undefined &&
+      context.gameId !== this.startupGameId
+    if (activeGameChanged &&
+        (this.abort || this.startInFlight || this.captureSessionId)) {
+      // Close the old capture against its original context before exposing the
+      // new game ID to either the frame loop or the Live Client evidence loop.
+      await this.stop("complete")
     }
-    const eligible = context.phase === "InProgress" &&
-      context.gameId !== undefined &&
-      context.mapNumber === 11 &&
-      context.captureClassificationReady !== false &&
-      !context.isPracticeTool
-    if (eligible && !this.abort && context.gameId !== this.failedStartGameId) await this.start()
+    this.context = context
+    const eligibilityReason = this.captureEligibilityReason(context)
+    const eligible = eligibilityReason === "eligible"
+    this.health.eligibilityReason = eligibilityReason
+
+    if (this.startupGameId !== undefined &&
+        (context.phase !== "InProgress" || context.gameId !== this.startupGameId)) {
+      this.resetStartupRetry()
+    }
+
+    if (eligible && !this.abort && !this.startInFlight &&
+        Date.now() >= this.nextStartAttemptAt) {
+      await this.start()
+    }
     if (eligible && this.abort && context.debugEnabled && !this.debugSamplingActive) {
       this.debugSampler?.start(context.gameId!)
       this.debugSamplingActive = Boolean(this.debugSampler)
@@ -233,35 +328,92 @@ export class MinimapTelemetryCoordinator {
       this.debugSamplingActive = false
       await this.debugSampler?.finish().catch(() => undefined)
     }
-    if (!eligible && this.abort) await this.stop("complete")
+    if (!eligible && (this.abort || this.startInFlight || this.captureSessionId)) {
+      await this.stop("complete")
+    } else if (!eligible && !this.abort && !this.startInFlight) {
+      this.health.state = "idle"
+    }
   }
 
   async start() {
-    if (this.stopping) await this.stopping
-    const context = this.context
-    if (!context?.gameId || context.phase !== "InProgress" ||
-        context.captureClassificationReady === false ||
-        context.isPracticeTool || this.abort) return
-    this.abort = new AbortController()
-    this.resetSessionState()
-    this.sessionStartedMonotonicMs = performance.now()
-    this.health = this.emptyHealth("starting")
-    this.captureSessionId = this.repository.startCaptureSession({
-      gameId: context.gameId,
-      puuid: context.puuid,
-      captureBackend: this.backend.id,
-      detectorVersion: CHAMPION_MARKER_DETECTOR_VERSION,
-      debugRetention: context.debugEnabled === true,
-    })
-    if (context.debugEnabled) {
-      this.debugSampler?.start(context.gameId)
-      this.debugSamplingActive = Boolean(this.debugSampler)
+    if (this.startInFlight) return this.startInFlight
+    const task = (async () => {
+      // A caller may request a new capture immediately after a phase transition.
+      // Wait for an older shutdown, but never let stop() and performStart() await
+      // one another through the same startInFlight promise.
+      await this.stopping?.catch(() => undefined)
+      await this.performStart()
+    })()
+    this.startInFlight = task
+    try {
+      await task
+    } finally {
+      if (this.startInFlight === task) this.startInFlight = undefined
     }
+  }
+
+  private async performStart() {
+    const context = this.context
+    if (context?.gameId === undefined ||
+        this.captureEligibilityReason(context) !== "eligible" || this.abort) return
+    const gameId = context.gameId
+    if (this.startupGameId !== gameId || this.needsSessionReset) {
+      const preservedStartupAttempts = this.startupGameId === gameId
+        ? this.health.startupAttempts
+        : 0
+      const preservedTemplateStatus = {
+        rosterCount: this.health.rosterCount,
+        templateCount: this.health.templateCount,
+        localTemplateAvailable: this.health.localTemplateAvailable,
+        templateErrorCode: this.health.templateErrorCode,
+      }
+      this.resetSessionState()
+      this.health = {
+        ...this.emptyHealth("starting"),
+        startupAttempts: preservedStartupAttempts,
+        eligibilityReason: "eligible",
+        ...preservedTemplateStatus,
+      }
+      this.startupGameId = gameId
+      this.needsSessionReset = false
+    }
+    this.health.state = "starting"
+    this.health.startupAttempts += 1
+    this.health.nextRetryAt = undefined
 
     try {
       await this.backend.start()
+      // The integration serializes updates, but retain a defensive context
+      // check so a direct caller cannot attach a late stream to another game.
+      if (this.context?.gameId !== gameId ||
+          this.captureEligibilityReason(this.context) !== "eligible") {
+        await this.backend.stop().catch(() => undefined)
+        return
+      }
+      this.clearStartupRetryTimer()
+      this.nextStartAttemptAt = 0
+      this.abort = new AbortController()
+      this.sessionStartedMonotonicMs = performance.now()
+      this.captureSessionId = this.repository.startCaptureSession({
+        gameId,
+        puuid: context.puuid,
+        captureBackend: this.backend.id,
+        detectorVersion: CHAMPION_MARKER_DETECTOR_VERSION,
+        debugRetention: context.debugEnabled === true,
+      })
+      const captureSessionId = this.captureSessionId
+      const runtime = await this.vision.initialize(this.options.canonicalSize)
+      await this.vision.setCampTemplates(this.campTemplates.snapshot())
+      await this.vision.setRoster(captureSessionId, gameId, this.templates)
+      this.health.visionEngine = runtime.engine
+      this.health.opencvVersion = runtime.opencvVersion
+      if (context.debugEnabled) {
+        this.debugSampler?.start(gameId)
+        this.debugSamplingActive = Boolean(this.debugSampler)
+      }
       const signal = this.abort.signal
       this.health.state = "capturing"
+      this.health.lastErrorCode = undefined
       this.evidenceTask = this.evidenceLoop(signal)
       this.loopTask = this.loop(signal)
       void this.loopTask.catch((error) => {
@@ -274,26 +426,54 @@ export class MinimapTelemetryCoordinator {
       })
     } catch (error) {
       const code = error instanceof Error ? error.message : "capture_start_failed"
-      this.health = { ...this.health, state: "failed", lastErrorCode: code }
-      this.failedStartGameId = context.gameId
-      const abort = this.abort
+      const backendRetryAt = this.backend.getHealth().nextRetryAt ?? 0
+      const failedAbort = this.abort
       this.abort = undefined
-      abort?.abort()
-      await this.backend.stop().catch(() => undefined)
+      failedAbort?.abort()
+      this.health.lastErrorCode = code
+      if (this.captureSessionId) {
+        const failedSessionId = this.captureSessionId
+        await this.vision.reset(failedSessionId).catch(() => undefined)
+        this.sessionEndedMonotonicMs = performance.now()
+        this.finishCaptureSession("failed")
+        this.repository.flushAll()
+      }
       await this.debugSampler?.finish().catch(() => undefined)
       this.debugSamplingActive = false
-      this.sessionEndedMonotonicMs = performance.now()
-      this.finishCaptureSession("capture_unavailable")
+      await this.backend.stop().catch(() => undefined)
+      const exponentialDelay = Math.min(
+        this.options.startupRetryMaximumMs,
+        this.options.startupRetryBaseMs * 2 ** Math.min(6, this.health.startupAttempts - 1),
+      )
+      this.nextStartAttemptAt = Math.max(Date.now() + exponentialDelay, backendRetryAt)
+      this.health = {
+        ...this.health,
+        state: "degraded",
+        lastErrorCode: code,
+        nextRetryAt: this.nextStartAttemptAt,
+      }
+      this.scheduleStartupRetry(gameId)
     }
   }
 
   stop(status: "complete" | "capture_unavailable" | "calibration_required" | "failed" | "aborted") {
     if (this.stopping) return this.stopping
-    if (!this.abort && !this.loopTask && !this.evidenceTask &&
-        !this.captureSessionId && !this.debugSamplingActive) {
-      return Promise.resolve()
-    }
-    this.stopping = this.performStop(status).finally(() => {
+    this.stopping = (async () => {
+      await this.startInFlight?.catch(() => undefined)
+      if (!this.abort && !this.loopTask && !this.evidenceTask &&
+          !this.captureSessionId && !this.debugSamplingActive) {
+        if (status === "complete" || status === "aborted") {
+          this.resetStartupRetry()
+          this.health = {
+            ...this.health,
+            state: "idle",
+            nextRetryAt: undefined,
+          }
+        }
+        return
+      }
+      await this.performStop(status)
+    })().finally(() => {
       this.stopping = undefined
     })
     return this.stopping
@@ -302,9 +482,34 @@ export class MinimapTelemetryCoordinator {
   getHealth() {
     const quality = this.qualityMetrics()
     const debug = this.debugSampler?.getHealth()
+    const backend = this.backend.getHealth()
     return {
       ...this.health,
       ...quality,
+      backendState: backend.state,
+      sourceId: backend.sourceId,
+      sourceName: backend.sourceName,
+      discoveredWindowCount: backend.discoveredWindowCount,
+      candidateSourceCount: backend.candidateSourceCount,
+      candidateSourceNames: backend.candidateSourceNames
+        ? [...backend.candidateSourceNames]
+        : undefined,
+      sourceDiscoveryAttempts: backend.sourceDiscoveryAttempts,
+      captureMode: backend.captureMode,
+      captureStage: backend.captureStage,
+      frameDeliveryMode: backend.frameDeliveryMode,
+      paintEventCount: backend.paintEventCount,
+      paintSizeMismatchCount: backend.paintSizeMismatchCount,
+      snapshotCaptureCount: backend.snapshotCaptureCount,
+      lastPaintSize: backend.lastPaintSize,
+      rendererFrameSerial: backend.rendererFrameSerial,
+      lastErrorDetail: backend.lastErrorDetail,
+      clockSampleCount: this.clock.sampleCount,
+      clockReady: this.clock.sampleCount > 0,
+      visionEngine: this.vision.runtime?.engine,
+      opencvVersion: this.vision.runtime?.opencvVersion,
+      visionWorkerState: this.vision.state,
+      visionWorkerRestarts: this.vision.restarts,
       ...(debug ? {
         debugSampleCount: debug.sampleCount,
         debugErrorCode: debug.lastError,
@@ -312,9 +517,50 @@ export class MinimapTelemetryCoordinator {
     }
   }
 
-  /** Allows an explicit telemetry disable/enable cycle to retry startup. */
+  /** Clears startup backoff after an explicit telemetry disable/enable cycle. */
   resetFailedStart() {
-    this.failedStartGameId = undefined
+    this.resetStartupRetry()
+  }
+
+  private resetStartupRetry() {
+    this.clearStartupRetryTimer()
+    this.startupGameId = undefined
+    this.nextStartAttemptAt = 0
+    this.needsSessionReset = true
+    this.health.nextRetryAt = undefined
+  }
+
+  private clearStartupRetryTimer() {
+    if (this.startupRetryTimer !== undefined) clearTimeout(this.startupRetryTimer)
+    this.startupRetryTimer = undefined
+  }
+
+  private scheduleStartupRetry(gameId: number) {
+    this.clearStartupRetryTimer()
+    const delayMs = Math.max(0, this.nextStartAttemptAt - Date.now())
+    this.startupRetryTimer = setTimeout(() => {
+      this.startupRetryTimer = undefined
+      const context = this.context
+      if (!context || context.gameId !== gameId || this.abort ||
+          this.captureEligibilityReason(context) !== "eligible") return
+      if (this.stopping) {
+        this.nextStartAttemptAt = Math.max(this.nextStartAttemptAt, Date.now() + 25)
+        this.scheduleStartupRetry(gameId)
+        return
+      }
+      void this.start()
+    }, delayMs)
+    this.startupRetryTimer.unref?.()
+  }
+
+  private captureEligibilityReason(
+    context: MinimapTelemetryContext,
+  ): NonNullable<MinimapTelemetryHealth["eligibilityReason"]> {
+    if (context.phase !== "InProgress") return "phase_not_in_progress"
+    if (context.gameId === undefined) return "game_id_unavailable"
+    if (context.mapNumber !== 11) return "map_not_summoners_rift"
+    if (context.captureClassificationReady === false) return "classification_pending"
+    return "eligible"
   }
 
   private async performStop(
@@ -342,17 +588,32 @@ export class MinimapTelemetryCoordinator {
     }
     await this.debugSampler?.finish().catch(() => undefined)
     this.debugSamplingActive = false
+    const visionSessionId = this.captureSessionId
+    if (visionSessionId) await this.vision.reset(visionSessionId).catch(() => undefined)
     this.sessionEndedMonotonicMs = performance.now()
     this.finishCaptureSession(status)
     this.repository.flushAll()
     this.calibration = undefined
     this.activeSourceFingerprint = undefined
     this.persistedCalibrationId = undefined
+    const terminal = status === "complete" || status === "aborted"
+    if (terminal) {
+      this.resetStartupRetry()
+    } else {
+      this.needsSessionReset = true
+      this.nextStartAttemptAt = Date.now() + this.options.startupRetryBaseMs
+      const gameId = this.context?.gameId
+      if (gameId !== undefined &&
+          this.captureEligibilityReason(this.context!) === "eligible") {
+        this.scheduleStartupRetry(gameId)
+      }
+    }
     this.health = {
       ...this.health,
       ...this.qualityMetrics(),
-      state: status === "complete" || status === "aborted" ? "idle" : "failed",
-      ...(status === "complete" || status === "aborted" ? { lastErrorCode: undefined } : {}),
+      state: terminal ? "idle" : "degraded",
+      nextRetryAt: terminal ? undefined : this.nextStartAttemptAt,
+      ...(terminal ? { lastErrorCode: undefined } : {}),
     }
   }
 
@@ -439,7 +700,10 @@ export class MinimapTelemetryCoordinator {
           ...sample,
           capturedMonotonicMs: midpoint,
         })
-        if (evidence) this.recordEvidenceHistory(sample.gameTimeMs, evidence)
+        if (evidence) {
+          this.recordEvidenceHistory(sample.gameTimeMs, evidence)
+          this.processLiveCampEvidence(sample.gameTimeMs, sample.localPlayerDead, evidence)
+        }
         this.health.lastEvidenceErrorCode = undefined
       } catch (error) {
         if (!signal.aborted) {
@@ -456,151 +720,205 @@ export class MinimapTelemetryCoordinator {
 
   private async processFrame() {
     const context = this.context
-    if (!context?.gameId || context.phase !== "InProgress" ||
-        context.captureClassificationReady === false || context.isPracticeTool) return
+    if (context?.gameId === undefined || context.phase !== "InProgress" ||
+        context.captureClassificationReady === false) return
     const gameId = context.gameId
-    const frame = await this.backend.captureFrame()
-    this.recordFrameGap(frame.capturedMonotonicMs)
-    const sourceFingerprint = this.sourceFingerprint(frame.width, frame.height)
-    if (this.activeSourceFingerprint !== sourceFingerprint) {
-      this.activeSourceFingerprint = sourceFingerprint
-      this.calibration = undefined
-      this.persistedCalibrationId = undefined
-      this.lastCalibrationValidationMs = Number.NEGATIVE_INFINITY
-      this.calibrationValidationFailures = 0
-    }
+    const captureSessionId = this.captureSessionId
+    if (!captureSessionId) throw new Error("minimap_capture_session_required")
 
     let calibration = this.calibration
-    const calibrationIsValid = calibration &&
-      validateCalibration(calibration, frame.width, frame.height) &&
-      calibrationMatchesHints(calibration, this.calibrationHints)
-    if (!calibrationIsValid) {
-      calibration = this.repository.findCalibration(
-        sourceFingerprint,
-        frame.width,
-        frame.height,
-      )
-      if (!calibration || !validateCalibration(calibration, frame.width, frame.height) ||
-          !calibrationMatchesHints(calibration, this.calibrationHints)) {
-        calibration = this.locator.locate(frame, this.calibrationHints)
-      }
-      if (!calibration) throw new Error("minimap_calibration_required")
-      this.calibration = calibration
-      this.lastCalibrationValidationMs = Number.NEGATIVE_INFINITY
-    }
-    if (!calibration) throw new Error("minimap_calibration_required")
+    let sourceFingerprint = this.activeSourceFingerprint
+    let minimap: RgbaFrame
 
-    if (this.calibrationValidationFailures > 0 ||
-        frame.capturedMonotonicMs - this.lastCalibrationValidationMs >=
-        this.options.calibrationValidationIntervalMs) {
-      const visual = evaluateMinimapVisual(resizeFrameBilinear(
-        cropFrame(frame, calibration.minimapRect),
-        96,
-        96,
-      ))
-      this.lastCalibrationValidationMs = frame.capturedMonotonicMs
+    const captureRegion = this.backend.captureRegion?.bind(this.backend)
+    const regionEligible = Boolean(
+      captureRegion &&
+      calibration &&
+      sourceFingerprint &&
+      calibrationMatchesHints(calibration, this.calibrationHints) &&
+      performance.now() - this.lastFullFrameCaptureMs <
+        this.options.fullFrameRefreshIntervalMs
+    )
+
+    if (regionEligible && captureRegion && calibration) {
+      try {
+        minimap = await captureRegion({
+          sourceRect: calibration.innerMapRect,
+          outputWidth: this.options.canonicalSize,
+          outputHeight: this.options.canonicalSize,
+        })
+      } catch (error) {
+        // A window recreation or resolution change can invalidate a previously
+        // correct ROI. Force a full-frame OpenCV calibration pass next time.
+        this.calibration = undefined
+        this.persistedCalibrationId = undefined
+        this.lastFullFrameCaptureMs = Number.NEGATIVE_INFINITY
+        throw error
+      }
+    } else {
+      const frame = await this.backend.captureFrame()
+      const sourceWidth = frame.width
+      const sourceHeight = frame.height
+      this.lastFullFrameCaptureMs = frame.capturedMonotonicMs
+      sourceFingerprint = this.sourceFingerprint(sourceWidth, sourceHeight)
+      if (this.activeSourceFingerprint !== sourceFingerprint) {
+        this.activeSourceFingerprint = sourceFingerprint
+        this.calibration = undefined
+        this.persistedCalibrationId = undefined
+        this.lastCalibrationValidationMs = Number.NEGATIVE_INFINITY
+        this.calibrationValidationFailures = 0
+      }
+
+      calibration = this.calibration
+      if (!calibration || !validateCalibration(calibration, sourceWidth, sourceHeight) ||
+          !calibrationMatchesHints(calibration, this.calibrationHints)) {
+        const persisted = this.repository.findCalibration(
+          sourceFingerprint,
+          sourceWidth,
+          sourceHeight,
+        )
+        calibration = persisted &&
+          validateCalibration(persisted, sourceWidth, sourceHeight) &&
+          calibrationMatchesHints(persisted, this.calibrationHints)
+          ? persisted
+          : undefined
+      }
+
+      const located = await this.vision.calibrate({
+        sessionId: captureSessionId,
+        frame,
+        hints: this.calibrationHints,
+        calibration,
+      })
+      const diagnostics = located.diagnostics
+      this.health.calibrationCandidatesEvaluated = diagnostics.evaluatedCandidates
+      this.health.calibrationCandidatesValid = diagnostics.visuallyValidCandidates
+      this.health.calibrationBestScore = diagnostics.bestScore
+      this.health.calibrationFailureReason = diagnostics.failureReason
+      this.health.calibrationVariance = diagnostics.bestVisual?.variance ?? located.visual?.variance
+      this.health.calibrationEdgeDensity = diagnostics.bestVisual?.edgeDensity ?? located.visual?.edgeDensity
+      this.health.calibrationColoredRatio = diagnostics.bestVisual?.coloredRatio ?? located.visual?.coloredRatio
+
+      calibration = located.calibration
+      minimap = located.minimap as RgbaFrame
+      if (!calibration || !minimap) throw new Error("minimap_calibration_required")
+      this.calibration = calibration
+      this.persistCalibration(sourceFingerprint, calibration)
+    }
+
+    if (!calibration || !sourceFingerprint) throw new Error("minimap_calibration_required")
+    this.recordFrameGap(minimap.capturedMonotonicMs)
+
+    const estimate = this.clock.estimate(minimap.capturedMonotonicMs)
+    const gameTimeMs = estimate?.gameTimeMs ?? 0
+    const includeCamps = Boolean(
+      estimate && gameTimeMs - this.lastCampPollMs >= this.options.campPollIntervalMs
+    )
+    const includeVisualValidation = this.calibrationValidationFailures > 0 ||
+      minimap.capturedMonotonicMs - this.lastCalibrationValidationMs >=
+        this.options.calibrationValidationIntervalMs
+    const vision = await this.vision.processFrame({
+      sessionId: captureSessionId,
+      gameId,
+      gameTimeMs,
+      frame: minimap,
+      includeCamps,
+      includeVisualValidation,
+    })
+
+    // A worker result can arrive after a match/window transition. Never allow
+    // pixels from the old session to update tracking or persistence for the new one.
+    if (this.captureSessionId !== vision.sessionId ||
+        this.context?.gameId !== vision.gameId || vision.gameId !== gameId) return
+
+    minimap = vision.frame
+    this.health.visionProcessingMs = vision.metrics.totalMs
+    this.health.visionChampionMs = vision.metrics.championMs
+    this.health.visionCampMs = vision.metrics.campMs
+
+    if (includeVisualValidation) {
+      const visual = vision.visual
+      if (!visual) throw new Error("vision_visual_validation_missing")
+      this.lastCalibrationValidationMs = minimap.capturedMonotonicMs
+      this.health.calibrationVariance = visual.variance
+      this.health.calibrationEdgeDensity = visual.edgeDensity
+      this.health.calibrationColoredRatio = visual.coloredRatio
       if (!visual.valid) {
         this.calibrationValidationFailures += 1
         this.health.calibrationFailures += 1
-        if (this.calibrationValidationFailures >= 2) this.calibration = undefined
+        if (this.calibrationValidationFailures >= 2) {
+          this.calibration = undefined
+          this.lastFullFrameCaptureMs = Number.NEGATIVE_INFINITY
+        }
+        this.health.calibrationFailureReason = "periodic_visual_validation"
         throw new Error("minimap_visual_validation_failed")
       }
       this.calibrationValidationFailures = 0
+      this.health.calibrationFailureReason = undefined
     }
 
-    this.persistCalibration(sourceFingerprint, calibration)
     this.health.calibrationConfidence = calibration.confidence
-    const minimap = resizeFrameBilinear(
-      cropFrame(frame, calibration.innerMapRect),
-      this.options.canonicalSize,
-      this.options.canonicalSize,
-    )
-    const estimate = this.clock.estimate(frame.capturedMonotonicMs)
-    if (!estimate) {
-      this.health.rejectedFrames += 1
-      return
-    }
-    const gameTimeMs = estimate.gameTimeMs
+    const detections = vision.championObservations
+    const markerProposals = vision.markerProposals
+    let confirmed: ReturnType<ChampionTracker["getConfirmedObservations"]> = []
 
-    const detections = this.markerDetector.detect({
-      frame: minimap,
-      templates: this.templates,
-      gameId,
-      gameTimeMs,
-    })
-    const markerProposals = this.markerDetector.getProposalFootprints()
-    this.latestTracks = this.championTracker.update({
-      gameTimeMs,
-      observations: detections,
-      deadParticipantKeys: context.deadParticipantKeys,
-      captureAvailable: true,
-    })
-    this.recordTrackHistory(gameTimeMs, this.latestTracks, context.deadParticipantKeys)
-    const confirmed = this.championTracker.getConfirmedObservations()
-    for (const observation of confirmed) {
-      this.repository.appendChampionObservation(context.puuid, observation)
-    }
-    this.health.confirmedObservations += confirmed.length
-
-    if (gameTimeMs - this.lastCampPollMs >= this.options.campPollIntervalMs) {
-      this.lastCampPollMs = gameTimeMs
-      this.processCampFrame(
-        { ...context, gameId },
-        minimap,
+    if (estimate) {
+      this.latestTracks = this.championTracker.update({
         gameTimeMs,
-        markerProposals,
-      )
-    }
-    if (this.debugSamplingActive) {
-      this.debugSampler?.sample(minimap, {
-        gameTimeMs,
-        calibration,
-        markerProposals,
-        detections,
-        confirmed,
-        campStates: this.lastCampObservations,
+        observations: detections,
+        deadParticipantKeys: context.deadParticipantKeys,
+        captureAvailable: true,
       })
+      this.recordTrackHistory(gameTimeMs, this.latestTracks, context.deadParticipantKeys)
+      confirmed = this.championTracker.getConfirmedObservations()
+      for (const observation of confirmed) {
+        this.repository.appendChampionObservation(context.puuid, observation)
+      }
+      this.health.confirmedObservations += confirmed.length
+
+      if (includeCamps) {
+        this.lastCampPollMs = gameTimeMs
+        this.processCampObservations(
+          { ...context, gameId },
+          vision.campObservations,
+        )
+      }
+      this.health.processedFrames += 1
+    } else {
+      this.health.rejectedFrames += 1
     }
 
+    const debugSample: MinimapDebugSample = {
+      gameTimeMs,
+      vision: {
+        engine: "opencv_js",
+        opencvVersion: this.vision.runtime?.opencvVersion ?? "unknown",
+        calibrationVersion: MINIMAP_CALIBRATION_VERSION,
+        championDetectorVersion: CHAMPION_MARKER_DETECTOR_VERSION,
+        campDetectorVersion: CAMP_VISUAL_DETECTOR_VERSION,
+      },
+      calibration,
+      markerProposals,
+      detections,
+      confirmed,
+      campStates: this.lastCampObservations,
+    }
+    if (this.debugSamplingActive) this.debugSampler?.sample(minimap, debugSample)
     if (context.debugOverlayEnabled) {
       this.onDebugFrame?.({
         gameId,
         frame: minimap,
-        sample: {
-          gameTimeMs,
-          calibration,
-          markerProposals,
-          detections,
-          confirmed,
-          campStates: this.lastCampObservations,
-        },
-        health: { ...this.health, ...this.qualityMetrics() },
+        sample: debugSample,
+        health: this.getHealth(),
       })
     }
-
-    this.health.processedFrames += 1
   }
 
-  private processCampFrame(
+  private processCampObservations(
     context: MinimapTelemetryContext & { gameId: number },
-    minimap: Parameters<CampVisualDetector["observeAll"]>[0]["frame"],
-    gameTimeMs: number,
-    markerProposals: readonly ChampionMarkerProposalFootprint[] = [],
+    observations: CampStateObservation[],
   ) {
-    const observations = this.campDetector.observeAll({
-      frame: minimap,
-      gameId: context.gameId,
-      gameTimeMs,
-    })
-    this.lastCampObservations = observations.map((observation) => {
-      const camp = CAMP_BY_KEY.get(observation.campKey)
-      const overlapped = camp && markerProposals.some((proposal) =>
-        normalizedDistance(proposal.center, camp.center) <=
-        camp.patchRadius + proposal.radius)
-      return overlapped
-        ? { ...observation, state: "unknown" as const, sourceConfidence: 0 }
-        : observation
-    })
+    this.lastCampObservations = observations
     for (const observation of this.lastCampObservations) {
       const transition = this.campStates.observe(observation)
       if (!transition) continue
@@ -614,6 +932,11 @@ export class MinimapTelemetryCoordinator {
         sourceConfidence: transition.confidence,
         providerVersion: transition.providerVersion,
       })
+      if (transition.state === "alive" && transition.previousState !== "alive") {
+        // A confirmed respawn starts a new camp life. Evidence deduplication is
+        // only meant to merge CV and Live Client reports for the same clear.
+        this.lastRecordedClearAt.delete(transition.campKey)
+      }
       if (transition.previousState !== "alive" ||
           !["dead", "respawn_long", "respawn_soon"].includes(transition.state)) continue
       const camp = CAMP_BY_KEY.get(transition.campKey)
@@ -649,6 +972,7 @@ export class MinimapTelemetryCoordinator {
         evidenceAgeMs: alignedEvidence?.distanceMs ?? Number.MAX_SAFE_INTEGER,
       }
       const attributed = this.attribution.attribute(evidence)
+      this.liveCampInference.markObservedClear(transition.campKey, transition.observedAtMs)
       const event: CampClearEvent = {
         gameId: context.gameId,
         puuid: context.puuid,
@@ -662,9 +986,55 @@ export class MinimapTelemetryCoordinator {
         routeIndex: attributed.attribution === "local" ? this.localClearCount : undefined,
         algorithmVersion: 2,
       }
-      this.repository.recordCampClear(event)
-      if (attributed.attribution === "local") this.localClearCount += 1
+      this.recordCampClearEvent(event)
     }
+  }
+
+  private processLiveCampEvidence(
+    gameTimeMs: number,
+    localPlayerDead: boolean | undefined,
+    evidence: JungleEvidenceDelta,
+  ) {
+    const context = this.context
+    if (context?.gameId === undefined || context.phase !== "InProgress") return
+    const trackSample = this.trackSampleAt(gameTimeMs)
+    const event = this.liveCampInference.observe({
+      gameId: context.gameId,
+      puuid: context.puuid,
+      gameTimeMs,
+      evidence,
+      localParticipantKey: context.localParticipantKey,
+      tracks: trackSample?.tracks ?? [],
+      localPlayerDead: localPlayerDead ?? (
+        context.localParticipantKey
+          ? context.deadParticipantKeys.includes(context.localParticipantKey)
+          : undefined
+      ),
+      routePlan: context.routePlan,
+      routeIndex: this.localClearCount,
+    })
+    if (!event || !this.recordCampClearEvent(event)) return
+    this.repository.recordCampState(context.puuid, {
+      gameId: event.gameId,
+      campKey: event.campKey,
+      gameTimeMs: event.clearedAtMs,
+      state: "dead",
+      source: "live_client_inference",
+      sourceConfidence: event.sourceConfidence,
+      providerVersion: event.algorithmVersion,
+    })
+    this.health.inferredCampClears = (this.health.inferredCampClears ?? 0) + 1
+  }
+
+  private recordCampClearEvent(event: CampClearEvent) {
+    const previous = this.lastRecordedClearAt.get(event.campKey)
+    if (previous !== undefined && Math.abs(event.clearedAtMs - previous) <= 15_000) {
+      return false
+    }
+    this.repository.recordCampClear(event)
+    this.lastRecordedClearAt.set(event.campKey, event.clearedAtMs)
+    if (event.attribution === "local") this.localClearCount += 1
+    return true
   }
 
   private recordTrackHistory(
@@ -790,16 +1160,18 @@ export class MinimapTelemetryCoordinator {
     this.clock.reset()
     this.evidence.reset()
     this.campStates.reset()
-    this.campDetector.reset()
+    this.liveCampInference.reset()
     this.championTracker.reset()
     this.calibration = undefined
     this.activeSourceFingerprint = undefined
     this.latestTracks = []
     this.trackHistory.length = 0
     this.evidenceHistory.length = 0
+    this.lastRecordedClearAt.clear()
     this.lastCampObservations = []
     this.lastCampPollMs = Number.NEGATIVE_INFINITY
     this.lastCalibrationValidationMs = Number.NEGATIVE_INFINITY
+    this.lastFullFrameCaptureMs = Number.NEGATIVE_INFINITY
     this.calibrationValidationFailures = 0
     this.localClearCount = 0
     this.consecutiveFailures = 0
@@ -824,6 +1196,8 @@ export class MinimapTelemetryCoordinator {
       p95FrameGapMs: 0,
       maximumFrameGapMs: 0,
       calibrationFailures: 0,
+      startupAttempts: 0,
+      inferredCampClears: 0,
     }
   }
 }

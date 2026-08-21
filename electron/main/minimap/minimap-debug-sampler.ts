@@ -12,6 +12,13 @@ import type { ChampionMarkerProposalFootprint } from "./champion-marker-detector
 
 export interface MinimapDebugSample {
   gameTimeMs: number
+  vision?: {
+    engine: "opencv_js"
+    opencvVersion: string
+    calibrationVersion: number
+    championDetectorVersion: number
+    campDetectorVersion: number
+  }
   calibration: MinimapCalibration
   markerProposals: readonly ChampionMarkerProposalFootprint[]
   detections: ChampionPositionObservation[]
@@ -25,7 +32,7 @@ export interface MinimapDebugSamplerOptions {
 }
 
 const DEFAULT_OPTIONS: MinimapDebugSamplerOptions = {
-  intervalMs: 5_000,
+  intervalMs: 10_000,
   maximumSamples: 240,
 }
 
@@ -83,7 +90,9 @@ function detectionOverlay(
 ) {
   const overlay: RgbaFrame = { ...frame, data: frame.data.slice() }
   const markerRadius = Math.max(5, Math.round(Math.min(frame.width, frame.height) * 0.035))
-  for (const proposal of markerProposals) {
+  for (const proposal of markerProposals.filter((entry) =>
+    entry.identityAccepted ||
+    (entry.identityScore ?? 0) >= 0.7 && (entry.identityMargin ?? 0) >= 0.035)) {
     drawCircle(
       overlay,
       proposal.center,
@@ -159,6 +168,7 @@ export class MinimapDebugSampler {
     const metadata = {
       gameTimeMs: sample.gameTimeMs,
       frameSequence: frame.frameSequence,
+      vision: sample.vision,
       calibration: sample.calibration,
       markerProposals: sample.markerProposals,
       detections: sample.detections,

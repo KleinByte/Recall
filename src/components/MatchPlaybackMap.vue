@@ -8,11 +8,25 @@ import {
   isUsableMapPosition,
   playbackCoverage,
   playbackMapEventLayer,
-  playbackPositionsAt,
+  playbackPositionAt,
   playbackTrailSamples,
   playbackWorldMarkers,
   spreadOverlappingMapPoints,
 } from "../helpers/timeline-playback"
+import {
+  bindMinimapParticipants,
+  campClearName,
+  clampMinimapPlaybackConfidence,
+  minimapCampMarkersAt,
+  minimapFirstEvidenceTimestamp,
+  minimapPlaybackDuration,
+  minimapPlaybackTrails,
+  reliableMinimapSegments,
+  unifiedPlaybackPositionsAt,
+  type UnifiedPlaybackSource,
+} from "../helpers/unified-playback"
+import type { CampClearEvent } from "../shared/minimap/contracts"
+import type { MinimapPathingReview } from "../shared/minimap/review"
 import type { MatchRow, ParticipantRow } from "../types/stats"
 import type { TimelineEvent, TimelineFrame } from "../types/review"
 
@@ -25,6 +39,10 @@ const props = defineProps<{
   events: TimelineEvent[]
   timestamp: number
   compact?: boolean
+  minimapReview?: MinimapPathingReview
+  minimapLoading?: boolean
+  minimapError?: string
+  minimumCvConfidence?: number
 }>()
 const emit = defineEmits<{ "update:timestamp": [timestamp: number] }>()
 
@@ -53,27 +71,72 @@ const mapName = computed(() => mapId.value === 12
 const mapStyle = computed(() => ({
   backgroundImage: `url("${publicAssetUrl(`game-data/ui/map${mapId.value}.png`)}")`,
 }))
+const minimumCvConfidence = computed(() =>
+  clampMinimapPlaybackConfidence(props.minimumCvConfidence),
+)
+const minimapEnabledForMap = computed(() => mapId.value === 11)
+const minimapBindings = computed(() => minimapEnabledForMap.value
+  ? bindMinimapParticipants(props.minimapReview, props.participants)
+  : [],
+)
+const reliableCvSegments = computed(() => minimapEnabledForMap.value
+  ? reliableMinimapSegments(props.minimapReview, minimumCvConfidence.value)
+  : [],
+)
+const mappedCvParticipantIds = computed(() => {
+  const segmentKeys = new Set(reliableCvSegments.value.map((segment) => segment.participantKey))
+  return minimapBindings.value
+    .filter((binding) => segmentKeys.has(binding.participantKey))
+    .map((binding) => binding.participantId)
+})
+const campClears = computed(() => minimapEnabledForMap.value
+  ? [...(props.minimapReview?.campClears ?? [])].sort((left, right) =>
+    left.clearedAtMs - right.clearedAtMs || left.campKey.localeCompare(right.campKey),
+  )
+  : [],
+)
 const duration = computed(() => Math.max(
   0,
+  props.match.durationSecs * 1_000,
   ...props.frames.map((frame) => frame.timestamp),
   ...props.events.map((event) => event.timestamp),
+  minimapEnabledForMap.value ? minimapPlaybackDuration(props.minimapReview) : 0,
 ))
-const firstPositionTimestamp = computed(() => Math.min(
+const firstTimelinePositionTimestamp = computed(() => Math.min(
   ...props.frames.flatMap((frame) => frame.participants.some((participant) =>
     isUsableMapPosition(participant.position, mapId.value),
   ) ? [frame.timestamp] : []),
+))
+const firstPositionTimestamp = computed(() => Math.min(
+  firstTimelinePositionTimestamp.value,
+  minimapEnabledForMap.value
+    ? minimapFirstEvidenceTimestamp(props.minimapReview, minimumCvConfidence.value)
+    : Number.POSITIVE_INFINITY,
 ))
 const coverage = computed(() => playbackCoverage(
   props.frames,
   props.participants.map((participant) => participant.participantId),
   mapId.value,
 ))
-const available = computed(() =>
+const timelineAvailable = computed(() =>
   coverage.value.positionedFrames >= 2 && coverage.value.positionedParticipants > 0,
 )
+const cvAvailable = computed(() => mappedCvParticipantIds.value.length > 0)
+const campEvidenceAvailable = computed(() => campClears.value.length > 0)
+const available = computed(() =>
+  timelineAvailable.value || cvAvailable.value || campEvidenceAvailable.value,
+)
 const currentPositions = computed(() => new Map(
-  playbackPositionsAt(props.frames, props.events, props.timestamp, mapId.value)
-    .map((position) => [position.participantId, position]),
+  unifiedPlaybackPositionsAt({
+    frames: props.frames,
+    events: props.events,
+    minimapReview: minimapEnabledForMap.value ? props.minimapReview : undefined,
+    bindings: minimapBindings.value,
+    participantIds: props.participants.map((participant) => participant.participantId),
+    timestamp: props.timestamp,
+    mapId: mapId.value,
+    minimumConfidence: minimumCvConfidence.value,
+  }).map((position) => [position.participantId, position]),
 ))
 const visibleParticipants = computed(() => props.participants.filter((participant) => {
   if (visibility.value === "blue") return participant.teamId === 100
@@ -87,12 +150,15 @@ const roster = computed(() => [...props.participants].sort((left, right) =>
 const focusedParticipant = computed(() => props.participants.find((participant) =>
   participant.participantId === focusedParticipantId.value,
 ))
+const focusedPosition = computed(() => focusedParticipantId.value === undefined
+  ? undefined
+  : currentPositions.value.get(focusedParticipantId.value),
+)
 const visibleTokens = computed(() => {
   const tokens = visibleParticipants.value.flatMap((participant) => {
     const current = currentPositions.value.get(participant.participantId)
     if (!current) return []
-    const plotted = mapPositionPercent(current.position, mapId.value)
-    return [{ participant, current, plotted }]
+    return [{ participant, current, plotted: current.point }]
   })
   const spread = new Map(spreadOverlappingMapPoints(tokens.map(({ participant, plotted }) => ({
     id: participant.participantId,
@@ -127,7 +193,7 @@ const expandedTokenLinks = computed(() => visibleTokens.value.filter((token) =>
   (Math.abs(token.display.left - token.display.sourceLeft) > .01 ||
     Math.abs(token.display.top - token.display.sourceTop) > .01),
 ))
-const trails = computed(() => visibleTokens.value.flatMap(({ participant, current }) => {
+const riotTrails = computed(() => visibleParticipants.value.flatMap((participant) => {
   const latestDeath = props.events.filter((event) =>
     event.type === "CHAMPION_KILL" &&
     event.targetId === participant.participantId &&
@@ -140,17 +206,61 @@ const trails = computed(() => visibleTokens.value.flatMap(({ participant, curren
     mapId.value,
   ).filter((sample) => !latestDeath || sample.timestamp >= latestDeath.timestamp)
     .map((sample) => mapPositionPercent(sample.position, mapId.value))
-  const currentPoint = mapPositionPercent(current.position, mapId.value)
-  if (points.length === 0 ||
-    points.at(-1)?.left !== currentPoint.left || points.at(-1)?.top !== currentPoint.top) {
-    points.push(currentPoint)
+  const current = playbackPositionAt(
+    props.frames,
+    props.events,
+    participant.participantId,
+    props.timestamp,
+    mapId.value,
+  )
+  if (current) {
+    const currentPoint = mapPositionPercent(current.position, mapId.value)
+    if (points.length === 0 ||
+        points.at(-1)?.left !== currentPoint.left || points.at(-1)?.top !== currentPoint.top) {
+      points.push(currentPoint)
+    }
   }
   if (points.length < 2) return []
   return [{
+    key: `riot:${participant.participantId}`,
     participant,
+    source: current?.exact ? "riot_snapshot" as const : "estimated" as const,
+    origin: "riot_timeline" as const,
+    confidence: current?.exact ? 1 : .55,
     points: points.map((point) => `${point.left},${point.top}`).join(" "),
   }]
 }))
+const cvTrails = computed(() => {
+  const participantById = new Map(props.participants.map((participant) => [
+    participant.participantId,
+    participant,
+  ]))
+  const visibleIds = new Set(visibleParticipants.value.map((participant) => participant.participantId))
+  return minimapPlaybackTrails({
+    minimapReview: minimapEnabledForMap.value ? props.minimapReview : undefined,
+    bindings: minimapBindings.value,
+    participantIds: [...visibleIds],
+    timestamp: props.timestamp,
+    minimumConfidence: minimumCvConfidence.value,
+  }).flatMap((trail) => {
+    const participant = participantById.get(trail.participantId)
+    return participant ? [{
+      ...trail,
+      participant,
+      points: trail.points.map((point) => `${point.left},${point.top}`).join(" "),
+    }] : []
+  })
+})
+const trails = computed(() => [...riotTrails.value, ...cvTrails.value])
+const sourceCounts = computed(() => {
+  const counts: Record<UnifiedPlaybackSource, number> = {
+    cv_observed: 0,
+    riot_snapshot: 0,
+    estimated: 0,
+  }
+  for (const token of visibleTokens.value) counts[token.current.source] += 1
+  return counts
+})
 const currentEvents = computed(() => props.events.flatMap((event) => {
   if (
     Math.abs(event.timestamp - props.timestamp) > 2_500 ||
@@ -165,13 +275,26 @@ const timelineTicks = computed(() => props.events.filter((event) =>
   event,
   left: duration.value > 0 ? event.timestamp / duration.value * 100 : 0,
 })))
+const campTimelineTicks = computed(() => campClears.value.map((clear, index) => ({
+  key: `${clear.campKey}:${clear.clearedAtMs}:${index}`,
+  clear,
+  left: duration.value > 0 ? clear.clearedAtMs / duration.value * 100 : 0,
+})))
+const campMarkers = computed(() => minimapEnabledForMap.value && campClears.value.length > 0
+  ? minimapCampMarkersAt(campClears.value, props.timestamp)
+  : [],
+)
+const completedCampClears = computed(() => campClears.value.filter((clear) =>
+  clear.clearedAtMs <= props.timestamp,
+))
+const latestCampClear = computed(() => completedCampClears.value.at(-1))
 const worldMarkers = computed(() => playbackWorldMarkers(
   props.events,
   props.timestamp,
   mapId.value,
   props.match.mode,
   props.match.gameVersion,
-).map((marker) => ({
+).filter((marker) => marker.kind !== "camp").map((marker) => ({
   ...marker,
   plotted: mapPositionPercent(marker.position, mapId.value),
 })))
@@ -230,11 +353,51 @@ function tokenStyle(token: typeof visibleTokens.value[number]) {
   return { left: `${token.display.left}%`, top: `${token.display.top}%`, zIndex }
 }
 
+function playbackSourceLabel(
+  source: UnifiedPlaybackSource,
+  origin?: "minimap_cv" | "riot_timeline",
+) {
+  if (source === "cv_observed") return "Observed CV"
+  if (source === "riot_snapshot") return "Riot snapshot"
+  return origin === "minimap_cv" ? "CV reconstructed" : "Estimated"
+}
+
 function tokenTitle(token: typeof visibleTokens.value[number]) {
   const stack = token.display.clusterSize > 1
     ? ` · stacked with ${token.display.clusterSize - 1} other champion${token.display.clusterSize === 2 ? "" : "s"}`
     : ""
-  return `${participantName(token.participant)} · ${token.current.exact ? "observed" : "estimated"} position at ${formatTime(props.timestamp)}${stack}`
+  const confidence = Math.round(token.current.confidence * 100)
+  return `${participantName(token.participant)} · ${playbackSourceLabel(token.current.source, token.current.origin)} · ${confidence}% confidence at ${formatTime(props.timestamp)}${stack}`
+}
+
+function campMarkerStyle(marker: typeof campMarkers.value[number]) {
+  return { left: `${marker.center.x * 100}%`, top: `${marker.center.y * 100}%` }
+}
+
+function campClearSourceLabel(source: CampClearEvent["source"]) {
+  if (source === "minimap_cv") return "Minimap CV"
+  if (source === "live_client_inference") return "Live Client + position"
+  return "Manual"
+}
+
+function campMarkerTitle(marker: typeof campMarkers.value[number]) {
+  const clear = marker.latestClear
+  if (!clear) return `${campClearName(marker.key)} · no recorded clear yet`
+  const route = clear.routeIndex === undefined ? "" : ` · clear ${clear.routeIndex + 1}`
+  const attribution = clear.attribution === "local"
+    ? "you"
+    : clear.attribution === "other" ? "another player" : "uncertain player"
+  const respawn = marker.state === "available"
+    ? " · available"
+    : marker.respawnInMs === undefined
+      ? " · cleared"
+      : ` · respawns in ${formatTime(marker.respawnInMs)}`
+  return `${campClearName(marker.key)} · cleared by ${attribution} at ${formatTime(clear.clearedAtMs)}${route}${respawn} · ${campClearSourceLabel(clear.source)}`
+}
+
+function seekToCampClear(clear: CampClearEvent) {
+  stop()
+  setTimestamp(clear.clearedAtMs)
 }
 
 function eventStyle(marker: typeof currentEvents.value[number]) {
@@ -370,7 +533,7 @@ onBeforeUnmount(() => {
   <section
     class="playback-panel"
     :class="{ compact }"
-    :aria-label="`${mapName} estimated champion movement playback`"
+    :aria-label="`${mapName} evidence-aware champion movement playback`"
     tabindex="0"
     @keydown="handleKeyboard"
   >
@@ -379,9 +542,17 @@ onBeforeUnmount(() => {
         <span class="eyebrow">{{ mapName }}</span>
         <h3>Map playback</h3>
       </div>
-      <div class="coverage" :class="{ weak: coverage.percent < 70 }">
-        <strong>{{ coverage.percent }}%</strong>
-        timeline coverage
+      <div class="coverage-stack" aria-label="Playback evidence coverage">
+        <div class="coverage" :class="{ weak: coverage.percent < 70 }">
+          <strong>{{ coverage.percent }}%</strong>
+          Riot timeline
+        </div>
+        <div v-if="minimapEnabledForMap" class="coverage cv" :class="{ weak: !cvAvailable }" :title="minimapError">
+          <strong v-if="minimapLoading">…</strong>
+          <strong v-else>{{ mappedCvParticipantIds.length }}</strong>
+          {{ mappedCvParticipantIds.length === 1 ? "CV track" : "CV tracks" }}
+          <small v-if="campClears.length">· {{ campClears.length }} clears</small>
+        </div>
       </div>
     </header>
 
@@ -390,9 +561,11 @@ onBeforeUnmount(() => {
         <svg class="trail-layer" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
           <polyline
             v-for="trail in trails"
-            :key="trail.participant.participantId"
+            :key="trail.key"
             :class="[
               trail.participant.teamId === 100 ? 'blue' : 'red',
+              `source-${trail.source}`,
+              `origin-${trail.origin}`,
               { owner: trail.participant.isPlayer === 1 },
             ]"
             :points="trail.points"
@@ -442,6 +615,30 @@ onBeforeUnmount(() => {
         </span>
 
         <button
+          v-for="marker in campMarkers"
+          :key="`camp-state:${marker.key}`"
+          type="button"
+          class="camp-state-marker"
+          :class="[
+            marker.state,
+            {
+              pulse: marker.justCleared,
+              local: marker.latestClear?.attribution === 'local',
+              uncertain: marker.latestClear?.attribution === 'uncertain',
+            },
+          ]"
+          :style="campMarkerStyle(marker)"
+          :title="campMarkerTitle(marker)"
+          :aria-label="campMarkerTitle(marker)"
+          :disabled="!marker.latestClear"
+          @click="marker.latestClear && seekToCampClear(marker.latestClear)"
+        >
+          <span v-if="marker.latestClear?.routeIndex !== undefined">
+            {{ marker.latestClear.routeIndex + 1 }}
+          </span>
+        </button>
+
+        <button
           v-for="token in visibleTokens"
           :key="token.participant.participantId"
           type="button"
@@ -451,6 +648,10 @@ onBeforeUnmount(() => {
             {
               owner: token.participant.isPlayer === 1,
               exact: token.current.exact,
+              'cv-observed': token.current.source === 'cv_observed',
+              'riot-snapshot': token.current.source === 'riot_snapshot',
+              estimated: token.current.source === 'estimated',
+              'cv-origin': token.current.origin === 'minimap_cv',
               overlapping: token.display.overlapping,
               'cluster-expanded': token.display.expanded,
               'stack-lead': token.stackLead,
@@ -503,16 +704,20 @@ onBeforeUnmount(() => {
         <div class="map-clock" aria-hidden="true">{{ formatTime(timestamp) }}</div>
         <div v-if="focusedParticipant" class="focused-player">
           <span :class="focusedParticipant.teamId === 100 ? 'blue' : 'red'" />
-          {{ participantName(focusedParticipant) }}
+          <b>{{ participantName(focusedParticipant) }}</b>
+          <small v-if="focusedPosition">
+            {{ playbackSourceLabel(focusedPosition.source, focusedPosition.origin) }}
+            · {{ Math.round(focusedPosition.confidence * 100) }}%
+          </small>
         </div>
 
         <div v-if="!available" class="map-empty">
           <strong>Playback unavailable</strong>
-          <span>This match does not contain enough positioned timeline frames.</span>
+          <span>This match has neither positioned Riot frames nor usable minimap CV tracks.</span>
         </div>
         <div v-else-if="visibleTokens.length === 0" class="map-empty">
           <strong>No position at {{ formatTime(timestamp) }}</strong>
-          <span>Seek to the first observed timeline frame.</span>
+          <span>Seek to the first observed position or CV segment.</span>
         </div>
       </div>
 
@@ -544,6 +749,20 @@ onBeforeUnmount(() => {
             :class="tick.event.category"
             :style="{ left: `${tick.left}%` }"
           />
+          <button
+            v-for="tick in campTimelineTicks"
+            :key="tick.key"
+            type="button"
+            class="camp-clear-tick"
+            :class="{
+              local: tick.clear.attribution === 'local',
+              uncertain: tick.clear.attribution === 'uncertain',
+            }"
+            :style="{ left: `${tick.left}%` }"
+            :title="`${formatTime(tick.clear.clearedAtMs)} · ${campClearName(tick.clear.campKey)} · ${campClearSourceLabel(tick.clear.source)}`"
+            :aria-label="`Seek to ${campClearName(tick.clear.campKey)} clear at ${formatTime(tick.clear.clearedAtMs)}`"
+            @click="seekToCampClear(tick.clear)"
+          ></button>
           <input
             class="scrubber"
             type="range"
@@ -556,6 +775,32 @@ onBeforeUnmount(() => {
             @input="seek"
           />
         </div>
+
+        <div class="evidence-legend" aria-label="Position evidence legend">
+          <span class="cv-observed"><i />Observed CV <b>{{ sourceCounts.cv_observed }}</b></span>
+          <span class="riot-snapshot"><i />Riot snapshot <b>{{ sourceCounts.riot_snapshot }}</b></span>
+          <span class="estimated"><i />Estimated <b>{{ sourceCounts.estimated }}</b></span>
+        </div>
+
+        <div v-if="campClears.length" class="camp-summary">
+          <div>
+            <span>Jungle route</span>
+            <strong>{{ completedCampClears.length }} / {{ campClears.length }} clears reached</strong>
+          </div>
+          <button
+            v-if="latestCampClear"
+            type="button"
+            @click="seekToCampClear(latestCampClear)"
+          >
+            <b>{{ latestCampClear.routeIndex === undefined ? "•" : latestCampClear.routeIndex + 1 }}</b>
+            <span>
+              {{ campClearName(latestCampClear.campKey) }}
+              <small>{{ formatTime(latestCampClear.clearedAtMs) }} · {{ campClearSourceLabel(latestCampClear.source) }}</small>
+            </span>
+          </button>
+        </div>
+        <p v-else-if="minimapLoading" class="minimap-status">Loading minimap telemetry…</p>
+        <p v-else-if="minimapError" class="minimap-status error">{{ minimapError }}</p>
 
         <div class="control-row">
           <div class="control-group speed-controls">
@@ -584,7 +829,11 @@ onBeforeUnmount(() => {
             type="button"
             :class="[
               player.teamId === 100 ? 'blue' : 'red',
-              { owner: player.isPlayer === 1, selected: focusedParticipantId === player.participantId },
+              {
+                owner: player.isPlayer === 1,
+                selected: focusedParticipantId === player.participantId,
+                'cv-track': mappedCvParticipantIds.includes(player.participantId),
+              },
             ]"
             :title="participantName(player)"
             :aria-label="`Focus ${participantName(player)}`"
@@ -596,10 +845,11 @@ onBeforeUnmount(() => {
         </div>
 
         <details class="accuracy-note">
-          <summary>About estimated movement</summary>
+          <summary>About playback evidence</summary>
           <p>
-            Movement is evenly estimated between periodic observations. Exact routes, recalls, and ability movement are not recorded.
-            Recorded events update structure and epic-monster state; ordinary camp availability is not exposed by the timeline.
+            Solid CV trails are rendered from observed minimap segments above the minimum confidence threshold. Riot snapshots remain
+            the low-frequency baseline, and dashed paths are estimated or reconstructed. Unknown CV intervals stay disconnected rather
+            than inventing movement. Camp clears and respawns use the same playback clock as the gold chart and match events.
           </p>
         </details>
       </aside>
@@ -639,6 +889,12 @@ onBeforeUnmount(() => {
   text-transform: uppercase;
 }
 
+.coverage-stack {
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+}
+
 .coverage {
   display: flex;
   align-items: baseline;
@@ -653,6 +909,9 @@ onBeforeUnmount(() => {
 }
 
 .coverage.weak strong { color: var(--ui-warning); }
+.coverage.cv strong { color: #69d8c5; }
+.coverage.cv.weak strong { color: var(--ui-text-muted); }
+.coverage.cv small { color: var(--ui-text-muted); font-size: var(--ui-text-micro); }
 
 .playback-layout {
   display: grid;
@@ -706,6 +965,19 @@ onBeforeUnmount(() => {
 
 .trail-layer .blue { stroke: var(--ui-team-blue); }
 .trail-layer .red { stroke: var(--ui-team-red); }
+.trail-layer .origin-riot_timeline {
+  stroke-dasharray: 2.5 3;
+  opacity: .34;
+}
+.trail-layer .origin-minimap_cv.source-cv_observed {
+  stroke-width: 1.75;
+  opacity: .9;
+}
+.trail-layer .origin-minimap_cv.source-estimated {
+  stroke-width: 1.35;
+  stroke-dasharray: 4 2.5;
+  opacity: .58;
+}
 .trail-layer .owner {
   stroke: var(--ui-accent-strong);
   stroke-width: 2;
@@ -814,6 +1086,61 @@ onBeforeUnmount(() => {
 .world-marker.dragon,
 .world-marker.elder { color: var(--ui-warning); }
 
+
+.camp-state-marker {
+  --camp-color: var(--ui-text-muted);
+  position: absolute;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  border: 1px solid color-mix(in srgb, var(--camp-color) 76%, #061018);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--camp-color) 28%, rgb(3 10 16 / 90%));
+  color: white;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 72%);
+  cursor: pointer;
+}
+
+.camp-state-marker.available {
+  --camp-color: #9eb2b8;
+  width: 8px;
+  height: 8px;
+  opacity: .58;
+}
+
+.camp-state-marker.cleared {
+  --camp-color: var(--ui-negative);
+  opacity: .82;
+}
+
+.camp-state-marker.respawning {
+  --camp-color: var(--ui-warning);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-warning) 18%, transparent),
+    0 1px 4px rgb(0 0 0 / 72%);
+}
+
+.camp-state-marker.local {
+  z-index: 5;
+  width: 17px;
+  height: 17px;
+  border-width: 2px;
+  border-color: var(--ui-accent-strong);
+  background: rgb(4 20 25 / 92%);
+  box-shadow: 0 0 0 1px #061018, 0 0 8px color-mix(in srgb, var(--ui-accent) 68%, transparent);
+}
+
+.camp-state-marker.uncertain { border-style: dashed; }
+.camp-state-marker:disabled { cursor: default; }
+.camp-state-marker > span {
+  font: 11px/1 var(--ui-font-heading);
+  font-variant-numeric: tabular-nums;
+}
+.camp-state-marker.pulse { animation: camp-clear-pulse 900ms ease-out 3; }
+
 .champion-token {
   --team: var(--ui-team-blue);
   position: absolute;
@@ -831,6 +1158,29 @@ onBeforeUnmount(() => {
 }
 
 .champion-token.red { --team: var(--ui-team-red); }
+.champion-token::before {
+  position: absolute;
+  inset: -6px;
+  border: 1px solid transparent;
+  border-radius: inherit;
+  content: "";
+  pointer-events: none;
+}
+.champion-token.cv-observed::before {
+  border-width: 2px;
+  border-color: #6ce0ca;
+  box-shadow: 0 0 8px rgb(108 224 202 / 55%);
+}
+.champion-token.riot-snapshot::before {
+  border-color: color-mix(in srgb, var(--team) 78%, white);
+  opacity: .75;
+}
+.champion-token.estimated::before {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--team) 64%, var(--ui-text-muted));
+  opacity: .72;
+}
+.champion-token.cv-origin.estimated::before { border-color: #69d8c5; }
 .champion-token.owner {
   z-index: 6;
   width: 35px;
@@ -913,7 +1263,7 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   background: #061018;
   box-shadow: 0 0 0 2px rgb(2 8 13 / 78%), 0 0 18px currentColor;
-  color: var(--ui-loss);
+  color: var(--ui-negative);
   pointer-events: none;
   animation: event-pop 420ms ease-out;
 }
@@ -982,6 +1332,8 @@ onBeforeUnmount(() => {
 
 .focused-player > span.blue { --team: var(--ui-team-blue); }
 .focused-player > span.red { --team: var(--ui-team-red); }
+.focused-player b { overflow: hidden; text-overflow: ellipsis; }
+.focused-player small { color: var(--ui-text-muted); font-size: var(--ui-text-micro); }
 
 .map-empty {
   position: absolute;
@@ -1122,7 +1474,7 @@ onBeforeUnmount(() => {
   height: 5px;
   transform: translateX(-50%);
   border-radius: 2px;
-  background: var(--ui-loss);
+  background: var(--ui-negative);
   opacity: .62;
   pointer-events: none;
 }
@@ -1132,6 +1484,112 @@ onBeforeUnmount(() => {
   background: var(--ui-warning);
   opacity: .9;
 }
+
+.camp-clear-tick {
+  position: absolute;
+  z-index: 4;
+  bottom: 1px;
+  width: 8px;
+  height: 9px;
+  padding: 0;
+  transform: translateX(-50%);
+  border: 0;
+  border-radius: 2px 2px 50% 50%;
+  background: #69d8c5;
+  box-shadow: 0 0 0 1px rgb(3 10 16 / 88%);
+  cursor: pointer;
+  opacity: .78;
+}
+.camp-clear-tick.local {
+  height: 12px;
+  background: var(--ui-accent-strong);
+  opacity: 1;
+}
+.camp-clear-tick.uncertain {
+  border: 1px dashed var(--ui-warning);
+  background: rgb(3 10 16 / 92%);
+}
+.camp-clear-tick:hover,
+.camp-clear-tick:focus-visible {
+  z-index: 5;
+  transform: translateX(-50%) scale(1.35);
+  outline: 1px solid var(--ui-accent-strong);
+}
+
+.evidence-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  color: var(--ui-text-muted);
+  font-size: var(--ui-text-label);
+}
+.evidence-legend > span { display: inline-flex; align-items: center; gap: 5px; }
+.evidence-legend i {
+  width: 14px;
+  height: 3px;
+  border-radius: 99px;
+  background: currentColor;
+}
+.evidence-legend b { color: var(--ui-text-subtle); font-variant-numeric: tabular-nums; }
+.evidence-legend .cv-observed { color: #69d8c5; }
+.evidence-legend .riot-snapshot { color: var(--ui-team-blue); }
+.evidence-legend .estimated { color: var(--ui-text-muted); }
+.evidence-legend .estimated i {
+  height: 0;
+  border-top: 2px dashed currentColor;
+  background: transparent;
+}
+
+.camp-summary {
+  display: grid;
+  gap: 7px;
+  padding: 8px 9px;
+  border: 1px solid color-mix(in srgb, #69d8c5 30%, var(--ui-border));
+  border-radius: var(--ui-radius-sm);
+  background: color-mix(in srgb, #69d8c5 5%, var(--ui-surface-panel-quiet));
+}
+.camp-summary > div { display: flex; justify-content: space-between; gap: 10px; }
+.camp-summary > div span {
+  color: var(--ui-text-muted);
+  font-size: var(--ui-text-label);
+  letter-spacing: .6px;
+  text-transform: uppercase;
+}
+.camp-summary > div strong { color: var(--ui-text-heading); font-size: var(--ui-text-label); }
+.camp-summary > button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-xs);
+  background: rgb(3 10 16 / 45%);
+  color: var(--ui-text-subtle);
+  text-align: left;
+  cursor: pointer;
+}
+.camp-summary > button:hover { border-color: var(--ui-accent); }
+.camp-summary > button > b {
+  display: grid;
+  place-items: center;
+  width: 23px;
+  height: 23px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #69d8c5;
+  color: #041215;
+  font: 11px var(--ui-font-heading);
+}
+.camp-summary > button > span { display: grid; min-width: 0; }
+.camp-summary small { color: var(--ui-text-muted); font-size: var(--ui-text-micro); }
+
+.minimap-status {
+  margin: 0;
+  color: var(--ui-text-muted);
+  font-size: var(--ui-text-label);
+}
+.minimap-status.error { color: var(--ui-warning); }
 
 .control-row {
   display: grid;
@@ -1190,6 +1648,15 @@ onBeforeUnmount(() => {
 }
 
 .playback-roster button.red { --team: var(--ui-team-red); }
+.playback-roster button.cv-track::before {
+  position: absolute;
+  inset: -5px;
+  border: 1px solid #69d8c5;
+  border-radius: inherit;
+  content: "";
+  pointer-events: none;
+  opacity: .72;
+}
 .playback-roster button:hover,
 .playback-roster button.selected {
   z-index: 2;
@@ -1254,6 +1721,12 @@ onBeforeUnmount(() => {
 @keyframes stack-pop {
   from { transform: translate(-50%, -50%) scale(.74); }
   to { transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes camp-clear-pulse {
+  0% { transform: translate(-50%, -50%) scale(.8); }
+  55% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--ui-accent) 35%, transparent); }
+  100% { transform: translate(-50%, -50%) scale(1); }
 }
 
 @media (max-width: 900px) {

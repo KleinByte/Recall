@@ -21,6 +21,9 @@ module.exports = {
   ...baseConfig,
   win: {
     ...baseConfig.win,
+    // Microsoft Store certification inspects every installed Portable
+    // Executable, not only the application and installer executables.
+    signExts: [".dll", ".node"],
     azureSignOptions: {
       publisherName: process.env[signingEnvironment.publisherName],
       endpoint: process.env[signingEnvironment.endpoint],

@@ -18,7 +18,10 @@ import {
 } from "../helpers/game-assets"
 import { focusReviewGameId, reviewMatch } from "../helpers/navigation"
 import { publicAssetUrl } from "../helpers/assets"
+import { timelineChartX } from "../helpers/timeline-chart"
+import { campClearName, minimapPlaybackDuration } from "../helpers/unified-playback"
 import { lobbyStandings } from "../helpers/match-detail"
+import { positionForPlayer } from "../helpers/roles"
 import GradeBadge from "../components/GradeBadge.vue"
 import AugmentInsightCard from "../components/AugmentInsightCard.vue"
 import MatchReviewHero from "../components/MatchReviewHero.vue"
@@ -47,16 +50,26 @@ import type {
   BaselineMetric,
   ReviewHighlight,
 } from "../types/review"
+import type { CampClearEvent } from "../shared/minimap/contracts"
+import type { MinimapPathingReview } from "../shared/minimap/review"
 
 defineProps<{ champions: Champion[] | null }>()
 const events = useApiEvents()
 type Tab = "review" | "sessions" | "bookmarks" | "experiments"
-type MatchTab = "overview" | "stats" | "timeline" | "probability"
+type MatchTab = "overview" | "jungle" | "stats" | "timeline" | "probability"
 type InsightTab = "rvi" | "performance"
 const tab = ref<Tab>("review")
 const matchTab = ref<MatchTab>("overview")
 const insightTab = ref<InsightTab>("rvi")
+const showcaseReviewScene = import.meta.env.DEV
+  ? new URLSearchParams(window.location.search).get("showcase")
+  : null
+let showcaseSceneApplied = false
 const assets = ref<GameAssetCatalog>({ version: "latest", items: {}, augments: {}, abilities: {} })
+const minimapReview = ref<MinimapPathingReview>()
+const minimapReviewLoading = ref(false)
+const minimapReviewError = ref<string>()
+let minimapReviewSequence = 0
 let resetTimelinePresentation = () => {}
 const {
   review,
@@ -102,6 +115,17 @@ const {
 const owner = computed(() =>
   review.value?.scoreboard.find((participant) => participant.isPlayer === 1),
 )
+const ownerWasJungling = computed(() => {
+  const player = owner.value
+  const match = review.value?.match
+  if (!player || !match) return false
+  return player.spell1Id === 11 || player.spell2Id === 11 ||
+    positionForPlayer(player) === "JUNGLE" || positionForPlayer(match) === "JUNGLE"
+})
+const sharedTimelineMaximumTimestamp = computed(() => Math.max(
+  (review.value?.match.durationSecs ?? 0) * 1_000,
+  minimapPlaybackDuration(minimapReview.value),
+))
 const {
   timelineMapView,
   timelineFilter,
@@ -142,8 +166,97 @@ const {
   selectTimelineTimestamp,
   moveTimelineCursor,
   resetTimelineView,
-} = useReviewTimeline({ review, owner, assets })
+} = useReviewTimeline({
+  review,
+  owner,
+  assets,
+  playbackMaximumTimestamp: sharedTimelineMaximumTimestamp,
+})
 resetTimelinePresentation = resetTimelineView
+
+async function loadMinimapReview(gameId: number) {
+  const sequence = ++minimapReviewSequence
+  minimapReviewLoading.value = true
+  minimapReviewError.value = undefined
+  try {
+    const result = await api.getJunglePathingReview(gameId)
+    if (sequence !== minimapReviewSequence || review.value?.match.gameId !== gameId) return
+    minimapReview.value = result
+  } catch (cause) {
+    if (sequence !== minimapReviewSequence || review.value?.match.gameId !== gameId) return
+    minimapReview.value = undefined
+    minimapReviewError.value = cause instanceof Error
+      ? cause.message
+      : "Could not load minimap telemetry for this match."
+  } finally {
+    if (sequence === minimapReviewSequence) minimapReviewLoading.value = false
+  }
+}
+
+watch(() => review.value?.match.gameId, (gameId) => {
+  minimapReviewSequence += 1
+  minimapReview.value = undefined
+  minimapReviewError.value = undefined
+  minimapReviewLoading.value = false
+  if (gameId !== undefined) void loadMinimapReview(gameId)
+}, { immediate: true })
+
+watch([review, minimapReview], ([currentReview, currentMinimap]) => {
+  if (showcaseSceneApplied || !currentReview) return
+  if (showcaseReviewScene === "review-overview" || showcaseReviewScene === "review-rvi") {
+    matchTab.value = "overview"
+    insightTab.value = "rvi"
+    showcaseSceneApplied = true
+  } else if (showcaseReviewScene === "review-breakdown") {
+    matchTab.value = "overview"
+    insightTab.value = "performance"
+    showcaseSceneApplied = true
+  } else if (showcaseReviewScene === "playback" && currentMinimap) {
+    matchTab.value = "timeline"
+    timelineMapView.value = "playback"
+    timelineCursorTimestamp.value = 960_000
+    showcaseSceneApplied = true
+  } else if (showcaseReviewScene === "jungle" && currentMinimap) {
+    matchTab.value = "jungle"
+    showcaseSceneApplied = true
+  }
+})
+
+const timelineJungleMarkers = computed(() => {
+  const laneByBucket = new Map<number, number>()
+  return [...(minimapReview.value?.campClears ?? [])]
+    .sort((left, right) => left.clearedAtMs - right.clearedAtMs)
+    .map((clear, index) => {
+      const x = timelineChartX(clear.clearedAtMs, timelineDomain.value)
+      const bucket = Math.round(x / 3)
+      const lane = laneByBucket.get(bucket) ?? 0
+      laneByBucket.set(bucket, lane + 1)
+      return {
+        key: `${clear.campKey}:${clear.clearedAtMs}:${index}`,
+        clear,
+        x,
+        top: [21, 10, 32][lane % 3],
+      }
+    })
+})
+
+function campClearSourceLabel(source: CampClearEvent["source"]) {
+  if (source === "minimap_cv") return "Minimap CV"
+  if (source === "live_client_inference") return "Live Client + position"
+  return "Manual"
+}
+
+function campClearAttributionLabel(attribution: CampClearEvent["attribution"]) {
+  if (attribution === "local") return "your clear"
+  if (attribution === "other") return "another player's clear"
+  return "uncertain attribution"
+}
+
+function timelineJungleMarkerTitle(clear: CampClearEvent) {
+  const route = clear.routeIndex === undefined ? "" : ` · route #${clear.routeIndex + 1}`
+  return `${eventTime(clear.clearedAtMs)} · ${campClearName(clear.campKey)} · ${campClearAttributionLabel(clear.attribution)}${route} · ${campClearSourceLabel(clear.source)} · ${Math.round(clear.sourceConfidence * 100)}% source confidence`
+}
+
 const matchLobbyStanding = computed(() => {
   const current = review.value
   if (!current) return undefined
@@ -153,12 +266,13 @@ const matchLobbyStanding = computed(() => {
   const player = owner.value
   return player ? lobbyStandings(current.scoreboard).get(player.participantId) : undefined
 })
-const matchTabs: { id: MatchTab; label: string }[] = [
+const matchTabs = computed<{ id: MatchTab; label: string }[]>(() => [
   { id: "overview", label: "Overview" },
+  ...(ownerWasJungling.value ? [{ id: "jungle" as const, label: "Jungle clear" }] : []),
   { id: "stats", label: "Stats" },
   { id: "timeline", label: "Timeline" },
   { id: "probability", label: "Win Probability" },
-]
+])
 const pageTabs = [
   { value: "review", label: "Current match" },
   { value: "sessions", label: "Sessions" },
@@ -169,7 +283,9 @@ const insightTabs = [
   { value: "rvi", label: "RVI" },
   { value: "performance", label: "Breakdown" },
 ]
-const matchTabOptions = matchTabs.map((item) => ({ value: item.id, label: item.label }))
+const matchTabOptions = computed(() => matchTabs.value.map(
+  (item) => ({ value: item.id, label: item.label }),
+))
 const matchBans = computed(() => (review.value?.teams ?? []).flatMap((team) => {
   try {
     return (JSON.parse(team.bans || "[]") as number[]).filter((id) => id > 0)
@@ -289,11 +405,20 @@ onMounted(() => {
       }).catch((error) => console.warn("Could not cache augment catalog", error))
     }
   })
-  events.on("review:updated", () => {
+  events.on("review:updated", (updatedGameId?: number) => {
     refreshCurrentWhenIdle()
+    const currentGameId = review.value?.match.gameId
+    if (currentGameId !== undefined &&
+        (updatedGameId === undefined || updatedGameId === currentGameId)) {
+      void loadMinimapReview(currentGameId)
+    }
   })
   events.on("timeline:updated", (gameId: number) => {
     void refreshTimeline(gameId)
+    if (review.value?.match.gameId === gameId) void loadMinimapReview(gameId)
+  })
+  events.on("minimap:pathing-updated", (gameId: number) => {
+    if (review.value?.match.gameId === gameId) void loadMinimapReview(gameId)
   })
 })
 </script>
@@ -477,8 +602,6 @@ onMounted(() => {
           />
         </div>
 
-        <JunglePathingReview class="card" :game-id="review.match.gameId" />
-
         <section v-if="owner?.augments?.length" class="owner-augment-context">
           <header>
             <div><span class="eyebrow">Mayhem loadout</span><h3>Your augments</h3></div>
@@ -507,6 +630,17 @@ onMounted(() => {
           <span class="muted">Row leaders are emphasized · your column is gold</span>
         </div>
         <MatchStatsTable :participants="review.scoreboard" :champions="champions" />
+      </section>
+
+      <section v-if="ownerWasJungling && matchTab === 'jungle'" class="match-tab-panel jungle-clear-tab" role="tabpanel">
+        <JunglePathingReview
+          class="card"
+          :game-id="review.match.gameId"
+          :pathing-review="minimapReview"
+          :pathing-loading="minimapReviewLoading"
+          :pathing-error="minimapReviewError"
+          managed
+        />
       </section>
 
       <div v-if="matchTab === 'overview'" class="review-grid annotation-grid">
@@ -591,7 +725,7 @@ onMounted(() => {
                 <span class="time-axis start">0:00</span>
                 <span class="time-axis end">{{ formatDuration(timelineDomain.maximumTimestamp / 1_000) }}</span>
               </div>
-              <div v-if="timelineEventTracks.length" class="timeline-event-tracks" aria-label="Match events aligned to the gold timeline">
+              <div v-if="timelineEventTracks.length || timelineJungleMarkers.length" class="timeline-event-tracks" aria-label="Match events and jungle clears aligned to the gold timeline">
                 <div v-for="track in timelineEventTracks" :key="track.id" class="timeline-event-track" :class="track.id">
                   <strong>{{ track.label }}</strong>
                   <button
@@ -607,6 +741,26 @@ onMounted(() => {
                   >
                     <img v-if="timelineMarkerIcon(marker.event)" :src="timelineMarkerIcon(marker.event)" alt="" />
                     <span v-else>{{ timelineMarkerGlyph(marker.event) }}</span>
+                  </button>
+                </div>
+                <div v-if="timelineJungleMarkers.length" class="timeline-event-track jungle">
+                  <strong>Jungle clears</strong>
+                  <button
+                    v-for="marker in timelineJungleMarkers"
+                    :key="marker.key"
+                    type="button"
+                    class="event-track-marker jungle-clear"
+                    :class="{
+                      local: marker.clear.attribution === 'local',
+                      other: marker.clear.attribution === 'other',
+                      uncertain: marker.clear.attribution === 'uncertain',
+                    }"
+                    :style="{ left: `${marker.x}%`, top: `${marker.top}px` }"
+                    :title="timelineJungleMarkerTitle(marker.clear)"
+                    :aria-label="timelineJungleMarkerTitle(marker.clear)"
+                    @click="selectTimelineTimestamp(marker.clear.clearedAtMs)"
+                  >
+                    <span>{{ marker.clear.routeIndex === undefined ? 'J' : marker.clear.routeIndex + 1 }}</span>
                   </button>
                 </div>
               </div>
@@ -641,6 +795,9 @@ onMounted(() => {
                   :participants="review.scoreboard"
                   :frames="review.timeline.summary.frames"
                   :events="review.timeline.summary.events"
+                  :minimap-review="minimapReview"
+                  :minimap-loading="minimapReviewLoading"
+                  :minimap-error="minimapReviewError"
                   v-model:timestamp="timelineCursorTimestamp"
                 />
               </div>
@@ -927,6 +1084,11 @@ textarea { width: 100%; box-sizing: border-box; min-height: 110px; resize: verti
 .event-track-marker.kill::after { content: "×"; position: absolute; right: -5px; bottom: -5px; display: grid; place-items: center; width: 14px; height: 14px; border: 1px solid var(--surface-0); border-radius: 50%; background: var(--loss); color: white; font: var(--ui-text-micro)/1 var(--font-heading); }
 .event-track-marker.blue-team { border-color: #35b9dd; }.event-track-marker.red-team { border-color: #e45868; }.event-track-marker.owner-event { box-shadow: 0 0 0 1px var(--gold), 0 2px 8px rgba(0, 0, 0, .65); }
 .event-track-marker.item { border-radius: var(--radius-sm); border-color: var(--win); }.event-track-marker.objective { border-color: var(--gold); }.event-track-marker.level { border-color: #8d7edb; background: #211d3c; }.event-track-marker.game { border-color: var(--loss); }
+.timeline-event-track.jungle { background: linear-gradient(90deg, color-mix(in srgb, #69d8c5 9%, var(--surface-2)), transparent 32%); }
+.event-track-marker.jungle-clear { border-color: #69d8c5; background: #0b2a2a; color: #bdf8e9; }
+.event-track-marker.jungle-clear.local { border-color: var(--gold-bright); box-shadow: 0 0 0 1px #69d8c5, 0 2px 8px rgba(0, 0, 0, .65); }
+.event-track-marker.jungle-clear.other { filter: saturate(.72); }
+.event-track-marker.jungle-clear.uncertain { border-style: dashed; border-color: var(--ui-warning); color: var(--ui-warning); }
 .gold-axis-label { position: absolute; left: 7px; z-index: 1; transform: translateY(-50%); color: var(--text-muted); font-size: var(--ui-text-micro); font-variant-numeric: tabular-nums; pointer-events: none; }.time-axis { position: absolute; bottom: 5px; z-index: 1; color: var(--text-muted); font-size: var(--ui-text-micro); pointer-events: none; }.time-axis.start { left: 7px; }.time-axis.end { right: 7px; }.gold-legend { display: flex; align-items: center; gap: var(--space-3); min-height: 34px; padding: 6px 9px; border: 1px solid var(--border-subtle); border-top: 0; border-radius: 0 0 var(--radius-md) var(--radius-md); background: var(--surface-2); color: var(--text-secondary); font-size: 12px; }.gold-legend > span { display: inline-flex; align-items: center; gap: 5px; }.gold-legend i { width: 14px; height: 3px; border-radius: 2px; }.gold-legend .blue i { background: #35b9dd; }.gold-legend .red i { background: #e45868; }.gold-legend strong { color: var(--text-primary); }.gold-legend .difference { margin-left: auto; }.gold-legend .difference.blue { color: #60cbea; }.gold-legend .difference.red { color: #ef7b88; }
 .chart-crosshair { position: absolute; z-index: 3; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,.48); pointer-events: none; }
 .cursor-dot { position: absolute; z-index: 4; width: 9px; height: 9px; transform: translate(-50%,-50%); border: 2px solid var(--surface-0); border-radius: 50%; pointer-events: none; }.cursor-dot.blue { background: #35b9dd; }.cursor-dot.red { background: #e45868; }

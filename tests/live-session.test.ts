@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { readLiveSession } from "../electron/main/live-session.js"
+import {
+  mergeInProgressSessionMetadata,
+  needsInProgressMetadataRefresh,
+  readLiveSession,
+} from "../electron/main/live-session.js"
 import { readFileSync } from "node:fs"
 
 const client = (responses: Record<string, unknown>) => ({
@@ -10,6 +14,91 @@ const client = (responses: Record<string, unknown>) => ({
 })
 
 describe("readLiveSession", () => {
+  it("keeps polling an eventual InProgress payload until identity and classification are usable", () => {
+    expect(needsInProgressMetadataRefresh({
+      phase: "InProgress",
+      benchChampionIds: [],
+      allies: [],
+      enemies: [],
+      updatedAt: 1,
+    })).toBe(true)
+    expect(needsInProgressMetadataRefresh({
+      phase: "InProgress",
+      gameId: 55,
+      mapId: 11,
+      queueId: 420,
+      benchChampionIds: [],
+      allies: [],
+      enemies: [],
+      updatedAt: 1,
+    })).toBe(false)
+  })
+
+  it("repairs LCU identity immediately without replacing newer Port 2999 data", () => {
+    const game = {
+      available: true,
+      gameTime: 10,
+      mapNumber: 11,
+      allies: [],
+      enemies: [],
+      events: [],
+      updatedAt: 20,
+    }
+    expect(mergeInProgressSessionMetadata({
+      phase: "InProgress",
+      game,
+      benchChampionIds: [],
+      allies: [],
+      enemies: [],
+      updatedAt: 20,
+    }, {
+      phase: "InProgress",
+      gameId: 55,
+      mapId: 11,
+      queueId: 420,
+      benchChampionIds: [],
+      allies: [],
+      enemies: [],
+      updatedAt: 15,
+    })).toMatchObject({
+      gameId: 55,
+      mapId: 11,
+      queueId: 420,
+      game,
+      updatedAt: 20,
+    })
+  })
+
+
+  it("does not regress already-known metadata when a later LCU read is sparse", () => {
+    const previous = {
+      phase: "InProgress" as const,
+      gameId: 55,
+      mapId: 11,
+      queueId: 420,
+      gameType: "MATCHED_GAME",
+      benchChampionIds: [],
+      allies: [{ cellId: 0, championId: 154, championPickIntent: 154 }],
+      enemies: [],
+      updatedAt: 20,
+    }
+    const merged = mergeInProgressSessionMetadata(previous, {
+      phase: "InProgress",
+      benchChampionIds: [],
+      allies: [],
+      enemies: [],
+      updatedAt: 21,
+    })
+    expect(merged).toMatchObject({
+      gameId: 55,
+      mapId: 11,
+      queueId: 420,
+      gameType: "MATCHED_GAME",
+      allies: previous.allies,
+      updatedAt: 21,
+    })
+  })
+
   it("maps an ARAM champion-select roster and bench", async () => {
     const live = await readLiveSession(client({
       "/lol-gameflow/v1/session": {

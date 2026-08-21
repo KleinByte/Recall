@@ -438,8 +438,8 @@ const formatDate = (value?: number) =>
         <span>
           Keep temporary minimap vision samples
           <span class="muted hint">
-            Saves bounded minimap-only crops and detection overlays from normal matches for detector
-            tuning. It never saves the full game window and excludes Practice Tool.
+            Saves bounded minimap-only crops and detection overlays for detector tuning, including
+            Practice Tool sessions. It never saves the full game window.
           </span>
         </span>
       </label>

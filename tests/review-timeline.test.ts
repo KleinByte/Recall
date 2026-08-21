@@ -105,7 +105,7 @@ function reviewFixture(): MatchReview {
   } as MatchReview
 }
 
-function timelineController() {
+function timelineController(playbackMaximumTimestamp = 0) {
   const review = ref<MatchReview | undefined>(reviewFixture())
   const assets = ref<GameAssetCatalog>({
     version: "14.1.1",
@@ -116,7 +116,12 @@ function timelineController() {
   const selectedOwner = computed(() =>
     review.value?.scoreboard.find((participant) => participant.isPlayer === 1),
   )
-  return useReviewTimeline({ review, owner: selectedOwner, assets })
+  return useReviewTimeline({
+    review,
+    owner: selectedOwner,
+    assets,
+    playbackMaximumTimestamp: computed(() => playbackMaximumTimestamp),
+  })
 }
 
 describe("useReviewTimeline", () => {
@@ -203,5 +208,14 @@ describe("useReviewTimeline", () => {
     expect(timeline.timelineFilter.value).toBe("all")
     expect(timeline.timelineMapView.value).toBe("deaths")
     expect(timeline.timelineCursorTimestamp.value).toBe(0)
+  })
+
+  it("extends selection and chart geometry to the shared CV playback clock", () => {
+    const timeline = timelineController(180_000)
+
+    expect(timeline.timelineDomain.value.maximumTimestamp).toBe(180_000)
+    timeline.selectTimelineTimestamp(150_000)
+    expect(timeline.timelineCursorTimestamp.value).toBe(150_000)
+    expect(timeline.timelineCursor.value?.x).toBeCloseTo(82)
   })
 })

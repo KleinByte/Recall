@@ -38,11 +38,13 @@ describe("createUpdaterService", () => {
     const updater = client()
     const publish = vi.fn()
     const beforeInstall = vi.fn()
+    const beginInstall = vi.fn()
     const service = createUpdaterService({
       updater,
       isPackaged: true,
       publish,
       beforeInstall,
+      beginInstall,
     })
     await service.start()
 
@@ -56,8 +58,9 @@ describe("createUpdaterService", () => {
       version: "1.2.0",
     })
     await expect(service.install()).resolves.toBe(true)
+    expect(beginInstall).toHaveBeenCalledWith("1.2.0")
     expect(beforeInstall).toHaveBeenCalledOnce()
-    expect(updater.quitAndInstall).toHaveBeenCalledWith(true, true)
+    expect(updater.quitAndInstall).toHaveBeenCalledWith(false, true)
   })
 
   it("checks for updates every six hours without overlapping a pending check", async () => {
@@ -91,6 +94,7 @@ describe("createUpdaterService", () => {
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined)
     const updater = client()
     const publish = vi.fn()
+    const cancelInstall = vi.fn()
     const service = createUpdaterService({
       updater,
       isPackaged: true,
@@ -98,12 +102,14 @@ describe("createUpdaterService", () => {
       beforeInstall: () => {
         throw new Error("database is busy")
       },
+      cancelInstall,
     })
     await service.start()
     updater.emit("update-downloaded", { version: "1.2.0" })
 
     await expect(service.install()).resolves.toBe(false)
     expect(updater.quitAndInstall).not.toHaveBeenCalled()
+    expect(cancelInstall).toHaveBeenCalledOnce()
     expect(service.status()).toEqual({
       kind: "error",
       message: expect.stringContaining("safely close"),

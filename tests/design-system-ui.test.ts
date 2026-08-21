@@ -238,7 +238,9 @@ describe("Recall shared UI system", () => {
     expect(titleBar).toContain("-webkit-app-region: no-drag")
 
     const updateArrival = read("src/components/UpdateRecallAnimation.vue")
-    expect(updateArrival).toContain('phase: "startup" | "channeling" | "arrival"')
+    expect(updateArrival).toContain(
+      'phase: "startup" | "channeling" | "installing" | "arrival"',
+    )
     expect(updateArrival).toContain("prefers-reduced-motion")
   })
 })

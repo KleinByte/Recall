@@ -35,6 +35,47 @@ export interface LiveSession {
   updatedAt: number
 }
 
+/**
+ * Riot can emit InProgress before `/lol-gameflow/v1/session` has finished
+ * populating its durable game identity and classification fields. Port 2999
+ * repairs map/mode data later, but it does not expose the game id, so callers
+ * must keep refreshing the LCU snapshot until these fields become usable.
+ */
+export function needsInProgressMetadataRefresh(session: LiveSession) {
+  if (session.phase !== "InProgress") return false
+  const mapKnown = session.mapId !== undefined || session.game?.mapNumber !== undefined
+  const classificationKnown = session.queueId !== undefined ||
+    Boolean(session.gameType?.trim()) || Boolean(session.game?.gameType?.trim())
+  return session.gameId === undefined || !mapKnown || !classificationKnown
+}
+
+/**
+ * Repairs eventual LCU metadata without discarding a newer Port 2999 snapshot.
+ * Roster/queue fields come from the refreshed LCU document; rendered live-game
+ * telemetry remains owned by the previous aggregate snapshot.
+ */
+export function mergeInProgressSessionMetadata(
+  previous: LiveSession,
+  refreshed: LiveSession,
+): LiveSession {
+  return {
+    ...previous,
+    ...refreshed,
+    gameId: refreshed.gameId ?? previous.gameId,
+    queueId: refreshed.queueId ?? previous.queueId,
+    queueName: refreshed.queueName ?? previous.queueName,
+    mode: refreshed.mode ?? previous.mode,
+    gameMode: refreshed.gameMode ?? previous.gameMode ?? previous.game?.gameMode,
+    gameType: refreshed.gameType ?? previous.gameType ?? previous.game?.gameType,
+    mapId: refreshed.mapId ?? previous.mapId ?? previous.game?.mapNumber,
+    localPlayerCellId: refreshed.localPlayerCellId ?? previous.localPlayerCellId,
+    allies: refreshed.allies.length > 0 ? refreshed.allies : previous.allies,
+    enemies: refreshed.enemies.length > 0 ? refreshed.enemies : previous.enemies,
+    game: previous.game,
+    updatedAt: Math.max(previous.updatedAt, refreshed.updatedAt),
+  }
+}
+
 const idle = (): LiveSession => ({
   phase: "Idle",
   benchChampionIds: [],
@@ -44,7 +85,7 @@ const idle = (): LiveSession => ({
 })
 
 const number = (value: unknown): number | undefined =>
-  typeof value === "number" ? value : undefined
+  typeof value === "number" && Number.isFinite(value) ? value : undefined
 
 const text = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim().length > 0

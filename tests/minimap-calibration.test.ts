@@ -1,14 +1,15 @@
 import { describe, expect, it, vi } from "vitest"
 import {
   MINIMAP_CALIBRATION_VERSION,
-  MinimapLocator,
   calibrationMatchesHints,
   createCalibration,
   createCalibrationContextSignature,
-  evaluateMinimapVisual,
   expectedMinimapFraction,
   validateCalibration,
 } from "../electron/main/minimap/calibration.js"
+import { evaluateMinimapVisualCv, OpenCvMinimapLocator } from
+  "../electron/main/vision/opencv-calibration.js"
+import { loadOpenCv } from "../electron/main/vision/opencv-runtime.js"
 import {
   calibrationHintsFromLeagueSettings,
   parseLeagueGameConfig,
@@ -92,14 +93,20 @@ describe("minimap calibration", () => {
     expect(2_160 * expectedMinimapFraction(1.5)).toBeCloseTo(615.6)
   })
 
-  it("finds a bottom-right map at the configured side and scale", () => {
+  it("accepts League's current maximum minimap scale", () => {
+    expect(expectedMinimapFraction(3)).toBeCloseTo(0.39)
+    expect(900 * expectedMinimapFraction(3)).toBeCloseTo(351)
+  })
+
+  it("finds a bottom-right map at the configured side and scale", async () => {
     const screenshot = frame(1_920, 1_080, [11, 13, 16, 255])
     drawHudPanel(screenshot, "left", 308)
     drawMap(screenshot, "right", 308)
-    const calibration = new MinimapLocator({
+    const locator = new OpenCvMinimapLocator(await loadOpenCv())
+    const calibration = locator.locate(screenshot, {
       placement: "right",
       minimapScale: 1.5,
-    }).locate(screenshot)
+    }).calibration
 
     expect(calibration).toBeDefined()
     expect(calibration?.placement).toBe("right")
@@ -112,20 +119,21 @@ describe("minimap calibration", () => {
     )
   })
 
-  it("rejects a generic striped HUD panel as a minimap", () => {
+  it("rejects a generic striped HUD panel as a minimap", async () => {
+    const cv = await loadOpenCv()
     const screenshot = frame(1_280, 720, [8, 10, 12, 255])
     drawHudPanel(screenshot, "right", 205)
-    expect(new MinimapLocator({
+    expect(new OpenCvMinimapLocator(cv).locate(screenshot, {
       placement: "right",
       minimapScale: 1.5,
-    }).locate(screenshot)).toBeUndefined()
+    }).calibration).toBeUndefined()
 
     const panel = frame(160, 160, [10, 15, 18, 255])
     drawHudPanel(panel, "right", 160)
-    expect(evaluateMinimapVisual(panel).valid).toBe(false)
+    expect(evaluateMinimapVisualCv(cv, panel).valid).toBe(false)
   })
 
-  it("invalidates version-one and wrong-scale persisted calibrations", () => {
+  it("invalidates old versions and cached crops that disagree with League HUD scale", () => {
     const current = createCalibration({
       sourceWidth: 3_840,
       sourceHeight: 2_160,
@@ -147,6 +155,10 @@ describe("minimap calibration", () => {
     expect(calibrationMatchesHints(staleSmall, {
       placement: "right",
       minimapScale: 1.5,
+    })).toBe(false)
+    expect(calibrationMatchesHints(staleSmall, {
+      placement: "right",
+      expectedMinimapFraction: 0.4,
     })).toBe(false)
   })
 
@@ -200,5 +212,21 @@ describe("League minimap settings", () => {
       windowMode: undefined,
     })
     expect(reader).toHaveBeenCalledWith("virtual/game.cfg")
+  })
+
+  it("parses the current 3.0 League minimap scale", () => {
+    expect(parseLeagueGameConfig("[HUD]\nMinimapScale=3.0000\nFlipMiniMap=0"))
+      .toMatchObject({ minimapScale: 3, placement: "right" })
+  })
+
+  it("accepts legacy General-section minimap keys used by some game.cfg files", () => {
+    expect(parseLeagueGameConfig(`
+      [General]
+      MinimapScale=1.25
+      FlipMiniMap=1
+    `)).toMatchObject({
+      placement: "left",
+      minimapScale: 1.25,
+    })
   })
 })

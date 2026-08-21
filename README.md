@@ -103,12 +103,12 @@ all modes. Recall checks that window often and permanently saves new games, but
 the client cannot provide a deeper local archive. For the best coverage, run
 Recall regularly instead of waiting months between syncs.
 
-You can optionally add a personal Riot API key in Settings. It is used only for
-the full Match-V5 history import started there. Recall resumes that import after
-restarts and respects the rate limits reported by Riot. Normal post-game sync,
-full recent scoreboards, grades, labels, and recent timelines remain local and
-keyless. Developer keys expire on Riot's schedule, so a key that worked
-yesterday may need to be regenerated.
+For the fullest starting archive, add a personal Riot development key in
+Settings and run the Match-V5 history import at least once. Recall resumes that
+import after restarts and respects the rate limits reported by Riot. Normal
+post-game sync, full recent scoreboards, grades, labels, and recent timelines
+remain local and keyless. Development keys expire after 24 hours, so a long
+import may require a freshly generated key before it can resume.
 
 Some rotating modes are not consistently exposed through Match-V5. ARAM:
 Mayhem games can still be recorded when they appear in the League client's
@@ -178,13 +178,16 @@ Recall currently supports Windows.
 2. Run the installer.
 3. Start League and open Recall. The first sync begins automatically.
 
-Windows may show a SmartScreen warning because the installer is not
-code-signed. The application and release workflow are available in this
-repository if you want to inspect exactly what is being installed.
+Current installers are Authenticode-signed and timestamped under Jordyn
+Kleinheksel with a Microsoft ID Verified certificate. SmartScreen may still
+show an "unrecognized app" warning while the new publisher identity builds
+download reputation. Verify that the publisher and release hash match before
+running any installer.
 
 Recall checks GitHub Releases for updates after the packaged app starts. New
 versions download in the background, then Settings offers **Restart to update**.
-Recall never restarts itself, and app updates preserve the local database.
+Recall shows installation progress, blocks an older build from opening the
+database during the handoff, and preserves a verified database snapshot.
 
 ## Build from source
 

@@ -1,5 +1,18 @@
 @import "./design/tokens.css";
 
+html[data-showcase-scene="tempo"],
+html[data-showcase-scene="tempo"] body,
+html[data-showcase-scene="tempo"] #app {
+  width: 360px;
+  height: 232px;
+  overflow: hidden;
+}
+
+html[data-showcase-scene="tempo"] .tempo-overlay {
+  width: 360px;
+  height: 232px;
+}
+
 :root {
   font-family: var(--ui-font-body);
   line-height: 1.5;
@@ -259,4 +272,17 @@ a:focus-visible,
     animation-iteration-count: 1 !important;
     transition-duration: .01ms !important;
   }
+}
+
+/*
+ * Recall often remains visible on a second monitor during a match. Ambient
+ * brand/chart animations otherwise keep Chromium's compositor active while
+ * League owns the performance-critical foreground. Data and controls remain
+ * live; only nonessential motion is suspended until the match ends.
+ */
+html[data-live-phase="InProgress"] .app-window *,
+html[data-live-phase="InProgress"] .app-window *::before,
+html[data-live-phase="InProgress"] .app-window *::after {
+  animation-play-state: paused !important;
+  transition-duration: 0s !important;
 }

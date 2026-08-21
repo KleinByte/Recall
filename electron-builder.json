@@ -14,14 +14,18 @@
     "!node_modules/better-sqlite3/deps/**/*",
     "!node_modules/better-sqlite3/src/**/*",
     "!node_modules/better-sqlite3/binding.gyp",
-    "!node_modules/better-sqlite3/README.md"
+    "!node_modules/better-sqlite3/README.md",
+    "!node_modules/better-sqlite3/prebuilds/darwin-*.node",
+    "!node_modules/better-sqlite3/prebuilds/linux-*.node",
+    "!node_modules/better-sqlite3/prebuilds/linuxmusl-*.node",
+    "!node_modules/better-sqlite3/prebuilds/win32-arm64.node"
   ],
   "extraResources": [
     "LICENSE",
     "NOTICE"
   ],
   "asarUnpack": [
-    "**/node_modules/better-sqlite3/prebuilds/*.node"
+    "**/node_modules/better-sqlite3/prebuilds/win32-x64.node"
   ],
   "win": {
     "target": [

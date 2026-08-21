@@ -11,18 +11,20 @@ import {
   TelemetryGrid,
 } from "./ui"
 import { api } from "../helpers/api"
-import { closeChampion } from "../helpers/navigation"
+import { closeChampion, reviewMatch } from "../helpers/navigation"
 import {
   championIconUrl,
   championNameById,
   formatCompact,
   formatDecimal,
+  formatDuration,
   formatPercent,
   formatRelativeDate,
   GRADE_ORDER,
   modeLabel,
 } from "../helpers/format"
 import { recallGradeFromRecallScore } from "../shared/recall-grade"
+import type { ChampionJungleClearStats } from "../shared/minimap/jungle-clear"
 import type { Champion } from "../types/lol"
 import type {
   ChampionNeed,
@@ -57,6 +59,7 @@ const performance = ref<PerformanceProfile | undefined>(undefined)
 const best = ref<MatchRow[]>([])
 const worst = ref<MatchRow[]>([])
 const needs = ref<ChampionNeed[]>([])
+const jungleClears = ref<ChampionJungleClearStats | null>(null)
 const family = ref<PerformanceFamily>("aram")
 const availableFamilies = ref<FamilyOption[]>([])
 const loading = ref(true)
@@ -100,11 +103,12 @@ async function loadChampion(championId: number) {
   loadFailed.value = false
   clearPerformance()
   needs.value = []
+  jungleClears.value = null
   availableFamilies.value = []
 
   try {
     const baseFilter = { championIds: [championId] }
-    const [summaries, championNeeds] = await Promise.all([
+    const [summaries, championNeeds, nextJungleClears] = await Promise.all([
       Promise.all(FAMILY_OPTIONS.map(async (option) => ({
         ...option,
         games: (await api.getSummary({
@@ -113,10 +117,15 @@ async function loadChampion(championId: number) {
         })).games,
       }))),
       api.getChampionNeeds([championId]),
+      api.getChampionJungleClearStats(championId).catch((error) => {
+        console.warn("Could not load champion jungle clears", error)
+        return null
+      }),
     ])
 
     if (request !== requestGeneration) return
     needs.value = championNeeds[championId] ?? []
+    jungleClears.value = nextJungleClears
     availableFamilies.value = summaries.filter((option) => option.games > 0)
     const selected = summaries.reduce((leader, option) =>
       option.games > leader.games ? option : leader)
@@ -181,6 +190,22 @@ const measuredGameLabel = computed(() => {
   const games = performance.value?.measuredGames ?? 0
   return `${games} measured ${games === 1 ? "game" : "games"}`
 })
+
+const recentJungleClears = computed(() => jungleClears.value?.samples.slice(0, 8) ?? [])
+
+function clearTime(milliseconds?: number) {
+  return milliseconds === undefined ? "—" : formatDuration(milliseconds / 1_000)
+}
+
+function clearCampName(campKey: string) {
+  return campKey.split("_").map((part) =>
+    part.charAt(0).toUpperCase() + part.slice(1)).join(" ")
+}
+
+function openJungleClearReview(gameId: number) {
+  closeChampion()
+  reviewMatch(gameId)
+}
 
 type TelemetryReading = {
   label: string
@@ -274,6 +299,95 @@ const gradeBars = computed(() => {
       />
 
       <template v-else-if="hasGames">
+        <Surface
+          v-if="jungleClears"
+          as="section"
+          variant="inset"
+          padding="compact"
+          class="jungle-clear-shell"
+          aria-label="Jungle clear times"
+        >
+          <header class="jungle-clear-head">
+            <div>
+              <p class="rvi-eyebrow">Summoner's Rift jungle</p>
+              <h3>First full clear times</h3>
+              <p>Six unique non-river camps, completed before 8:00.</p>
+            </div>
+            <span v-if="jungleClears.jungleGames" class="jungle-sample-badge">
+              {{ jungleClears.samples.length }} measured / {{ jungleClears.jungleGames }} jungle games
+            </span>
+          </header>
+
+          <p v-if="jungleClears.jungleGames === 0" class="jungle-empty muted">
+            No recorded jungle games on {{ name }} yet.
+          </p>
+          <template v-else>
+            <div class="jungle-clear-metrics">
+              <article>
+                <span>Complete clears</span>
+                <strong>{{ jungleClears.samples.length }}</strong>
+                <small>{{ jungleClears.telemetryGames }} games with clear evidence</small>
+              </article>
+              <article>
+                <span>Average</span>
+                <strong>{{ clearTime(jungleClears.averageClearTimeMs) }}</strong>
+                <small>Sixth camp game time</small>
+              </article>
+              <article>
+                <span>Fastest</span>
+                <strong>{{ clearTime(jungleClears.fastest?.clearTimeMs) }}</strong>
+                <small v-if="jungleClears.fastest">
+                  {{ formatRelativeDate(jungleClears.fastest.playedAt) }}
+                </small>
+                <small v-else>No complete sample</small>
+              </article>
+              <article>
+                <span>Longest</span>
+                <strong>{{ clearTime(jungleClears.longest?.clearTimeMs) }}</strong>
+                <small v-if="jungleClears.longest">
+                  {{ formatRelativeDate(jungleClears.longest.playedAt) }}
+                </small>
+                <small v-else>No complete sample</small>
+              </article>
+            </div>
+
+            <div v-if="recentJungleClears.length" class="jungle-clear-history">
+              <div class="jungle-history-heading">
+                <strong>Recent clear times</strong>
+                <span>Newest first</span>
+              </div>
+              <div class="jungle-table-shell">
+                <table>
+                  <thead>
+                    <tr><th>Date</th><th>Time</th><th>Route</th><th>Evidence</th><th /></tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="sample in recentJungleClears" :key="sample.gameId">
+                      <td>{{ formatRelativeDate(sample.playedAt) }}</td>
+                      <td><strong class="numeric">{{ clearTime(sample.clearTimeMs) }}</strong></td>
+                      <td class="jungle-route">
+                        {{ sample.route.map(clearCampName).join(' → ') }}
+                      </td>
+                      <td>{{ Math.round(sample.confidence * 100) }}%</td>
+                      <td>
+                        <button type="button" class="jungle-review-link" @click="openJungleClearReview(sample.gameId)">
+                          Review
+                        </button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <p v-else class="jungle-empty muted">
+              Recall found jungle games, but no complete six-camp first clear met the telemetry requirements.
+            </p>
+            <p class="jungle-policy muted">
+              Partial routes stay visible in each match review but are excluded from average, fastest, and longest.
+            </p>
+          </template>
+        </Surface>
+
         <Surface
           v-if="availableFamilies.length"
           as="section"
@@ -468,6 +582,153 @@ const gradeBars = computed(() => {
   line-height: 1;
 }
 
+.jungle-clear-shell {
+  display: grid;
+  gap: var(--ui-space-3);
+  overflow: hidden;
+}
+
+.jungle-clear-head,
+.jungle-history-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--ui-space-3);
+}
+
+.jungle-clear-head h3,
+.jungle-clear-head p {
+  margin: 0;
+}
+
+.jungle-clear-head h3 {
+  color: var(--ui-text-heading);
+  font: 16px var(--ui-font-heading);
+}
+
+.jungle-clear-head p:last-child,
+.jungle-history-heading span,
+.jungle-policy {
+  margin-top: 3px;
+  color: var(--ui-text-muted);
+  font-size: 11px;
+}
+
+.jungle-sample-badge {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--ui-accent) 32%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ui-accent) 8%, transparent);
+  color: var(--ui-text-subtle);
+  font-size: 11px;
+}
+
+.jungle-clear-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--ui-divider);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-inset);
+}
+
+.jungle-clear-metrics article {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: var(--ui-space-3);
+  border-right: 1px solid var(--ui-divider);
+}
+
+.jungle-clear-metrics article:last-child {
+  border-right: 0;
+}
+
+.jungle-clear-metrics span,
+.jungle-clear-metrics small {
+  color: var(--ui-text-muted);
+  font-size: 11px;
+}
+
+.jungle-clear-metrics span {
+  font-family: var(--ui-font-heading);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.jungle-clear-metrics strong {
+  color: var(--ui-text-heading);
+  font: 22px var(--ui-font-display);
+  font-variant-numeric: tabular-nums;
+}
+
+.jungle-clear-history {
+  display: grid;
+  gap: var(--ui-space-2);
+}
+
+.jungle-history-heading strong {
+  color: var(--ui-text-subtle);
+  font: 11px var(--ui-font-heading);
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+}
+
+.jungle-table-shell {
+  overflow-x: auto;
+  border: 1px solid var(--ui-divider);
+  border-radius: var(--ui-radius-sm);
+}
+
+.jungle-table-shell table {
+  width: 100%;
+  min-width: 650px;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.jungle-table-shell th,
+.jungle-table-shell td {
+  padding: 8px 9px;
+  border-bottom: 1px solid var(--ui-divider);
+  text-align: left;
+}
+
+.jungle-table-shell th {
+  color: var(--ui-text-muted);
+  font: 11px var(--ui-font-heading);
+  letter-spacing: .8px;
+  text-transform: uppercase;
+}
+
+.jungle-table-shell tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.jungle-route {
+  max-width: 360px;
+  color: var(--ui-text-subtle);
+}
+
+.jungle-review-link {
+  border: 0;
+  background: transparent;
+  color: var(--ui-accent-strong);
+  font: 11px var(--ui-font-heading);
+  letter-spacing: .7px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.jungle-review-link:hover {
+  color: var(--ui-text-heading);
+}
+
+.jungle-empty,
+.jungle-policy {
+  margin: 0;
+}
+
 .scope-toolbar {
   display: flex;
   align-items: end;
@@ -647,6 +908,9 @@ const gradeBars = computed(() => {
   .scope-toolbar label { min-width: 0; }
   .scope-toolbar p { margin: 0; }
   .rvi-compact { grid-template-columns: minmax(0, 1fr); }
+  .jungle-clear-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .jungle-clear-metrics article:nth-child(2) { border-right: 0; }
+  .jungle-clear-metrics article:nth-child(-n + 2) { border-bottom: 1px solid var(--ui-divider); }
 }
 
 @container champion-detail (max-width: 480px) {

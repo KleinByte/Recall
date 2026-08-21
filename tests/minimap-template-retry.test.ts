@@ -8,6 +8,7 @@ vi.mock("electron", () => ({
 
 import {
   completeChampionTemplateRoster,
+  validatedChampionTemplateRoster,
   type ChampionRosterTemplateInput,
 } from "../electron/main/minimap/data-dragon-template-provider.js"
 import type { ChampionMarkerTemplate } from
@@ -37,7 +38,7 @@ function template(
     ...descriptor,
     width: 24,
     height: 24,
-    interiorGray: new Float32Array(276),
+    rgba: new Uint8Array(24 * 24 * 4),
   }
 }
 
@@ -52,7 +53,14 @@ describe("minimap champion template roster", () => {
     ])).toEqual([])
   })
 
-  it("retries an incomplete roster and commits only the full set", async () => {
+  it("keeps only exact identities when a partial portrait download is usable", () => {
+    expect(validatedChampionTemplateRoster(roster, [
+      template(roster[0]),
+      template({ ...roster[1], team: "ally" }),
+    ])).toEqual([template(roster[0])])
+  })
+
+  it("commits safe partial templates while retrying for the full roster", async () => {
     const full = roster.map(template)
     const load = vi.fn()
       .mockResolvedValueOnce(full.slice(0, 1))
@@ -70,6 +78,7 @@ describe("minimap champion template roster", () => {
       getEnabled: () => true,
       getDataDragonVersion: () => "1.2.3",
       templateProvider: { load },
+      templateRetryIntervalMs: 0,
     })
     const session = {
       phase: "ChampSelect" as const,

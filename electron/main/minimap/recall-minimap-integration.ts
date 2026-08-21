@@ -11,8 +11,8 @@ import {
 import { PostGamePathingAnalysisService } from "../pathing/postgame-pathing-analysis-service.js"
 import type { GameClientRequest } from "../jungle/live-jungle-evidence.js"
 import {
-  completeChampionTemplateRoster,
   DataDragonTemplateProvider,
+  validatedChampionTemplateRoster,
 } from "./data-dragon-template-provider.js"
 import { ElectronDesktopCaptureBackend } from "./electron-desktop-capture-backend.js"
 import type { MinimapCaptureBackend } from "./capture-backend.js"
@@ -55,6 +55,8 @@ export interface RecallMinimapIntegrationOptions {
   puuid: string
   getEnabled(): boolean
   getDataDragonVersion(): string | undefined
+  onDataDragonVersionResolved?(version: string): void
+  onPathingReviewUpdated?(gameId: number): void
   getDebugEnabled?(): boolean
   getDebugOverlayEnabled?(): boolean
   onDebugFrame?(event: MinimapDebugFrameEvent): void
@@ -63,6 +65,7 @@ export interface RecallMinimapIntegrationOptions {
   getRoutePlan?(session: RecallLiveSessionLike): CampKey[] | undefined
   templateProvider?: Pick<DataDragonTemplateProvider, "load">
   captureBackend?: MinimapCaptureBackend
+  templateRetryIntervalMs?: number
 }
 
 function normalizedIdentity(value?: string) {
@@ -128,9 +131,12 @@ export class RecallMinimapIntegration {
   private readonly templates: Pick<DataDragonTemplateProvider, "load">
   private readonly postGame: PostGamePathingAnalysisService
   private lastRosterSignature = ""
+  private activeTemplateRosterSignature = ""
+  private lastTemplateAttemptSignature = ""
   private lastGameId?: number
   private activeCaptureGameId?: number
   private lastCalibrationHintsGameId?: number
+  private nextTemplateRetryAt = 0
   private operation = Promise.resolve()
 
   constructor(private readonly options: RecallMinimapIntegrationOptions) {
@@ -148,8 +154,22 @@ export class RecallMinimapIntegration {
       debugSampler,
       options.onDebugFrame,
     )
-    this.templates = options.templateProvider ??
-      new DataDragonTemplateProvider(options.getDataDragonVersion)
+    this.templates = options.templateProvider ?? new DataDragonTemplateProvider(
+      options.getDataDragonVersion,
+      {
+        onVersionResolved: (version) => {
+          if (!options.getDataDragonVersion()) {
+            // Main-process consumers no longer depend on the renderer having
+            // opened before a match starts. Persistence is best-effort.
+            try {
+              options.onDataDragonVersionResolved?.(version)
+            } catch {
+              // Template loading remains usable even if cache persistence fails.
+            }
+          }
+        },
+      },
+    )
     this.postGame = new PostGamePathingAnalysisService(this.repository)
   }
 
@@ -175,6 +195,7 @@ export class RecallMinimapIntegration {
           puuid: this.options.puuid,
           policy: { gameId, livePhase: "PostGame", matchCompleted: true },
         })
+        this.options.onPathingReviewUpdated?.(gameId)
       })
     return this.operation
   }
@@ -214,7 +235,7 @@ export class RecallMinimapIntegration {
     const mapNumber = session.game?.mapNumber ?? session.mapId
     const nextCaptureGameId = session.phase === "InProgress" &&
         session.gameId !== undefined && mapNumber === 11 &&
-        captureClassificationReady && !isPracticeTool
+        captureClassificationReady
       ? session.gameId
       : undefined
 
@@ -223,12 +244,8 @@ export class RecallMinimapIntegration {
       await this.coordinator.stop("complete")
       this.activeCaptureGameId = undefined
     }
-    if (session.phase === "InProgress" && isPracticeTool) {
-      this.lastGameId = undefined
-      this.lastCalibrationHintsGameId = undefined
-    }
     if (session.phase === "InProgress" && session.gameId !== undefined &&
-        captureClassificationReady && !isPracticeTool &&
+        captureClassificationReady &&
         this.lastCalibrationHintsGameId !== session.gameId) {
       try {
         this.coordinator.setCalibrationHints(
@@ -241,7 +258,8 @@ export class RecallMinimapIntegration {
       }
     }
     const rosterSignature = JSON.stringify({
-      version: this.options.getDataDragonVersion(),
+      gameId: session.gameId ?? null,
+      version: this.options.getDataDragonVersion() ?? null,
       roster: roster.map((entry) => [
         entry.participantKey,
         entry.championName,
@@ -249,16 +267,54 @@ export class RecallMinimapIntegration {
         entry.isLocal,
       ]),
     })
-    if (roster.length > 0 && rosterSignature !== this.lastRosterSignature) {
-      const templates = completeChampionTemplateRoster(
-        roster,
-        await this.templates.load(roster),
-      )
-      this.coordinator.setTemplates(templates)
-      if (templates.length === roster.length) this.lastRosterSignature = rosterSignature
-    }
-    if (session.phase === "InProgress" && isPracticeTool) {
+    const localParticipantKey = roster.find((entry) => entry.isLocal)?.participantKey
+    if (rosterSignature !== this.activeTemplateRosterSignature) {
+      // Templates carry participant keys as well as champion pixels. Never let a
+      // previous match's identities remain active while the next roster is
+      // incomplete or Data Dragon is being retried.
+      this.activeTemplateRosterSignature = rosterSignature
       this.lastRosterSignature = ""
+      this.coordinator.setTemplates([], {
+        rosterCount: roster.length,
+        localParticipantKey,
+        errorCode: roster.length === 0 && session.phase === "InProgress"
+          ? "live_roster_unavailable"
+          : undefined,
+      })
+    }
+    if (rosterSignature !== this.lastTemplateAttemptSignature) {
+      this.lastTemplateAttemptSignature = rosterSignature
+      this.nextTemplateRetryAt = 0
+    }
+    if (roster.length > 0 && rosterSignature !== this.lastRosterSignature &&
+        Date.now() >= this.nextTemplateRetryAt) {
+      try {
+        const templates = validatedChampionTemplateRoster(
+          roster,
+          await this.templates.load(roster),
+        )
+        const complete = templates.length === roster.length
+        this.coordinator.setTemplates(templates, {
+          rosterCount: roster.length,
+          localParticipantKey,
+          errorCode: complete ? undefined : "ddragon_templates_incomplete",
+        })
+        if (complete) {
+          this.lastRosterSignature = rosterSignature
+          this.nextTemplateRetryAt = 0
+        } else {
+          this.nextTemplateRetryAt = Date.now() +
+            (this.options.templateRetryIntervalMs ?? 5_000)
+        }
+      } catch (error) {
+        this.coordinator.setTemplateStatus({
+          rosterCount: roster.length,
+          localParticipantKey,
+          errorCode: error instanceof Error ? error.message : "ddragon_templates_failed",
+        })
+        this.nextTemplateRetryAt = Date.now() +
+          (this.options.templateRetryIntervalMs ?? 5_000)
+      }
     }
     if (session.phase === "InProgress") {
       this.lastGameId = nextCaptureGameId
@@ -283,9 +339,9 @@ export class RecallMinimapIntegration {
       gameType,
       captureClassificationReady,
       isPracticeTool,
-      debugEnabled: captureClassificationReady && !isPracticeTool &&
+      debugEnabled: captureClassificationReady &&
         this.options.getDebugEnabled?.() === true,
-      debugOverlayEnabled: captureClassificationReady && !isPracticeTool &&
+      debugOverlayEnabled: captureClassificationReady &&
         this.options.getDebugOverlayEnabled?.() === true,
       puuid: this.options.puuid,
       localRiotId: session.game?.activePlayer?.riotId,

@@ -20,6 +20,8 @@ export interface OpenDatabaseOptions {
   DatabaseClass?: typeof Database
   now?: () => number
   backupDir?: string
+  /** A disposable recovery staging copy already has an immutable source. */
+  backupBeforeMigration?: boolean
 }
 
 function assertHealthy(db: Database.Database) {
@@ -107,7 +109,11 @@ export function openDatabase(
       )
     }
 
-    if (hadUserDataBeforeOpen && currentVersion < latestSchemaVersion) {
+    if (
+      hadUserDataBeforeOpen &&
+      currentVersion < latestSchemaVersion &&
+      options.backupBeforeMigration !== false
+    ) {
       backUpBeforeMigration(
         db,
         filePath,

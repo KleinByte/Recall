@@ -21,7 +21,10 @@ import { SettingsStore, type UiSettings } from "./settings-store.js"
 import type { MinimapVisionDebugSnapshot, MinimapVisionDebugStatus } from "../../src/types/app.js"
 import { MatchSourceRepository } from "./database/match-source-repo.js"
 import { resolveDisplayTimezone } from "./matches/time-contract.js"
-import { openDatabase } from "./database/connection.js"
+import {
+  openDatabaseWithRecovery,
+  type DatabaseRecovery,
+} from "./database/recovery.js"
 import {
   createUpdateSnapshot,
   restoreLatestUpdateSnapshot,
@@ -75,14 +78,22 @@ import type {
   TrackedMode,
 } from "./matches/types.js"
 import { migrateLegacyUserData } from "./migrate-user-data.js"
-import { readLiveSession, type LivePhase, type LiveSession } from "./live-session.js"
+import {
+  mergeInProgressSessionMetadata,
+  needsInProgressMetadataRefresh,
+  readLiveSession,
+  type LivePhase,
+  type LiveSession,
+} from "./live-session.js"
 import { GameClient, readLiveGameSnapshot } from "./game-client.js"
 import {
   createRecallMinimapIntegration,
   type RecallMinimapIntegration,
 } from "./minimap/recall-minimap-integration.js"
-import { encodeMinimapDebugPng } from "./minimap/minimap-debug-sampler.js"
-import type { MinimapDebugFrameEvent } from "./minimap/minimap-telemetry-coordinator.js"
+import type {
+  MinimapDebugFrameEvent,
+  MinimapTelemetryHealth,
+} from "./minimap/minimap-telemetry-coordinator.js"
 import {
   calibrationHintsFromLeagueSettings,
   readLeagueMinimapSettings,
@@ -131,6 +142,12 @@ import { registerDataTrustIpc } from "./ipc/data-trust-ipc.js"
 import { LcuSessionGeneration } from "./lcu-session-generation.js"
 import { AnalysisWorkerClient } from "./background/analysis-worker-client.js"
 import { runStableAnalysis } from "./background/stable-analysis.js"
+import {
+  clearUpdateMarker,
+  markUpdateInProgress,
+  updateStartupState,
+  type UpdateStartupState,
+} from "./update-guard.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -139,6 +156,7 @@ process.env.APP_ROOT = path.join(__dirname, "../..")
 export const MAIN_DIST = path.join(process.env.APP_ROOT, "dist-electron")
 export const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist")
 export const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
+const OPEN_DEVTOOLS = Boolean(VITE_DEV_SERVER_URL) && process.env.RECALL_OPEN_DEVTOOLS === "1"
 
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
   ? path.join(process.env.APP_ROOT, "public")
@@ -159,7 +177,12 @@ if (os.release().startsWith("6.1")) app.disableHardwareAcceleration()
 // Set application name for Windows 10+ notifications
 if (process.platform === "win32") app.setAppUserModelId("com.kleinbyte.recall")
 
-if (!app.requestSingleInstanceLock()) {
+const updateStartup = updateStartupState(
+  app.getPath("userData"),
+  app.getVersion(),
+)
+
+if (updateStartup.kind === "normal" && !app.requestSingleInstanceLock()) {
   app.quit()
   process.exit(0)
 }
@@ -274,7 +297,7 @@ let championNames: Map<number, string> | undefined
  * flag the quit request would be swallowed by the same handler that hides.
  */
 let quitting = false
-let database: ReturnType<typeof openDatabase> | undefined
+let database: ReturnType<typeof openDatabaseWithRecovery>["database"] | undefined
 let repository: MatchesRepository | undefined
 let challenges: ChallengesRepository | undefined
 let profiles: ProfileRepository | undefined
@@ -296,6 +319,7 @@ let recall: MatchGradingService | undefined
 let analysisWorker: AnalysisWorkerClient | undefined
 let statsRevision = 0
 let startupRestoreError: string | undefined
+let startupRecovery: DatabaseRecovery | undefined
 let riotBackfillAbort: AbortController | undefined
 let riotBackfillTask: Promise<void> | undefined
 let riotBackfillRevision = 0
@@ -329,9 +353,17 @@ function collectionDisabled(): boolean {
 
 function getDatabase() {
   if (!database) {
-    database = openDatabase(getDatabasePath(), {
+    const result = openDatabaseWithRecovery(getDatabasePath(), {
       backupDir: getDatabaseBackupDir(),
     })
+    database = result.database
+    if (result.recovery) {
+      startupRecovery = result.recovery
+      console.warn(
+        `Recall recovered a corrupt database from ${result.recovery.sourcePath}. ` +
+        `The damaged generation was preserved at ${result.recovery.quarantinedPath}.`,
+      )
+    }
   }
   return database
 }
@@ -712,7 +744,7 @@ async function createWindow(startHidden = false) {
     frame: false,
     autoHideMenuBar: true,
     height: 940,
-    width: VITE_DEV_SERVER_URL ? 1500 + 760 : 1500,
+    width: OPEN_DEVTOOLS ? 1500 + 760 : 1500,
     minWidth: 1080,
     minHeight: 700,
     backgroundColor: "#0a1428",
@@ -729,7 +761,10 @@ async function createWindow(startHidden = false) {
 
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL)
-    win.webContents.openDevTools()
+    // DevTools adds a renderer and keeps the shared GPU process busy even
+    // while Recall is behind a running game. Make it explicit for profiling
+    // and ordinary game testing; set RECALL_OPEN_DEVTOOLS=1 when needed.
+    if (OPEN_DEVTOOLS) win.webContents.openDevTools()
   } else {
     win.loadFile(indexHtml)
   }
@@ -756,6 +791,53 @@ async function createWindow(startHidden = false) {
   })
 
   return win
+}
+
+async function showUpdateInProgress(
+  update: Extract<UpdateStartupState, { kind: "updating" }>,
+) {
+  await app.whenReady()
+  const win = new BrowserWindow({
+    title: "Recall is updating",
+    icon: path.join(process.env.VITE_PUBLIC, "favicon.ico"),
+    frame: false,
+    autoHideMenuBar: true,
+    height: 700,
+    width: 1080,
+    minWidth: 720,
+    minHeight: 520,
+    backgroundColor: "#030810",
+    show: false,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      webSecurity: true,
+    },
+  })
+
+  win.once("ready-to-show", () => win.show())
+  if (VITE_DEV_SERVER_URL) {
+    await win.loadURL(
+      `${VITE_DEV_SERVER_URL}?updating=${encodeURIComponent(update.targetVersion)}`,
+    )
+  } else {
+    await win.loadFile(indexHtml, {
+      query: { updating: update.targetVersion },
+    })
+  }
+  // This guard process deliberately does not own Electron's single-instance
+  // lock, so the newly installed executable can launch. Do not let an old
+  // executable remain resident long enough to hold installer files forever.
+  const poll = setInterval(() => {
+    const state = updateStartupState(app.getPath("userData"), app.getVersion())
+    if (state.kind === "normal") app.quit()
+  }, 500)
+  const timeout = setTimeout(() => app.quit(), 15_000)
+  app.once("will-quit", () => {
+    clearInterval(poll)
+    clearTimeout(timeout)
+  })
+  app.on("window-all-closed", () => app.quit())
 }
 
 function broadcast(win: BrowserWindow, channel: string, payload?: unknown) {
@@ -935,7 +1017,7 @@ function resetTempoOverlayPosition(mainWindow: BrowserWindow) {
 }
 
 const MINIMAP_DEBUG_OVERLAY_WIDTH = 430
-const MINIMAP_DEBUG_OVERLAY_HEIGHT = 505
+const MINIMAP_DEBUG_OVERLAY_HEIGHT = 800
 
 function minimapVisionDebugStatus(): MinimapVisionDebugStatus {
   return { visible: minimapVisionDebugRequestedVisible, locked: minimapVisionDebugLocked }
@@ -993,7 +1075,9 @@ function createMinimapVisionDebugWindow(mainWindow: BrowserWindow) {
     skipTaskbar: true,
     focusable: false,
     movable: true,
-    resizable: false,
+    resizable: true,
+    minWidth: 380,
+    minHeight: 560,
     show: false,
     webPreferences: { preload, nodeIntegration: false, contextIsolation: true, webSecurity: true },
   })
@@ -1071,6 +1155,61 @@ function resetMinimapVisionDebugPosition(mainWindow: BrowserWindow) {
   return minimapVisionDebugStatus()
 }
 
+
+function minimapVisionHealthSnapshot(
+  health: MinimapTelemetryHealth,
+): MinimapVisionDebugSnapshot["health"] {
+  return {
+    achievedFps: health.achievedFps,
+    captureAttempts: health.captureAttempts,
+    processedFrames: health.processedFrames,
+    rejectedFrames: health.rejectedFrames,
+    calibrationFailures: health.calibrationFailures,
+    startupAttempts: health.startupAttempts,
+    nextRetryAt: health.nextRetryAt,
+    eligibilityReason: health.eligibilityReason,
+    backendState: health.backendState,
+    sourceId: health.sourceId,
+    sourceName: health.sourceName,
+    discoveredWindowCount: health.discoveredWindowCount,
+    candidateSourceCount: health.candidateSourceCount,
+    candidateSourceNames: health.candidateSourceNames,
+    sourceDiscoveryAttempts: health.sourceDiscoveryAttempts,
+    captureMode: health.captureMode,
+    captureStage: health.captureStage,
+    frameDeliveryMode: health.frameDeliveryMode,
+    paintEventCount: health.paintEventCount,
+    paintSizeMismatchCount: health.paintSizeMismatchCount,
+    snapshotCaptureCount: health.snapshotCaptureCount,
+    lastPaintSize: health.lastPaintSize,
+    rendererFrameSerial: health.rendererFrameSerial,
+    lastErrorDetail: health.lastErrorDetail,
+    rosterCount: health.rosterCount,
+    templateCount: health.templateCount,
+    localTemplateAvailable: health.localTemplateAvailable,
+    templateErrorCode: health.templateErrorCode,
+    calibrationCandidatesEvaluated: health.calibrationCandidatesEvaluated,
+    calibrationCandidatesValid: health.calibrationCandidatesValid,
+    calibrationBestScore: health.calibrationBestScore,
+    calibrationFailureReason: health.calibrationFailureReason,
+    calibrationVariance: health.calibrationVariance,
+    calibrationEdgeDensity: health.calibrationEdgeDensity,
+    calibrationColoredRatio: health.calibrationColoredRatio,
+    visionEngine: health.visionEngine,
+    opencvVersion: health.opencvVersion,
+    visionWorkerState: health.visionWorkerState,
+    visionWorkerRestarts: health.visionWorkerRestarts,
+    visionProcessingMs: health.visionProcessingMs,
+    visionChampionMs: health.visionChampionMs,
+    visionCampMs: health.visionCampMs,
+    inferredCampClears: health.inferredCampClears,
+    clockSampleCount: health.clockSampleCount,
+    clockReady: health.clockReady,
+    lastErrorCode: health.lastErrorCode,
+    lastEvidenceErrorCode: health.lastEvidenceErrorCode,
+  }
+}
+
 function publishMinimapDebugFrame(event: MinimapDebugFrameEvent) {
   // PNG encoding and IPC are intentionally bounded; the capture loop remains
   // real-time while the overlay displays the latest available frame.
@@ -1087,7 +1226,12 @@ function publishMinimapDebugFrame(event: MinimapDebugFrameEvent) {
     gameTimeMs: sample.gameTimeMs,
     // This is the canonical inner-map crop only. The desktop frame is never
     // sent to a renderer or persisted by this path.
-    imageData: `data:image/png;base64,${Buffer.from(encodeMinimapDebugPng(frame)).toString("base64")}`,
+    // Raw canonical pixels avoid synchronous PNG encoding and large base64
+    // churn in Electron's main process while the diagnostic overlay is open.
+    // webContents.send clones this bounded 320px ROI for the renderer.
+    imageRgba: frame.data,
+    imageWidth: frame.width,
+    imageHeight: frame.height,
     calibration: sample.calibration,
     proposals: sample.markerProposals.slice(0, 32).map((proposal) => ({
       team: proposal.team,
@@ -1095,6 +1239,16 @@ function publishMinimapDebugFrame(event: MinimapDebugFrameEvent) {
       y: proposal.center.y,
       radius: proposal.radius,
       confidence: proposal.ringConfidence,
+      diameterPx: proposal.diameterPx,
+      aspectRatio: proposal.aspectRatio,
+      fillRatio: proposal.fillRatio,
+      proposalSource: proposal.proposalSource,
+      ringSupport: proposal.ringSupport,
+      ringSectors: proposal.ringSectors,
+      identityCandidate: proposal.identityCandidate,
+      identityScore: proposal.identityScore,
+      identityMargin: proposal.identityMargin,
+      identityAccepted: proposal.identityAccepted,
     })),
     detections: sample.detections.slice(0, 32).map((observation) => ({
       championName: observation.championName,
@@ -1116,25 +1270,40 @@ function publishMinimapDebugFrame(event: MinimapDebugFrameEvent) {
       state: camp.state,
       confidence: camp.sourceConfidence,
     })),
-    health: {
-      achievedFps: health.achievedFps,
-      captureAttempts: health.captureAttempts,
-      processedFrames: health.processedFrames,
-      rejectedFrames: health.rejectedFrames,
-      calibrationFailures: health.calibrationFailures,
-      lastErrorCode: health.lastErrorCode,
-    },
+    health: minimapVisionHealthSnapshot(health),
   }
   if (minimapVisionDebugWindow && !minimapVisionDebugWindow.isDestroyed()) {
     minimapVisionDebugWindow.webContents.send("minimap-vision-debug:update", latestMinimapVisionDebug)
   }
 }
 
+function resetMinimapVisionDebugFrame(mainWindow: BrowserWindow) {
+  minimapDebugGameId = undefined
+  latestMinimapVisionDebug = {
+    ...latestMinimapVisionDebug,
+    state: session?.minimapTelemetry.getHealth().state ?? "idle",
+    updatedAt: Date.now(),
+    frameSequence: undefined,
+    gameTimeMs: undefined,
+    imageRgba: undefined,
+    imageWidth: undefined,
+    imageHeight: undefined,
+    calibration: undefined,
+    proposals: [],
+    detections: [],
+    confirmed: [],
+    camps: [],
+    health: session
+      ? minimapVisionHealthSnapshot(session.minimapTelemetry.getHealth())
+      : latestMinimapVisionDebug.health,
+  }
+  sendMinimapVisionDebugUpdate(mainWindow)
+}
+
 function clearMinimapVisionDebugOverlay(mainWindow: BrowserWindow) {
   minimapDebugGameId = undefined
   minimapVisionDebugRequestedVisible = false
   minimapVisionDebugLocked = false
-  minimapVisionDebugWindow?.hide()
   latestMinimapVisionDebug = {
     enabled: false,
     state: "idle",
@@ -1151,6 +1320,10 @@ function clearMinimapVisionDebugOverlay(mainWindow: BrowserWindow) {
       calibrationFailures: 0,
     },
   }
+  // The debug surface is explicitly session-scoped. Destroying it at match
+  // end releases its renderer/GPU resources; toggling it later recreates it.
+  const debugWindow = minimapVisionDebugWindow
+  if (debugWindow && !debugWindow.isDestroyed()) debugWindow.destroy()
   sendMinimapVisionDebugUpdate(mainWindow)
 }
 
@@ -1163,14 +1336,7 @@ function publishMinimapDebugHealth() {
     enabled: true,
     state: health.state,
     updatedAt: Date.now(),
-    health: {
-      achievedFps: health.achievedFps,
-      captureAttempts: health.captureAttempts,
-      processedFrames: health.processedFrames,
-      rejectedFrames: health.rejectedFrames,
-      calibrationFailures: health.calibrationFailures,
-      lastErrorCode: health.lastErrorCode,
-    },
+    health: minimapVisionHealthSnapshot(health),
   }
   if (minimapVisionDebugWindow && !minimapVisionDebugWindow.isDestroyed()) {
     minimapVisionDebugWindow.webContents.send("minimap-vision-debug:update", latestMinimapVisionDebug)
@@ -1188,7 +1354,10 @@ function broadcastLive(win: BrowserWindow) {
   if (liveSession.phase === "Idle" ||
       (minimapDebugGameId !== undefined && liveSession.gameId !== minimapDebugGameId)) {
     if (minimapVisionDebugRequestedVisible || latestMinimapVisionDebug.enabled) {
-      clearMinimapVisionDebugOverlay(win)
+      // Preserve the explicitly opened diagnostic surface between phases. This
+      // lets users see eligibility/source errors before a match starts instead
+      // of making the overlay appear broken by hiding it automatically.
+      resetMinimapVisionDebugFrame(win)
     }
   } else {
     publishMinimapDebugHealth()
@@ -1322,6 +1491,12 @@ async function startSession(
     getEnabled: () => !collectionDisabled() &&
       settingsStore.getMain("minimap-telemetry-enabled") !== false,
     getDataDragonVersion: () => settingsStore.getMain("ddragon-version"),
+    onDataDragonVersionResolved: (version) => {
+      settingsStore.setMain("ddragon-version", version)
+    },
+    onPathingReviewUpdated: (gameId) => {
+      broadcast(win, "minimap:pathing-updated", gameId)
+    },
     getDebugEnabled: () =>
       settingsStore.getMain("minimap-vision-debug-enabled") === true,
     getDebugOverlayEnabled: () =>
@@ -1331,10 +1506,14 @@ async function startSession(
     debugDirectory: path.join(app.getPath("userData"), "Minimap Vision Debug"),
     getCalibrationHints: async () => {
       const configured = process.env.RECALL_LEAGUE_GAME_CONFIG?.trim()
+      const discoveredInstallDirectory = lcuDiscovery?.getInstallDirectory()
       const systemDrive = process.env.SystemDrive ?? "C:"
       const programFiles = process.env.ProgramFiles
       const candidates = [
         configured,
+        discoveredInstallDirectory
+          ? path.join(discoveredInstallDirectory, "Config", "game.cfg")
+          : undefined,
         path.join(systemDrive, "Riot Games", "League of Legends", "Config", "game.cfg"),
         programFiles
           ? path.join(programFiles, "Riot Games", "League of Legends", "Config", "game.cfg")
@@ -1344,10 +1523,7 @@ async function startSession(
       for (const candidate of [...new Set(candidates)]) {
         try {
           const settings = await readLeagueMinimapSettings(candidate)
-          return calibrationHintsFromLeagueSettings(
-            settings,
-            screen.getPrimaryDisplay().scaleFactor,
-          )
+          return calibrationHintsFromLeagueSettings(settings)
         } catch (error) {
           lastReadError = error
           // Try the next known League installation location.
@@ -1357,15 +1533,20 @@ async function startSession(
     },
   })
 
-  events.on("end-of-game", () => {
-    broadcast(win, "end-of-game")
-    void trackDatabaseTask(catchFinishedGame(win))
-  })
-  events.on("game-end", () => {
+  const finishLiveMatch = () => {
     trackMinimapTelemetry(minimapTelemetry.completeMatch())
+    clearMinimapVisionDebugOverlay(win)
     clearLiveSession(win)
     void trackDatabaseTask(catchFinishedGame(win))
+  }
+  events.on("end-of-game", () => {
+    broadcast(win, "end-of-game")
+    // Practice Tool and quickly closed post-game screens do not always yield
+    // the later gameflow transition. The EOG stats event is already terminal,
+    // so stop capture and finalize pathing here as well as on game-end.
+    finishLiveMatch()
   })
+  events.on("game-end", finishLiveMatch)
   events.on("pick", (championId: number | null) => {
     broadcast(win, "pick", championId)
   })
@@ -1444,6 +1625,7 @@ function stopSession(win: BrowserWindow): number {
   active.client.close()
   active.gameClient.close()
   session = undefined
+  clearMinimapVisionDebugOverlay(win)
   clearLiveSession(win)
 
   broadcast(win, "lcu:status", { connected: false, summoner: null })
@@ -1515,13 +1697,37 @@ async function refreshLiveSession(win: BrowserWindow, phase: LivePhase) {
 async function refreshLiveGameData(win: BrowserWindow) {
   if (!session || liveSession.phase !== "InProgress" || liveGameReading) return
   liveGameReading = true
-  const expectedGameId = liveSession.gameId
+  const activeSession = session
+  const startingRevision = liveRevision
 
   try {
-    const game = await readLiveGameSnapshot(session.gameClient)
+    if (needsInProgressMetadataRefresh(liveSession)) {
+      try {
+        const refreshed = await readLiveSession(
+          activeSession.client,
+          "InProgress",
+          activeSession.summoner.puuid,
+        )
+        if (session !== activeSession || liveSession.phase !== "InProgress" ||
+            liveRevision !== startingRevision) return
+        liveSession = mergeInProgressSessionMetadata(liveSession, refreshed)
+        // Capture eligibility depends on LCU identity/classification, not on
+        // Port 2999 being ready. Publish the repaired session immediately so
+        // source discovery and calibration can begin during the loading race.
+        trackMinimapTelemetry(activeSession.minimapTelemetry.update(liveSession))
+        broadcastLive(win)
+      } catch {
+        // The phase transition is eventually consistent. Continue with the
+        // Port 2999 read and retry LCU metadata on the next bounded poll.
+      }
+    }
+
+    const expectedGameId = liveSession.gameId
+    const game = await readLiveGameSnapshot(activeSession.gameClient)
     if (
-      !session ||
+      session !== activeSession ||
       liveSession.phase !== "InProgress" ||
+      liveRevision !== startingRevision ||
       liveSession.gameId !== expectedGameId
     ) return
     game.analysis = liveTempoTracker.update(game)
@@ -1535,6 +1741,7 @@ async function refreshLiveGameData(win: BrowserWindow) {
     liveSession = {
       ...liveSession,
       gameType: liveSession.gameType ?? game.gameType,
+      mapId: liveSession.mapId ?? game.mapNumber,
       game,
       updatedAt: game.updatedAt,
     }
@@ -2196,6 +2403,13 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     return new MinimapTelemetryRepository(getDatabase()).getReview(
       gameId,
       withPuuid().puuid,
+    )
+  })
+  ipcMain.handle("stats:champion-jungle-clears", (_event, rawChampionId: unknown) => {
+    const championId = integer(rawChampionId, "Champion id")
+    return new MinimapTelemetryRepository(getDatabase()).getChampionJungleClearStats(
+      withPuuid().puuid,
+      championId,
     )
   })
   ipcMain.handle("augments:owner-summary", (_event, rawAugmentId: unknown, rawChampionId: unknown) =>
@@ -3120,12 +3334,29 @@ async function main() {
   const startHidden = app.isPackaged && process.argv.includes(START_HIDDEN_ARG)
   const win = await createWindow(startHidden)
   createTray(win)
+  if (startupRecovery) {
+    void dialog.showMessageBox(win, {
+      type: "warning",
+      title: "Recall recovered your history",
+      message: "Recall found database corruption and opened the newest working backup.",
+      detail:
+        `Recovered from:\n${startupRecovery.sourcePath}\n\n` +
+        `Damaged database preserved at:\n${startupRecovery.quarantinedPath}`,
+      buttons: ["Continue"],
+      defaultId: 0,
+    })
+  }
 
   const updater = createUpdaterService({
     updater: autoUpdater,
     isPackaged: app.isPackaged,
     publish: (status) => broadcast(win, "app:update-status", status),
     beforeInstall: () => prepareShutdown(win, true),
+    beginInstall: (version) => markUpdateInProgress(
+      app.getPath("userData"),
+      version,
+    ),
+    cancelInstall: () => clearUpdateMarker(app.getPath("userData")),
   })
 
   registerIpc(win, updater)
@@ -3174,4 +3405,8 @@ async function main() {
   })
 }
 
-void main()
+if (updateStartup.kind === "updating") {
+  void showUpdateInProgress(updateStartup)
+} else {
+  void main()
+}

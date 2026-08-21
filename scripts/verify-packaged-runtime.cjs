@@ -4,11 +4,14 @@ const { spawnSync } = require("node:child_process")
 const { extractFile, listPackage } = require("@electron/asar")
 
 const REQUIRED_ARCHIVE_FILES = [
+  "node_modules/@techstark/opencv-js/package.json",
+  "node_modules/@techstark/opencv-js/dist/opencv.js",
   "node_modules/better-sqlite3/package.json",
   "node_modules/ws/package.json",
 ]
 const REQUIRED_BACKGROUND_FILES = [
   "dist-electron/main/analysis-worker.js",
+  "dist-electron/main/vision-worker.js",
 ]
 const FORBIDDEN_UNPACKED_FILES = [
   "node_modules/better-sqlite3/deps/sqlite3/sqlite3.c",
@@ -96,12 +99,19 @@ function verifyPackagedNativeRuntime(context, nativeBinaryPath) {
     "node_modules",
     "better-sqlite3"
   )
-  const workerPath = path.join(
+  const analysisWorkerPath = path.join(
     __dirname,
     "..",
     "dist-electron",
     "main",
     "analysis-worker.js"
+  )
+  const visionWorkerPath = path.join(
+    __dirname,
+    "..",
+    "dist-electron",
+    "main",
+    "vision-worker.js"
   )
   const probe = [
     `const Database = require(${JSON.stringify(modulePath)})`,
@@ -110,17 +120,14 @@ function verifyPackagedNativeRuntime(context, nativeBinaryPath) {
     `const row = database.prepare("SELECT 42 AS value").get()`,
     `database.close()`,
     `if (row.value !== 42) throw new Error("Unexpected SQLite result")`,
-    `const worker = new Worker(${JSON.stringify(workerPath)})`,
-    `const timer = setTimeout(() => { console.error("Analysis worker timed out"); process.exit(4) }, 10000)`,
-    `worker.once("error", error => { clearTimeout(timer); console.error(error); process.exit(5) })`,
-    `worker.once("message", async message => { clearTimeout(timer); if (message.result !== "pong") { console.error("Unexpected analysis worker response"); process.exit(6) }; await worker.terminate() })`,
-    `worker.postMessage({ id: 1, task: "ping" })`,
+    `const runWorker = (file, request, validate, label) => new Promise((resolve, reject) => { const worker = new Worker(file); const timer = setTimeout(() => { worker.terminate().catch(() => undefined); reject(new Error(label + " timed out")) }, 30000); worker.once("error", error => { clearTimeout(timer); reject(error) }); worker.once("message", async message => { clearTimeout(timer); try { validate(message); await worker.terminate(); resolve() } catch (error) { await worker.terminate().catch(() => undefined); reject(error) } }); worker.postMessage(request) })`,
+    `;(async () => { await runWorker(${JSON.stringify(analysisWorkerPath)}, { id: 1, task: "ping" }, message => { if (message.result !== "pong") throw new Error("Unexpected analysis worker response") }, "Analysis worker"); await runWorker(${JSON.stringify(visionWorkerPath)}, { id: 2, task: "initialize", canonicalSize: 320 }, message => { if (!message.ok || message.task !== "initialize" || message.result?.engine !== "opencv_js") throw new Error("Unexpected OpenCV vision worker response") }, "OpenCV vision worker") })().catch(error => { console.error(error); process.exit(6) })`,
   ].join(";")
   const result = spawnSync(executable, ["-e", probe], {
     cwd: context.appOutDir,
     encoding: "utf8",
     env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
-    timeout: 30_000,
+    timeout: 70_000,
     windowsHide: true,
   })
 
@@ -131,7 +138,7 @@ function verifyPackagedNativeRuntime(context, nativeBinaryPath) {
       result.stdout?.trim(),
     ].filter(Boolean).join(" ")
     throw new Error(
-      `Packaged better-sqlite3 execution failed` +
+      `Packaged runtime execution failed` +
       `${diagnostic ? `: ${diagnostic}` : ` with exit code ${result.status}`}`
     )
   }
@@ -158,10 +165,25 @@ module.exports = async context => {
     "app.asar.unpacked"
   )
   const nativeBinary = packagedNativeBinary(context)
+  const nativePrebuildDirectory = path.join(
+    unpackedRoot,
+    "node_modules",
+    "better-sqlite3",
+    "prebuilds"
+  )
+  const packagedNativeBinaries = fs.existsSync(nativePrebuildDirectory)
+    ? fs.readdirSync(nativePrebuildDirectory)
+      .filter(fileName => fileName.endsWith(".node"))
+      .sort()
+    : []
   const missingUnpackedFiles = nativeBinary &&
     !fs.existsSync(path.join(unpackedRoot, nativeBinary))
     ? [nativeBinary]
     : []
+  const expectedNativeFileName = nativeBinary && path.basename(nativeBinary)
+  const unexpectedNativeBinaries = packagedNativeBinaries.filter(
+    fileName => fileName !== expectedNativeFileName
+  )
   const buildOnlyUnpackedFiles = FORBIDDEN_UNPACKED_FILES.filter(
     filePath => fs.existsSync(path.join(unpackedRoot, filePath))
   )
@@ -180,6 +202,7 @@ module.exports = async context => {
     missingArchiveFiles.length > 0 ||
     missingBackgroundFiles.length > 0 ||
     missingUnpackedFiles.length > 0 ||
+    unexpectedNativeBinaries.length > 0 ||
     buildOnlyUnpackedFiles.length > 0 ||
     externalModules.length > 0
   ) {
@@ -194,6 +217,9 @@ module.exports = async context => {
           : "",
         missingUnpackedFiles.length > 0
           ? `Missing unpacked native files: ${missingUnpackedFiles.join(", ")}.`
+          : "",
+        unexpectedNativeBinaries.length > 0
+          ? `Foreign native binaries were packaged: ${unexpectedNativeBinaries.join(", ")}.`
           : "",
         buildOnlyUnpackedFiles.length > 0
           ? `Build-only native sources were packaged: ${buildOnlyUnpackedFiles.join(", ")}.`
@@ -214,10 +240,10 @@ module.exports = async context => {
 
   console.log(
     `Packaged runtime verified: ${REQUIRED_ARCHIVE_FILES.length} external modules, ` +
-    `${nativeBinary ? 1 : 0} native binary, no build-only native sources, ` +
+    `${packagedNativeBinaries.length} target native binary, no foreign/build-only native sources, ` +
     `bundled main-process dependencies, and ` +
     `${nativeRuntimeExecuted
-      ? "a successful in-memory native query and analysis-worker launch"
+      ? "a successful SQLite query plus analysis/OpenCV worker launches"
       : "cross-build static validation"}.`
   )
 }

@@ -1,5 +1,6 @@
-import type { NormalizedPoint } from "../../../src/shared/minimap/contracts.js"
+import type { CampKey, NormalizedPoint } from "../../../src/shared/minimap/contracts.js"
 import { normalizedDistance } from "../../../src/shared/minimap/contracts.js"
+import { CAMP_BY_KEY, SUMMONERS_RIFT_CAMPS } from "../../../src/shared/minimap/camp-map.js"
 
 export interface NavigationNode {
   id: string
@@ -29,8 +30,22 @@ const node = (
 const bidirectional = (pairs: Array<[string, string]>): NavigationEdge[] =>
   pairs.flatMap(([from, to]) => [{ from, to }, { from: to, to: from }])
 
+const jungleCampNodes = SUMMONERS_RIFT_CAMPS
+  .filter((camp) => camp.respawnRule === "standard" || camp.respawnRule === "buff")
+  .map((camp) => node(camp.key, camp.center.x, camp.center.y, "jungle", "camp"))
+
+const campAnchorNode = (
+  id: string,
+  campKey: CampKey,
+  ...tags: NavigationNode["tags"]
+) => {
+  const camp = CAMP_BY_KEY.get(campKey)
+  if (!camp) throw new Error(`missing_camp_anchor:${campKey}`)
+  return node(id, camp.center.x, camp.center.y, ...tags)
+}
+
 export const SUMMONERS_RIFT_GRAPH: NavigationGraph = {
-  version: 1,
+  version: 3,
   nodes: [
     node("blue_base", 0.07, 0.92, "base"),
     node("blue_gate", 0.15, 0.84, "base", "lane"),
@@ -55,29 +70,19 @@ export const SUMMONERS_RIFT_GRAPH: NavigationGraph = {
     node("bot_red_river", 0.83, 0.63, "lane", "river"),
     node("bot_red_outer", 0.90, 0.33, "lane"),
 
-    node("river_north", 0.39, 0.39, "river"),
+    campAnchorNode("river_north", "north_scuttle", "river"),
     node("river_north_mid", 0.45, 0.45, "river"),
     node("river_south_mid", 0.55, 0.55, "river"),
-    node("river_south", 0.61, 0.61, "river"),
-    node("baron_pit", 0.39, 0.47, "river", "objective"),
-    node("dragon_pit", 0.61, 0.53, "river", "objective"),
+    campAnchorNode("river_south", "south_scuttle", "river"),
+    campAnchorNode("baron_pit", "baron", "river", "objective"),
+    campAnchorNode("dragon_pit", "dragon", "river", "objective"),
 
-    node("west_blue", 0.275, 0.704, "jungle", "camp"),
-    node("west_gromp", 0.205, 0.758, "jungle", "camp"),
-    node("west_wolves", 0.35, 0.625, "jungle", "camp"),
-    node("west_raptors", 0.465, 0.676, "jungle", "camp"),
-    node("west_red", 0.525, 0.754, "jungle", "camp"),
-    node("west_krugs", 0.61, 0.835, "jungle", "camp"),
+    ...jungleCampNodes.filter((camp) => camp.id.startsWith("west_")),
     node("west_top_entry", 0.25, 0.49, "jungle", "river"),
     node("west_mid_entry", 0.42, 0.62, "jungle", "lane"),
     node("west_bot_entry", 0.54, 0.79, "jungle", "lane"),
 
-    node("east_blue", 0.725, 0.296, "jungle", "camp"),
-    node("east_gromp", 0.795, 0.242, "jungle", "camp"),
-    node("east_wolves", 0.65, 0.375, "jungle", "camp"),
-    node("east_raptors", 0.535, 0.324, "jungle", "camp"),
-    node("east_red", 0.475, 0.246, "jungle", "camp"),
-    node("east_krugs", 0.39, 0.165, "jungle", "camp"),
+    ...jungleCampNodes.filter((camp) => camp.id.startsWith("east_")),
     node("east_top_entry", 0.46, 0.21, "jungle", "lane"),
     node("east_mid_entry", 0.58, 0.38, "jungle", "lane"),
     node("east_bot_entry", 0.75, 0.51, "jungle", "river"),

@@ -55,7 +55,13 @@ const scopeId = ref<SkillScopeId>("rankedSolo")
 const seasonId = ref(defaultSeason.id)
 const role = ref<string | undefined>(undefined)
 const championId = ref<number | undefined>(undefined)
+const showcaseSkillTab = import.meta.env.DEV
+  ? new URLSearchParams(window.location.search).get("showcase")?.replace("skill-", "")
+  : undefined
 const tab = ref<SkillTab>("overview")
+if (showcaseSkillTab === "insights" || showcaseSkillTab === "analyze") {
+  tab.value = showcaseSkillTab
+}
 const rviArmDetailsOpen = ref(true)
 const tabModel = computed<string>({
   get: () => tab.value,

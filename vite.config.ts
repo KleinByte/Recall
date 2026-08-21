@@ -7,7 +7,7 @@ import pkg from "./package.json" with { type: "json" }
 // Pure JavaScript dependencies used by the main process are bundled so their
 // transitive dependency trees cannot be pruned by the desktop packager. Keep
 // only native or intentionally external runtime modules here.
-const mainProcessExternals = ["better-sqlite3", "electron", "ws"]
+const mainProcessExternals = ["@techstark/opencv-js", "better-sqlite3", "electron", "ws"]
 const rendererEntryBudgetBytes = 250 * 1024
 
 function rendererEntryBudget(): Plugin {
@@ -50,6 +50,7 @@ export default defineConfig(({ command }) => {
           entry: {
             index: "electron/main/index.ts",
             "analysis-worker": "electron/main/background/analysis-worker.ts",
+            "vision-worker": "electron/main/vision/vision-worker.ts",
           },
           onstart({ startup }) {
             if (process.env.VSCODE_DEBUG) {

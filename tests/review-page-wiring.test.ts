@@ -12,6 +12,7 @@ import type { ParticipantRow, TeamRow } from "../src/types/stats"
 const apiMocks = vi.hoisted(() => ({
   getReviewOverview: vi.fn(),
   getMatchReview: vi.fn(),
+  getJunglePathingReview: vi.fn(),
   getOwnerAugmentSummaries: vi.fn(),
   getRviProfile: vi.fn(),
   getReviewSessions: vi.fn(),
@@ -45,7 +46,7 @@ const champions: Champion[] = [{
   isVisibleInClient: true,
 }]
 
-function reviewFixture(): MatchReview {
+function reviewFixture(jungling = false): MatchReview {
   const owner = {
     participantId: 1,
     teamId: 100,
@@ -54,6 +55,10 @@ function reviewFixture(): MatchReview {
     summonerName: "Owner#NA1",
     recallScore: 74,
     augments: [],
+    spell1Id: jungling ? 11 : 4,
+    spell2Id: 14,
+    resolvedPosition: jungling ? "JUNGLE" : "BOTTOM",
+    positionResolverVersion: 3,
   } as ParticipantRow
   const team = {
     gameId: 42,
@@ -71,6 +76,8 @@ function reviewFixture(): MatchReview {
       lobbySize: 1,
       grade: "A",
       gradeReferenceSampleCount: 12,
+      resolvedPosition: jungling ? "JUNGLE" : "BOTTOM",
+      positionResolverVersion: 3,
     },
     records: [],
     scoreboard: [owner],
@@ -127,6 +134,11 @@ describe("ReviewPage wiring", () => {
     const review = reviewFixture()
     apiMocks.getReviewOverview.mockResolvedValue({ latest: review })
     apiMocks.getMatchReview.mockResolvedValue(review)
+    apiMocks.getJunglePathingReview.mockResolvedValue({
+      participants: [],
+      segments: [],
+      campClears: [],
+    })
     apiMocks.getOwnerAugmentSummaries.mockResolvedValue([])
     apiMocks.getRviProfile.mockResolvedValue(undefined)
     apiMocks.getReviewSessions.mockResolvedValue({ rows: [] })
@@ -163,6 +175,11 @@ describe("ReviewPage wiring", () => {
     await flushPromises()
 
     expect(apiMocks.getMatchReview).toHaveBeenCalledWith(42)
+    expect(apiMocks.getJunglePathingReview).toHaveBeenCalledWith(42)
+    expect(eventMocks.on).toHaveBeenCalledWith(
+      "minimap:pathing-updated",
+      expect.any(Function),
+    )
     const hero = wrapper.getComponent(MatchReviewHeroStub)
     const scoreboard = wrapper.getComponent(ReviewScoreboardStub)
     expect((hero.props("review") as MatchReview).match.gameId).toBe(42)
@@ -181,6 +198,35 @@ describe("ReviewPage wiring", () => {
     })
     expect(apiMocks.getTimeline).toHaveBeenCalledWith(42)
 
+    wrapper.unmount()
+  })
+
+  it("shows jungle clear review in a dedicated tab only for jungle games", async () => {
+    const jungleReview = reviewFixture(true)
+    apiMocks.getReviewOverview.mockResolvedValue({ latest: jungleReview })
+    apiMocks.getMatchReview.mockResolvedValue(jungleReview)
+
+    const wrapper = mount(ReviewPage, {
+      props: { champions },
+      global: {
+        stubs: {
+          MatchReviewHero: MatchReviewHeroStub,
+          ReviewScoreboard: ReviewScoreboardStub,
+        },
+      },
+    })
+    await flushPromises()
+
+    const jungleTab = wrapper.findAll(".match-tabs button").find(
+      (button) => button.text() === "Jungle clear",
+    )
+    expect(jungleTab).toBeDefined()
+    expect(wrapper.find('[aria-label="Jungle clear and pathing review"]').exists()).toBe(false)
+
+    await jungleTab!.trigger("click")
+    await flushPromises()
+
+    expect(wrapper.get('[aria-label="Jungle clear and pathing review"]').exists()).toBe(true)
     wrapper.unmount()
   })
 })

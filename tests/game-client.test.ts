@@ -6,6 +6,73 @@ const client = (responses: Record<string, unknown>) => ({
 })
 
 describe("readLiveGameSnapshot", () => {
+  it("prefers one aggregate Port 2999 snapshot and matches legacy-to-Riot identity fields", async () => {
+    const calls: string[] = []
+    const snapshot = await readLiveGameSnapshot({
+      request: async <T>(path: string) => {
+        calls.push(path)
+        if (path !== "/liveclientdata/allgamedata") {
+          throw new Error(`unexpected subset endpoint: ${path}`)
+        }
+        return {
+          gameData: { gameTime: 91, gameMode: "CLASSIC", mapNumber: 11 },
+          activePlayer: {
+            summonerName: "Recall Player",
+            currentGold: 650,
+            level: 3,
+          },
+          allPlayers: [{
+            championName: "Zac",
+            riotIdGameName: "Recall Player",
+            riotIdTagLine: "NA1",
+            team: "ORDER",
+            scores: { creepScore: 8 },
+          }, {
+            championName: "Ahri",
+            riotId: "Opponent#NA1",
+            team: "CHAOS",
+            scores: {},
+          }],
+        } as unknown as T
+      },
+    })
+
+    expect(calls).toEqual(["/liveclientdata/allgamedata"])
+    expect(snapshot.allies[0]).toMatchObject({
+      championName: "Zac",
+      riotId: "Recall Player#NA1",
+      isLocal: true,
+    })
+    expect(snapshot.enemies.map((player) => player.championName)).toEqual(["Ahri"])
+  })
+
+  it("keeps roster and map data when the optional event endpoint is unavailable", async () => {
+    const responses: Record<string, unknown> = {
+      "/liveclientdata/gamestats": { gameTime: 91, mapNumber: 11 },
+      "/liveclientdata/activeplayer": { riotId: "Recall#NA1", currentGold: 500 },
+      "/liveclientdata/playerlist": [{
+        championName: "Nunu",
+        riotId: "Recall#NA1",
+        team: "ORDER",
+        scores: { creepScore: 4 },
+      }],
+    }
+    const snapshot = await readLiveGameSnapshot({
+      request: async <T>(path: string) => {
+        if (path === "/liveclientdata/allgamedata" ||
+            path === "/liveclientdata/eventdata") {
+          throw new Error("temporarily_unavailable")
+        }
+        return responses[path] as T
+      },
+    })
+
+    expect(snapshot.available).toBe(true)
+    expect(snapshot.mapNumber).toBe(11)
+    expect(snapshot.allies[0]).toMatchObject({ championName: "Nunu", isLocal: true })
+    expect(snapshot.events).toEqual([])
+  })
+
   it("maps the documented local feed and splits teams around the active player", async () => {
     const snapshot = await readLiveGameSnapshot(client({
       "/liveclientdata/gamestats": {
@@ -145,6 +212,21 @@ describe("readLiveGameSnapshot", () => {
     }))
 
     expect(snapshot.allies).toHaveLength(1)
+    expect(snapshot.enemies).toEqual([])
+  })
+
+  it("does not use a non-unique Riot game-name fallback", async () => {
+    const snapshot = await readLiveGameSnapshot(client({
+      "/liveclientdata/gamestats": { gameTime: 1 },
+      "/liveclientdata/activeplayer": { summonerName: "Shared Name" },
+      "/liveclientdata/playerlist": [
+        { championName: "Annie", riotId: "Shared Name#NA1", team: "ORDER" },
+        { championName: "Lux", riotId: "Shared Name#EUW", team: "CHAOS" },
+      ],
+      "/liveclientdata/eventdata": { Events: [] },
+    }))
+
+    expect(snapshot.allies.every((player) => !player.isLocal)).toBe(true)
     expect(snapshot.enemies).toEqual([])
   })
 })

@@ -88,9 +88,15 @@ describe("update-ready notification", () => {
     expect(app).toContain("UpdateRecallAnimation")
     expect(app).toContain("runStartupTransition")
     expect(app).toContain(':phase="startupAnimationPhase"')
-    expect(animation).toContain('phase: "startup" | "channeling" | "arrival"')
+    expect(animation).toContain(
+      'phase: "startup" | "channeling" | "installing" | "arrival"',
+    )
     expect(animation).toContain("phase-startup")
     expect(animation).toContain("completion-burst")
+    expect(app).toContain("installingUpdateVersion")
+    expect(app).toContain('phase="installing"')
+    expect(animation).toContain('"installing"')
+    expect(animation).toContain("Update in progress")
     expect(settings).toContain("Check for updates")
     expect(settings).toContain("api.checkForUpdates()")
     expect(settings).toContain("https://developer.riotgames.com/")

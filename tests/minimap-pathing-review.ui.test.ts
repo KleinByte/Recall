@@ -76,4 +76,85 @@ describe("minimap pathing review fallback", () => {
     )
     expect(wrapper.find("canvas").exists()).toBe(false)
   })
+  it("renders map-backed playback without connecting unknown telemetry gaps", async () => {
+    apiMocks.getJunglePathingReview.mockResolvedValue({
+      analysis: {
+        analysisId: "playback",
+        gameId: 44,
+        puuid: "owner",
+        inputHash: "2".repeat(64),
+        graphVersion: 1,
+        modelVersion: 2,
+        status: "complete",
+        coverage: {},
+        createdAt: 1,
+      },
+      participants: [{
+        participantKey: "ally:local",
+        championName: "Nunu",
+        team: "ally",
+        isLocal: true,
+      }],
+      segments: [{
+        gameId: 44,
+        participantKey: "ally:local",
+        startTimeMs: 1_000,
+        endTimeMs: 3_000,
+        kind: "observed",
+        points: [{ x: 0.21, y: 0.71 }, { x: 0.28, y: 0.63 }],
+        confidence: 0.91,
+        modelVersion: 2,
+      }, {
+        gameId: 44,
+        participantKey: "ally:local",
+        startTimeMs: 4_500,
+        endTimeMs: 4_500,
+        kind: "unknown",
+        points: [{ x: 0.42, y: 0.51 }],
+        confidence: 0.55,
+        modelVersion: 2,
+      }],
+      campClears: [{
+        gameId: 44,
+        puuid: "owner",
+        campKey: "west_blue",
+        clearedAtMs: 4_000,
+        respawnAtMs: 304_000,
+        source: "minimap_cv",
+        sourceConfidence: 0.9,
+        attribution: "local",
+        attributionConfidence: 0.88,
+        evidence: {
+          campTransition: true,
+          localPositionObserved: true,
+          transitionConfidence: 0.9,
+        },
+        routeIndex: 0,
+        algorithmVersion: 3,
+      }],
+    })
+
+    const wrapper = mount(JunglePathingReview, {
+      props: { gameId: 44 },
+    })
+    await flushPromises()
+
+    const scrubber = wrapper.get<HTMLInputElement>(
+      'input[aria-label="Jungle path playback time"]',
+    )
+    await scrubber.setValue("5000")
+
+    expect(wrapper.get(".playback-map").attributes("style")).toContain("map11.png")
+    expect(wrapper.get("select").element.value).toBe("ally:local")
+    expect(wrapper.text()).toContain("Nunu · You")
+    expect(wrapper.findAll(".path-layer polyline")).toHaveLength(1)
+    expect(wrapper.findAll(".sighting-marker")).toHaveLength(1)
+    expect(wrapper.findAll(".clear-tick")).toHaveLength(1)
+    expect(wrapper.get(".first-clear-summary").text()).toContain("Incomplete")
+    expect(wrapper.get(".first-clear-summary").text()).toContain("1 / 6 unique camps")
+    expect(wrapper.text()).not.toContain("Live Client + position")
+    expect(wrapper.text()).toContain("Minimap CV")
+    expect(wrapper.find("canvas").exists()).toBe(false)
+  })
+
 })

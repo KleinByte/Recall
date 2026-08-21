@@ -15,6 +15,7 @@ import {
   latestSchemaVersion,
 } from "../electron/main/database/migrations.js"
 import {
+  migrationCvInvariants,
   migrationRehearsalCounts,
   migrationStorageProfile,
 } from "./migration-rehearsal-contract.js"
@@ -58,6 +59,7 @@ try {
   })
   const sourceVersion = Number(source.pragma("user_version", { simple: true }))
   const before = migrationRehearsalCounts(source)
+  const beforeCv = migrationCvInvariants(source)
   const beforeStorage = migrationStorageProfile(source)
   try {
     if (source.pragma("quick_check", { simple: true }) !== "ok") {
@@ -72,15 +74,18 @@ try {
   try {
     const copiedVersion = Number(rehearsal.pragma("user_version", { simple: true }))
     const copied = migrationRehearsalCounts(rehearsal)
+    const copiedCv = migrationCvInvariants(rehearsal)
     const sourceHashAfterCopy = sha256File(databasePath)
     if (copiedVersion !== sourceVersion ||
         JSON.stringify(copied) !== JSON.stringify(before) ||
+        JSON.stringify(copiedCv) !== JSON.stringify(beforeCv) ||
         sourceHashAfterCopy !== sourceHashBefore) {
       throw new Error("Rehearsal copy does not match source invariants")
     }
     rehearsal.pragma("foreign_keys = ON")
     const migratedVersion = applyMigrations(rehearsal)
     const after = migrationRehearsalCounts(rehearsal)
+    const afterCv = migrationCvInvariants(rehearsal)
     const afterStorage = migrationStorageProfile(rehearsal)
     const quickCheck = String(rehearsal.pragma("quick_check", { simple: true }))
     const foreignKeyViolations = rehearsal.pragma("foreign_key_check").length
@@ -105,6 +110,7 @@ try {
         promotedRawTimelines > before.timelineCacheRawBodies ||
         after.rawTimelineObservations !==
           before.rawTimelineObservations + promotedRawTimelines ||
+        JSON.stringify(afterCv) !== JSON.stringify(beforeCv) ||
         sourceHashAfterMigration !== sourceHashBefore) {
       throw new Error("Migration rehearsal invariants failed")
     }
@@ -120,6 +126,8 @@ try {
       foreignKeyViolations,
       before,
       after,
+      beforeCv,
+      afterCv,
       beforeStorage,
       afterStorage,
     })}\n`)

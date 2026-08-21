@@ -50,7 +50,10 @@ const refreshMessage = ref<string | null>(null)
 const showPatchNotes = ref(false)
 const updateStatus = ref<UpdateStatus>({ kind: "up-to-date" })
 const dismissedUpdateVersion = ref<string | null>(null)
-const startupAnimation = ref(true)
+const installingUpdateVersion = new URLSearchParams(window.location.search)
+  .get("updating")
+const showcaseMode = import.meta.env.DEV && new URLSearchParams(window.location.search).has("showcase")
+const startupAnimation = ref(!showcaseMode && !installingUpdateVersion)
 const startupAnimationPhase = ref<"startup" | "arrival">("startup")
 const updateAnimation = ref<{
   phase: "channeling" | "arrival"
@@ -99,6 +102,7 @@ function persistSettings() {
 }
 
 async function runStartupTransition() {
+  if (showcaseMode) return
   let seenVersion: string | undefined
   try {
     seenVersion = await api.getLastSeenPatchNotesVersion()
@@ -170,6 +174,9 @@ function openRecordNotification(gameId: number) {
 }
 
 onMounted(async () => {
+  // The update-guard renderer intentionally has no IPC handlers and must not
+  // touch application state while the installer is replacing the old build.
+  if (installingUpdateVersion) return
   api.notifyReady()
   void loadDataDragonVersion()
   void runStartupTransition()
@@ -199,6 +206,7 @@ onMounted(async () => {
   )
 
   events.on("live:updated", (live: LiveSession) => {
+    document.documentElement.dataset.livePhase = live.phase
     if (live.phase === "Idle") {
       hasFocusedLiveGame = false
     } else if (!hasFocusedLiveGame) {
@@ -248,7 +256,12 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="app-window">
+  <UpdateRecallAnimation
+    v-if="installingUpdateVersion"
+    phase="installing"
+    :version="installingUpdateVersion"
+  />
+  <div v-else class="app-window">
     <WindowTitleBar
       :record-notifications="recordNotifications"
       @mark-records-read="markRecordNotificationsRead"

@@ -3,18 +3,20 @@ import { computed } from "vue"
 import RecallMark from "./RecallMark.vue"
 
 const props = defineProps<{
-  phase: "startup" | "channeling" | "arrival"
+  phase: "startup" | "channeling" | "installing" | "arrival"
   version?: string
 }>()
 
 const eyebrow = computed(() => {
   if (props.phase === "channeling") return "Update channeling"
+  if (props.phase === "installing") return "Update in progress"
   if (props.phase === "arrival") return "Recall complete"
   return "B-ing back"
 })
 
 const headline = computed(() => {
   if (props.phase === "channeling") return `Preparing Recall ${props.version || ""}`
+  if (props.phase === "installing") return `Installing Recall ${props.version || ""}`
   if (props.phase === "arrival") return `Welcome to Recall ${props.version || ""}`
   return ""
 })
@@ -70,6 +72,10 @@ const headline = computed(() => {
   animation: channel-overlay 2.6s ease both;
 }
 
+.phase-installing {
+  opacity: 1;
+}
+
 .phase-startup {
   animation: arrival-overlay 2.7s ease both;
 }
@@ -95,6 +101,10 @@ const headline = computed(() => {
 
 .phase-channeling .update-recall-mark {
   animation: logo-channel 2.6s cubic-bezier(.35, .02, .22, 1) both;
+}
+
+.phase-installing .update-recall-mark {
+  animation: logo-installing 1.6s ease-in-out infinite alternate;
 }
 
 .phase-startup .update-recall-mark {
@@ -133,6 +143,10 @@ const headline = computed(() => {
   animation: beam-channel 2.6s ease-in both;
 }
 
+.phase-installing .beam {
+  animation: beam-installing 1.6s ease-in-out infinite alternate;
+}
+
 .phase-startup .beam {
   animation: beam-arrive 2.7s ease-out both;
 }
@@ -167,7 +181,8 @@ const headline = computed(() => {
 .recall-platform i:nth-child(2) { inset: 20%; }
 .recall-platform i:nth-child(3) { inset: 30%; }
 
-.phase-channeling .recall-platform {
+.phase-channeling .recall-platform,
+.phase-installing .recall-platform {
   animation: platform-channel 1.15s ease-in-out infinite alternate;
 }
 
@@ -193,7 +208,8 @@ const headline = computed(() => {
   transform: rotate(var(--angle)) translateX(58px);
 }
 
-.phase-channeling .particle {
+.phase-channeling .particle,
+.phase-installing .particle {
   animation: particle-rise 1.35s calc(var(--particle) * -90ms) linear infinite;
 }
 
@@ -272,6 +288,11 @@ const headline = computed(() => {
   100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 
+@keyframes logo-installing {
+  from { opacity: .72; transform: translateY(2px) scale(.98); }
+  to { opacity: 1; transform: translateY(-3px) scale(1.02); }
+}
+
 @keyframes beam-channel {
   0% { opacity: 0; transform: translateX(-50%) scaleY(.15); }
   30% { opacity: .7; transform: translateX(-50%) scaleY(1); }
@@ -284,6 +305,11 @@ const headline = computed(() => {
   18% { opacity: 1; }
   72% { opacity: .8; transform: translateX(-50%) scaleY(1); }
   100% { opacity: 0; }
+}
+
+@keyframes beam-installing {
+  from { opacity: .3; transform: translateX(-50%) scaleY(.8); }
+  to { opacity: .9; transform: translateX(-50%) scaleY(1.1); }
 }
 
 @keyframes platform-channel {

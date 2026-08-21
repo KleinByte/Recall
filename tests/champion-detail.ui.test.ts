@@ -13,6 +13,7 @@ const apiMocks = vi.hoisted(() => ({
   getRviProfile: vi.fn(),
   listMatches: vi.fn(),
   getChampionNeeds: vi.fn(),
+  getChampionJungleClearStats: vi.fn(),
 }))
 
 vi.mock("../src/helpers/api", () => ({ api: apiMocks }))
@@ -68,6 +69,30 @@ describe("ChampionDetail RVI scope", () => {
     })
     apiMocks.listMatches.mockResolvedValue({ rows: [], total: 0, page: 1, pageSize: 3 })
     apiMocks.getChampionNeeds.mockResolvedValue({ 103: [] })
+    const fastest = {
+      gameId: 90,
+      championId: 103,
+      playedAt: Date.now() - 86_400_000,
+      win: 1,
+      clearTimeMs: 202_000,
+      route: ["west_blue", "west_gromp", "west_wolves", "west_raptors", "west_red", "west_krugs"],
+      confidence: .91,
+    }
+    const longest = {
+      ...fastest,
+      gameId: 91,
+      clearTimeMs: 230_000,
+      playedAt: Date.now() - 172_800_000,
+    }
+    apiMocks.getChampionJungleClearStats.mockResolvedValue({
+      championId: 103,
+      jungleGames: 3,
+      telemetryGames: 2,
+      samples: [fastest, longest],
+      averageClearTimeMs: 216_000,
+      fastest,
+      longest,
+    })
   })
 
   it("uses the current champion-filtered RVI profile and scopes mode changes consistently", async () => {
@@ -99,6 +124,11 @@ describe("ChampionDetail RVI scope", () => {
     expect(apiMocks.getGradeDistribution).toHaveBeenLastCalledWith(
       { championIds: [103], modeFamily: "sr" },
     )
+    expect(apiMocks.getChampionJungleClearStats).toHaveBeenCalledWith(103)
+    expect(wrapper.get(".jungle-clear-shell").text()).toContain("Average3:36")
+    expect(wrapper.get(".jungle-clear-shell").text()).toContain("Fastest3:22")
+    expect(wrapper.get(".jungle-clear-shell").text()).toContain("Longest3:50")
+    expect(wrapper.findAll(".jungle-clear-history tbody tr")).toHaveLength(2)
 
     await wrapper.get(".scope-toolbar select").setValue("aram")
     await flushPromises()

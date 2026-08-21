@@ -70,6 +70,10 @@ export function configuredLcuLockfilePath(
   return configured ? path.resolve(configured) : undefined
 }
 
+export function leagueInstallDirectoryFromLockfilePath(lockfilePath: string) {
+  return path.dirname(path.resolve(lockfilePath))
+}
+
 export class LcuDiscovery extends EventEmitter {
   private installDirectory?: string
   private discoveryTimer?: NodeJS.Timeout
@@ -85,6 +89,7 @@ export class LcuDiscovery extends EventEmitter {
     if (configuredLockfile) {
       this.stopped = false
       this.lockfilePath = configuredLockfile
+      this.installDirectory = leagueInstallDirectoryFromLockfilePath(configuredLockfile)
       watchFile(this.lockfilePath, { interval: 1_000 }, () => this.readLockfile())
       this.readLockfile()
       return
@@ -108,6 +113,14 @@ export class LcuDiscovery extends EventEmitter {
     this.installDirectory = undefined
     this.lockfilePath = undefined
     this.previousLockfile = undefined
+  }
+
+  getInstallDirectory() {
+    return this.installDirectory
+  }
+
+  getLockfilePath() {
+    return this.lockfilePath
   }
 
   private async discover() {
