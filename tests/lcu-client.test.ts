@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { buildAuthHeader, LcuClient } from "../electron/main/lcu-client.js"
+import { createServer } from "node:net"
+import {
+  buildAuthHeader,
+  LcuClient,
+  LcuRequestTimeoutError,
+} from "../electron/main/lcu-client.js"
 import { LcuEvents } from "../electron/main/lcu-events.js"
 
 describe("buildAuthHeader", () => {
@@ -43,5 +48,33 @@ describe("buildAuthHeader", () => {
     const events = new LcuEvents(credentials)
     client.close()
     events.stop()
+  })
+
+  it("bounds a local API request that accepts a socket but never responds", async () => {
+    const sockets = new Set<import("node:net").Socket>()
+    const server = createServer((socket) => {
+      sockets.add(socket)
+      socket.on("close", () => sockets.delete(socket))
+    })
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+    const address = server.address()
+    if (!address || typeof address === "string") throw new Error("test_server_address_missing")
+    const client = new LcuClient({
+      address: "127.0.0.1",
+      port: address.port,
+      username: "riot",
+      password: "local-secret",
+      protocol: "https",
+    })
+
+    try {
+      await expect(client.request("/never", { timeoutMs: 25 }))
+        .rejects.toBeInstanceOf(LcuRequestTimeoutError)
+    } finally {
+      client.close()
+      for (const socket of sockets) socket.destroy()
+      await new Promise<void>((resolve, reject) => server.close((error) =>
+        error ? reject(error) : resolve()))
+    }
   })
 })

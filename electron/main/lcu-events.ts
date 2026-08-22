@@ -9,9 +9,8 @@ import {
   type LCUEventMessage,
 } from "./interface.js"
 
-/** The client refuses WebSocket connections for a short time after launching. */
-const CONNECT_DELAY_MS = 10_000
-const RECONNECT_DELAY_MS = 15_000
+const INITIAL_RECONNECT_DELAY_MS = 500
+const MAXIMUM_RECONNECT_DELAY_MS = 15_000
 
 function parseSessionEvent(event: ChampSelectSessionEvent) {
   return event.actions
@@ -32,7 +31,7 @@ function parseEventMessage(message: string) {
 /**
  * Subscribes to the League Client event stream.
  *
- * Emits `pick`, `game-start`, `game-end` and `end-of-game`. Connection
+ * Emits `pick`, `game-start`, gameflow `phase` and `end-of-game`. Connection
  * failures are retried quietly, since the client is frequently unavailable
  * while starting.
  */
@@ -41,6 +40,7 @@ export class LcuEvents extends EventEmitter {
   private timer?: NodeJS.Timeout
   private stopped = true
   private inGame = false
+  private reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS
   private readonly credentials: LcuCredentials
 
   constructor(credentials: LcuCredentials) {
@@ -51,7 +51,7 @@ export class LcuEvents extends EventEmitter {
   start() {
     if (!this.stopped || this.timer || this.socket) return
     this.stopped = false
-    this.timer = setTimeout(() => this.connect(), CONNECT_DELAY_MS)
+    this.connect()
   }
 
   stop() {
@@ -62,6 +62,12 @@ export class LcuEvents extends EventEmitter {
     this.socket?.terminate()
     this.socket = undefined
     this.removeAllListeners()
+  }
+
+  /** Aligns edge-triggered event state after HTTP reconciliation on reconnect. */
+  reconcilePhase(phase: string) {
+    if (phase === "InProgress") this.inGame = true
+    else if (phase !== "Reconnect" && phase !== "GameStart") this.inGame = false
   }
 
   private connect() {
@@ -76,10 +82,14 @@ export class LcuEvents extends EventEmitter {
     })
 
     socket.on("open", () => {
+      this.reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS
       // 5 means subscribe.
       socket.send(`[5, "${LCUEvents.EndOfGameStats}"]`)
       socket.send(`[5, "${LCUEvents.ChampSelectSession}"]`)
       socket.send(`[5, "${LCUEvents.GameSession}"]`)
+      // WebSocket events are hints rather than a replayable log. Callers must
+      // reconcile the current HTTP phase whenever a transport opens.
+      this.emit("connected")
     })
 
     socket.on("message", (raw) => this.handleMessage(raw.toString()))
@@ -91,7 +101,13 @@ export class LcuEvents extends EventEmitter {
     socket.on("close", () => {
       if (this.socket === socket) this.socket = undefined
       if (this.stopped) return
-      this.timer = setTimeout(() => this.connect(), RECONNECT_DELAY_MS)
+      this.emit("disconnected")
+      const delay = this.reconnectDelayMs
+      this.reconnectDelayMs = Math.min(
+        MAXIMUM_RECONNECT_DELAY_MS,
+        this.reconnectDelayMs * 2,
+      )
+      this.timer = setTimeout(() => this.connect(), delay)
     })
 
     this.socket = socket
@@ -108,10 +124,11 @@ export class LcuEvents extends EventEmitter {
 
     switch (event.type) {
       case LCUEvents.EndOfGameStats:
-        this.emit("end-of-game")
+        this.emit("end-of-game", event.data)
         break
 
       case LCUEvents.ChampSelectSession: {
+        if (!event.data || !Array.isArray(event.data.actions)) break
         this.emit("champ-select", event.data)
         const championId = parseSessionEvent(event.data)
         if (championId !== undefined && championId < 0) {
@@ -123,19 +140,22 @@ export class LcuEvents extends EventEmitter {
       }
 
       case LCUEvents.GameSession:
+        if (!event.data || typeof event.data.phase !== "string") break
         this.emit("phase", event.data.phase)
         if (event.data.phase === "InProgress") {
-          this.inGame = true
-          this.emit(
-            "game-start",
-            event.data.gameData.playerChampionSelections,
-          )
-        } else if (this.inGame) {
-          // Leaving a game is the earliest reliable sign that one finished.
-          // The end-of-game screen follows, but is skipped entirely if the
-          // player closes it quickly or the client restarts.
+          if (!this.inGame) {
+            this.inGame = true
+            this.emit(
+              "game-start",
+              event.data.gameData?.playerChampionSelections ?? [],
+            )
+          }
+        } else if (event.data.phase !== "Reconnect" &&
+            event.data.phase !== "GameStart") {
+          // Reconnect is explicitly nonterminal: the game process may return
+          // and the same logical capture must resume. The lifecycle reducer
+          // decides whether every other phase is terminal using Port 2999 too.
           this.inGame = false
-          this.emit("game-end")
         }
         break
     }

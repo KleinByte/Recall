@@ -2492,6 +2492,43 @@ export const migrations: Migration[] = [
       }
     },
   },
+  {
+    // Keep only the small logical-game journal needed to bridge an LCU or
+    // Recall restart. Live snapshots and minimap observations remain in their
+    // existing bounded stores.
+    version: 36,
+    up: `
+      CREATE TABLE active_game_sessions (
+        owner_puuid TEXT PRIMARY KEY CHECK (length(trim(owner_puuid)) > 0),
+        game_id INTEGER CHECK (game_id IS NULL OR game_id > 0),
+        lifecycle_state TEXT NOT NULL CHECK (lifecycle_state IN (
+          'idle','champ_select','launching','tracking','suspended','ending','finalizing'
+        )),
+        session_json TEXT NOT NULL CHECK (json_valid(session_json)),
+        lifecycle_json TEXT NOT NULL CHECK (json_valid(lifecycle_json)),
+        started_at INTEGER NOT NULL CHECK (started_at >= 0),
+        updated_at INTEGER NOT NULL CHECK (updated_at >= started_at),
+        last_lcu_seen_at INTEGER CHECK (
+          last_lcu_seen_at IS NULL OR last_lcu_seen_at >= 0
+        ),
+        last_port_seen_at INTEGER CHECK (
+          last_port_seen_at IS NULL OR last_port_seen_at >= 0
+        )
+      );
+      CREATE INDEX idx_active_game_id
+        ON active_game_sessions (game_id, updated_at DESC);
+    `,
+    verify: (db) => {
+      const table = db.prepare(`
+        SELECT name FROM sqlite_master
+        WHERE type = 'table' AND name = 'active_game_sessions'
+      `).get()
+      if (!table) throw new Error("active_game_journal_missing")
+      if ((db.pragma("foreign_key_check") as unknown[]).length > 0) {
+        throw new Error("active_game_journal_foreign_key_violation")
+      }
+    },
+  },
 ]
 
 export const latestSchemaVersion = migrations.at(-1)?.version ?? 0

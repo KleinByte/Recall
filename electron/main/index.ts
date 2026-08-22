@@ -78,6 +78,7 @@ import type {
 } from "./matches/types.js"
 import { migrateLegacyUserData } from "./migrate-user-data.js"
 import {
+  enrichLiveSessionNames,
   mergeInProgressSessionMetadata,
   needsInProgressMetadataRefresh,
   readLiveSession,
@@ -85,6 +86,10 @@ import {
   type LiveSession,
 } from "./live-session.js"
 import { GameClient, readLiveGameSnapshot } from "./game-client.js"
+import {
+  GameLifecycleCoordinator,
+  type GameLifecycleEffect,
+} from "./game-lifecycle-coordinator.js"
 import {
   createRecallMinimapIntegration,
   type RecallMinimapIntegration,
@@ -98,6 +103,7 @@ import {
   readLeagueMinimapSettings,
 } from "./minimap/league-minimap-settings.js"
 import { MinimapTelemetryRepository } from "./database/minimap-telemetry-repo.js"
+import { ActiveGameRepository } from "./database/active-game-repo.js"
 import { LiveTempoTracker } from "./live-analysis.js"
 import { fetchQueues } from "./matches/queues.js"
 import { RiotHistoryBackfill } from "./riot/history-backfill.js"
@@ -213,7 +219,8 @@ function getDatabaseBackupDir() {
 
 /** How long the client needs after a game before its history is readable. */
 const PERIODIC_SYNC_INTERVAL_MS = 5 * 60_000
-const LIVE_GAME_REFRESH_INTERVAL_MS = 2_000
+const LIVE_GAME_REFRESH_INTERVAL_MS = 1_000
+const LCU_LIFECYCLE_REQUEST_TIMEOUT_MS = 1_500
 const SESSION_RETRY_DELAY_MS = 10_000
 
 interface TempoOverlayStatus {
@@ -235,12 +242,22 @@ interface Session {
   regionalRoute?: string
   platformId?: string
   timer: NodeJS.Timeout
-  liveTimer: NodeJS.Timeout
+  lifecycleReconcile?: Promise<void>
+}
+
+/** State owned by the logical game/account rather than LCU's UI transport. */
+interface ActiveGameRuntime {
+  ownerPuuid: string
   gameClient: GameClient
   minimapTelemetry: RecallMinimapIntegration
+  lifecycle: GameLifecycleCoordinator
+  liveTimer: NodeJS.Timeout
+  finalization?: Promise<void>
+  lastJournalWriteAt: number
 }
 
 let session: Session | undefined
+let activeGame: ActiveGameRuntime | undefined
 let connectRetry: NodeJS.Timeout | undefined
 let lcuDiscovery: LcuDiscovery | undefined
 let tray: Tray | undefined
@@ -273,6 +290,8 @@ let lastMinimapDebugPublishAt = 0
 let minimapDebugGameId: number | undefined
 let liveRevision = 0
 let liveGameReading = false
+let activeGameRestore: Promise<void> | undefined
+let pendingFinishedGamePuuid: string | undefined
 let liveSession: LiveSession = {
   phase: "Idle",
   benchChampionIds: [],
@@ -303,6 +322,7 @@ let masteryHistory: MasteryRepository | undefined
 let liveGameCaptures: LiveGameCaptureRepository | undefined
 const liveTempoTracker = new LiveTempoTracker()
 let champSelect: ChampSelectRepository | undefined
+let activeGames: ActiveGameRepository | undefined
 let rankedHistory: RankedRepository | undefined
 let goals: GoalsRepository | undefined
 let insights: InsightsRepository | undefined
@@ -627,6 +647,11 @@ function getChampSelect() {
     champSelect = new ChampSelectRepository(getDatabase())
   }
   return champSelect
+}
+
+function getActiveGames() {
+  if (!activeGames) activeGames = new ActiveGameRepository(getDatabase())
+  return activeGames
 }
 
 function saveRiotAccount(
@@ -1140,7 +1165,9 @@ function toggleMinimapVisionDebugOverlay(mainWindow: BrowserWindow) {
   overlay.setIgnoreMouseEvents(false)
   if (minimapVisionDebugRequestedVisible && !overlay.webContents.isLoadingMainFrame()) overlay.showInactive()
   if (!minimapVisionDebugRequestedVisible) overlay.hide()
-  if (session) trackMinimapTelemetry(session.minimapTelemetry.update(liveSession))
+  if (activeGame) {
+    trackMinimapTelemetry(activeGame.minimapTelemetry.update(liveSession))
+  }
   sendMinimapVisionDebugUpdate(mainWindow)
   return minimapVisionDebugStatus()
 }
@@ -1284,7 +1311,7 @@ function resetMinimapVisionDebugFrame(mainWindow: BrowserWindow) {
   minimapDebugGameId = undefined
   latestMinimapVisionDebug = {
     ...latestMinimapVisionDebug,
-    state: session?.minimapTelemetry.getHealth().state ?? "idle",
+    state: activeGame?.minimapTelemetry.getHealth().state ?? "idle",
     updatedAt: Date.now(),
     frameSequence: undefined,
     gameTimeMs: undefined,
@@ -1296,8 +1323,8 @@ function resetMinimapVisionDebugFrame(mainWindow: BrowserWindow) {
     detections: [],
     confirmed: [],
     camps: [],
-    health: session
-      ? minimapVisionHealthSnapshot(session.minimapTelemetry.getHealth())
+    health: activeGame
+      ? minimapVisionHealthSnapshot(activeGame.minimapTelemetry.getHealth())
       : latestMinimapVisionDebug.health,
   }
   sendMinimapVisionDebugUpdate(mainWindow)
@@ -1332,9 +1359,9 @@ function clearMinimapVisionDebugOverlay(mainWindow: BrowserWindow) {
 
 function publishMinimapDebugHealth() {
   if (!MINIMAP_VISION_DEBUG_AVAILABLE ||
-      !minimapVisionDebugRequestedVisible || !session ||
+      !minimapVisionDebugRequestedVisible || !activeGame ||
       settingsStore.getMain("minimap-vision-overlay-enabled") !== true) return
-  const health = session.minimapTelemetry.getHealth()
+  const health = activeGame.minimapTelemetry.getHealth()
   latestMinimapVisionDebug = {
     ...latestMinimapVisionDebug,
     enabled: true,
@@ -1410,88 +1437,15 @@ function createTray(win: BrowserWindow) {
   tray.on("double-click", () => reveal(win))
 }
 
-async function startSession(
+function createMinimapIntegration(
   win: BrowserWindow,
-  credentials: LcuCredentials,
-  generation: number,
+  puuid: string,
+  gameClient: GameClient,
 ) {
-  const isCurrent = () =>
-    lcuSessionGeneration.isCurrent(generation) &&
-    !quitting &&
-    !collectionDisabled()
-  if (!isCurrent()) return
-  const client = new LcuClient(credentials)
-
-  let summoner: Summoner
-  let regionalRoute: string | undefined
-  let platformId: string | undefined
-  try {
-    summoner = await client.request<Summoner>(
-      "/lol-summoner/v1/current-summoner",
-    )
-    if (!isCurrent()) {
-      client.close()
-      return
-    }
-  } catch (error) {
-    // The client is running but not ready — still signing in, or busy during a
-    // game. Discovery will not fire again because the lockfile has not changed,
-    // so retry here rather than waiting for a restart.
-    console.warn(`Could not read current summoner: ${(error as Error).message}`)
-    client.close()
-
-    if (isCurrent()) {
-      connectRetry = setTimeout(
-        () => void startSession(win, credentials, generation),
-        SESSION_RETRY_DELAY_MS,
-      )
-    }
-    return
-  }
-
-  try {
-    const locale = await client.request<{
-      region?: string
-      webRegion?: string
-    }>("/riotclient/region-locale")
-    const platform = locale.region || locale.webRegion
-    platformId = platform ? canonicalPlatformId(platform) : undefined
-    regionalRoute = platform ? regionalRouteFor(platform) : undefined
-  } catch (error) {
-    console.warn(`Could not determine Riot API route: ${(error as Error).message}`)
-  }
-
-  if (!isCurrent()) {
-    client.close()
-    return
-  }
-
-  getAccountProfileCapture().record(summoner, {
-    platformId,
-    regionalRoute,
-  })
-
-  const sync = new MatchSync(
-    client,
-    getRepository(),
-    summoner.puuid,
-    getParticipants(),
-    getChampSelect(),
-    getLiveGameCaptures(),
-    new MatchSourceRepository(getDatabase()),
-    getMatchGradingService(),
-  )
-  const challengeSync = new ChallengeSync(
-    client,
-    getChallenges(),
-    summoner.puuid,
-  )
-  const events = new LcuEventStream(credentials)
-  const gameClient = new GameClient()
-  const minimapTelemetry = createRecallMinimapIntegration({
+  return createRecallMinimapIntegration({
     gameClient,
     database: getDatabase(),
-    puuid: summoner.puuid,
+    puuid,
     getEnabled: () => !collectionDisabled() &&
       settingsStore.getMain("minimap-telemetry-enabled") !== false,
     getDataDragonVersion: () => settingsStore.getMain("ddragon-version"),
@@ -1538,39 +1492,310 @@ async function startSession(
       throw lastReadError ?? new Error("league_game_config_unavailable")
     },
   })
+}
 
-  const finishLiveMatch = () => {
-    trackMinimapTelemetry(minimapTelemetry.completeMatch())
+function gameIdFromLifecycleEvent(value: unknown): number | undefined {
+  if (!value || typeof value !== "object") return undefined
+  const event = value as Record<string, unknown>
+  const gameData = event.gameData && typeof event.gameData === "object"
+    ? event.gameData as Record<string, unknown>
+    : undefined
+  for (const candidate of [event.gameId, gameData?.gameId]) {
+    const gameId = typeof candidate === "string" ? Number(candidate) : candidate
+    if (typeof gameId === "number" && Number.isSafeInteger(gameId) && gameId > 0) {
+      return gameId
+    }
+  }
+  return undefined
+}
+
+function persistActiveGame(runtime: ActiveGameRuntime, force = false) {
+  if (activeGame !== runtime || collectionDisabled() || liveSession.phase === "Idle") {
+    return
+  }
+  const now = Date.now()
+  if (!force && now - runtime.lastJournalWriteAt < 10_000) return
+  runtime.lastJournalWriteAt = now
+  try {
+    getActiveGames().save(runtime.ownerPuuid, liveSession, runtime.lifecycle.snapshot())
+  } catch (error) {
+    console.warn(`Could not persist active game journal: ${(error as Error).message}`)
+  }
+}
+
+function clearActiveGameJournal(ownerPuuid: string) {
+  try {
+    getActiveGames().clear(ownerPuuid)
+  } catch (error) {
+    console.warn(`Could not clear active game journal: ${(error as Error).message}`)
+  }
+}
+
+function createActiveGameRuntime(win: BrowserWindow, ownerPuuid: string) {
+  const gameClient = new GameClient()
+  const lifecycle = new GameLifecycleCoordinator()
+  let runtime: ActiveGameRuntime
+  runtime = {
+    ownerPuuid,
+    gameClient,
+    minimapTelemetry: createMinimapIntegration(win, ownerPuuid, gameClient),
+    lifecycle,
+    liveTimer: setInterval(() => {
+      if (activeGame !== runtime) return
+      void refreshLiveGameData(win)
+    }, LIVE_GAME_REFRESH_INTERVAL_MS),
+    lastJournalWriteAt: 0,
+  }
+  activeGame = runtime
+  return runtime
+}
+
+async function stopActiveGameRuntime(
+  win: BrowserWindow,
+  options: { clearJournal?: boolean; clearState?: boolean } = {},
+) {
+  const clearJournal = options.clearJournal !== false
+  const clearState = options.clearState !== false
+  const runtime = activeGame
+  if (!runtime) {
+    if (clearState) clearLiveSession(win)
+    return
+  }
+
+  if (!clearJournal) persistActiveGame(runtime, true)
+  activeGame = undefined
+  clearInterval(runtime.liveTimer)
+  if (clearJournal) clearActiveGameJournal(runtime.ownerPuuid)
+  if (clearState) {
     clearMinimapVisionDebugOverlay(win)
     clearLiveSession(win)
-    void trackDatabaseTask(catchFinishedGame(win))
   }
-  events.on("end-of-game", () => {
-    broadcast(win, "end-of-game")
-    // Practice Tool and quickly closed post-game screens do not always yield
-    // the later gameflow transition. The EOG stats event is already terminal,
-    // so stop capture and finalize pathing here as well as on game-end.
-    finishLiveMatch()
+
+  try {
+    if (runtime.finalization) await runtime.finalization
+    else await trackDatabaseTask(runtime.minimapTelemetry.stop())
+  } catch (error) {
+    console.warn(`Could not stop active game capture: ${(error as Error).message}`)
+  } finally {
+    runtime.gameClient.close()
+  }
+}
+
+async function ensureActiveGameRuntime(win: BrowserWindow, ownerPuuid: string) {
+  if (activeGame?.ownerPuuid === ownerPuuid) return activeGame
+  if (activeGame) await stopActiveGameRuntime(win)
+  return createActiveGameRuntime(win, ownerPuuid)
+}
+
+function queueFinishedGameSync(win: BrowserWindow, ownerPuuid: string) {
+  if (session?.summoner.puuid !== ownerPuuid) {
+    pendingFinishedGamePuuid = ownerPuuid
+    return
+  }
+  pendingFinishedGamePuuid = undefined
+  void trackDatabaseTask(catchFinishedGame(win)).catch((error) => {
+    console.warn(`Could not sync finished game: ${(error as Error).message}`)
   })
-  events.on("game-end", finishLiveMatch)
-  events.on("pick", (championId: number | null) => {
-    broadcast(win, "pick", championId)
-  })
-  events.on("champ-select", () => void refreshLiveSession(win, "ChampSelect"))
-  events.on("game-start", (selections: unknown) => {
-    broadcast(win, "game-start", selections)
-    void refreshLiveSession(win, "InProgress")
-  })
-  events.on("phase", (phase: string) => {
-    if (phase === "ChampSelect") void refreshLiveSession(win, "ChampSelect")
-    else if (phase === "InProgress") void refreshLiveSession(win, "InProgress")
-    else if (liveSession.phase === "ChampSelect" && phase !== "GameStart") {
-      // A dodge returns through Lobby/Matchmaking without ever producing a
-      // game id. Do not let that draft's champions leak into the next game.
-      assignedPositions.clear()
+}
+
+function finalizeActiveGame(
+  win: BrowserWindow,
+  runtime: ActiveGameRuntime,
+  effect: Extract<GameLifecycleEffect, { type: "finalize" }>,
+) {
+  if (runtime.finalization) return runtime.finalization
+
+  const operation = (async () => {
+    try {
+      if (effect.outcome === "complete") {
+        await runtime.minimapTelemetry.completeMatch()
+      } else {
+        await runtime.minimapTelemetry.stop()
+      }
+    } catch (error) {
+      console.warn(`Could not finalize active game capture: ${(error as Error).message}`)
+    } finally {
+      clearActiveGameJournal(runtime.ownerPuuid)
+      if (activeGame === runtime) {
+        runtime.lifecycle.finalized()
+        clearMinimapVisionDebugOverlay(win)
+        clearLiveSession(win)
+      }
     }
+
+    if (effect.outcome === "complete") {
+      queueFinishedGameSync(win, runtime.ownerPuuid)
+    }
+  })()
+  const tracked = trackDatabaseTask(operation)
+  runtime.finalization = tracked
+  const release = () => {
+    if (runtime.finalization === tracked) runtime.finalization = undefined
+  }
+  void tracked.then(release, release)
+  return tracked
+}
+
+async function applyLifecycleEffect(
+  win: BrowserWindow,
+  runtime: ActiveGameRuntime,
+  effect: GameLifecycleEffect,
+  forceJournal = false,
+) {
+  if (activeGame !== runtime) return
+  if (effect.type === "clear_draft") {
+    assignedPositions.clear()
+    clearActiveGameJournal(runtime.ownerPuuid)
+    if (liveSession.phase === "ChampSelect") clearLiveSession(win)
+    return
+  }
+  if (effect.type === "finalize") {
+    persistActiveGame(runtime, true)
+    await finalizeActiveGame(win, runtime, effect)
+    return
+  }
+  persistActiveGame(runtime, forceJournal)
+}
+
+function handleLcuPhase(win: BrowserWindow, phase: string) {
+  const runtime = activeGame
+  if (!runtime) return
+  if (phase !== "ChampSelect" && phase !== "InProgress" && phase !== "GameStart") {
+    // Invalidates metadata reads that began under a previous phase while Port
+    // polling itself remains independent of LCU transport state.
+    liveRevision += 1
+  }
+  const effect = runtime.lifecycle.observeLcuPhase(phase)
+  void applyLifecycleEffect(win, runtime, effect, true)
+  if (phase === "ChampSelect") void refreshLiveSession(win, "ChampSelect")
+  else if (phase === "InProgress" || phase === "GameStart") {
+    if (liveSession.phase !== "InProgress") {
+      liveRevision += 1
+      liveSession = liveSession.phase === "ChampSelect"
+        ? { ...liveSession, phase: "InProgress", updatedAt: Date.now() }
+        : {
+            phase: "InProgress",
+            benchChampionIds: [],
+            allies: [],
+            enemies: [],
+            updatedAt: Date.now(),
+          }
+      trackMinimapTelemetry(runtime.minimapTelemetry.update(liveSession))
+      persistActiveGame(runtime, true)
+      broadcastLive(win)
+    }
+    if (needsInProgressMetadataRefresh(liveSession)) {
+      void refreshLiveSession(win, "InProgress")
+    }
+    // Port 2999 is the first source available after the map spawns and is not
+    // delayed behind LCU metadata or optional identity enrichment.
+    void refreshLiveGameData(win)
+  }
+}
+
+async function restoreActiveGameRuntime(win: BrowserWindow) {
+  if (activeGameRestore) return activeGameRestore
+  activeGameRestore = (async () => {
+    if (collectionDisabled()) return
+    const saved = getActiveGames().getLatest()
+    if (!saved) return
+    const runtime = await ensureActiveGameRuntime(win, saved.ownerPuuid)
+    runtime.lifecycle.restore(saved.lifecycle)
+    liveRevision += 1
+    liveSession = saved.session
+    trackMinimapTelemetry(runtime.minimapTelemetry.update(liveSession))
+    broadcastLive(win)
+    persistActiveGame(runtime, true)
+    void refreshLiveGameData(win)
+  })()
+  return activeGameRestore
+}
+
+async function startSession(
+  win: BrowserWindow,
+  credentials: LcuCredentials,
+  generation: number,
+) {
+  const isCurrent = () =>
+    lcuSessionGeneration.isCurrent(generation) &&
+    !quitting &&
+    !collectionDisabled()
+  if (!isCurrent()) return
+  const client = new LcuClient(credentials)
+
+  let summoner: Summoner
+  let regionalRoute: string | undefined
+  let platformId: string | undefined
+  try {
+    summoner = await client.request<Summoner>(
+      "/lol-summoner/v1/current-summoner",
+    )
+    if (!isCurrent()) {
+      client.close()
+      return
+    }
+  } catch (error) {
+    // The client is running but not ready — still signing in, or busy during a
+    // game. Discovery will not fire again because the lockfile has not changed,
+    // so retry here rather than waiting for a restart.
+    console.warn(`Could not read current summoner: ${(error as Error).message}`)
+    client.close()
+
+    if (isCurrent()) {
+      connectRetry = setTimeout(
+        () => void startSession(win, credentials, generation),
+        SESSION_RETRY_DELAY_MS,
+      )
+    }
+    return
+  }
+
+  try {
+    const locale = await client.request<{
+      region?: string
+      webRegion?: string
+    }>("/riotclient/region-locale", {
+      timeoutMs: LCU_LIFECYCLE_REQUEST_TIMEOUT_MS,
+    })
+    const platform = locale.region || locale.webRegion
+    platformId = platform ? canonicalPlatformId(platform) : undefined
+    regionalRoute = platform ? regionalRouteFor(platform) : undefined
+  } catch (error) {
+    console.warn(`Could not determine Riot API route: ${(error as Error).message}`)
+  }
+
+  if (!isCurrent()) {
+    client.close()
+    return
+  }
+
+  getAccountProfileCapture().record(summoner, {
+    platformId,
+    regionalRoute,
   })
-  events.start()
+
+  const sync = new MatchSync(
+    client,
+    getRepository(),
+    summoner.puuid,
+    getParticipants(),
+    getChampSelect(),
+    getLiveGameCaptures(),
+    new MatchSourceRepository(getDatabase()),
+    getMatchGradingService(),
+  )
+  const challengeSync = new ChallengeSync(
+    client,
+    getChallenges(),
+    summoner.puuid,
+  )
+  const events = new LcuEventStream(credentials)
+  const runtime = await ensureActiveGameRuntime(win, summoner.puuid)
+  if (!isCurrent()) {
+    client.close()
+    return
+  }
+  runtime.lifecycle.observeLcuConnected()
 
   session = {
     credentials,
@@ -1582,16 +1807,44 @@ async function startSession(
     regionalRoute,
     platformId,
     timer: setInterval(() => void runSync(win), PERIODIC_SYNC_INTERVAL_MS),
-    liveTimer: setInterval(
-      () => void refreshLiveGameData(win),
-      LIVE_GAME_REFRESH_INTERVAL_MS,
-    ),
-    gameClient,
-    minimapTelemetry,
   }
+
+  events.on("end-of-game", (event: unknown) => {
+    if (activeGame !== runtime || session?.events !== events) return
+    broadcast(win, "end-of-game")
+    const effect = runtime.lifecycle.observeStrongTerminal(
+      "end_of_game_stats",
+      Date.now(),
+      gameIdFromLifecycleEvent(event),
+    )
+    void applyLifecycleEffect(win, runtime, effect)
+  })
+  events.on("pick", (championId: number | null) => {
+    broadcast(win, "pick", championId)
+  })
+  events.on("champ-select", () => void refreshLiveSession(win, "ChampSelect"))
+  events.on("game-start", (selections: unknown) => {
+    broadcast(win, "game-start", selections)
+  })
+  events.on("phase", (phase: string) => handleLcuPhase(win, phase))
+  events.on("connected", () => {
+    if (activeGame !== runtime || session?.events !== events) return
+    runtime.lifecycle.observeLcuConnected()
+    persistActiveGame(runtime, true)
+    void initialiseLiveSession(win)
+  })
+  events.on("disconnected", () => {
+    if (activeGame !== runtime || session?.events !== events) return
+    const effect = runtime.lifecycle.observeLcuDisconnected()
+    void applyLifecycleEffect(win, runtime, effect, true)
+  })
+  events.start()
 
   broadcast(win, "lcu:status", { connected: true, summoner })
   void initialiseLiveSession(win)
+  if (pendingFinishedGamePuuid === summoner.puuid) {
+    queueFinishedGameSync(win, summoner.puuid)
+  }
   // A configured Match-V5 key gives the recipe cutover one chance to enrich
   // the full stored history before its local reference is frozen. This is a
   // one-time cost: the direct-cutover predicate becomes false after rebuild.
@@ -1611,28 +1864,36 @@ async function startSession(
   await runSync(win)
 }
 
-function stopSession(win: BrowserWindow): number {
+function stopSession(
+  win: BrowserWindow,
+  options: { preserveActiveGame?: boolean; preserveJournal?: boolean } = {},
+): number {
   const generation = lcuSessionGeneration.invalidate()
   if (connectRetry) {
     clearTimeout(connectRetry)
     connectRetry = undefined
   }
 
-  if (!session) return generation
-
   riotBackfillRevision += 1
   riotBackfillAbort?.abort()
   riotBackfillAbort = undefined
-  const active = session
-  clearInterval(active.timer)
-  clearInterval(active.liveTimer)
-  active.events.stop()
-  trackMinimapTelemetry(active.minimapTelemetry.stop())
-  active.client.close()
-  active.gameClient.close()
-  session = undefined
-  clearMinimapVisionDebugOverlay(win)
-  clearLiveSession(win)
+  const lcuSession = session
+  if (lcuSession) {
+    clearInterval(lcuSession.timer)
+    lcuSession.events.stop()
+    lcuSession.client.close()
+    session = undefined
+  }
+
+  const runtime = activeGame
+  if (options.preserveActiveGame && runtime) {
+    const effect = runtime.lifecycle.observeLcuDisconnected()
+    void applyLifecycleEffect(win, runtime, effect, true)
+  } else {
+    void stopActiveGameRuntime(win, {
+      clearJournal: options.preserveJournal !== true,
+    })
+  }
 
   broadcast(win, "lcu:status", { connected: false, summoner: null })
   return generation
@@ -1663,29 +1924,88 @@ function rememberAssignedPositions(champSelectSession: LiveSession) {
 }
 
 function storeAssignedPositions(gameId: number | undefined) {
-  if (!session || !gameId || assignedPositions.size === 0) return
-  getChampSelect().record(gameId, session.summoner.puuid, [...assignedPositions.values()])
+  const ownerPuuid = activeGame?.ownerPuuid ?? session?.summoner.puuid
+  if (!ownerPuuid || !gameId || assignedPositions.size === 0) return
+  getChampSelect().record(gameId, ownerPuuid, [...assignedPositions.values()])
   assignedPositions.clear()
 }
 
 /** Reads a new, self-contained live snapshot without letting stale requests win. */
-async function refreshLiveSession(win: BrowserWindow, phase: LivePhase) {
-  if (!session) return
+async function refreshLiveSession(
+  win: BrowserWindow,
+  phase: Exclude<LivePhase, "Idle">,
+) {
+  const lcuSession = session
+  const runtime = activeGame
+  if (!lcuSession || !runtime ||
+      runtime.ownerPuuid !== lcuSession.summoner.puuid) return
+  if (runtime.finalization) await runtime.finalization.catch(() => undefined)
+  if (session !== lcuSession || activeGame !== runtime) return
   const revision = ++liveRevision
   try {
     const next = await readLiveSession(
-      session.client,
+      lcuSession.client,
       phase,
-      session.summoner.puuid,
+      lcuSession.summoner.puuid,
+      {
+        resolvePlayerNames: false,
+        requestTimeoutMs: LCU_LIFECYCLE_REQUEST_TIMEOUT_MS,
+      },
     )
-    if (revision !== liveRevision) return
+    if (revision !== liveRevision || session !== lcuSession ||
+        activeGame !== runtime) return
+
+    const effect = runtime.lifecycle.observeSession(phase, next.gameId)
+    if (effect.type === "finalize") {
+      await applyLifecycleEffect(win, runtime, effect)
+      if (session === lcuSession && activeGame === runtime) {
+        void refreshLiveSession(win, phase)
+      }
+      return
+    }
+    if (phase === "ChampSelect" &&
+        runtime.lifecycle.snapshot().stage !== "champ_select") {
+      // A delayed draft payload must not replace an InProgress snapshot or
+      // stop the capture that owns it.
+      return
+    }
+
     if (phase === "ChampSelect") {
       rememberAssignedPositions(next)
       storeAssignedPositions(next.gameId)
     }
-    liveSession = next
-    trackMinimapTelemetry(session.minimapTelemetry.update(liveSession))
+    liveSession = phase === "InProgress" && liveSession.phase === "InProgress" &&
+        (liveSession.gameId === undefined || next.gameId === undefined ||
+          liveSession.gameId === next.gameId)
+      ? mergeInProgressSessionMetadata(liveSession, next)
+      : next
+    trackMinimapTelemetry(runtime.minimapTelemetry.update(liveSession))
+    persistActiveGame(runtime, true)
     broadcastLive(win)
+
+    // Display names are useful UI decoration, but they must never hold up the
+    // first game identity, Port 2999 poll, or minimap capture attempt.
+    void enrichLiveSessionNames(
+      lcuSession.client,
+      next,
+      LCU_LIFECYCLE_REQUEST_TIMEOUT_MS,
+    ).then((enriched) => {
+      if (revision !== liveRevision || session !== lcuSession ||
+          activeGame !== runtime || liveSession.phase !== phase ||
+          liveSession.gameId !== next.gameId) return
+      liveSession = phase === "InProgress"
+        ? mergeInProgressSessionMetadata(liveSession, enriched)
+        : {
+            ...liveSession,
+            allies: enriched.allies,
+            enemies: enriched.enemies,
+            updatedAt: Math.max(liveSession.updatedAt, enriched.updatedAt),
+          }
+      trackMinimapTelemetry(runtime.minimapTelemetry.update(liveSession))
+      persistActiveGame(runtime)
+      broadcastLive(win)
+    }).catch(() => undefined)
+
     if (phase === "InProgress") {
       storeAssignedPositions(next.gameId)
       void refreshLiveGameData(win)
@@ -1701,77 +2021,135 @@ async function refreshLiveSession(win: BrowserWindow, phase: LivePhase) {
  * briefly slow during loading or reconnecting.
  */
 async function refreshLiveGameData(win: BrowserWindow) {
-  if (!session || liveSession.phase !== "InProgress" || liveGameReading) return
+  const runtime = activeGame
+  if (!runtime || liveGameReading || runtime.finalization) return
+  const lifecycleStage = runtime.lifecycle.snapshot().stage
+  const probingFromDraft = liveSession.phase === "ChampSelect" &&
+    (lifecycleStage === "champ_select" || lifecycleStage === "launching" ||
+      lifecycleStage === "suspended" || lifecycleStage === "tracking")
+  if (liveSession.phase !== "InProgress" && !probingFromDraft) {
+    const effect = runtime.lifecycle.tick()
+    if (effect.type !== "none") {
+      await applyLifecycleEffect(win, runtime, effect)
+    }
+    return
+  }
   liveGameReading = true
-  const activeSession = session
+  const startingPhase = liveSession.phase
   const startingRevision = liveRevision
+  const expectedGameId = liveSession.gameId
+  const lcuSession = session?.summoner.puuid === runtime.ownerPuuid
+    ? session
+    : undefined
+  const metadataTask = startingPhase === "InProgress" &&
+      needsInProgressMetadataRefresh(liveSession) && lcuSession
+    ? readLiveSession(
+        lcuSession.client,
+        "InProgress",
+        runtime.ownerPuuid,
+        {
+          resolvePlayerNames: false,
+          requestTimeoutMs: LCU_LIFECYCLE_REQUEST_TIMEOUT_MS,
+        },
+      ).catch(() => undefined)
+    : Promise.resolve(undefined)
+  const stillCurrent = () => activeGame === runtime &&
+    !runtime.finalization &&
+    liveSession.phase === startingPhase &&
+    liveRevision === startingRevision &&
+    (expectedGameId === undefined || liveSession.gameId === expectedGameId)
 
   try {
-    if (needsInProgressMetadataRefresh(liveSession)) {
-      try {
-        const refreshed = await readLiveSession(
-          activeSession.client,
-          "InProgress",
-          activeSession.summoner.puuid,
-        )
-        if (session !== activeSession || liveSession.phase !== "InProgress" ||
-            liveRevision !== startingRevision) return
-        liveSession = mergeInProgressSessionMetadata(liveSession, refreshed)
-        // Capture eligibility depends on LCU identity/classification, not on
-        // Port 2999 being ready. Publish the repaired session immediately so
-        // source discovery and calibration can begin during the loading race.
-        trackMinimapTelemetry(activeSession.minimapTelemetry.update(liveSession))
+    try {
+      const game = await readLiveGameSnapshot(runtime.gameClient)
+      if (stillCurrent()) {
+        runtime.lifecycle.observePortAvailable()
+        if (probingFromDraft) {
+          // Port 2999 is stronger evidence than a missing LCU transition. Keep
+          // the draft metadata/game id and begin the same capture immediately.
+          liveRevision += 1
+          liveSession = {
+            ...liveSession,
+            phase: "InProgress",
+            updatedAt: game.updatedAt,
+          }
+        }
+        game.analysis = liveTempoTracker.update(game)
+        const captureGameId = liveSession.gameId ?? expectedGameId
+        if (captureGameId !== undefined) {
+          getLiveGameCaptures().record(captureGameId, runtime.ownerPuuid, game)
+        }
+        liveSession = {
+          ...liveSession,
+          gameType: liveSession.gameType ?? game.gameType,
+          mapId: liveSession.mapId ?? game.mapNumber,
+          game,
+          updatedAt: game.updatedAt,
+        }
+        trackMinimapTelemetry(runtime.minimapTelemetry.update(liveSession))
+        persistActiveGame(runtime, probingFromDraft)
         broadcastLive(win)
-      } catch {
-        // The phase transition is eventually consistent. Continue with the
-        // Port 2999 read and retry LCU metadata on the next bounded poll.
+        if (probingFromDraft) {
+          storeAssignedPositions(liveSession.gameId)
+          if (lcuSession) void refreshLiveSession(win, "InProgress")
+          return
+        }
+      }
+    } catch {
+      if (stillCurrent()) {
+        const effect = runtime.lifecycle.observePortUnavailable()
+        await applyLifecycleEffect(win, runtime, effect)
       }
     }
 
-    const expectedGameId = liveSession.gameId
-    const game = await readLiveGameSnapshot(activeSession.gameClient)
-    if (
-      session !== activeSession ||
-      liveSession.phase !== "InProgress" ||
-      liveRevision !== startingRevision ||
-      liveSession.gameId !== expectedGameId
-    ) return
-    game.analysis = liveTempoTracker.update(game)
-    if (expectedGameId !== undefined) {
-      getLiveGameCaptures().record(
-        expectedGameId,
-        session.summoner.puuid,
-        game,
-      )
+    const refreshed = await metadataTask
+    if (!refreshed || !stillCurrent()) return
+    const effect = runtime.lifecycle.observeSession("InProgress", refreshed.gameId)
+    if (effect.type === "finalize") {
+      await applyLifecycleEffect(win, runtime, effect)
+      if (activeGame === runtime && session === lcuSession) {
+        void refreshLiveSession(win, "InProgress")
+      }
+      return
     }
-    liveSession = {
-      ...liveSession,
-      gameType: liveSession.gameType ?? game.gameType,
-      mapId: liveSession.mapId ?? game.mapNumber,
-      game,
-      updatedAt: game.updatedAt,
-    }
-    trackMinimapTelemetry(session.minimapTelemetry.update(liveSession))
+    liveSession = mergeInProgressSessionMetadata(liveSession, refreshed)
+    storeAssignedPositions(liveSession.gameId)
+    trackMinimapTelemetry(runtime.minimapTelemetry.update(liveSession))
+    persistActiveGame(runtime, true)
     broadcastLive(win)
-  } catch {
-    // Port 2999 is unavailable during the loading transition and immediately
-    // after a game. Preserve the latest good snapshot and retry quietly.
   } finally {
     liveGameReading = false
   }
 }
 
 /** Covers the case where Recall connects after champion select has begun. */
-async function initialiseLiveSession(win: BrowserWindow) {
-  if (!session) return
-  try {
-    const phase = await session.client.request<string>("/lol-gameflow/v1/gameflow-phase")
-    if (phase === "ChampSelect") await refreshLiveSession(win, "ChampSelect")
-    if (phase === "InProgress") await refreshLiveSession(win, "InProgress")
-  } catch {
-    // The client moves through transitional phases quickly; the event stream
-    // will provide the next stable state.
-  }
+function initialiseLiveSession(win: BrowserWindow): Promise<void> {
+  const lcuSession = session
+  const runtime = activeGame
+  if (!lcuSession || !runtime ||
+      lcuSession.summoner.puuid !== runtime.ownerPuuid) return Promise.resolve()
+  if (lcuSession.lifecycleReconcile) return lcuSession.lifecycleReconcile
+
+  const reconcile = (async () => {
+    try {
+      const phase = await lcuSession.client.request<string>(
+        "/lol-gameflow/v1/gameflow-phase",
+        { timeoutMs: LCU_LIFECYCLE_REQUEST_TIMEOUT_MS },
+      )
+      if (session !== lcuSession || activeGame !== runtime) return
+      lcuSession.events.reconcilePhase(phase)
+      handleLcuPhase(win, phase)
+    } catch {
+      // The client moves through transitional phases quickly; the event stream
+      // will provide the next stable state.
+    }
+  })().finally(() => {
+    if (lcuSession.lifecycleReconcile === reconcile) {
+      lcuSession.lifecycleReconcile = undefined
+    }
+  })
+  lcuSession.lifecycleReconcile = reconcile
+  return reconcile
 }
 
 /**
@@ -2071,7 +2449,7 @@ async function snapshotAccountProfile(win: BrowserWindow, active: Session) {
       () => !collectionDisabled() && session === active,
     )
     if (result.state === "account_changed") {
-      const generation = stopSession(win)
+      const generation = stopSession(win, { preserveActiveGame: true })
       void startSession(win, active.credentials, generation)
       return
     }
@@ -2180,11 +2558,13 @@ function connectToLcu(win: BrowserWindow) {
         settingsStore.getMain("collection-mode") === "disabled_after_clear") {
       settingsStore.setMain("collection-mode", "enabled")
     }
-    const generation = stopSession(win)
+    const generation = stopSession(win, { preserveActiveGame: true })
     void startSession(win, credentials, generation)
   })
 
-  discovery.on("disconnect", () => stopSession(win))
+  discovery.on("disconnect", () => {
+    stopSession(win, { preserveActiveGame: true })
+  })
 
   discovery.start()
 }
@@ -2211,6 +2591,7 @@ function currentPuuid(): string | undefined {
     settingsStore.setMain("last-puuid", session.summoner.puuid)
     return session.summoner.puuid
   }
+  if (activeGame) return activeGame.ownerPuuid
   return settingsStore.getMain("last-puuid")
 }
 
@@ -2273,7 +2654,13 @@ async function championNameFor(championId: number): Promise<string | undefined> 
 }
 
 function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
-  ipcMain.on("app-ready", () => connectToLcu(win))
+  ipcMain.on("app-ready", () => {
+    void restoreActiveGameRuntime(win)
+      .catch((error) => {
+        console.warn(`Could not restore active game: ${(error as Error).message}`)
+      })
+      .finally(() => connectToLcu(win))
+  })
 
   ipcMain.on("window:minimize", () => win.minimize())
   ipcMain.on("window:toggle-maximize", () => {
@@ -2319,7 +2706,9 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     settingsStore.getRenderer("minimap-telemetry-enabled") ?? true)
   ipcMain.handle("settings:minimap-telemetry:set", (_event, value: unknown) => {
     const enabled = settingsStore.setRenderer("minimap-telemetry-enabled", value) as boolean
-    if (session) trackMinimapTelemetry(session.minimapTelemetry.update(liveSession))
+    if (activeGame) {
+      trackMinimapTelemetry(activeGame.minimapTelemetry.update(liveSession))
+    }
     return enabled
   })
   ipcMain.handle("settings:minimap-vision-debug:get", () =>
@@ -2329,7 +2718,9 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
   {
     if (!MINIMAP_VISION_DEBUG_AVAILABLE) return false
     const enabled = settingsStore.setRenderer("minimap-vision-debug-enabled", value) as boolean
-    if (session) trackMinimapTelemetry(session.minimapTelemetry.update(liveSession))
+    if (activeGame) {
+      trackMinimapTelemetry(activeGame.minimapTelemetry.update(liveSession))
+    }
     return enabled
   })
   ipcMain.handle("settings:minimap-vision-overlay:get", () =>
@@ -2341,7 +2732,9 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     if (!enabled && (minimapVisionDebugRequestedVisible || latestMinimapVisionDebug.enabled)) {
       clearMinimapVisionDebugOverlay(win)
     }
-    if (session) trackMinimapTelemetry(session.minimapTelemetry.update(liveSession))
+    if (activeGame) {
+      trackMinimapTelemetry(activeGame.minimapTelemetry.update(liveSession))
+    }
     return enabled
   })
   ipcMain.handle("settings:display-timezone:get", () => {
@@ -2659,7 +3052,7 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
 
   ipcMain.handle("live:get", () => liveSession)
   ipcMain.handle("minimap-telemetry:health", () =>
-    session?.minimapTelemetry.getHealth() ?? {
+    activeGame?.minimapTelemetry.getHealth() ?? {
       state: "idle",
       processedFrames: 0,
       droppedFrames: 0,
@@ -3179,7 +3572,7 @@ async function prepareShutdown(
   riotBackfillAbort?.abort()
   riotBackfillAbort = undefined
   stopLcuDiscovery()
-  stopSession(win)
+  stopSession(win, { preserveJournal: true })
 
   // Aborted API requests still need one turn to record their durable paused
   // cursor. Local match/challenge syncs are also allowed to finish before the

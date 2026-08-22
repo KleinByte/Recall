@@ -349,7 +349,7 @@ describe("minimap telemetry integration", () => {
     db.pragma("foreign_keys = ON")
 
     expect(applyMigrations(db)).toBe(latestSchemaVersion)
-    expect(latestSchemaVersion).toBe(35)
+    expect(latestSchemaVersion).toBe(36)
     const tables = new Set((db.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table'",
     ).all() as { name: string }[]).map((row) => row.name))

@@ -14,6 +14,39 @@ const client = (responses: Record<string, unknown>) => ({
 })
 
 describe("readLiveSession", () => {
+  it("publishes critical in-game metadata without waiting for optional names", async () => {
+    let identityReads = 0
+    const fastClient = {
+      request: async <T>(path: string) => {
+        if (path === "/lol-gameflow/v1/session") {
+          return {
+            gameData: {
+              gameId: 54,
+              gameMode: "CLASSIC",
+              mapId: 11,
+              queue: { id: 420 },
+              teamOne: [{ championId: 154, puuid: "mine", summonerId: 9 }],
+              teamTwo: [],
+            },
+          } as T
+        }
+        identityReads += 1
+        return new Promise<T>(() => undefined)
+      },
+    }
+
+    const live = await readLiveSession(
+      fastClient as never,
+      "InProgress",
+      "mine",
+      { resolvePlayerNames: false, requestTimeoutMs: 25 },
+    )
+
+    expect(live).toMatchObject({ gameId: 54, mapId: 11, queueId: 420 })
+    expect(live.allies[0]).toMatchObject({ championId: 154, puuid: "mine" })
+    expect(identityReads).toBe(0)
+  })
+
   it("keeps polling an eventual InProgress payload until identity and classification are usable", () => {
     expect(needsInProgressMetadataRefresh({
       phase: "InProgress",

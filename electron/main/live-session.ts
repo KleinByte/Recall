@@ -35,6 +35,12 @@ export interface LiveSession {
   updatedAt: number
 }
 
+export interface ReadLiveSessionOptions {
+  /** Identity enrichment is never required to start live capture. */
+  resolvePlayerNames?: boolean
+  requestTimeoutMs?: number
+}
+
 /**
  * Riot can emit InProgress before `/lol-gameflow/v1/session` has finished
  * populating its durable game identity and classification fields. Port 2999
@@ -141,6 +147,7 @@ function displayName(identity: SummonerIdentity) {
 async function resolveNames(
   client: LcuClient,
   players: LivePlayer[],
+  requestTimeoutMs?: number,
 ): Promise<LivePlayer[]> {
   const identities = new Map<number, Promise<string | undefined>>()
 
@@ -153,6 +160,7 @@ async function resolveNames(
         pending = client
           .request<SummonerIdentity>(
             `/lol-summoner/v1/summoners/${entry.summonerId}`,
+            { timeoutMs: requestTimeoutMs },
           )
           .then(displayName)
           .catch(() => undefined)
@@ -162,6 +170,22 @@ async function resolveNames(
       return { ...entry, displayName: await pending }
     }),
   )
+}
+
+/** Adds optional display names after the critical game identity has published. */
+export async function enrichLiveSessionNames(
+  client: LcuClient,
+  session: LiveSession,
+  requestTimeoutMs = 1_500,
+): Promise<LiveSession> {
+  if (session.queueId === 420 || session.queueId === 440) return session
+  const [allies, enemies] = await Promise.all([
+    resolveNames(client, session.allies, requestTimeoutMs),
+    session.phase === "InProgress"
+      ? resolveNames(client, session.enemies, requestTimeoutMs)
+      : Promise.resolve(session.enemies),
+  ])
+  return { ...session, allies, enemies }
 }
 
 function roster(
@@ -184,10 +208,15 @@ export async function readLiveSession(
   client: LcuClient,
   phase: LivePhase,
   localPuuid?: string,
+  options: ReadLiveSessionOptions = {},
 ): Promise<LiveSession> {
   if (phase === "Idle") return idle()
 
-  const flow = await client.request<Record<string, any>>("/lol-gameflow/v1/session")
+  const requestOptions = { timeoutMs: options.requestTimeoutMs }
+  const flow = await client.request<Record<string, any>>(
+    "/lol-gameflow/v1/session",
+    requestOptions,
+  )
   const data = (flow.gameData ?? {}) as Record<string, any>
   const queue = (data.queue ?? {}) as Record<string, any>
   const queueId = number(queue.id) ?? number(data.queueId)
@@ -211,7 +240,10 @@ export async function readLiveSession(
   }
 
   if (phase === "ChampSelect") {
-    const select = await client.request<Record<string, any>>("/lol-champ-select/v1/session")
+    const select = await client.request<Record<string, any>>(
+      "/lol-champ-select/v1/session",
+      requestOptions,
+    )
     // Current champ-select sessions expose their own gameId. Prefer the
     // gameflow value when present, but do not wait for InProgress to persist
     // assignments when champ select already identifies the match.
@@ -232,8 +264,12 @@ export async function readLiveSession(
     // Ranked champion select intentionally hides teammate identities. In
     // queues where the client shows them, resolve missing Riot IDs through the
     // local summoner endpoint instead of spending Web API requests.
-    if (queueId !== 420 && queueId !== 440) {
-      result.allies = await resolveNames(client, result.allies)
+    if (options.resolvePlayerNames !== false && queueId !== 420 && queueId !== 440) {
+      result.allies = await resolveNames(
+        client,
+        result.allies,
+        options.requestTimeoutMs,
+      )
     }
   } else {
     const teamOne = roster(data.teamOne, 0)
@@ -253,13 +289,25 @@ export async function readLiveSession(
     const local = result.allies.find((entry) => entry.puuid === localPuuid)
     if (local) result.localPlayerCellId = local.cellId
 
-    result.allies = await resolveNames(client, result.allies)
-    result.enemies = await resolveNames(client, result.enemies)
+    if (options.resolvePlayerNames !== false) {
+      result.allies = await resolveNames(
+        client,
+        result.allies,
+        options.requestTimeoutMs,
+      )
+      result.enemies = await resolveNames(
+        client,
+        result.enemies,
+        options.requestTimeoutMs,
+      )
+    }
 
     // Some older gameflow payloads omit team rosters but retain selections.
     if (result.allies.length === 0 && result.enemies.length === 0) {
       const selections = roster(data.playerChampionSelections, 0)
-      result.allies = await resolveNames(client, selections)
+      result.allies = options.resolvePlayerNames === false
+        ? selections
+        : await resolveNames(client, selections, options.requestTimeoutMs)
       const selectedLocal = result.allies.find(
         (entry) => entry.puuid === localPuuid,
       )

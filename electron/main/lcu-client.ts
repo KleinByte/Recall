@@ -17,6 +17,24 @@ export class LcuRequestError extends Error {
   }
 }
 
+export class LcuRequestTimeoutError extends Error {
+  constructor(
+    readonly timeoutMs: number,
+    path: string,
+  ) {
+    super(`League Client request timed out after ${timeoutMs}ms for ${path}`)
+    this.name = "LcuRequestTimeoutError"
+  }
+}
+
+export interface LcuRequestOptions {
+  /** Local lifecycle reads should fail quickly enough for the next poll to recover. */
+  timeoutMs?: number
+  signal?: AbortSignal
+}
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 5_000
+
 /**
  * Reads from the local League Client API.
  *
@@ -32,10 +50,18 @@ export class LcuClient {
     this.credentials = assertLoopbackLcuCredentials(credentials)
   }
 
-  request<T>(path: string): Promise<T> {
+  request<T>(path: string, options: LcuRequestOptions = {}): Promise<T> {
     const { address, port } = this.credentials
+    const timeoutMs = Math.max(1, options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS)
 
     return new Promise<T>((resolve, reject) => {
+      let settled = false
+      const finish = (callback: () => void) => {
+        if (settled) return
+        settled = true
+        options.signal?.removeEventListener("abort", abort)
+        callback()
+      }
       const req = request(
         {
           host: address,
@@ -53,22 +79,35 @@ export class LcuClient {
           const chunks: Buffer[] = []
 
           res.on("data", (chunk: Buffer) => chunks.push(chunk))
+          res.on("error", (error) => finish(() => reject(error)))
           res.on("end", () => {
             if (status < 200 || status >= 300) {
-              reject(new LcuRequestError(status, path))
+              finish(() => reject(new LcuRequestError(status, path)))
               return
             }
 
             try {
-              resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")) as T)
+              const value = JSON.parse(Buffer.concat(chunks).toString("utf8")) as T
+              finish(() => resolve(value))
             } catch (error) {
-              reject(error)
+              finish(() => reject(error))
             }
           })
         },
       )
 
-      req.on("error", reject)
+      const abort = () => req.destroy(options.signal?.reason instanceof Error
+        ? options.signal.reason
+        : new Error("League Client request aborted"))
+      req.setTimeout(timeoutMs, () => {
+        req.destroy(new LcuRequestTimeoutError(timeoutMs, path))
+      })
+      req.on("error", (error) => finish(() => reject(error)))
+      if (options.signal?.aborted) {
+        abort()
+        return
+      }
+      options.signal?.addEventListener("abort", abort, { once: true })
       req.end()
     })
   }
