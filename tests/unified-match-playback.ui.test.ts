@@ -83,7 +83,7 @@ const minimapReview: MinimapPathingReview = {
     puuid: "owner-puuid",
     campKey: "west_blue",
     clearedAtMs: 45_000,
-    respawnAtMs: 345_000,
+    respawnAtMs: 315_000,
     source: "minimap_cv",
     sourceConfidence: .93,
     attribution: "local",
@@ -94,7 +94,7 @@ const minimapReview: MinimapPathingReview = {
       transitionConfidence: .93,
     },
     routeIndex: 0,
-    algorithmVersion: 3,
+    algorithmVersion: 4,
   }],
 }
 
@@ -120,6 +120,7 @@ describe("unified match timeline playback", () => {
     expect(token.attributes("title")).toContain("Observed CV")
     expect(token.attributes("title")).toContain("94% confidence")
     expect(wrapper.findAll(".trail-layer .origin-minimap_cv")).toHaveLength(1)
+    const trailElement = wrapper.get(".trail-layer .origin-minimap_cv").element
     expect(wrapper.findAll(".camp-clear-tick")).toHaveLength(1)
     expect(wrapper.findAll(".camp-state-marker.local")).toHaveLength(1)
     expect(wrapper.text()).toContain("1 / 1 clears reached")
@@ -128,10 +129,11 @@ describe("unified match timeline playback", () => {
     expect(wrapper.emitted("update:timestamp")?.at(-1)).toEqual([45_000])
 
     await wrapper.setProps({ timestamp: 90_000 })
+    expect(wrapper.get(".trail-layer .origin-minimap_cv").element).toBe(trailElement)
     const fallback = wrapper.get(".champion-token")
     expect(fallback.classes()).toContain("estimated")
-    expect(fallback.classes()).not.toContain("cv-origin")
-    expect(fallback.attributes("title")).toContain("Estimated")
+    expect(fallback.classes()).toContain("cv-origin")
+    expect(fallback.attributes("title")).toContain("CV reconstructed")
 
     wrapper.unmount()
   })

@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest"
 import { SUMMONERS_RIFT_GRAPH } from "../electron/main/pathing/summoners-rift-graph.js"
 import {
   CAMP_BY_KEY,
+  CAMP_CLEAR_ALGORITHM_VERSION,
   SUMMONERS_RIFT_CAMP_MAP_VERSION,
+  campRespawnDurationMs,
 } from "../src/shared/minimap/camp-map.js"
 import type { CampKey, NormalizedPoint } from "../src/shared/minimap/contracts.js"
 
@@ -53,5 +55,12 @@ describe("Summoner's Rift camp map", () => {
     expect(graphNodes.get("river_south")?.point).toEqual(CALIBRATED_SPECIAL_CAMPS.south_scuttle)
     expect(graphNodes.get("baron_pit")?.point).toEqual(CALIBRATED_SPECIAL_CAMPS.baron)
     expect(graphNodes.get("dragon_pit")?.point).toEqual(CALIBRATED_SPECIAL_CAMPS.dragon)
+  })
+
+  it("shares versioned clear timing across capture and playback", () => {
+    expect(CAMP_CLEAR_ALGORITHM_VERSION).toBe(6)
+    expect(campRespawnDurationMs("west_gromp")).toBe(120_000)
+    expect(campRespawnDurationMs("west_blue")).toBe(270_000)
+    expect(campRespawnDurationMs("dragon")).toBeUndefined()
   })
 })

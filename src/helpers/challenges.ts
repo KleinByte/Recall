@@ -9,6 +9,23 @@ export type ChallengeSortKey =
 
 export type ChallengeSortDirection = "asc" | "desc"
 
+export type ChallengeKind = "capstone" | "grouped" | "standalone"
+export type ChallengeKindFilter = "all" | ChallengeKind
+
+export interface ChallengeGroup {
+  capstone: ChallengeRow
+  members: ChallengeRow[]
+}
+
+const CATEGORY_LABELS: Record<string, string> = {
+  COLLECTION: "Collection",
+  EXPERTISE: "Expertise",
+  IMAGINATION: "Imagination",
+  LEGACY: "Legacy",
+  TEAMWORK: "Teamwork & Strategy",
+  VETERANCY: "Veterancy",
+}
+
 const GAME_MODE_LABELS: Record<string, string> = {
   ARAM: "ARAM",
   CHERRY: "Arena",
@@ -41,6 +58,87 @@ const LEVEL_ORDER = [
   "GRANDMASTER",
   "CHALLENGER",
 ]
+
+export function challengeCategoryLabel(category: string): string {
+  return CATEGORY_LABELS[category] ?? category
+    .toLowerCase()
+    .split("_")
+    .map((part) => part[0]?.toUpperCase() + part.slice(1))
+    .join(" ")
+}
+
+/**
+ * Builds the capstone hierarchy reported by League. Member challenges point
+ * at their capstone through `parentId`; capstones can also have a parent that
+ * represents a client-only category node, so the capstone flag wins.
+ */
+export function buildChallengeGroups(
+  challenges: readonly ChallengeRow[],
+): ChallengeGroup[] {
+  const capstones = challenges.filter((challenge) => challenge.isCapstone === 1)
+  const childrenByParent = new Map<number, ChallengeRow[]>()
+
+  for (const challenge of challenges) {
+    if (challenge.parentId === null) continue
+    const siblings = childrenByParent.get(challenge.parentId) ?? []
+    siblings.push(challenge)
+    childrenByParent.set(challenge.parentId, siblings)
+  }
+
+  const descendantsOf = (capstoneId: number) => {
+    const members: ChallengeRow[] = []
+    const visited = new Set([capstoneId])
+
+    const visit = (parentId: number) => {
+      for (const child of childrenByParent.get(parentId) ?? []) {
+        if (visited.has(child.challengeId)) continue
+        visited.add(child.challengeId)
+        members.push(child)
+        visit(child.challengeId)
+      }
+    }
+
+    visit(capstoneId)
+    return members.sort((left, right) =>
+      right.isCapstone - left.isCapstone || left.name.localeCompare(right.name))
+  }
+
+  return capstones
+    .map((capstone) => ({
+      capstone,
+      members: descendantsOf(capstone.challengeId),
+    }))
+    .sort((left, right) => left.capstone.name.localeCompare(right.capstone.name))
+}
+
+export function challengeKind(
+  challenge: ChallengeRow,
+  capstoneIds: ReadonlySet<number>,
+): ChallengeKind {
+  if (challenge.isCapstone === 1) return "capstone"
+  if (challenge.parentId !== null && capstoneIds.has(challenge.parentId)) {
+    return "grouped"
+  }
+  return "standalone"
+}
+
+export function challengeMatchesKind(
+  challenge: ChallengeRow,
+  filter: ChallengeKindFilter,
+  capstoneIds: ReadonlySet<number>,
+): boolean {
+  return filter === "all" || challengeKind(challenge, capstoneIds) === filter
+}
+
+/** A selected group contains its capstone and every direct member. */
+export function challengeMatchesGroup(
+  challenge: ChallengeRow,
+  capstoneId: number | null,
+  memberIds: ReadonlySet<number> = new Set(),
+): boolean {
+  return capstoneId === null || challenge.challengeId === capstoneId ||
+    memberIds.has(challenge.challengeId)
+}
 
 /**
  * Progress through the current tier, rather than progress from zero.

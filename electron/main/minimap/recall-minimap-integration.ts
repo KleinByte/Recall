@@ -154,22 +154,7 @@ export class RecallMinimapIntegration {
       debugSampler,
       options.onDebugFrame,
     )
-    this.templates = options.templateProvider ?? new DataDragonTemplateProvider(
-      options.getDataDragonVersion,
-      {
-        onVersionResolved: (version) => {
-          if (!options.getDataDragonVersion()) {
-            // Main-process consumers no longer depend on the renderer having
-            // opened before a match starts. Persistence is best-effort.
-            try {
-              options.onDataDragonVersionResolved?.(version)
-            } catch {
-              // Template loading remains usable even if cache persistence fails.
-            }
-          }
-        },
-      },
-    )
+    this.templates = options.templateProvider ?? new DataDragonTemplateProvider()
     this.postGame = new PostGamePathingAnalysisService(this.repository)
   }
 
@@ -259,7 +244,6 @@ export class RecallMinimapIntegration {
     }
     const rosterSignature = JSON.stringify({
       gameId: session.gameId ?? null,
-      version: this.options.getDataDragonVersion() ?? null,
       roster: roster.map((entry) => [
         entry.participantKey,
         entry.championName,

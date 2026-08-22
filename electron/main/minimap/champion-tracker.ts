@@ -28,13 +28,17 @@ interface InternalTrack {
   lastObservedAtMs: number
   lastObservedPosition: NormalizedPoint
   confidence: number
+  lastRelocatedAtMs?: number
   pendingRelocation?: PendingCandidate
 }
 
 export interface ChampionTrackerOptions {
   temporaryOcclusionMs: number
   initialConfirmationObservations: number
+  minimumInitialConfirmationDurationMs: number
   relocationConfirmationObservations: number
+  suspiciousRelocationConfirmationObservations: number
+  minimumSuspiciousRelocationDurationMs: number
   maximumConfirmationGapMs: number
   confirmationRadius: number
   /**
@@ -42,6 +46,8 @@ export interface ChampionTrackerOptions {
    * never rejected for being fast: a confirmed dash/teleport is accepted.
    */
   discontinuityDistance: number
+  maximumNormalizedSpeedPerSecond: number
+  relocationCooldownMs: number
   /** A gap longer than this is not joined to the previous visible point. */
   maximumContinuousGapMs: number
   minimumDuplicateConfidenceMargin: number
@@ -49,11 +55,16 @@ export interface ChampionTrackerOptions {
 
 const DEFAULT_OPTIONS: ChampionTrackerOptions = {
   temporaryOcclusionMs: 900,
-  initialConfirmationObservations: 2,
+  initialConfirmationObservations: 3,
+  minimumInitialConfirmationDurationMs: 300,
   relocationConfirmationObservations: 2,
+  suspiciousRelocationConfirmationObservations: 4,
+  minimumSuspiciousRelocationDurationMs: 700,
   maximumConfirmationGapMs: 1_000,
   confirmationRadius: 0.06,
   discontinuityDistance: 0.06,
+  maximumNormalizedSpeedPerSecond: 0.045,
+  relocationCooldownMs: 3_000,
   maximumContinuousGapMs: 500,
   minimumDuplicateConfidenceMargin: 0.08,
 }
@@ -130,7 +141,11 @@ export class ChampionTracker {
         const current = this.pendingInitial.get(observation.participantKey)
         const candidate = extendCandidate(current, observation, this.options)
         this.pendingInitial.set(observation.participantKey, candidate)
-        if (candidate.observations.length < this.options.initialConfirmationObservations) continue
+        const initialDurationMs = candidate.observations.length > 1
+          ? candidate.observations.at(-1)!.gameTimeMs - candidate.observations[0].gameTimeMs
+          : 0
+        if (candidate.observations.length < this.options.initialConfirmationObservations ||
+            initialDurationMs < this.options.minimumInitialConfirmationDurationMs) continue
         const latest = candidate.observations.at(-1)!
         this.tracks.set(observation.participantKey, {
           participantKey: latest.participantKey,
@@ -167,8 +182,21 @@ export class ChampionTracker {
           observation,
           this.options,
         )
-        if (previous.pendingRelocation.observations.length <
-            this.options.relocationConfirmationObservations) continue
+        const plausibleDistance = this.options.discontinuityDistance +
+          elapsedMs / 1_000 * this.options.maximumNormalizedSpeedPerSecond
+        const recentlyRelocated = previous.lastRelocatedAtMs !== undefined &&
+          observation.gameTimeMs - previous.lastRelocatedAtMs < this.options.relocationCooldownMs
+        const suspicious = distance > plausibleDistance || recentlyRelocated
+        const requiredObservations = suspicious
+          ? this.options.suspiciousRelocationConfirmationObservations
+          : this.options.relocationConfirmationObservations
+        const relocationDurationMs = previous.pendingRelocation.observations.length > 1
+          ? previous.pendingRelocation.observations.at(-1)!.gameTimeMs -
+            previous.pendingRelocation.observations[0].gameTimeMs
+          : 0
+        if (previous.pendingRelocation.observations.length < requiredObservations ||
+            (suspicious && relocationDurationMs <
+              this.options.minimumSuspiciousRelocationDurationMs)) continue
         const confirmed = previous.pendingRelocation.observations
         const latest = confirmed.at(-1)!
         previous.lastObservedAtMs = latest.gameTimeMs
@@ -176,6 +204,7 @@ export class ChampionTracker {
         previous.confidence = clamp(
           previous.confidence * 0.35 + averageConfidence(confirmed) * 0.65,
         )
+        previous.lastRelocatedAtMs = latest.gameTimeMs
         previous.pendingRelocation = undefined
         this.confirmedObservations.push(...confirmed.map((item, index) => ({
           ...item,

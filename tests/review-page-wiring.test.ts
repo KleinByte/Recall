@@ -17,7 +17,6 @@ const apiMocks = vi.hoisted(() => ({
   getRviProfile: vi.fn(),
   getReviewSessions: vi.fn(),
   listTags: vi.fn(),
-  listExperiments: vi.fn(),
   listMatches: vi.fn(),
   saveAnnotation: vi.fn(),
   getTimeline: vi.fn(),
@@ -89,7 +88,6 @@ function reviewFixture(jungling = false): MatchReview {
       note: "",
       bookmarked: false,
       tags: [],
-      experimentOutcomes: [],
     },
     timeline: { status: "pending" },
   } as MatchReview
@@ -143,14 +141,12 @@ describe("ReviewPage wiring", () => {
     apiMocks.getRviProfile.mockResolvedValue(undefined)
     apiMocks.getReviewSessions.mockResolvedValue({ rows: [] })
     apiMocks.listTags.mockResolvedValue([])
-    apiMocks.listExperiments.mockResolvedValue([])
     apiMocks.listMatches.mockResolvedValue({ rows: [] })
     apiMocks.saveAnnotation.mockImplementation(async (gameId, annotation) => ({
       gameId,
       note: annotation.note,
       bookmarked: annotation.bookmarked,
       tags: [],
-      experimentOutcomes: [],
     }))
     apiMocks.getTimeline.mockResolvedValue({ status: "pending" })
     apiMocks.cacheAugmentCatalog.mockResolvedValue(undefined)
@@ -174,6 +170,8 @@ describe("ReviewPage wiring", () => {
     })
     await flushPromises()
 
+    expect(wrapper.get(".review-area-tabs").text()).not.toContain("Experiments")
+    expect(wrapper.text()).not.toContain("New practice experiment")
     expect(apiMocks.getMatchReview).toHaveBeenCalledWith(42)
     expect(apiMocks.getJunglePathingReview).toHaveBeenCalledWith(42)
     expect(eventMocks.on).toHaveBeenCalledWith(

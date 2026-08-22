@@ -1,5 +1,6 @@
 const fs = require("node:fs")
 const path = require("node:path")
+const { createHash } = require("node:crypto")
 const { spawnSync } = require("node:child_process")
 const { extractFile, listPackage } = require("@electron/asar")
 
@@ -7,6 +8,9 @@ const REQUIRED_ARCHIVE_FILES = [
   "node_modules/@techstark/opencv-js/package.json",
   "node_modules/@techstark/opencv-js/dist/opencv.js",
   "node_modules/better-sqlite3/package.json",
+  "node_modules/onnxruntime-common/package.json",
+  "node_modules/onnxruntime-node/package.json",
+  "node_modules/onnxruntime-node/dist/index.js",
   "node_modules/ws/package.json",
 ]
 const REQUIRED_BACKGROUND_FILES = [
@@ -34,6 +38,18 @@ function packagedNativeBinary(context) {
     ? "win32"
     : context.electronPlatformName
   return `node_modules/better-sqlite3/prebuilds/${platform}-${targetArchitecture}.node`
+}
+
+function packagedOnnxRuntimeFiles(context) {
+  const targetArchitecture = typeof context.arch === "number"
+    ? ARCHITECTURE_NAMES[context.arch]
+    : context.arch
+  if (context.electronPlatformName !== "win32" || targetArchitecture !== "x64") return []
+  const root = "node_modules/onnxruntime-node/bin/napi-v6/win32/x64"
+  return [
+    `${root}/onnxruntime_binding.node`,
+    `${root}/onnxruntime.dll`,
+  ]
 }
 
 function packagedResourcesDirectory(context) {
@@ -68,7 +84,7 @@ function packagedExecutable(context) {
   )
 }
 
-function verifyPackagedNativeRuntime(context, nativeBinaryPath) {
+function verifyPackagedNativeRuntime(context, nativeBinaryPath, minimapModelPath, modelClassCount) {
   const targetArchitecture = typeof context.arch === "number"
     ? ARCHITECTURE_NAMES[context.arch]
     : context.arch
@@ -88,11 +104,9 @@ function verifyPackagedNativeRuntime(context, nativeBinaryPath) {
   }
 
   const executable = packagedExecutable(context)
-  // Loading JavaScript directly through app.asar during electron-builder's
-  // afterPack hook is unreliable on Windows: Electron can observe the archive
-  // while its integrity metadata is still being finalized. Static checks above
-  // validate the archived wrapper; this probe targets the packaged native
-  // binary explicitly while using the matching workspace wrapper.
+  // SQLite exposes nativeBinding, so its workspace wrapper can target the
+  // packaged binary explicitly. ONNX Runtime is also required directly from
+  // app.asar below, exercising its packaged JavaScript/native lookup and model.
   const modulePath = path.join(
     __dirname,
     "..",
@@ -113,15 +127,22 @@ function verifyPackagedNativeRuntime(context, nativeBinaryPath) {
     "main",
     "vision-worker.js"
   )
+  const packagedOnnxRuntimePath = path.join(
+    packagedResourcesDirectory(context),
+    "app.asar",
+    "node_modules",
+    "onnxruntime-node"
+  )
   const probe = [
     `const Database = require(${JSON.stringify(modulePath)})`,
+    `const ort = require(${JSON.stringify(packagedOnnxRuntimePath)})`,
     `const { Worker } = require("node:worker_threads")`,
     `const database = new Database(":memory:", { nativeBinding: ${JSON.stringify(nativeBinaryPath)} })`,
     `const row = database.prepare("SELECT 42 AS value").get()`,
     `database.close()`,
     `if (row.value !== 42) throw new Error("Unexpected SQLite result")`,
     `const runWorker = (file, request, validate, label) => new Promise((resolve, reject) => { const worker = new Worker(file); const timer = setTimeout(() => { worker.terminate().catch(() => undefined); reject(new Error(label + " timed out")) }, 30000); worker.once("error", error => { clearTimeout(timer); reject(error) }); worker.once("message", async message => { clearTimeout(timer); try { validate(message); await worker.terminate(); resolve() } catch (error) { await worker.terminate().catch(() => undefined); reject(error) } }); worker.postMessage(request) })`,
-    `;(async () => { await runWorker(${JSON.stringify(analysisWorkerPath)}, { id: 1, task: "ping" }, message => { if (message.result !== "pong") throw new Error("Unexpected analysis worker response") }, "Analysis worker"); await runWorker(${JSON.stringify(visionWorkerPath)}, { id: 2, task: "initialize", canonicalSize: 320 }, message => { if (!message.ok || message.task !== "initialize" || message.result?.engine !== "opencv_js") throw new Error("Unexpected OpenCV vision worker response") }, "OpenCV vision worker") })().catch(error => { console.error(error); process.exit(6) })`,
+    `;(async () => { await runWorker(${JSON.stringify(analysisWorkerPath)}, { id: 1, task: "ping" }, message => { if (message.result !== "pong") throw new Error("Unexpected analysis worker response") }, "Analysis worker"); await runWorker(${JSON.stringify(visionWorkerPath)}, { id: 2, task: "initialize", canonicalSize: 320 }, message => { if (!message.ok || message.task !== "initialize" || message.result?.engine !== "opencv_js" || message.result?.championModel?.available !== true) throw new Error("Unexpected OpenCV/ONNX vision worker response") }, "OpenCV/ONNX vision worker"); const session = await ort.InferenceSession.create(${JSON.stringify(minimapModelPath)}, { executionProviders: ["cpu"], graphOptimizationLevel: "all" }); const output = await session.run({ images: new ort.Tensor("float32", new Float32Array(3 * 256 * 256), [1, 3, 256, 256]) }); const prediction = output[session.outputNames[0]]; const expected = "1x" + (${modelClassCount} + 4) + "x1344"; if (!prediction || prediction.dims.join("x") !== expected) throw new Error("Unexpected packaged ONNX output"); await session.release() })().catch(error => { console.error(error); process.exit(6) })`,
   ].join(";")
   const result = spawnSync(executable, ["-e", probe], {
     cwd: context.appOutDir,
@@ -148,6 +169,54 @@ function verifyPackagedNativeRuntime(context, nativeBinaryPath) {
 
 module.exports = async context => {
   const resourcesDirectory = packagedResourcesDirectory(context)
+  const noticesPath = path.join(resourcesDirectory, "THIRD_PARTY_NOTICES.md")
+  if (!fs.existsSync(noticesPath)) {
+    throw new Error("Packaged third-party attribution is missing.")
+  }
+  const portraitDirectory = path.join(resourcesDirectory, "champion-portraits")
+  const portraitManifestPath = path.join(portraitDirectory, "manifest.json")
+  const portraitManifest = fs.existsSync(portraitManifestPath)
+    ? JSON.parse(fs.readFileSync(portraitManifestPath, "utf8"))
+    : undefined
+  const packagedPortraits = fs.existsSync(portraitDirectory)
+    ? fs.readdirSync(portraitDirectory).filter(file => file.endsWith(".png"))
+    : []
+  if (!portraitManifest || portraitManifest.schemaVersion !== 1 ||
+      portraitManifest.championCount !== portraitManifest.champions?.length ||
+      portraitManifest.championCount !== packagedPortraits.length ||
+      portraitManifest.championCount < 150) {
+    throw new Error("Packaged champion portrait bank is missing or incomplete.")
+  }
+  const modelDirectory = path.join(resourcesDirectory, "minimap-model")
+  const modelManifestPath = path.join(modelDirectory, "manifest.json")
+  const modelManifest = fs.existsSync(modelManifestPath)
+    ? JSON.parse(fs.readFileSync(modelManifestPath, "utf8"))
+    : undefined
+  const labelsPath = modelManifest
+    ? path.join(modelDirectory, modelManifest.labelsFile)
+    : ""
+  const modelPath = modelManifest
+    ? path.join(modelDirectory, modelManifest.artifactFile)
+    : ""
+  const labels = labelsPath && fs.existsSync(labelsPath)
+    ? JSON.parse(fs.readFileSync(labelsPath, "utf8"))
+    : undefined
+  const modelBytes = modelPath && fs.existsSync(modelPath)
+    ? fs.readFileSync(modelPath)
+    : undefined
+  const portraitKeys = new Set(
+    portraitManifest.champions.map(champion => String(champion.assetKey).toLowerCase())
+  )
+  if (!modelManifest || modelManifest.schemaVersion !== 1 ||
+      modelManifest.classCount < 150 ||
+      modelManifest.classCount > portraitManifest.championCount || !Array.isArray(labels) ||
+      labels.length !== modelManifest.classCount || !labels.includes("Garen") ||
+      labels.some(label => typeof label !== "string" || !portraitKeys.has(label.toLowerCase())) ||
+      new Set(labels.map(label => label.toLowerCase())).size !== labels.length ||
+      !modelBytes || modelBytes.length !== modelManifest.artifactBytes ||
+      createHash("sha256").update(modelBytes).digest("hex") !== modelManifest.artifactSha256) {
+    throw new Error("Packaged minimap model is missing, corrupt, or incompatible.")
+  }
   const archivePath = path.join(resourcesDirectory, "app.asar")
   const archiveFiles = new Set(
     listPackage(archivePath, { isPack: false }).map(filePath =>
@@ -180,6 +249,10 @@ module.exports = async context => {
     !fs.existsSync(path.join(unpackedRoot, nativeBinary))
     ? [nativeBinary]
     : []
+  const onnxRuntimeFiles = packagedOnnxRuntimeFiles(context)
+  const missingOnnxRuntimeFiles = onnxRuntimeFiles.filter(
+    filePath => !fs.existsSync(path.join(unpackedRoot, filePath)),
+  )
   const expectedNativeFileName = nativeBinary && path.basename(nativeBinary)
   const unexpectedNativeBinaries = packagedNativeBinaries.filter(
     fileName => fileName !== expectedNativeFileName
@@ -202,6 +275,7 @@ module.exports = async context => {
     missingArchiveFiles.length > 0 ||
     missingBackgroundFiles.length > 0 ||
     missingUnpackedFiles.length > 0 ||
+    missingOnnxRuntimeFiles.length > 0 ||
     unexpectedNativeBinaries.length > 0 ||
     buildOnlyUnpackedFiles.length > 0 ||
     externalModules.length > 0
@@ -217,6 +291,9 @@ module.exports = async context => {
           : "",
         missingUnpackedFiles.length > 0
           ? `Missing unpacked native files: ${missingUnpackedFiles.join(", ")}.`
+          : "",
+        missingOnnxRuntimeFiles.length > 0
+          ? `Missing unpacked ONNX Runtime files: ${missingOnnxRuntimeFiles.join(", ")}.`
           : "",
         unexpectedNativeBinaries.length > 0
           ? `Foreign native binaries were packaged: ${unexpectedNativeBinaries.join(", ")}.`
@@ -235,15 +312,19 @@ module.exports = async context => {
 
   const nativeRuntimeExecuted = verifyPackagedNativeRuntime(
     context,
-    nativeBinary ? path.join(unpackedRoot, nativeBinary) : undefined
+    nativeBinary ? path.join(unpackedRoot, nativeBinary) : undefined,
+    modelPath,
+    modelManifest.classCount
   )
 
   console.log(
     `Packaged runtime verified: ${REQUIRED_ARCHIVE_FILES.length} external modules, ` +
+    `${packagedPortraits.length} offline champion portraits, ` +
+    `a checksummed ${Math.round(modelBytes.length / 1024 / 1024)} MB minimap model, ` +
     `${packagedNativeBinaries.length} target native binary, no foreign/build-only native sources, ` +
     `bundled main-process dependencies, and ` +
     `${nativeRuntimeExecuted
-      ? "a successful SQLite query plus analysis/OpenCV worker launches"
+      ? "a successful SQLite query plus analysis/OpenCV/ONNX worker launches"
       : "cross-build static validation"}.`
   )
 }

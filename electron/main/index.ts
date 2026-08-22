@@ -75,7 +75,6 @@ import type {
   MatchRow,
   ModeFamily,
   ParticipantRow,
-  TrackedMode,
 } from "./matches/types.js"
 import { migrateLegacyUserData } from "./migrate-user-data.js"
 import {
@@ -109,11 +108,7 @@ import { DataTrustService } from "./database/data-trust.js"
 import { ClearHistoryService } from "./database/clear-history-service.js"
 import { DatabaseWriteCoordinator } from "./database-write-coordinator.js"
 import { ExportService } from "./database/export-service.js"
-import {
-  ReviewRepository,
-  type ExperimentInput,
-  type ExperimentOutcome,
-} from "./database/review-repo.js"
+import { ReviewRepository } from "./database/review-repo.js"
 import { LcuTimelineService } from "./lcu-timeline-service.js"
 import {
   evaluateMatchLabels,
@@ -157,6 +152,8 @@ export const MAIN_DIST = path.join(process.env.APP_ROOT, "dist-electron")
 export const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist")
 export const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
 const OPEN_DEVTOOLS = Boolean(VITE_DEV_SERVER_URL) && process.env.RECALL_OPEN_DEVTOOLS === "1"
+const MINIMAP_VISION_DEBUG_AVAILABLE =
+  Boolean(VITE_DEV_SERVER_URL) && !app.isPackaged
 
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
   ? path.join(process.env.APP_ROOT, "public")
@@ -1020,6 +1017,9 @@ const MINIMAP_DEBUG_OVERLAY_WIDTH = 430
 const MINIMAP_DEBUG_OVERLAY_HEIGHT = 800
 
 function minimapVisionDebugStatus(): MinimapVisionDebugStatus {
+  if (!MINIMAP_VISION_DEBUG_AVAILABLE) {
+    return { visible: false, locked: false }
+  }
   return { visible: minimapVisionDebugRequestedVisible, locked: minimapVisionDebugLocked }
 }
 
@@ -1116,7 +1116,8 @@ function createMinimapVisionDebugWindow(mainWindow: BrowserWindow) {
 }
 
 function setMinimapVisionDebugLocked(mainWindow: BrowserWindow, locked: boolean) {
-  if (settingsStore.getMain("minimap-vision-overlay-enabled") !== true) {
+  if (!MINIMAP_VISION_DEBUG_AVAILABLE ||
+      settingsStore.getMain("minimap-vision-overlay-enabled") !== true) {
     return minimapVisionDebugStatus()
   }
   const overlay = createMinimapVisionDebugWindow(mainWindow)
@@ -1127,7 +1128,8 @@ function setMinimapVisionDebugLocked(mainWindow: BrowserWindow, locked: boolean)
 }
 
 function toggleMinimapVisionDebugOverlay(mainWindow: BrowserWindow) {
-  if (settingsStore.getMain("minimap-vision-overlay-enabled") !== true) {
+  if (!MINIMAP_VISION_DEBUG_AVAILABLE ||
+      settingsStore.getMain("minimap-vision-overlay-enabled") !== true) {
     minimapVisionDebugRequestedVisible = false
     minimapVisionDebugWindow?.hide()
     return minimapVisionDebugStatus()
@@ -1144,7 +1146,8 @@ function toggleMinimapVisionDebugOverlay(mainWindow: BrowserWindow) {
 }
 
 function resetMinimapVisionDebugPosition(mainWindow: BrowserWindow) {
-  if (settingsStore.getMain("minimap-vision-overlay-enabled") !== true) {
+  if (!MINIMAP_VISION_DEBUG_AVAILABLE ||
+      settingsStore.getMain("minimap-vision-overlay-enabled") !== true) {
     return minimapVisionDebugStatus()
   }
   settingsStore.deleteMain("minimap-vision-overlay-position")
@@ -1328,7 +1331,8 @@ function clearMinimapVisionDebugOverlay(mainWindow: BrowserWindow) {
 }
 
 function publishMinimapDebugHealth() {
-  if (!minimapVisionDebugRequestedVisible || !session ||
+  if (!MINIMAP_VISION_DEBUG_AVAILABLE ||
+      !minimapVisionDebugRequestedVisible || !session ||
       settingsStore.getMain("minimap-vision-overlay-enabled") !== true) return
   const health = session.minimapTelemetry.getHealth()
   latestMinimapVisionDebug = {
@@ -1498,8 +1502,10 @@ async function startSession(
       broadcast(win, "minimap:pathing-updated", gameId)
     },
     getDebugEnabled: () =>
+      MINIMAP_VISION_DEBUG_AVAILABLE &&
       settingsStore.getMain("minimap-vision-debug-enabled") === true,
     getDebugOverlayEnabled: () =>
+      MINIMAP_VISION_DEBUG_AVAILABLE &&
       settingsStore.getMain("minimap-vision-overlay-enabled") === true &&
       minimapVisionDebugRequestedVisible,
     onDebugFrame: publishMinimapDebugFrame,
@@ -1877,7 +1883,6 @@ async function startRiotHistoryBackfill(
   const controller = new AbortController()
   riotBackfillAbort = controller
   let announcedImported: number | undefined
-  let attachedImported: number | undefined
 
   const backfill = new RiotHistoryBackfill(
     apiKey,
@@ -1907,16 +1912,6 @@ async function startRiotHistoryBackfill(
       onProgress: (state) => {
         if (revision !== riotBackfillRevision) return
         broadcast(win, "riot-history:updated", state)
-        if (attachedImported === undefined) {
-          attachedImported = state.matchesImported
-        } else if (state.matchesImported > attachedImported) {
-          const added = state.matchesImported - attachedImported
-          attachedImported = state.matchesImported
-          for (const match of getRepository().getRecentMatches(
-            { puuid: active.summoner.puuid },
-            added,
-          )) getReviewRepository().attachMatchingExperiments(match)
-        }
         if (state.status === "complete") {
           getDataTrustService().recordSync(active.summoner.puuid, "riot_history", {
             success: true,
@@ -2030,14 +2025,10 @@ async function afterSync(
   if (result.inserted > 0) {
     broadcast(win, "stats:updated", result)
 
-    // Every newly inserted game is checked against active experiment scopes;
-    // the newest one drives the post-game banner.
-    const recent = getRepository().getRecentMatches(
+    const [latest] = getRepository().getRecentMatches(
       { puuid: active.summoner.puuid },
       result.inserted,
     )
-    const [latest] = recent
-    for (const match of recent) getReviewRepository().attachMatchingExperiments(match)
     if (latest) {
       broadcast(win, "match:recorded", latest)
       broadcastHeldRecords(win, latest, active.summoner.puuid)
@@ -2332,16 +2323,20 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     return enabled
   })
   ipcMain.handle("settings:minimap-vision-debug:get", () =>
-    settingsStore.getRenderer("minimap-vision-debug-enabled") ?? false)
+    MINIMAP_VISION_DEBUG_AVAILABLE &&
+    (settingsStore.getRenderer("minimap-vision-debug-enabled") ?? false))
   ipcMain.handle("settings:minimap-vision-debug:set", (_event, value: unknown) =>
   {
+    if (!MINIMAP_VISION_DEBUG_AVAILABLE) return false
     const enabled = settingsStore.setRenderer("minimap-vision-debug-enabled", value) as boolean
     if (session) trackMinimapTelemetry(session.minimapTelemetry.update(liveSession))
     return enabled
   })
   ipcMain.handle("settings:minimap-vision-overlay:get", () =>
-    settingsStore.getRenderer("minimap-vision-overlay-enabled") ?? false)
+    MINIMAP_VISION_DEBUG_AVAILABLE &&
+    (settingsStore.getRenderer("minimap-vision-overlay-enabled") ?? false))
   ipcMain.handle("settings:minimap-vision-overlay:set", (_event, value: unknown) => {
+    if (!MINIMAP_VISION_DEBUG_AVAILABLE) return false
     const enabled = settingsStore.setRenderer("minimap-vision-overlay-enabled", value) as boolean
     if (!enabled && (minimapVisionDebugRequestedVisible || latestMinimapVisionDebug.enabled)) {
       clearMinimapVisionDebugOverlay(win)
@@ -2615,70 +2610,6 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
       integer(rawId, "Tag id"),
       withPuuid().puuid,
     ),
-  )
-
-  ipcMain.handle("experiments:list", () =>
-    getReviewRepository().listExperiments(withPuuid().puuid),
-  )
-  const experimentInput = (raw: unknown): ExperimentInput => {
-    const input = raw as Record<string, unknown>
-    if (!Array.isArray(input?.championIds) || !Array.isArray(input?.modes)) {
-      throw new Error("Experiment scope is invalid")
-    }
-    const name = limitedString(input.name, "Experiment name", 80)
-    if (!name) throw new Error("Experiment name is required")
-    return {
-      name,
-      hypothesis: boundedText(input.hypothesis ?? "", "Hypothesis", 500),
-      championIds: input.championIds.map((id) => integer(id, "Champion id")),
-      modes: input.modes.map((mode) => oneOf(mode, [
-        "sr_ranked_solo", "sr_ranked_flex", "sr_normal", "sr_quickplay",
-        "sr_swiftplay", "aram", "mayhem", "league_classic", "other",
-      ] as const, "Mode")) as TrackedMode[],
-      status: input.status === undefined
-        ? undefined
-        : oneOf(input.status, ["active", "paused", "completed"] as const, "Status"),
-    }
-  }
-  ipcMain.handle("experiments:create", (_event, rawInput: unknown) => {
-    const input = experimentInput(rawInput)
-    const created = getReviewRepository().createExperiment(withPuuid().puuid, input)
-    broadcast(win, "review:updated")
-    return created
-  })
-  ipcMain.handle(
-    "experiments:update",
-    (_event, rawId: unknown, rawInput: unknown) => {
-      const updated = getReviewRepository().updateExperiment(
-        integer(rawId, "Experiment id"),
-        withPuuid().puuid,
-        experimentInput(rawInput),
-      )
-      broadcast(win, "review:updated")
-      return updated
-    },
-  )
-  ipcMain.handle(
-    "experiments:set-match-outcome",
-    (
-      _event,
-      rawGameId: unknown,
-      rawExperimentId: unknown,
-      rawOutcome: unknown,
-      rawNote: unknown,
-    ) => {
-      const updated = getReviewRepository().setExperimentOutcome(
-        integer(rawGameId, "Game id"),
-        withPuuid().puuid,
-        integer(rawExperimentId, "Experiment id"),
-        oneOf(rawOutcome, [
-          "worked", "mixed", "did_not_work", "unrated",
-        ] as const, "Outcome") as ExperimentOutcome,
-        boundedText(rawNote ?? "", "Outcome note", 1_000),
-      )
-      broadcast(win, "review:updated", rawGameId)
-      return updated
-    },
   )
 
   // A Riot key must never travel back to the renderer. Electron delegates

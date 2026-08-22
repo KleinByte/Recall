@@ -36,14 +36,10 @@ const DEFAULT_OPTIONS: CampStateMachineOptions = {
   maximumConfirmationWindowMs: 15_000,
 }
 
-function isAbsentState(state: CampVisualState) {
-  return state === "dead" || state === "respawn_long" || state === "respawn_soon"
-}
-
 /**
- * Confirms only stable, distinct observations. A camp must first be confirmed
- * alive before an absent state can be emitted, so an ambiguous first frame can
- * never become a synthetic clear.
+ * Confirms only stable, distinct observations. Blank absence requires a prior
+ * confirmed alive state; an explicit countdown may establish a mid-respawn
+ * state, but cannot become a synthetic clear without the alive transition.
  */
 export class CampStateMachine {
   private readonly confirmed = new Map<CampKey, ConfirmedState>()
@@ -66,7 +62,15 @@ export class CampStateMachine {
       this.candidates.delete(observation.campKey)
       return undefined
     }
-    if (isAbsentState(observation.state) && current?.state !== "alive") {
+    // A blank/dead patch cannot establish a clear without first seeing the
+    // camp alive. Riot/Blitz countdown states are stronger evidence: they may
+    // establish that capture started mid-respawn, but the coordinator still
+    // creates a clear event only for a confirmed alive -> absent transition.
+    if (observation.state === "dead" && current?.state !== "alive") {
+      this.candidates.delete(observation.campKey)
+      return undefined
+    }
+    if (current?.state === "respawn_soon" && observation.state === "respawn_long") {
       this.candidates.delete(observation.campKey)
       return undefined
     }

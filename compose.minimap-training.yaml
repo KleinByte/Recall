@@ -1,0 +1,11 @@
+services:
+  minimap-training:
+    build:
+      context: .
+      dockerfile: minimap_training/Dockerfile
+    image: recall-minimap-training:latest
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    gpus: all
+    shm_size: "16gb"

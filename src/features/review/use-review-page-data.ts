@@ -2,13 +2,11 @@ import { computed, onBeforeUnmount, ref } from "vue"
 import { api } from "../../helpers/api"
 import { focusReviewGameId } from "../../helpers/navigation"
 import { useCoalescedTask } from "../../helpers/use-coalesced-task"
-import type { MatchRow, PerformanceDimensionScore, PerformanceProfile, TrackedMode } from "../../types/stats"
+import type { MatchRow, PerformanceDimensionScore, PerformanceProfile } from "../../types/stats"
 import type {
   AnnotationTag,
-  ExperimentOutcomeValue,
   MatchReview,
   OwnerAugmentSummary,
-  PracticeExperiment,
   ReviewSession,
 } from "../../types/review"
 
@@ -27,15 +25,10 @@ export function useReviewPageData(options: ReviewPageDataOptions) {
   const careerRvi = ref<PerformanceProfile>()
   const sessions = ref<ReviewSession[]>([])
   const tags = ref<AnnotationTag[]>([])
-  const experiments = ref<PracticeExperiment[]>([])
   const bookmarks = ref<MatchRow[]>([])
   const busy = ref(false)
   const error = ref("")
   const newTag = ref("")
-  const experimentName = ref("")
-  const experimentHypothesis = ref("")
-  const experimentChampionIds = ref<number[]>([])
-  const experimentModes = ref<TrackedMode[]>([])
   const augmentSummary = ref<Record<number, OwnerAugmentSummary>>({})
   const augmentSummaryLoading = ref(false)
   let saveTimer: ReturnType<typeof setTimeout> | undefined
@@ -99,15 +92,13 @@ export function useReviewPageData(options: ReviewPageDataOptions) {
         if (!gameRvi.value?.dimensions.some((dimension) =>
           dimension.score !== null || dimension.metrics.length > 0)) options.showPerformanceBreakdown()
       }
-      const [sessionPage, storedTags, storedExperiments, bookmarkedPage] = await Promise.all([
+      const [sessionPage, storedTags, bookmarkedPage] = await Promise.all([
         api.getReviewSessions(),
         api.listTags(),
-        api.listExperiments(),
         api.listMatches({ bookmarked: true }, 1, 100),
       ])
       sessions.value = sessionPage.rows
       tags.value = storedTags
-      experiments.value = storedExperiments
       bookmarks.value = bookmarkedPage.rows
     } catch (caught) {
       error.value = (caught as Error).message
@@ -184,50 +175,6 @@ export function useReviewPageData(options: ReviewPageDataOptions) {
     sessions.value = (await api.getReviewSessions()).rows
   }
 
-  async function createExperiment() {
-    if (!experimentName.value.trim()) return
-    await api.createExperiment({
-      name: experimentName.value,
-      hypothesis: experimentHypothesis.value,
-      championIds: experimentChampionIds.value,
-      modes: experimentModes.value,
-      status: "active",
-    })
-    experimentName.value = ""
-    experimentHypothesis.value = ""
-    experimentChampionIds.value = []
-    experimentModes.value = []
-    experiments.value = await api.listExperiments()
-  }
-
-  async function setExperimentStatus(
-    experiment: PracticeExperiment,
-    status: PracticeExperiment["status"],
-  ) {
-    await api.updateExperiment(experiment.id, {
-      ...experiment,
-      status,
-    })
-    experiments.value = await api.listExperiments()
-  }
-
-  async function updateOutcome(
-    experimentId: number,
-    outcome: ExperimentOutcomeValue,
-    note?: string,
-  ) {
-    if (!review.value) return
-    await api.setExperimentOutcome(
-      review.value.match.gameId,
-      experimentId,
-      outcome,
-      note ?? review.value.annotation.experimentOutcomes.find(
-        (entry) => entry.experimentId === experimentId,
-      )?.note ?? "",
-    )
-    review.value = await api.getMatchReview(review.value.match.gameId)
-  }
-
   function refreshCurrentWhenIdle() {
     if (!saveTimer && annotationSavesInFlight === 0) void refreshCurrent()
   }
@@ -241,15 +188,10 @@ export function useReviewPageData(options: ReviewPageDataOptions) {
     careerRvi,
     sessions,
     tags,
-    experiments,
     bookmarks,
     busy,
     error,
     newTag,
-    experimentName,
-    experimentHypothesis,
-    experimentChampionIds,
-    experimentModes,
     augmentSummary,
     augmentSummaryLoading,
     gameRviPresentation,
@@ -262,9 +204,6 @@ export function useReviewPageData(options: ReviewPageDataOptions) {
     loadTimeline,
     refreshTimeline,
     setBoundary,
-    createExperiment,
-    setExperimentStatus,
-    updateOutcome,
     refreshCurrentWhenIdle,
   }
 }

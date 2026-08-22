@@ -44,7 +44,8 @@ export interface MinimapVisionDebugSnapshot {
     diameterPx?: number
     aspectRatio?: number
     fillRatio?: number
-    proposalSource?: "component" | "hough_circle"
+    proposalSource?: "model" | "component" | "hough_circle" | "edge_circle"
+    modelConfidence?: number
     ringSupport?: number
     ringSectors?: number
     identityCandidate?: string

@@ -2,7 +2,10 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { api } from "../../helpers/api.js"
 import { publicAssetUrl } from "../../helpers/assets.js"
-import { SUMMONERS_RIFT_CAMPS } from "../../shared/minimap/camp-map.js"
+import {
+  campRespawnDurationMs,
+  SUMMONERS_RIFT_CAMPS,
+} from "../../shared/minimap/camp-map.js"
 import {
   deriveInitialJungleClear,
   FULL_CLEAR_CAMP_COUNT,
@@ -110,40 +113,53 @@ function interpolatedPoint(left: NormalizedPoint, right: NormalizedPoint, fracti
   }
 }
 
-function observedPointsAt(segment: PathSegment, timestamp: number): NormalizedPoint[] {
+function routePointsAt(segment: PathSegment, timestamp: number): NormalizedPoint[] {
   if (timestamp < segment.startTimeMs || segment.points.length === 0) return []
   if (segment.points.length === 1 || timestamp >= segment.endTimeMs) return segment.points
-  const elapsed = Math.max(0, timestamp - segment.startTimeMs)
-  const span = Math.max(1, segment.endTimeMs - segment.startTimeMs)
-  const pointPosition = Math.min(segment.points.length - 1, elapsed / span * (segment.points.length - 1))
-  const completedIndex = Math.floor(pointPosition)
-  const points = segment.points.slice(0, completedIndex + 1)
-  if (completedIndex < segment.points.length - 1) {
-    const fraction = pointPosition - completedIndex
-    if (fraction > 0) {
-      points.push(interpolatedPoint(
-        segment.points[completedIndex],
-        segment.points[completedIndex + 1],
-        fraction,
-      ))
+  const progress = Math.max(0, Math.min(
+    1,
+    (timestamp - segment.startTimeMs) / Math.max(1, segment.endTimeMs - segment.startTimeMs),
+  ))
+  const distances = segment.points.slice(1).map((point, index) =>
+    Math.hypot(point.x - segment.points[index].x, point.y - segment.points[index].y),
+  )
+  const totalDistance = distances.reduce((sum, distance) => sum + distance, 0)
+  if (totalDistance <= 0.0001) return [segment.points[0]]
+  const targetDistance = progress * totalDistance
+  const points = [segment.points[0]]
+  let traversed = 0
+  for (let index = 0; index < distances.length; index += 1) {
+    const distance = distances[index]
+    const next = traversed + distance
+    if (targetDistance >= next && index < distances.length - 1) {
+      points.push(segment.points[index + 1])
+      traversed = next
+      continue
     }
+    points.push(interpolatedPoint(
+      segment.points[index],
+      segment.points[index + 1],
+      distance <= 0.0001 ? 0 : Math.max(0, Math.min(1, (targetDistance - traversed) / distance)),
+    ))
+    break
   }
   return points
 }
 
 const renderedPaths = computed(() => selectedSegments.value.flatMap((segment, index) => {
-  if (segment.kind !== "observed") return []
-  const points = observedPointsAt(segment, playbackTimeMs.value)
+  if (segment.kind === "unknown") return []
+  const points = routePointsAt(segment, playbackTimeMs.value)
   if (points.length < 2) return []
   return [{
     key: `${segment.participantKey}:${segment.startTimeMs}:${segment.endTimeMs}:${index}`,
     points: points.map((point) => `${point.x * 100},${point.y * 100}`).join(" "),
     confidence: segment.confidence,
+    estimated: segment.kind !== "observed",
   }]
 }))
 
 const separatedSightings = computed(() => selectedSegments.value.flatMap((segment, segmentIndex) => {
-  if (segment.kind === "observed" || segment.points.length === 0 || playbackTimeMs.value < segment.startTimeMs) {
+  if (segment.kind !== "unknown" || segment.points.length === 0 || playbackTimeMs.value < segment.startTimeMs) {
     return []
   }
   const visiblePoints = playbackTimeMs.value >= segment.endTimeMs
@@ -161,13 +177,17 @@ const currentPoint = computed(() => {
   let candidate: { point: NormalizedPoint; evidenceTime: number; exact: boolean } | undefined
   for (const segment of selectedSegments.value) {
     if (playbackTimeMs.value < segment.startTimeMs || segment.points.length === 0) continue
-    if (segment.kind === "observed") {
-      const points = observedPointsAt(segment, playbackTimeMs.value)
+    if (segment.kind !== "unknown") {
+      const points = routePointsAt(segment, playbackTimeMs.value)
       const point = points.at(-1)
       if (!point) continue
       const evidenceTime = Math.min(playbackTimeMs.value, segment.endTimeMs)
       if (!candidate || evidenceTime >= candidate.evidenceTime) {
-        candidate = { point, evidenceTime, exact: playbackTimeMs.value <= segment.endTimeMs }
+        candidate = {
+          point,
+          evidenceTime,
+          exact: segment.kind === "observed" && playbackTimeMs.value <= segment.endTimeMs,
+        }
       }
       continue
     }
@@ -186,8 +206,13 @@ const campMarkers = computed(() => SUMMONERS_RIFT_CAMPS.map((camp) => {
   const latestClear = campClears.value.filter(
     (clear) => clear.campKey === camp.key && clear.clearedAtMs <= playbackTimeMs.value,
   ).at(-1)
-  const respawned = latestClear?.respawnAtMs !== undefined &&
-    latestClear.respawnAtMs <= playbackTimeMs.value
+  const respawnDuration = campRespawnDurationMs(camp.key)
+  const respawnAtMs = latestClear?.respawnAtMs ?? (
+    latestClear && respawnDuration !== undefined
+      ? latestClear.clearedAtMs + respawnDuration
+      : undefined
+  )
+  const respawned = respawnAtMs !== undefined && respawnAtMs <= playbackTimeMs.value
   return {
     ...camp,
     latestClear,
@@ -445,6 +470,7 @@ onBeforeUnmount(() => {
                 v-for="path in renderedPaths"
                 :key="path.key"
                 :points="path.points"
+                :class="{ estimated: path.estimated }"
                 :style="{ opacity: Math.max(.3, path.confidence) }"
               />
             </svg>
@@ -487,6 +513,7 @@ onBeforeUnmount(() => {
 
           <div class="legend">
             <span><i class="observed" />Observed route</span>
+            <span><i class="estimated" />Estimated through fog</span>
             <span><i class="unknown" />Separated sighting</span>
             <span><i class="camp" />Camp available</span>
             <span><i class="camp cleared" />Camp cleared</span>
@@ -544,7 +571,7 @@ onBeforeUnmount(() => {
             />
           </div>
           <p class="playback-note">
-            Solid lines connect pixel-supported observations only. Gaps are not filled with an invented route.
+            Solid lines are pixel-supported. Dashed routes estimate feasible fog-of-war travel between accepted sightings; even a brief sighting reshapes the estimate. Rejected gaps stay separated.
           </p>
         </div>
 
@@ -743,6 +770,10 @@ select {
   vector-effect: non-scaling-stroke;
   filter: drop-shadow(0 0 2px rgb(2 10 14 / 75%));
 }
+.path-layer polyline.estimated {
+  stroke-dasharray: 4 3;
+  opacity: .68;
+}
 .camp-marker, .sighting-marker, .current-position {
   position: absolute;
   transform: translate(-50%, -50%);
@@ -829,6 +860,7 @@ select {
 .legend span { display: inline-flex; gap: 6px; align-items: center; }
 .legend i { display: inline-block; }
 .legend .observed { width: 18px; border-top: 2px solid currentColor; }
+.legend .estimated { width: 18px; border-top: 2px dashed currentColor; }
 .legend .unknown { width: 6px; height: 6px; border: 1px solid currentColor; border-radius: 50%; }
 .legend .camp { width: 7px; height: 7px; border: 1px solid currentColor; border-radius: 50%; }
 .legend .camp.cleared { border-color: #d86f68; background: rgba(216, 111, 104, .4); }

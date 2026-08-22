@@ -322,7 +322,6 @@ export interface MatchRow {
   tagNames?: string[]
   /** Highest-priority automatically awarded Match-V5 labels. */
   labelNames?: string[]
-  experimentCount?: number
   /** Rank among the lobby by Recall grade; absent unless every player is graded. */
   lobbyPlace?: number
   lobbySize?: number

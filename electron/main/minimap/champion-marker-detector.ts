@@ -5,7 +5,7 @@ import type {
   RgbaFrame,
 } from "../../../src/shared/minimap/contracts.js"
 
-export const CHAMPION_MARKER_DETECTOR_VERSION = 4
+export const CHAMPION_MARKER_DETECTOR_VERSION = 8
 
 /** Raw roster portrait. Pixel preprocessing is owned by the OpenCV worker. */
 export interface ChampionMarkerTemplate extends ChampionTemplateDescriptor {
@@ -33,7 +33,8 @@ export interface ChampionMarkerProposalFootprint {
   readonly diameterPx?: number
   readonly aspectRatio?: number
   readonly fillRatio?: number
-  readonly proposalSource?: "component" | "hough_circle"
+  readonly proposalSource?: "model" | "component" | "hough_circle" | "edge_circle"
+  readonly modelConfidence?: number
   readonly ringSupport?: number
   readonly ringSectors?: number
   identityCandidate?: string

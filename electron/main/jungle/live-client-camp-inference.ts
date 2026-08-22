@@ -4,13 +4,26 @@ import type {
   ChampionTrackSnapshot,
 } from "../../../src/shared/minimap/contracts.js"
 import { clamp, normalizedDistance } from "../../../src/shared/minimap/contracts.js"
-import { SUMMONERS_RIFT_CAMPS } from "./camp-map.js"
+import {
+  CAMP_CLEAR_ALGORITHM_VERSION,
+  campRespawnDurationMs,
+  SUMMONERS_RIFT_CAMPS,
+} from "./camp-map.js"
 import type { JungleEvidenceDelta } from "./live-jungle-evidence.js"
 
 const ELIGIBLE_CAMPS = SUMMONERS_RIFT_CAMPS.filter((camp) => camp.respawnRule !== "epic")
 const QUIET_PERIOD_MS = 900
 const CLEAR_DEDUPLICATION_MS = 60_000
 const UNIQUE_NEAREST_MARGIN = 0.012
+const MAXIMUM_LAST_SEEN_POSITION_AGE_MS = 2_000
+
+function clearDeduplicationMs(campKey: CampKey) {
+  const respawnDuration = campRespawnDurationMs(campKey)
+  return Math.max(
+    CLEAR_DEDUPLICATION_MS,
+    respawnDuration === undefined ? 0 : respawnDuration - 10_000,
+  )
+}
 
 interface PendingCampEvidence {
   campKey: CampKey
@@ -18,6 +31,7 @@ interface PendingCampEvidence {
   creepScoreDelta: number
   goldResidual: number
   nearestDistance: number
+  positionAgeMs: number
   expectedNextCamp: boolean
   visibleAlliesNearCamp: number
   visibleEnemiesNearCamp: number
@@ -37,8 +51,10 @@ export interface LiveClientCampInferenceInput {
 
 /**
  * Conservative fallback for first-clear tracking when camp-icon CV has no
- * usable baseline. It requires a currently rendered local champion position,
- * a positive CS event, compatible gold, and a uniquely nearest non-epic camp.
+ * usable baseline. It requires a current or very recent local champion
+ * position, a positive CS event, compatible gold, and a uniquely nearest
+ * non-epic camp. The short last-seen window survives transient overlays but
+ * never predicts a hidden champion's movement.
  */
 export class LiveClientCampInference {
   private pending?: PendingCampEvidence
@@ -48,17 +64,28 @@ export class LiveClientCampInference {
     const local = input.localParticipantKey
       ? input.tracks.find((track) => track.participantKey === input.localParticipantKey)
       : undefined
-    const localVisible = local?.state === "visible" && Boolean(local.position)
+    const directlyVisible = local?.state === "visible" && Boolean(local.position)
+    const positionAgeMs = directlyVisible
+      ? 0
+      : local?.lastObservedGameTimeMs === undefined
+        ? Number.POSITIVE_INFINITY
+        : Math.max(0, input.gameTimeMs - local.lastObservedGameTimeMs)
+    const localPosition = directlyVisible && local?.position
+      ? local.position
+      : local?.lastObservedPosition &&
+          positionAgeMs <= MAXIMUM_LAST_SEEN_POSITION_AGE_MS && local.confidence >= 0.35
+        ? local.lastObservedPosition
+        : undefined
     const dead = input.localPlayerDead === true || local?.state === "dead"
     const creepScoreDelta = input.evidence.creepScoreDelta ?? 0
-    const positiveCampEvidence = !dead && localVisible && creepScoreDelta > 0 &&
+    const positiveCampEvidence = !dead && Boolean(localPosition) && creepScoreDelta > 0 &&
       creepScoreDelta <= 15 && input.evidence.goldResidual >= 1
 
-    if (positiveCampEvidence && local?.position) {
+    if (positiveCampEvidence && localPosition) {
       const nearby = ELIGIBLE_CAMPS
         .map((camp) => ({
           camp,
-          distance: normalizedDistance(local.position!, camp.center),
+          distance: normalizedDistance(localPosition, camp.center),
         }))
         .sort((left, right) => left.distance - right.distance)
       const nearest = nearby[0]
@@ -70,7 +97,7 @@ export class LiveClientCampInference {
         const camp = nearest.camp
         const lastRecordedAt = this.lastRecordedAt.get(camp.key)
         if (lastRecordedAt === undefined ||
-            input.gameTimeMs - lastRecordedAt >= CLEAR_DEDUPLICATION_MS) {
+            input.gameTimeMs - lastRecordedAt >= clearDeduplicationMs(camp.key)) {
           const allies = input.tracks.filter((track) =>
             track.state === "visible" && track.team === "ally" && track.position &&
             normalizedDistance(track.position, camp.center) <= camp.attributionRadius).length
@@ -85,6 +112,10 @@ export class LiveClientCampInference {
             this.pending.nearestDistance = Math.min(
               this.pending.nearestDistance,
               nearest.distance,
+            )
+            this.pending.positionAgeMs = Math.min(
+              this.pending.positionAgeMs,
+              positionAgeMs,
             )
             this.pending.expectedNextCamp ||= input.routePlan?.[input.routeIndex] === camp.key
             this.pending.visibleAlliesNearCamp = Math.max(
@@ -102,6 +133,7 @@ export class LiveClientCampInference {
               creepScoreDelta,
               goldResidual: Math.max(0, input.evidence.goldResidual),
               nearestDistance: nearest.distance,
+              positionAgeMs,
               expectedNextCamp: input.routePlan?.[input.routeIndex] === camp.key,
               visibleAlliesNearCamp: allies,
               visibleEnemiesNearCamp: enemies,
@@ -119,7 +151,8 @@ export class LiveClientCampInference {
     if (pending.creepScoreDelta <= 0 || pending.creepScoreDelta > 15 ||
         pending.goldResidual < 5 || dead) return undefined
     const previous = this.lastRecordedAt.get(pending.campKey)
-    if (previous !== undefined && pending.lastPositiveAtMs - previous < CLEAR_DEDUPLICATION_MS) {
+    if (previous !== undefined &&
+        pending.lastPositiveAtMs - previous < clearDeduplicationMs(pending.campKey)) {
       return undefined
     }
 
@@ -138,6 +171,9 @@ export class LiveClientCampInference {
       puuid: input.puuid,
       campKey: pending.campKey,
       clearedAtMs: pending.lastPositiveAtMs,
+      respawnAtMs: campRespawnDurationMs(pending.campKey) === undefined
+        ? undefined
+        : pending.lastPositiveAtMs + campRespawnDurationMs(pending.campKey)!,
       source: "live_client_inference",
       sourceConfidence: confidence,
       attribution: "local",
@@ -153,10 +189,10 @@ export class LiveClientCampInference {
         visibleEnemiesNearCamp: pending.visibleEnemiesNearCamp,
         localPlayerDead: false,
         transitionConfidence: 0,
-        evidenceAgeMs: 0,
+        evidenceAgeMs: pending.positionAgeMs,
       },
       routeIndex: input.routeIndex,
-      algorithmVersion: 3,
+      algorithmVersion: CAMP_CLEAR_ALGORITHM_VERSION,
     }
   }
 

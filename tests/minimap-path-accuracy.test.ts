@@ -42,12 +42,13 @@ describe("accuracy-first minimap paths", () => {
     expect(segment.points).toEqual([start.position, end.position])
   })
 
-  it("does not invent a route across missing visibility", () => {
-    const start = observation()
+  it("estimates a graph-backed route across feasible missing visibility", () => {
+    const start = observation({ position: { x: 0.266, y: 0.468 } })
     const end = observation({
-      gameTimeMs: 16_000,
-      frameSequence: 30,
-      position: { x: 0.75, y: 0.25 },
+      gameTimeMs: 30_000,
+      frameSequence: 80,
+      position: { x: 0.535, y: 0.733 },
+      continuity: "relocation",
     })
     const segment = new PathReconstructor().reconstructGap({
       policy,
@@ -56,9 +57,13 @@ describe("accuracy-first minimap paths", () => {
       start,
       end,
     })
-    expect(segment.kind).toBe("unknown")
-    expect(segment.confidence).toBe(0)
-    expect(segment.points).toEqual([start.position, end.position])
+    expect(segment.kind).toBe("inferred")
+    expect(segment.confidence).toBeGreaterThan(0)
+    expect(segment.points[0]).toEqual(start.position)
+    expect(segment.points.at(-1)).toEqual(end.position)
+    expect(segment.points.length).toBeGreaterThan(2)
+    expect(segment.inferenceMode).toBe("smoothed_postgame")
+    expect(segment.uncertaintyRadius).toHaveLength(segment.points.length)
   })
 
   it("does not connect low-confidence detections", () => {
@@ -90,6 +95,34 @@ describe("accuracy-first minimap paths", () => {
       end,
     })
     expect(segment.kind).toBe("unknown")
+  })
+
+  it("uses a brief sighting to split and refine the hidden route", () => {
+    const start = observation({
+      position: { x: 0.266, y: 0.468 },
+    })
+    const brief = observation({
+      gameTimeMs: 20_000,
+      frameSequence: 50,
+      position: { x: 0.267, y: 0.563 },
+      continuity: "relocation",
+    })
+    const end = observation({
+      gameTimeMs: 30_000,
+      frameSequence: 90,
+      position: { x: 0.481, y: 0.638 },
+      continuity: "relocation",
+    })
+    const segments = new PathReconstructor().buildSegments({
+      policy,
+      gameId: 9,
+      participantKey: start.participantKey,
+      observations: [start, brief, end],
+    })
+
+    expect(segments.map((segment) => segment.kind)).toEqual(["inferred", "inferred"])
+    expect(segments[0].points.at(-1)).toEqual(brief.position)
+    expect(segments[1].points[0]).toEqual(brief.position)
   })
 
   it("never connects legacy observations without explicit continuity", () => {

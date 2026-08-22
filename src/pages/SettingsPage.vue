@@ -7,6 +7,7 @@ import {
   PageHeader,
   Panel,
   Surface,
+  Tabs as UiTabs,
 } from "../components/ui"
 import { api } from "../helpers/api"
 import { useApiEvents } from "../helpers/use-api-events"
@@ -52,6 +53,20 @@ const trust = ref<DataTrustReport>()
 const trustBusy = ref(false)
 const launchAtLogin = ref(true)
 const minimapTelemetryEnabled = ref(true)
+const isDevelopment = import.meta.env.DEV
+const settingsTab = ref("general")
+const settingsTabs = [
+  { value: "general", label: "General" },
+  { value: "gameplay", label: "Gameplay" },
+  { value: "riot-history", label: "Riot & history" },
+  { value: "data", label: "Data" },
+  ...(isDevelopment ? [{ value: "development", label: "Development" }] : []),
+]
+const settingsPanelTitle = computed(() => {
+  if (settingsTab.value === "general") return "General preferences"
+  if (settingsTab.value === "gameplay") return "Gameplay & overlays"
+  return "Development tools"
+})
 const minimapVisionDebugEnabled = ref(false)
 const minimapVisionOverlayEnabled = ref(false)
 const displayTimezone = ref("")
@@ -113,12 +128,14 @@ onMounted(() => {
   void api.getMinimapTelemetryEnabled().then((value) => {
     minimapTelemetryEnabled.value = value !== false
   })
-  void api.getMinimapVisionDebugEnabled().then((value) => {
-    minimapVisionDebugEnabled.value = value === true
-  })
-  void api.getMinimapVisionDebugOverlayEnabled().then((value) => {
-    minimapVisionOverlayEnabled.value = value === true
-  })
+  if (isDevelopment) {
+    void api.getMinimapVisionDebugEnabled().then((value) => {
+      minimapVisionDebugEnabled.value = value === true
+    })
+    void api.getMinimapVisionDebugOverlayEnabled().then((value) => {
+      minimapVisionOverlayEnabled.value = value === true
+    })
+  }
   void api.getDisplayTimezone().then((value) => {
     displayTimezone.value = value.override ?? ""
     resolvedTimezone.value = value.timeZone
@@ -375,9 +392,19 @@ const formatDate = (value?: number) =>
       description="Control how Recall starts, stores data, and connects to optional services."
     />
 
-    <Panel title="Display">
+    <UiTabs
+      v-model="settingsTab"
+      :options="settingsTabs"
+      label="Settings categories"
+      variant="compact"
+    />
 
-      <label class="setting">
+    <Panel
+      v-if="['general', 'gameplay', 'development'].includes(settingsTab)"
+      :title="settingsPanelTitle"
+    >
+
+      <label v-show="settingsTab === 'general'" class="setting">
         <input
           type="checkbox"
           :checked="props.isColoredWhenDone"
@@ -396,7 +423,7 @@ const formatDate = (value?: number) =>
         </span>
       </label>
 
-      <label class="setting">
+      <label v-show="settingsTab === 'general'" class="setting">
         <input
           type="checkbox"
           :checked="props.showChampionNames"
@@ -410,7 +437,7 @@ const formatDate = (value?: number) =>
         <span>Show champion names under icons</span>
       </label>
 
-      <label class="setting">
+      <label v-show="settingsTab === 'general'" class="setting">
         <input type="checkbox" :checked="launchAtLogin"
           @change="setLaunchAtLogin(($event.target as HTMLInputElement).checked)" />
         <span>
@@ -419,7 +446,7 @@ const formatDate = (value?: number) =>
         </span>
       </label>
 
-      <label class="setting">
+      <label v-show="settingsTab === 'gameplay'" class="setting">
         <input type="checkbox" :checked="minimapTelemetryEnabled"
           @change="setMinimapTelemetryEnabled(($event.target as HTMLInputElement).checked)" />
         <span>
@@ -431,7 +458,7 @@ const formatDate = (value?: number) =>
         </span>
       </label>
 
-      <label class="setting">
+      <label v-if="isDevelopment && settingsTab === 'development'" class="setting">
         <input type="checkbox" :checked="minimapVisionDebugEnabled"
           :disabled="!minimapTelemetryEnabled"
           @change="setMinimapVisionDebugEnabled(($event.target as HTMLInputElement).checked)" />
@@ -444,7 +471,7 @@ const formatDate = (value?: number) =>
         </span>
       </label>
 
-      <label class="setting">
+      <label v-if="isDevelopment && settingsTab === 'development'" class="setting">
         <input type="checkbox" :checked="minimapVisionOverlayEnabled"
           :disabled="!minimapTelemetryEnabled"
           @change="setMinimapVisionOverlayEnabled(($event.target as HTMLInputElement).checked)" />
@@ -457,7 +484,10 @@ const formatDate = (value?: number) =>
         </span>
       </label>
 
-      <div v-if="minimapVisionOverlayEnabled" class="tempo-overlay-setting">
+      <div
+        v-if="isDevelopment && settingsTab === 'development' && minimapVisionOverlayEnabled"
+        class="tempo-overlay-setting"
+      >
         <div>
           <strong>Minimap CV debug window</strong>
           <span class="muted hint">Place it once, then lock it so League input passes through.</span>
@@ -468,7 +498,7 @@ const formatDate = (value?: number) =>
         </div>
       </div>
 
-      <div class="timezone-setting">
+      <div v-show="settingsTab === 'general'" class="timezone-setting">
         <UiField label="Display timezone" compact>
           <input
             v-model="displayTimezone"
@@ -487,7 +517,7 @@ const formatDate = (value?: number) =>
         <span v-if="timezoneMessage" class="muted hint">{{ timezoneMessage }}</span>
       </div>
 
-      <div class="tempo-overlay-setting">
+      <div v-show="settingsTab === 'gameplay'" class="tempo-overlay-setting">
         <div>
           <strong>In-game Tempo overlay</strong>
           <span class="muted hint">
@@ -512,7 +542,7 @@ const formatDate = (value?: number) =>
       </div>
     </Panel>
 
-    <Panel title="Application updates">
+    <Panel v-show="settingsTab === 'general'" title="Application updates">
       <p class="muted note">{{ update.message }}</p>
       <div class="actions update-actions">
         <UiButton
@@ -539,7 +569,7 @@ const formatDate = (value?: number) =>
       </div>
     </Panel>
 
-    <Panel title="Riot API" class="riot-panel">
+    <Panel v-show="settingsTab === 'riot-history'" title="Riot API" class="riot-panel">
       <p class="muted note">
         Used only to resolve the signed-in Riot ID and run the full Match-V5
         history import you start here. Normal post-game details, scoreboards, and
@@ -613,7 +643,7 @@ const formatDate = (value?: number) =>
       </p>
     </Panel>
 
-    <Panel title="Recorded data">
+    <Panel v-show="settingsTab === 'data'" title="Recorded data">
 
       <dl class="meta">
         <div>
@@ -692,7 +722,7 @@ const formatDate = (value?: number) =>
       <p v-if="message" class="muted note">{{ message }}</p>
     </Panel>
 
-    <Panel title="Data Trust Center" class="trust-center">
+    <Panel v-show="settingsTab === 'data'" title="Data Trust Center" class="trust-center">
       <template #actions>
         <span class="trust-state" :class="trust?.state">
           {{ (trust?.state ?? "checking").replace("_", " ") }}
@@ -795,7 +825,7 @@ const formatDate = (value?: number) =>
       />
     </Panel>
 
-    <Panel title="Challenge data">
+    <Panel v-show="settingsTab === 'gameplay'" title="Challenge data">
       <div class="actions">
         <UiButton @click="emit('refetch')">
           Refresh challenges
@@ -806,7 +836,7 @@ const formatDate = (value?: number) =>
       </div>
     </Panel>
 
-    <Panel title="About Recall" variant="quiet">
+    <Panel v-show="settingsTab === 'general'" title="About Recall" variant="quiet">
       <p class="muted note">
         Recall is not endorsed by Riot Games and does not reflect the views or
         opinions of Riot Games or anyone officially involved in producing or

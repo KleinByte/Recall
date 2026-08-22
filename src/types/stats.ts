@@ -79,7 +79,6 @@ export interface MatchQuery extends StatsFilter {
   bookmarked?: boolean
   hasNotes?: boolean
   tagIds?: number[]
-  experimentId?: number
 }
 
 export interface MatchPage {
@@ -664,7 +663,6 @@ export interface MatchRow {
   hasNote?: boolean
   tagNames?: string[]
   labelNames?: string[]
-  experimentCount?: number
   /** Rank among the lobby by Recall grade; absent unless every player is graded. */
   lobbyPlace?: number
   lobbySize?: number

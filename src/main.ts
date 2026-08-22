@@ -4,7 +4,8 @@ import "./style.css"
 async function bootstrap() {
   const parameters = new URLSearchParams(window.location.search)
   const overlay = parameters.get("surface") === "tempo-overlay"
-  const minimapDebug = parameters.get("surface") === "minimap-vision-debug"
+  const minimapDebug = import.meta.env.DEV &&
+    parameters.get("surface") === "minimap-vision-debug"
   const showcase = import.meta.env.DEV ? parameters.get("showcase") : null
   if (showcase) {
     const { installShowcaseEnvironment, showcaseGameId } = await import(

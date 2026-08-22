@@ -12,15 +12,20 @@ import { api } from "../helpers/api"
 import { useApiEvents } from "../helpers/use-api-events"
 import { useCoalescedTask } from "../helpers/use-coalesced-task"
 import {
+  buildChallengeGroups,
+  challengeCategoryLabel,
   challengeGameModeLabel,
   challengeGameModes,
   challengeMapForGameMode,
   challengeMatchesCategory,
   challengeMatchesGameMode,
+  challengeMatchesGroup,
+  challengeMatchesKind,
   challengeMatchesMap,
   isChallengeCompleted,
   selectIncompleteChallenges,
   sortChallenges,
+  type ChallengeKindFilter,
   type ChallengeSortDirection,
   type ChallengeSortKey,
 } from "../helpers/challenges"
@@ -69,6 +74,13 @@ const SORTS: { value: ChallengeSortKey; label: string }[] = [
   { value: "updated", label: "Recently updated" },
 ]
 
+const KINDS: { value: ChallengeKindFilter; label: string }[] = [
+  { value: "all", label: "All challenge types" },
+  { value: "capstone", label: "Capstones only" },
+  { value: "grouped", label: "Challenges in groups" },
+  { value: "standalone", label: "Standalone challenges" },
+]
+
 const challenges = ref<ChallengeRow[]>([])
 const pinned = ref<number[]>([])
 const search = ref("")
@@ -76,6 +88,8 @@ const category = ref("All")
 const level = ref("All")
 const gameMode = ref("")
 const challengeMap = ref("")
+const challengeKind = ref<ChallengeKindFilter>("all")
+const challengeGroupId = ref<number | null>(null)
 const championOnly = ref(false)
 const showRetired = ref(false)
 const hideCompleted = ref(true)
@@ -134,9 +148,12 @@ async function focusOn(challengeId: number) {
   level.value = "All"
   gameMode.value = ""
   challengeMap.value = ""
+  challengeKind.value = "all"
+  challengeGroupId.value = null
   championOnly.value = false
   showRetired.value = challenge.isRetired === 1
-  if (isChallengeCompleted(challenge)) hideCompleted.value = false
+  hideCompleted.value = !isChallengeCompleted(challenge)
+  category.value = challenge.category === "LEGACY" ? "LEGACY" : "All"
 
   // Make sure the row is inside the rendered window before scrolling to it.
   const index = filtered.value.findIndex(
@@ -165,17 +182,54 @@ const incompleteChallenges = computed(() =>
   selectIncompleteChallenges(challenges.value),
 )
 
+const challengeGroups = computed(() => buildChallengeGroups(challenges.value))
+const capstoneIds = computed(() => new Set(
+  challengeGroups.value.map((group) => group.capstone.challengeId),
+))
+const groupsById = computed(() => new Map(
+  challengeGroups.value.map((group) => [group.capstone.challengeId, group]),
+))
+
+const groupOptions = computed(() => challengeGroups.value.filter(({ capstone }) => {
+  if (!showRetired.value && capstone.isRetired === 1) return false
+  return challengeMatchesCategory(capstone, category.value)
+}))
+
+const groupNameFor = (challenge: ChallengeRow) => {
+  if (challenge.isCapstone === 1) return challenge.name
+  if (challenge.parentId === null) return undefined
+  return groupsById.value.get(challenge.parentId)?.capstone.name
+}
+
+const membersFor = (challenge: ChallengeRow) =>
+  groupsById.value.get(challenge.challengeId)?.members ?? []
+
+const selectedGroup = computed(() => challengeGroupId.value === null
+  ? undefined
+  : groupsById.value.get(challengeGroupId.value))
+const selectedGroupMemberIds = computed(() => new Set(
+  selectedGroup.value?.members.map((member) => member.challengeId) ?? [],
+))
+
 const filtered = computed(() => {
-  const needle = search.value.toLowerCase()
+  const needle = search.value.trim().toLowerCase()
   const source = hideCompleted.value
     ? incompleteChallenges.value
     : challenges.value
 
   const matches = source.filter((challenge) => {
     const retired = challenge.isRetired === 1
-    if (showRetired.value !== retired) return false
+    if (!showRetired.value && retired) return false
 
     if (!challengeMatchesCategory(challenge, category.value)) return false
+    if (!challengeMatchesKind(challenge, challengeKind.value, capstoneIds.value)) {
+      return false
+    }
+    if (!challengeMatchesGroup(
+      challenge,
+      challengeGroupId.value,
+      selectedGroupMemberIds.value,
+    )) return false
     if (level.value !== "All" && challenge.currentLevel !== level.value) {
       return false
     }
@@ -186,7 +240,8 @@ const filtered = computed(() => {
     if (needle) {
       return (
         challenge.name.toLowerCase().includes(needle) ||
-        challenge.description.toLowerCase().includes(needle)
+        challenge.description.toLowerCase().includes(needle) ||
+        groupNameFor(challenge)?.toLowerCase().includes(needle)
       )
     }
     return true
@@ -209,13 +264,51 @@ const mapOptions = computed(() => {
   return [...maps].sort((left, right) => left.localeCompare(right))
 })
 
+const filterCount = computed(() => [
+  search.value.trim() !== "",
+  category.value !== "All",
+  level.value !== "All",
+  gameMode.value !== "",
+  challengeMap.value !== "",
+  challengeKind.value !== "all",
+  challengeGroupId.value !== null,
+  championOnly.value,
+  showRetired.value,
+  !hideCompleted.value,
+].filter(Boolean).length)
+
+const resetFilters = () => {
+  search.value = ""
+  category.value = "All"
+  level.value = "All"
+  gameMode.value = ""
+  challengeMap.value = ""
+  challengeKind.value = "all"
+  challengeGroupId.value = null
+  championOnly.value = false
+  showRetired.value = false
+  hideCompleted.value = true
+  sortBy.value = "closest"
+  sortDirection.value = "desc"
+}
+
 const pinnedChallenges = computed(() =>
   (hideCompleted.value ? incompleteChallenges.value : challenges.value).filter(
     (challenge) =>
       pinned.value.includes(challenge.challengeId) &&
-      challengeMatchesCategory(challenge, category.value),
+      challengeMatchesCategory(challenge, category.value) &&
+      (showRetired.value || challenge.isRetired !== 1),
   ),
 )
+
+watch(groupOptions, (options) => {
+  if (
+    challengeGroupId.value !== null &&
+    !options.some((group) => group.capstone.challengeId === challengeGroupId.value)
+  ) {
+    challengeGroupId.value = null
+  }
+})
 
 watch(
   [
@@ -224,6 +317,8 @@ watch(
     level,
     gameMode,
     challengeMap,
+    challengeKind,
+    challengeGroupId,
     championOnly,
     showRetired,
     hideCompleted,
@@ -271,17 +366,14 @@ const splitChampions = (challenge: ChallengeRow) => {
     <PageHeader
       title="Challenges"
       eyebrow="League challenge tracker"
-      :description="`See what each challenge asks for, its next target, and what remains. Showing ${filtered.length} of ${challenges.length}.`"
+      description="Find the next milestone worth chasing, browse a capstone as a complete group, and open any challenge for its full briefing."
     >
       <template #actions>
-        <Field label="Search challenges" compact class="search-field">
-          <input
-            v-model="search"
-            class="league-input search"
-            type="search"
-            placeholder="Name or description"
-          />
-        </Field>
+        <div class="result-readout" aria-live="polite">
+          <span>In view</span>
+          <strong class="numeric">{{ filtered.length }}</strong>
+          <small>of {{ challenges.length }} synced</small>
+        </div>
       </template>
     </PageHeader>
 
@@ -289,89 +381,162 @@ const splitChampions = (challenge: ChallengeRow) => {
       as="section"
       variant="toolbar"
       padding="compact"
-      class="filters"
+      class="filter-deck"
       aria-label="Challenge filters"
     >
-      <Field label="Category" compact>
-        <select v-model="category" class="league-select">
-          <option v-for="option in CATEGORIES" :key="option" :value="option">
-            {{ option === "All" ? "All categories" : option }}
-          </option>
-        </select>
-      </Field>
+      <div class="browser-top">
+        <Field label="Search challenges" compact class="search-field">
+          <input
+            v-model="search"
+            class="league-input search"
+            type="search"
+            placeholder="Search a name, objective, or capstone group"
+          />
+        </Field>
 
-      <Field label="Tier" compact>
-        <select v-model="level" class="league-select">
-          <option v-for="option in LEVELS" :key="option" :value="option">
-            {{ option === "All" ? "All tiers" : option }}
-          </option>
-        </select>
-      </Field>
+        <div v-if="selectedGroup" class="selected-group">
+          <span>Browsing group</span>
+          <strong>{{ selectedGroup.capstone.name }}</strong>
+          <small>
+            {{ selectedGroup.members.length }} member
+            {{ selectedGroup.members.length === 1 ? "challenge" : "challenges" }}
+          </small>
+        </div>
+        <div v-else class="selected-group default-scope">
+          <span>Default scope</span>
+          <strong>Active progress</strong>
+          <small>Completed, legacy, and retired are hidden</small>
+        </div>
+      </div>
 
-      <Field label="Game mode" compact>
-        <select v-model="gameMode" class="league-select">
-          <option value="">All game modes</option>
-          <option v-for="mode in gameModeOptions" :key="mode" :value="mode">
-            {{ challengeGameModeLabel(mode) }}
-          </option>
-        </select>
-      </Field>
+      <div class="filter-grid primary-filters">
+        <Field label="Challenge group" compact class="group-field">
+          <select v-model="challengeGroupId" class="league-select">
+            <option :value="null">All challenge groups</option>
+            <option
+              v-for="group in groupOptions"
+              :key="group.capstone.challengeId"
+              :value="group.capstone.challengeId"
+            >
+              {{ group.capstone.name }} ({{ group.members.length }})
+            </option>
+          </select>
+        </Field>
 
-      <Field label="Map" compact>
-        <select v-model="challengeMap" class="league-select">
-          <option value="">All maps</option>
-          <option v-for="map in mapOptions" :key="map" :value="map">
-            {{ map }}
-          </option>
-        </select>
-      </Field>
+        <Field label="Challenge type" compact>
+          <select v-model="challengeKind" class="league-select">
+            <option
+              v-for="option in KINDS"
+              :key="option.value"
+              :value="option.value"
+            >
+              {{ option.label }}
+            </option>
+          </select>
+        </Field>
 
-      <Field label="Sort" compact>
-        <select v-model="sortBy" class="league-select">
-          <option
-            v-for="option in SORTS"
-            :key="option.value"
-            :value="option.value"
+        <Field label="Category" compact>
+          <select v-model="category" class="league-select">
+            <option v-for="option in CATEGORIES" :key="option" :value="option">
+              {{ option === "All" ? "All active categories" : challengeCategoryLabel(option) }}
+            </option>
+          </select>
+        </Field>
+
+        <Field label="Tier" compact>
+          <select v-model="level" class="league-select">
+            <option v-for="option in LEVELS" :key="option" :value="option">
+              {{ option === "All" ? "All tiers" : option }}
+            </option>
+          </select>
+        </Field>
+      </div>
+
+      <div class="filter-grid secondary-filters">
+        <Field label="Game mode" compact>
+          <select v-model="gameMode" class="league-select">
+            <option value="">All game modes</option>
+            <option v-for="mode in gameModeOptions" :key="mode" :value="mode">
+              {{ challengeGameModeLabel(mode) }}
+            </option>
+          </select>
+        </Field>
+
+        <Field label="Map" compact>
+          <select v-model="challengeMap" class="league-select">
+            <option value="">All maps</option>
+            <option v-for="map in mapOptions" :key="map" :value="map">
+              {{ map }}
+            </option>
+          </select>
+        </Field>
+
+        <div class="sort-stack">
+          <Field label="Sort" compact>
+            <select v-model="sortBy" class="league-select">
+              <option
+                v-for="option in SORTS"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+          </Field>
+          <Button
+            class="direction"
+            size="compact"
+            icon-only
+            type="button"
+            :title="sortDirection === 'desc' ? 'Sort descending' : 'Sort ascending'"
+            :aria-label="
+              sortDirection === 'desc' ? 'Sort descending' : 'Sort ascending'
+            "
+            @click="sortDirection = sortDirection === 'desc' ? 'asc' : 'desc'"
           >
-            {{ option.label }}
-          </option>
-        </select>
-      </Field>
+            {{ sortDirection === "desc" ? "↓" : "↑" }}
+          </Button>
+        </div>
+      </div>
 
-      <Button
-        class="direction"
-        size="compact"
-        icon-only
-        type="button"
-        :title="sortDirection === 'desc' ? 'Sort descending' : 'Sort ascending'"
-        :aria-label="
-          sortDirection === 'desc' ? 'Sort descending' : 'Sort ascending'
-        "
-        @click="sortDirection = sortDirection === 'desc' ? 'asc' : 'desc'"
-      >
-        {{ sortDirection === "desc" ? "↓" : "↑" }}
-      </Button>
+      <footer class="filter-footer">
+        <div class="filter-toggles" aria-label="Challenge visibility">
+          <label class="filter-toggle" :class="{ active: hideCompleted }">
+            <input v-model="hideCompleted" type="checkbox" />
+            <span>
+              <strong>Incomplete only</strong>
+              <small>Completed hidden</small>
+            </span>
+          </label>
 
-      <label class="toggle">
-        <input type="checkbox" v-model="championOnly" />
-        <span>Champion challenges only</span>
-      </label>
+          <label class="filter-toggle" :class="{ active: championOnly }">
+            <input v-model="championOnly" type="checkbox" />
+            <span>
+              <strong>Champion tracked</strong>
+              <small>Champion pools only</small>
+            </span>
+          </label>
 
-      <label class="toggle">
-        <input type="checkbox" v-model="hideCompleted" />
-        <span>Hide completed challenges</span>
-      </label>
+          <label class="filter-toggle" :class="{ active: showRetired }">
+            <input v-model="showRetired" type="checkbox" />
+            <span>
+              <strong>Include retired</strong>
+              <small>Reference only</small>
+            </span>
+          </label>
+        </div>
 
-      <label class="toggle">
-        <input type="checkbox" v-model="showRetired" />
-        <span>Retired challenges</span>
-      </label>
+        <Button
+          v-if="filterCount"
+          variant="ghost"
+          size="compact"
+          class="reset-filters"
+          @click="resetFilters"
+        >
+          Reset filters <span class="filter-count">{{ filterCount }}</span>
+        </Button>
+      </footer>
     </Surface>
-
-    <p v-if="showRetired" class="muted note">
-      Retired challenges can no longer be progressed. They are kept for
-      reference only.
-    </p>
 
     <Surface
       v-if="pinnedChallenges.length"
@@ -380,13 +545,13 @@ const splitChampions = (challenge: ChallengeRow) => {
       padding="compact"
       class="pinned-panel"
     >
-      <h2 class="section-title">
-        Chasing ({{ pinnedChallenges.length }})
-      </h2>
-      <p class="muted note">
-        Champion select shows whether the champion you are holding counts
-        towards these.
-      </p>
+      <div class="pinned-copy">
+        <span class="pinned-kicker">Pinned goals</span>
+        <h2>Chasing {{ pinnedChallenges.length }}</h2>
+        <p class="muted note">
+          Champion select checks the champion you are holding against these.
+        </p>
+      </div>
       <div class="pinned-list">
         <button
           v-for="challenge in pinnedChallenges"
@@ -410,7 +575,19 @@ const splitChampions = (challenge: ChallengeRow) => {
         : 'Start the League client and Recall will import all of your challenges.'"
     />
 
-    <div class="list">
+    <div v-if="filtered.length" class="ledger-head">
+      <div>
+        <span>{{ selectedGroup ? "Challenge group" : "Challenge ledger" }}</span>
+        <strong>
+          {{ selectedGroup?.capstone.name ?? "Your next milestones" }}
+        </strong>
+      </div>
+      <p>
+        {{ filtered.length }} matching · {{ visible.length }} loaded
+      </p>
+    </div>
+
+    <div class="challenge-grid">
       <ChallengeRowView
         v-for="challenge in visible"
         :id="`challenge-${challenge.challengeId}`"
@@ -418,8 +595,11 @@ const splitChampions = (challenge: ChallengeRow) => {
         :challenge="challenge"
         :expanded="expandedId === challenge.challengeId"
         :pinned="pinned.includes(challenge.challengeId)"
+        :members="membersFor(challenge)"
+        :group-name="groupNameFor(challenge)"
         @toggle="toggle(challenge.challengeId)"
         @pin="togglePin(challenge.challengeId)"
+        @open-member="focusOn"
       >
         <template #champions>
           <div
@@ -488,8 +668,8 @@ const splitChampions = (challenge: ChallengeRow) => {
       compact
       :title="hideCompleted ? 'No unfinished challenges match' : 'No challenges match these filters'"
       :description="hideCompleted
-        ? 'The matching challenges are complete, retired, or outside the selected filters. Turn off Hide completed to review finished objectives.'
-        : 'Adjust the category, tier, mode, or map filters to widen the list.'"
+        ? 'The matching challenges are complete, legacy, retired, or outside the selected filters. Turn off Incomplete only or reset the browser to widen the ledger.'
+        : 'Adjust the group, type, category, tier, mode, or map filters to widen the ledger.'"
     />
   </div>
 </template>
@@ -501,42 +681,188 @@ const splitChampions = (challenge: ChallengeRow) => {
   gap: var(--space-4);
 }
 
-.search-field { width: min(280px, 34vw); }
-.search { width: 100%; }
+.result-readout {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: end;
+  gap: 0 8px;
+  min-width: 112px;
+  padding: 7px 10px;
+  border: 1px solid var(--ui-divider);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-inset);
+}
 
-.filters {
-  display: flex;
+.result-readout span {
+  color: var(--ui-text-muted);
+  font: var(--ui-text-micro) var(--ui-font-heading);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.result-readout strong {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  color: var(--ui-accent-strong);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.result-readout small { color: var(--ui-text-subtle); font-size: 10px; }
+
+.filter-deck {
+  position: relative;
+  display: grid;
   gap: var(--ui-space-3);
-  align-items: flex-end;
-  flex-wrap: wrap;
+  overflow: hidden;
 }
 
-.filters > :deep(.ui-field) { flex: 1 1 140px; }
-
-.toggle {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: 12px;
-  cursor: pointer;
-  padding-bottom: var(--space-2);
+.filter-deck::before {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 150px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--ui-accent), transparent);
+  opacity: .55;
+  content: "";
 }
 
-.toggle input {
-  accent-color: var(--gold);
+.browser-top {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(230px, 300px);
+  align-items: end;
+  gap: var(--ui-space-3);
+  padding-bottom: var(--ui-space-3);
+  border-bottom: 1px solid var(--ui-divider);
+}
+
+.search-field { width: 100%; }
+.search { width: 100%; min-height: 40px; font-size: var(--ui-text-support); }
+
+.selected-group {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--instrument-energy) 34%, var(--ui-divider));
+  border-radius: var(--ui-radius-sm);
+  background: color-mix(in srgb, var(--instrument-energy) 6%, var(--ui-surface-panel));
+  box-shadow: inset 2px 0 color-mix(in srgb, var(--instrument-energy) 64%, transparent);
+}
+
+.selected-group > span {
+  color: var(--instrument-energy);
+  font: var(--ui-text-micro) var(--ui-font-heading);
+  letter-spacing: .9px;
+  text-transform: uppercase;
+}
+
+.selected-group strong {
+  overflow: hidden;
+  color: var(--ui-text-heading);
+  font-size: var(--ui-text-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selected-group small { color: var(--ui-text-muted); font-size: 10px; }
+.selected-group.default-scope { border-color: var(--ui-divider); box-shadow: inset 2px 0 color-mix(in srgb, var(--ui-accent) 38%, transparent); }
+.selected-group.default-scope > span { color: var(--ui-accent); }
+
+.filter-grid {
+  display: grid;
+  gap: var(--ui-space-3);
+}
+
+.primary-filters {
+  grid-template-columns: minmax(220px, 1.35fr) repeat(3, minmax(145px, 1fr));
+}
+
+.secondary-filters {
+  grid-template-columns: repeat(2, minmax(155px, 1fr)) minmax(240px, 1.35fr);
+}
+
+.sort-stack {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  align-items: end;
+  gap: var(--ui-space-2);
 }
 
 .direction {
-  width: 38px;
+  width: 32px;
   padding-inline: 0;
-  font-size: 17px;
+  font-size: 16px;
 }
 
-.list {
+.filter-footer {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ui-space-3);
+  padding-top: var(--ui-space-3);
+  border-top: 1px solid var(--ui-divider);
 }
+
+.filter-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
+}
+
+.filter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 150px;
+  padding: 6px 9px;
+  border: 1px solid var(--ui-divider);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-panel-quiet);
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.filter-toggle:hover { border-color: var(--ui-border-emphasis); }
+.filter-toggle.active { border-color: color-mix(in srgb, var(--ui-accent) 48%, var(--ui-divider)); background: color-mix(in srgb, var(--ui-accent) 6%, var(--ui-surface-panel)); }
+.filter-toggle input { margin: 0; accent-color: var(--ui-accent); }
+.filter-toggle span { display: grid; gap: 1px; }
+.filter-toggle strong { color: var(--ui-text); font-size: var(--ui-text-label); font-weight: 500; }
+.filter-toggle small { color: var(--ui-text-muted); font-size: 9px; }
+
+.reset-filters { flex: 0 0 auto; }
+.filter-count {
+  display: grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  border-radius: var(--ui-radius-pill);
+  background: color-mix(in srgb, var(--ui-accent) 13%, var(--ui-surface-selected));
+  color: var(--ui-accent-strong);
+  font: 10px var(--ui-font-numeric);
+}
+
+.ledger-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--ui-space-3);
+  padding: 0 3px;
+}
+
+.ledger-head > div { display: grid; gap: 2px; }
+.ledger-head span { color: var(--ui-text-muted); font: var(--ui-text-micro) var(--ui-font-heading); letter-spacing: 1.1px; text-transform: uppercase; }
+.ledger-head strong { color: var(--ui-text-heading); font: 16px var(--ui-font-display); }
+.ledger-head p { margin: 0; color: var(--ui-text-muted); font-size: var(--ui-text-micro); }
+
+.challenge-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 10px;
+}
+
+.challenge-grid > :deep(.challenge.is-expanded) { grid-column: 1 / -1; }
 
 .more {
   align-self: center;
@@ -544,7 +870,11 @@ const splitChampions = (challenge: ChallengeRow) => {
 }
 
 .champion-section {
-  margin-top: var(--space-2);
+  margin-top: var(--ui-space-1);
+  padding: var(--ui-space-3);
+  border: 1px solid var(--ui-divider);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-panel-quiet);
 }
 
 .grid-label {
@@ -618,34 +948,45 @@ const splitChampions = (challenge: ChallengeRow) => {
 }
 
 .pinned-panel {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
+  display: grid;
+  grid-template-columns: minmax(190px, auto) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--ui-space-4);
+  border-color: color-mix(in srgb, var(--ui-accent) 26%, var(--ui-border));
+  background:
+    radial-gradient(circle at 3% 50%, color-mix(in srgb, var(--ui-accent) 7%, transparent), transparent 28%),
+    var(--ui-surface-panel-quiet);
 }
+
+.pinned-copy { display: grid; gap: 2px; }
+.pinned-copy h2 { margin: 0; color: var(--ui-text-heading); font: 16px var(--ui-font-display); }
+.pinned-kicker { color: var(--ui-accent); font: var(--ui-text-micro) var(--ui-font-heading); letter-spacing: 1px; text-transform: uppercase; }
 
 .pinned-list {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
-  margin-top: var(--space-1);
 }
 
 .pinned-chip {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  background: var(--surface-2);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-  padding: var(--space-1) var(--space-3);
-  font-family: inherit;
-  font-size: 12px;
-  color: var(--text-primary);
+  min-height: 28px;
+  padding: 4px 8px 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--ui-accent) 32%, var(--ui-border));
+  border-radius: var(--ui-radius-pill);
+  background: color-mix(in srgb, var(--ui-accent) 5%, var(--ui-surface-panel));
+  color: var(--ui-text);
+  font: var(--ui-text-label) var(--ui-font-body);
   cursor: pointer;
+  box-shadow: inset 2px 0 color-mix(in srgb, var(--ui-accent) 56%, transparent);
+  transition: border-color 120ms ease, background 120ms ease;
 }
 
 .pinned-chip:hover {
-  border-color: var(--gold);
+  border-color: var(--ui-accent);
+  background: color-mix(in srgb, var(--ui-accent) 9%, var(--ui-surface-panel));
 }
 
 .pinned-name {
@@ -665,16 +1006,26 @@ const splitChampions = (challenge: ChallengeRow) => {
   padding: var(--space-5);
 }
 
-@container recall-content (max-width: 680px) {
-  .search-field { width: 100%; }
-  .filters { align-items: stretch; }
-  .filters > :deep(.ui-field) { flex-basis: calc(50% - var(--ui-space-2)); }
-  .direction { align-self: end; }
-  .toggle { flex: 1 1 180px; padding: var(--ui-space-2) 0 0; }
+@container recall-content (max-width: 1050px) {
+  .primary-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .challenge-grid { grid-template-columns: 1fr; }
+  .challenge-grid > :deep(.challenge.is-expanded) { grid-column: auto; }
 }
 
-@container recall-content (max-width: 430px) {
-  .filters > :deep(.ui-field),
-  .toggle { flex-basis: 100%; }
+@container recall-content (max-width: 760px) {
+  .browser-top,
+  .secondary-filters { grid-template-columns: 1fr; }
+  .filter-footer,
+  .pinned-panel { align-items: stretch; grid-template-columns: 1fr; }
+  .filter-footer { flex-direction: column; }
+  .filter-toggles { width: 100%; }
+  .filter-toggle { flex: 1 1 145px; }
+  .reset-filters { align-self: flex-end; }
+}
+
+@container recall-content (max-width: 520px) {
+  .primary-filters { grid-template-columns: 1fr; }
+  .filter-toggle { flex-basis: 100%; }
+  .ledger-head { align-items: start; flex-direction: column; }
 }
 </style>

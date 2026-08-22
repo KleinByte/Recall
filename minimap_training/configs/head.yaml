@@ -1,0 +1,35 @@
+# Warm up newly inserted champion classifier channels without changing the backbone.
+epochs: 5
+batch: 64
+imgsz: 256
+device: "0"
+workers: 8
+save_period: 1
+
+optimizer: AdamW
+lr0: 0.001
+lrf: 0.1
+weight_decay: 0.00005
+cos_lr: true
+warmup_epochs: 1
+patience: 5
+freeze: 23
+
+seed: 42
+deterministic: true
+degrees: 0
+translate: 0
+scale: 0
+shear: 0
+perspective: 0
+flipud: 0
+fliplr: 0
+mosaic: 0
+mixup: 0
+erasing: 0
+copy_paste: 0
+hsv_h: 0.01
+hsv_s: 0.2
+hsv_v: 0.1
+verbose: true
+plots: true

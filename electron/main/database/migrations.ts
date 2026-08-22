@@ -2472,6 +2472,26 @@ export const migrations: Migration[] = [
     up: MINIMAP_TELEMETRY_V34_UP,
     verify: verifyMinimapTelemetryV34,
   },
+  {
+    // Practice experiments were retired. Drop the match-owned join table
+    // first so existing databases keep their remaining review data intact.
+    version: 35,
+    up: `
+      DROP TABLE match_experiments;
+      DROP TABLE practice_experiments;
+    `,
+    verify: (db) => {
+      const retired = db.prepare(`
+        SELECT name FROM sqlite_master
+        WHERE type = 'table'
+          AND name IN ('match_experiments', 'practice_experiments')
+      `).all()
+      if (retired.length > 0) throw new Error("experiment_tables_not_removed")
+      if ((db.pragma("foreign_key_check") as unknown[]).length > 0) {
+        throw new Error("experiment_removal_foreign_key_violation")
+      }
+    },
+  },
 ]
 
 export const latestSchemaVersion = migrations.at(-1)?.version ?? 0

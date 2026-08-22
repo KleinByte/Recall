@@ -82,8 +82,9 @@ describe("vision pipeline performance contracts", () => {
           gameTimeMs: sequence * 250,
         })
       }
-      // Both teams are scanned on detector calls one and three only.
-      expect(houghCalls).toBe(4)
+      // Both colour masks and the colour-independent edge fallback are scanned
+      // on detector calls one and three only.
+      expect(houghCalls).toBe(6)
     } finally {
       detector.close()
       cv.HoughCircles = original

@@ -11,6 +11,7 @@ import {
   migrations,
 } from "../electron/main/database/migrations.js"
 import { MatchesRepository } from "../electron/main/database/matches-repo.js"
+import { ReviewRepository } from "../electron/main/database/review-repo.js"
 import { buildMatchRow } from "./fixtures/matches.js"
 import { migrationRehearsalCounts } from "../scripts/migration-rehearsal-contract.js"
 import {
@@ -303,8 +304,6 @@ describe("applyMigrations", () => {
       "match_timeline_sources",
       "match_annotations",
       "annotation_tags",
-      "practice_experiments",
-      "match_experiments",
       "participant_augments",
       "augment_catalog",
       "match_capture_manifests",
@@ -312,6 +311,10 @@ describe("applyMigrations", () => {
       "live_game_snapshots",
       "live_game_events",
       "champ_select_positions",
+    ]))
+    expect(tables).not.toEqual(expect.arrayContaining([
+      "practice_experiments",
+      "match_experiments",
     ]))
     const participantColumns = (
       db.pragma("table_info(match_participants)") as { name: string }[]
@@ -356,6 +359,54 @@ describe("applyMigrations", () => {
 
     expect(row.game_id).toBe(1)
     expect(row.grade).toBeNull()
+  })
+
+  it("removes retired experiments without losing other review data", () => {
+    const db = new Database(":memory:")
+    db.pragma("foreign_keys = ON")
+    for (const migration of migrations.slice(0, 34)) executeMigration(db, migration)
+    db.pragma("user_version = 34")
+
+    const owner = "experiment-removal-owner"
+    new MatchesRepository(db).insertMany([
+      buildMatchRow({ gameId: 35, puuid: owner }),
+    ])
+    const reviews = new ReviewRepository(db)
+    const tag = reviews.createTag(owner, "Keep me")
+    reviews.saveAnnotation(35, owner, {
+      note: "Keep this review note.",
+      bookmarked: true,
+      tagIds: [tag.id],
+    })
+    reviews.setBoundaryOverride(35, owner, "split")
+    const result = db.prepare(`
+      INSERT INTO practice_experiments
+        (puuid, name, hypothesis, champion_ids, modes, status,
+         started_at, created_at, updated_at)
+      VALUES (?, 'Retired', 'Delete me', '[]', '[]', 'active', 1, 1, 1)
+    `).run(owner)
+    db.prepare(`
+      INSERT INTO match_experiments
+        (game_id, puuid, experiment_id, outcome, outcome_note, attached_at)
+      VALUES (35, ?, ?, 'worked', 'Retired outcome', 1)
+    `).run(owner, Number(result.lastInsertRowid))
+
+    applyMigrations(db)
+
+    const tables = db.prepare(`
+      SELECT name FROM sqlite_master
+      WHERE type = 'table'
+        AND name IN ('practice_experiments', 'match_experiments')
+    `).all()
+    expect(tables).toEqual([])
+    expect(reviews.getAnnotation(35, owner)).toMatchObject({
+      note: "Keep this review note.",
+      bookmarked: true,
+      tags: [{ name: "Keep me" }],
+    })
+    expect(reviews.getBoundaryOverrides(owner).get(35)).toBe("split")
+    expect(db.pragma("foreign_key_check")).toEqual([])
+    db.close()
   })
 
   it("preserves recorded ARAM games when upgrading to multi-mode", () => {

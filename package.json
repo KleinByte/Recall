@@ -2,7 +2,7 @@
   "name": "recall",
   "version": "3.3.0",
   "main": "dist-electron/main/index.js",
-  "description": "League of Legends challenge and ARAM stat tracker that remembers what the client forgets.",
+  "description": "Game tracking, grades, challenges, and insights.",
   "author": "KleinByte",
   "license": "PolyForm-Noncommercial-1.0.0",
   "private": true,
@@ -42,6 +42,21 @@
     "sync:classic-items": "node scripts/sync-classic-items.mjs",
     "sync:rune-assets": "node scripts/sync-rune-assets.mjs",
     "sync:champion-classes": "node scripts/sync-champion-classes.mjs",
+    "sync:champion-portraits": "node scripts/sync-champion-portraits.mjs",
+    "minimap:roster:check-remote": "node scripts/sync-champion-portraits.mjs --check",
+    "sync:minimap-model": "node scripts/sync-minimap-model.mjs",
+    "sync:minimap-training-roster": "node scripts/sync-minimap-training-roster.mjs --update",
+    "minimap:roster:check": "node scripts/sync-minimap-training-roster.mjs --check",
+    "minimap:setup": "node scripts/setup-minimap-training.mjs",
+    "minimap:download-base": "node scripts/download-minimap-training-base.mjs",
+    "minimap:generate": "node scripts/run-minimap-training.mjs minimap_training.synthetic",
+    "minimap:dataset:validate": "node scripts/run-minimap-training.mjs minimap_training.validate_dataset",
+    "minimap:live:build": "node scripts/run-minimap-training.mjs minimap_training.live_regression",
+    "minimap:checkpoint:expand": "node scripts/run-minimap-training.mjs minimap_training.expand_checkpoint",
+    "minimap:train": "node scripts/run-minimap-training.mjs minimap_training.train",
+    "minimap:evaluate": "node scripts/run-minimap-training.mjs minimap_training.evaluate",
+    "minimap:publish": "node scripts/run-minimap-training.mjs minimap_training.publish",
+    "minimap:pipeline": "node scripts/run-minimap-training.mjs minimap_training.pipeline",
     "rebuild:electron": "electron-builder install-app-deps",
     "rebuild:node": "node scripts/rebuild-node-native.mjs",
     "rebuild:native": "pnpm rebuild:electron && pnpm rebuild:node",
@@ -80,6 +95,7 @@
   "dependencies": {
     "better-sqlite3": "13.0.3",
     "ws": "^8.21.3",
-    "@techstark/opencv-js": "5.0.0-release.1"
+    "@techstark/opencv-js": "5.0.0-release.1",
+    "onnxruntime-node": "1.27.0"
   }
 }

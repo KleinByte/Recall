@@ -102,7 +102,6 @@ export interface MatchQuery extends StatsFilter {
   bookmarked?: boolean
   hasNotes?: boolean
   tagIds?: number[]
-  experimentId?: number
 }
 
 export interface MatchPage {
@@ -1338,9 +1337,6 @@ export class MatchesRepository {
                     LIMIT 6
                   )
                 ), '') AS label_names,
-                (SELECT COUNT(*) FROM match_experiments me
-                 WHERE me.game_id = matches.game_id AND me.puuid = matches.puuid)
-                  AS experiment_count,
                 (SELECT mp.assigned_position FROM match_participants mp
                  WHERE mp.game_id = matches.game_id AND mp.puuid = matches.puuid
                    AND mp.is_player = 1)
@@ -1662,17 +1658,6 @@ function buildQuery(query: MatchQuery, visibility: GradeRecipeVisibility) {
     params.push(...query.tagIds)
   }
 
-  if (query.experimentId !== undefined) {
-    conditions.push(
-      `EXISTS (
-        SELECT 1 FROM match_experiments me
-        WHERE me.game_id = matches.game_id AND me.puuid = matches.puuid
-          AND me.experiment_id = ?
-      )`,
-    )
-    params.push(query.experimentId)
-  }
-
   return { clause: `WHERE ${conditions.join(" AND ")}`, params }
 }
 
@@ -1911,7 +1896,6 @@ function toMatchRow(
     labelNames: typeof row.label_names === "string" && row.label_names
       ? (row.label_names as unknown as string).split(" · ")
       : undefined,
-    experimentCount: row.experiment_count ?? undefined,
     lobbyPlace: gradeVisible ? row.lobby_place || undefined : undefined,
     lobbySize: row.lobby_size || undefined,
   }

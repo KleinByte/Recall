@@ -1,9 +1,14 @@
-import { nativeImage } from "electron"
+import { app, nativeImage } from "electron"
+import { readFile } from "node:fs/promises"
+import path from "node:path"
 import type { ChampionVisionTeam, RgbaFrame } from "../../../src/shared/minimap/contracts.js"
 import {
   createChampionMarkerTemplate,
   type ChampionMarkerTemplate,
 } from "./champion-marker-detector.js"
+import { championAssetKey } from "./champion-asset-key.js"
+
+export { championAssetKey } from "./champion-asset-key.js"
 
 export interface ChampionRosterTemplateInput {
   participantKey: string
@@ -12,40 +17,22 @@ export interface ChampionRosterTemplateInput {
   isLocal: boolean
 }
 
-export const DEFAULT_DDRAGON_VERSION = "16.14.1"
-
-const SPECIAL_ASSET_KEYS: Record<string, string> = {
-  "Bel'Veth": "Belveth",
-  "Cho'Gath": "Chogath",
-  "Dr. Mundo": "DrMundo",
-  "Jarvan IV": "JarvanIV",
-  "Kai'Sa": "Kaisa",
-  "Kha'Zix": "Khazix",
-  "Kog'Maw": "KogMaw",
-  "K'Sante": "KSante",
-  "LeBlanc": "Leblanc",
-  "Lee Sin": "LeeSin",
-  "Master Yi": "MasterYi",
-  "Miss Fortune": "MissFortune",
-  "Nunu & Willump": "Nunu",
-  "Renata Glasc": "Renata",
-  "Rek'Sai": "RekSai",
-  "Tahm Kench": "TahmKench",
-  "Twisted Fate": "TwistedFate",
-  "Vel'Koz": "Velkoz",
-  "Wukong": "MonkeyKing",
-  "Xin Zhao": "XinZhao",
+interface ChampionPortraitManifestEntry {
+  id: number
+  assetKey: string
+  name: string
+  file: string
+  bytes: number
+  sha256: string
 }
 
-export function championAssetKey(championName: string) {
-  return SPECIAL_ASSET_KEYS[championName] ?? championName.replace(/[^A-Za-z0-9]/g, "")
+interface ChampionPortraitManifest {
+  schemaVersion: number
+  patch: string
+  championCount: number
+  champions: ChampionPortraitManifestEntry[]
 }
 
-/**
- * Returns a usable template set only when every requested participant has one
- * exact identity match. A partial roster must never make the remaining
- * champions compete for the wrong identities.
- */
 export function completeChampionTemplateRoster(
   roster: ChampionRosterTemplateInput[],
   templates: ChampionMarkerTemplate[],
@@ -54,12 +41,6 @@ export function completeChampionTemplateRoster(
   return validated.length === roster.length ? validated : []
 }
 
-/**
- * Keeps every exact participant/template match that is safe to use. Missing
- * portraits remain untracked instead of disabling vision for the entire
- * roster. The detector's global assignment still abstains when two identical
- * portraits are ambiguous.
- */
 export function validatedChampionTemplateRoster(
   roster: ChampionRosterTemplateInput[],
   templates: ChampionMarkerTemplate[],
@@ -92,98 +73,86 @@ function bgraFrame(bitmap: Buffer, width: number, height: number): RgbaFrame {
     data[offset + 2] = bitmap[offset]
     data[offset + 3] = bitmap[offset + 3]
   }
-  return {
-    width,
-    height,
-    data,
-    capturedMonotonicMs: 0,
-    frameSequence: 0,
-  }
+  return { width, height, data, capturedMonotonicMs: 0, frameSequence: 0 }
+}
+
+function decodePortrait(bytes: Buffer) {
+  const image = nativeImage.createFromBuffer(bytes)
+  if (image.isEmpty()) throw new Error("bundled_portrait_decode_failed")
+  const size = image.getSize()
+  return bgraFrame(image.toBitmap(), size.width, size.height)
+}
+
+export function defaultChampionPortraitDirectory() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, "champion-portraits")
+    : path.join(app.getAppPath(), "resources", "champion-portraits")
 }
 
 export interface DataDragonTemplateProviderOptions {
-  fetcher?: typeof fetch
-  timeoutMs?: number
-  fallbackVersion?: string
-  onVersionResolved?(version: string): void
+  directory?: string
+  readFile?: typeof readFile
+  decode?: (bytes: Buffer) => RgbaFrame
 }
 
+/**
+ * Loads the release-bundled Data Dragon portrait bank from disk. The legacy
+ * class name is retained to keep the integration boundary stable; this class
+ * deliberately contains no network code.
+ */
 export class DataDragonTemplateProvider {
   private readonly cache = new Map<string, Promise<RgbaFrame>>()
-  private readonly fetcher: typeof fetch
-  private readonly timeoutMs: number
-  private readonly fallbackVersion: string
-  private remoteVersion?: Promise<string>
+  private manifest?: Promise<ChampionPortraitManifest>
+  private readonly directory?: string
+  private readonly read: typeof readFile
+  private readonly decode: (bytes: Buffer) => RgbaFrame
 
-  constructor(
-    private readonly version: () => string | undefined,
-    private readonly options: DataDragonTemplateProviderOptions = {},
-  ) {
-    this.fetcher = options.fetcher ?? fetch
-    this.timeoutMs = options.timeoutMs ?? 5_000
-    this.fallbackVersion = options.fallbackVersion ?? DEFAULT_DDRAGON_VERSION
+  constructor(options: DataDragonTemplateProviderOptions = {}) {
+    this.directory = options.directory
+    this.read = options.readFile ?? readFile
+    this.decode = options.decode ?? decodePortrait
   }
 
   async load(roster: ChampionRosterTemplateInput[]): Promise<ChampionMarkerTemplate[]> {
     if (roster.length === 0) return []
-    const version = await this.resolveVersion()
+    const directory = this.directory ?? defaultChampionPortraitDirectory()
+    const manifest = await this.loadManifest(directory)
+    const byName = new Map(manifest.champions.map((entry) => [entry.name.toLowerCase(), entry]))
+    const byKey = new Map(manifest.champions.map((entry) => [entry.assetKey.toLowerCase(), entry]))
     const templates = await Promise.all(roster.map(async (entry) => {
-      const key = championAssetKey(entry.championName)
-      const cacheKey = `${version}:${key}`
-      let pending = this.cache.get(cacheKey)
+      const portrait = byName.get(entry.championName.toLowerCase()) ??
+        byKey.get(championAssetKey(entry.championName).toLowerCase())
+      if (!portrait || path.basename(portrait.file) !== portrait.file ||
+          !/^[A-Za-z0-9]+\.png$/.test(portrait.file)) return undefined
+      let pending = this.cache.get(portrait.file)
       if (!pending) {
-        pending = this.fetchIcon(version, key)
-        this.cache.set(cacheKey, pending)
+        pending = this.read(path.join(directory, portrait.file))
+          .then((bytes) => this.decode(Buffer.from(bytes)))
+        this.cache.set(portrait.file, pending)
       }
       try {
-        const frame = await pending
-        return createChampionMarkerTemplate(entry, frame)
+        return createChampionMarkerTemplate(entry, await pending)
       } catch {
-        this.cache.delete(cacheKey)
+        this.cache.delete(portrait.file)
         return undefined
       }
     }))
     return templates.filter((entry): entry is ChampionMarkerTemplate => Boolean(entry))
   }
 
-  private async resolveVersion() {
-    const configured = this.version()?.trim()
-    if (configured) return configured
-    if (!this.remoteVersion) {
-      this.remoteVersion = this.fetchLatestVersion()
-        .then((resolved) => {
-          this.options.onVersionResolved?.(resolved)
-          return resolved
+  private loadManifest(directory: string) {
+    if (!this.manifest) {
+      this.manifest = this.read(path.join(directory, "manifest.json"), "utf8")
+        .then((content) => {
+          const manifest = JSON.parse(String(content)) as ChampionPortraitManifest
+          if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.champions) ||
+              manifest.championCount !== manifest.champions.length ||
+              manifest.championCount < 150) {
+            throw new Error("bundled_portrait_manifest_invalid")
+          }
+          return manifest
         })
-        .catch(() => this.fallbackVersion)
     }
-    return this.remoteVersion
-  }
-
-  private async fetchLatestVersion() {
-    const response = await this.fetcher(
-      "https://ddragon.leagueoflegends.com/api/versions.json",
-      { signal: AbortSignal.timeout(this.timeoutMs), cache: "no-cache" },
-    )
-    if (!response.ok) throw new Error(`ddragon_versions_http_${response.status}`)
-    const versions = await response.json() as unknown
-    const latest = Array.isArray(versions)
-      ? versions.find((entry): entry is string => typeof entry === "string" && entry.trim() !== "")
-      : undefined
-    if (!latest) throw new Error("ddragon_versions_invalid")
-    return latest.trim()
-  }
-
-  private async fetchIcon(version: string, key: string) {
-    const response = await this.fetcher(
-      `https://ddragon.leagueoflegends.com/cdn/${encodeURIComponent(version)}/img/champion/${encodeURIComponent(key)}.png`,
-      { signal: AbortSignal.timeout(this.timeoutMs) },
-    )
-    if (!response.ok) throw new Error(`ddragon_icon_http_${response.status}`)
-    const image = nativeImage.createFromBuffer(Buffer.from(await response.arrayBuffer()))
-
-    if (image.isEmpty()) throw new Error("ddragon_icon_decode_failed")
-    const size = image.getSize()
-    return bgraFrame(image.toBitmap(), size.width, size.height)
+    return this.manifest
   }
 }

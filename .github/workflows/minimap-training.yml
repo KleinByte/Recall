@@ -1,0 +1,148 @@
+name: Minimap model lifecycle
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/minimap-training.yml"
+      - "minimap_training/**"
+      - "resources/champion-portraits/**"
+      - "resources/minimap-model/labels.json"
+      - "resources/minimap-model/manifest.json"
+      - "scripts/*minimap*"
+      - "scripts/sync-champion-portraits.mjs"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/minimap-training.yml"
+      - "minimap_training/**"
+      - "resources/champion-portraits/**"
+      - "resources/minimap-model/labels.json"
+      - "resources/minimap-model/manifest.json"
+      - "scripts/*minimap*"
+      - "scripts/sync-champion-portraits.mjs"
+  schedule:
+    - cron: "23 14 * * 1"
+  workflow_dispatch:
+    inputs:
+      run_training:
+        description: Run the full job on a self-hosted GPU runner
+        required: true
+        type: boolean
+        default: false
+      train_images:
+        description: Number of synthetic training images
+        required: true
+        type: number
+        default: 100000
+      validation_images:
+        description: Number of synthetic validation images
+        required: true
+        type: number
+        default: 10000
+      test_images:
+        description: Number of synthetic test images
+        required: true
+        type: number
+        default: 10000
+      epochs:
+        description: YOLO training epochs
+        required: true
+        type: number
+        default: 50
+
+permissions:
+  contents: read
+
+concurrency:
+  group: minimap-model-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  roster-and-generator:
+    name: Roster and generator smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.19.0
+      - name: Validate the local training roster
+        run: node scripts/sync-minimap-training-roster.mjs --check
+      - name: Check Riot roster without downloading portraits
+        if: github.event_name == 'schedule'
+        run: node scripts/sync-champion-portraits.mjs --check
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: minimap_training/requirements-generator.txt
+      - name: Install generator dependencies
+        run: python -m pip install -r minimap_training/requirements-generator.txt
+      - name: Generate a deterministic focused sample
+        run: >-
+          python -m minimap_training.synthetic
+          --n-train 30 --n-val 9 --n-test 9
+          --output-dir .minimap-training/data/synthetic
+          --dataset-name ci-smoke
+          --focus-per-image 1 --seed 42 --workers 2
+          --viewport-sim --icon-augment --use-hsv-augmentation
+      - name: Validate labels and newest-champion coverage
+        run: >-
+          python -m minimap_training.validate_dataset
+          .minimap-training/data/synthetic/ci-smoke/config.yaml
+          --minimum-focus-instances 10
+      - name: Upload generator diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: minimap-generator-diagnostics
+          path: .minimap-training/data/synthetic/ci-smoke
+          if-no-files-found: ignore
+          retention-days: 7
+
+  train:
+    name: Train on self-hosted GPU
+    if: github.event_name == 'workflow_dispatch' && inputs.run_training
+    needs: roster-and-generator
+    runs-on: [self-hosted, linux, x64, gpu]
+    timeout-minutes: 720
+    env:
+      TRAIN_IMAGES: ${{ inputs.train_images }}
+      VALIDATION_IMAGES: ${{ inputs.validation_images }}
+      TEST_IMAGES: ${{ inputs.test_images }}
+      EPOCHS: ${{ inputs.epochs }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.19.0
+      - name: Download immutable upstream checkpoint
+        run: node scripts/download-minimap-training-base.mjs
+      - name: Build training image
+        run: docker compose -f compose.minimap-training.yaml build
+      - name: Generate, train, evaluate, and publish release artifact
+        run: >-
+          docker compose -f compose.minimap-training.yaml run --rm minimap-training
+          --n-train "$TRAIN_IMAGES"
+          --n-val "$VALIDATION_IMAGES"
+          --n-test "$TEST_IMAGES"
+          --epochs "$EPOCHS"
+          --publish
+      - name: Upload checkpoint, evaluation, and ONNX candidate
+        uses: actions/upload-artifact@v7
+        with:
+          name: minimap-model-${{ github.run_id }}
+          path: |
+            resources/minimap-model
+            .minimap-training/runs/**/weights/best.pt
+            .minimap-training/runs/evaluations/**/evaluation.json
+            .minimap-training/runs/**/metadata.json
+          if-no-files-found: error
+          retention-days: 30

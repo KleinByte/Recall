@@ -410,11 +410,11 @@ const minimapSegments = [
 ] as const
 
 const clearDefinitions = [
-  ["west_blue", 104_000, 404_000],
+  ["west_blue", 104_000, 374_000],
   ["west_gromp", 132_000, 252_000],
   ["west_wolves", 159_000, 279_000],
   ["west_raptors", 184_000, 304_000],
-  ["west_red", 211_000, 511_000],
+  ["west_red", 211_000, 481_000],
   ["west_krugs", 230_000, 350_000],
 ] as const
 
@@ -436,7 +436,7 @@ const campClears = clearDefinitions.map(([campKey, clearedAtMs, respawnAtMs], ro
     transitionConfidence: 0.92,
   },
   routeIndex,
-  algorithmVersion: 3,
+  algorithmVersion: 6,
 }))
 
 const minimapReview = {
@@ -611,7 +611,7 @@ const review = {
     { kind: "strength", title: "Objective pacing", detail: "This was one of your strongest objective games on Nunu.", metricKey: "objectives_macro" },
     { kind: "improvement", title: "Stayed alive", detail: "You died less than your recent Nunu baseline.", metricKey: "deaths" },
   ],
-  annotation: { gameId: SHOWCASE_GAME_ID, note: "Review the first dragon setup and repeat this opening route.", bookmarked: true, tags: [{ id: 1, name: "Clean clear", color: "#5ccfe6" }], experimentOutcomes: [] },
+  annotation: { gameId: SHOWCASE_GAME_ID, note: "Review the first dragon setup and repeat this opening route.", bookmarked: true, tags: [{ id: 1, name: "Clean clear", color: "#5ccfe6" }] },
   timeline: {
     status: "ready",
     fetchedAt: SHOWCASE_NOW + 10_000,
@@ -964,7 +964,7 @@ function channelValue(channel: string, args: unknown[]) {
     case "goals:add": return 4
     case "goals:remove": return true
     case "stats:rvi": return args[2] === "match" ? matchPerformance : performanceProfile
-    case "review:overview": return { latest: review, recentSession: undefined, bookmarkCount: 1, activeExperimentCount: 1 }
+    case "review:overview": return { latest: review, recentSession: undefined, bookmarkCount: 1 }
     case "review:match": return review
     case "review:jungle-pathing": return minimapReview
     case "stats:champion-jungle-clears": {
@@ -984,7 +984,6 @@ function channelValue(channel: string, args: unknown[]) {
     case "augments:cache-catalog": return undefined
     case "review:sessions": return { rows: [], total: 0, page: 1, pageSize: 20 }
     case "tags:list": return [{ id: 1, name: "Clean clear", color: "#5ccfe6" }, { id: 2, name: "Review later", color: "#c8aa6e" }]
-    case "experiments:list": return [{ id: 1, name: "Earlier first reset", hypothesis: "A cleaner first clear creates a stronger first objective setup.", championIds: [20], modes: ["sr_ranked_solo"], status: "active", startedAt: SHOWCASE_NOW - 604_800_000, games: 4 }]
     case "timeline:get":
     case "timeline:request": return review.timeline
     case "annotations:save": return { ...review.annotation, ...(args[1] as object) }

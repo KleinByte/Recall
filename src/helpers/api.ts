@@ -44,11 +44,9 @@ import type {
   ChampionChoice,
   ChampionChoiceObjective,
   DataTrustReport,
-  ExperimentOutcomeValue,
   MatchAnnotation,
   MatchReview,
   OwnerAugmentSummary,
-  PracticeExperiment,
   ReviewOverview,
   ReviewSession,
   SessionBoundaryAction,
@@ -587,33 +585,6 @@ export const api = {
 
   deleteTag(id: number): Promise<boolean> {
     return invoke("tags:delete", id)
-  },
-
-  listExperiments(): Promise<PracticeExperiment[]> {
-    return invoke("experiments:list")
-  },
-
-  createExperiment(input: Omit<PracticeExperiment, "id" | "startedAt">) {
-    return invoke<PracticeExperiment>("experiments:create", input)
-  },
-
-  updateExperiment(id: number, input: Omit<PracticeExperiment, "id" | "startedAt">) {
-    return invoke<PracticeExperiment | undefined>("experiments:update", id, input)
-  },
-
-  setExperimentOutcome(
-    gameId: number,
-    experimentId: number,
-    outcome: ExperimentOutcomeValue,
-    note: string,
-  ): Promise<boolean> {
-    return invoke(
-      "experiments:set-match-outcome",
-      gameId,
-      experimentId,
-      outcome,
-      note,
-    )
   },
 
   getUpdateStatus(): Promise<UpdateStatus> {

@@ -46,7 +46,6 @@ import {
 } from "@fortawesome/free-solid-svg-icons"
 import type { Champion } from "../types/lol"
 import type {
-  ExperimentOutcomeValue,
   BaselineMetric,
   ReviewHighlight,
 } from "../types/review"
@@ -55,7 +54,7 @@ import type { MinimapPathingReview } from "../shared/minimap/review"
 
 defineProps<{ champions: Champion[] | null }>()
 const events = useApiEvents()
-type Tab = "review" | "sessions" | "bookmarks" | "experiments"
+type Tab = "review" | "sessions" | "bookmarks"
 type MatchTab = "overview" | "jungle" | "stats" | "timeline" | "probability"
 type InsightTab = "rvi" | "performance"
 const tab = ref<Tab>("review")
@@ -76,15 +75,10 @@ const {
   careerRvi,
   sessions,
   tags,
-  experiments,
   bookmarks,
   busy,
   error,
   newTag,
-  experimentName,
-  experimentHypothesis,
-  experimentChampionIds,
-  experimentModes,
   augmentSummary,
   augmentSummaryLoading,
   gameRviPresentation,
@@ -97,9 +91,6 @@ const {
   loadTimeline,
   refreshTimeline,
   setBoundary,
-  createExperiment,
-  setExperimentStatus,
-  updateOutcome,
   refreshCurrentWhenIdle,
 } = useReviewPageData({
   resetMatchView() {
@@ -277,7 +268,6 @@ const pageTabs = [
   { value: "review", label: "Current match" },
   { value: "sessions", label: "Sessions" },
   { value: "bookmarks", label: "Bookmarks" },
-  { value: "experiments", label: "Experiments" },
 ]
 const insightTabs = [
   { value: "rvi", label: "RVI" },
@@ -661,24 +651,6 @@ onMounted(() => {
           </div>
         </section>
 
-        <section class="card">
-          <h2 class="section-title">Experiments</h2>
-          <p v-if="review.annotation.experimentOutcomes.length === 0" class="muted">
-            No active experiment matched this champion and mode.
-          </p>
-          <div v-for="outcome in review.annotation.experimentOutcomes"
-            :key="outcome.experimentId" class="experiment-outcome">
-            <strong>{{ outcome.experimentName }}</strong>
-            <select class="league-select" :value="outcome.outcome"
-              @change="updateOutcome(outcome.experimentId, ($event.target as HTMLSelectElement).value as ExperimentOutcomeValue)">
-              <option value="unrated">Unrated</option><option value="worked">Worked</option>
-              <option value="mixed">Mixed</option><option value="did_not_work">Did not work</option>
-            </select>
-            <input v-model="outcome.note" class="league-input outcome-note"
-              maxlength="1000" placeholder="Optional outcome note"
-              @blur="updateOutcome(outcome.experimentId, outcome.outcome, outcome.note)" />
-          </div>
-        </section>
       </div>
 
       <section v-if="matchTab === 'timeline'" class="card match-tab-panel" role="tabpanel">
@@ -948,59 +920,6 @@ onMounted(() => {
       <p v-if="bookmarks.length === 0" class="muted">No bookmarked matches yet.</p>
     </section>
 
-    <section v-else-if="tab === 'experiments'" class="experiments-page">
-      <div class="card">
-        <h2 class="section-title">New practice experiment</h2>
-        <input v-model="experimentName" maxlength="80" class="league-input" placeholder="Experiment name" />
-        <textarea v-model="experimentHypothesis" maxlength="500" placeholder="What measurable change are you trying?" />
-        <label class="scope-label">Champion scope
-          <select v-model="experimentChampionIds" class="league-select" multiple>
-            <option v-for="champion in champions" :key="champion.id" :value="champion.id">
-              {{ champion.name }}
-            </option>
-          </select>
-          <span class="muted">Leave empty for all champions.</span>
-        </label>
-        <label class="scope-label">Mode scope
-          <select v-model="experimentModes" class="league-select" multiple>
-            <option value="aram">ARAM</option><option value="mayhem">ARAM: Mayhem</option>
-            <option value="sr_ranked_solo">Ranked Solo</option><option value="sr_ranked_flex">Ranked Flex</option>
-            <option value="sr_normal">Normal Draft</option><option value="sr_quickplay">Quickplay</option>
-            <option value="sr_swiftplay">Swiftplay</option>
-            <option value="league_classic">League Classic</option>
-          </select>
-          <span class="muted">Leave empty for all modes.</span>
-        </label>
-        <button class="league-button" @click="createExperiment">Start experiment</button>
-      </div>
-      <article v-for="experiment in experiments" :key="experiment.id" class="card experiment-card">
-        <div><strong>{{ experiment.name }}</strong><span class="status">{{ experiment.status }}</span></div>
-        <p class="muted">{{ experiment.hypothesis || "No hypothesis recorded." }}</p>
-        <span class="muted">{{ experiment.games ?? 0 }} attached games · {{ experiment.status === 'active' ? 'New matching games attach automatically' : 'Not attaching new games' }}</span>
-        <p v-if="experiment.summary" class="muted">
-          {{ Math.round(experiment.summary.winRate * 100) }}% win rate ·
-          {{ experiment.summary.kda.toFixed(2) }} KDA ·
-          {{ experiment.summary.confidence }} confidence ·
-          prior {{ Math.round(experiment.summary.baselineWinRate * 100) }}% /
-          {{ experiment.summary.baselineKda.toFixed(2) }} KDA across
-          {{ experiment.summary.baselineGames }} games
-          <template v-if="experiment.summary.avgGrade !== undefined">
-            · compatibility {{ experiment.summary.avgGrade.toFixed(2) }}
-            vs {{ experiment.summary.baselineAvgGrade?.toFixed(2) ?? "—" }}
-          </template>
-          <template v-if="(experiment.games ?? 0) < 5"> · More games needed before describing improvement</template>
-        </p>
-        <div class="experiment-actions">
-          <button v-if="experiment.status !== 'active'" class="league-button"
-            @click="setExperimentStatus(experiment, 'active')">Resume</button>
-          <button v-if="experiment.status === 'active'" class="league-button"
-            @click="setExperimentStatus(experiment, 'paused')">Pause</button>
-          <button v-if="experiment.status !== 'completed'" class="league-button"
-            @click="setExperimentStatus(experiment, 'completed')">Complete</button>
-        </div>
-      </article>
-    </section>
-
     <div v-else-if="!busy" class="card muted">Play or import a match to begin reviewing.</div>
   </div>
 </template>
@@ -1009,7 +928,7 @@ onMounted(() => {
 .review-page { gap: var(--ui-space-4); max-width: 1480px; margin: 0 auto; }
 .session-head { display: flex; align-items: center; justify-content: space-between; gap: var(--ui-space-4); }
 h2 { margin: 0; }
-.bookmark, .timeline-empty button, .inline button, .experiments-page button { padding: var(--ui-space-2) var(--ui-space-3); }
+.bookmark, .timeline-empty button, .inline button { padding: var(--ui-space-2) var(--ui-space-3); }
 .match-content-shell { min-width: 0; }
 .match-tabs { position: relative; z-index: 1; align-items: center; min-height: 48px; }
 .match-bans { display: flex; align-items: center; gap: 4px; min-width: max-content; margin-left: auto; padding: 0 14px; }.match-bans span { margin-right: 4px; color: var(--text-muted); font-size: 11px; letter-spacing: .65px; text-transform: uppercase; }.match-bans img { width: 25px; height: 25px; border: 1px solid var(--border-subtle); border-radius: 3px; object-fit: cover; filter: saturate(.72); }
@@ -1017,7 +936,7 @@ h2 { margin: 0; }
 .match-tab-surface > .scoreboard-section, .match-tab-surface > .match-tab-panel { border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .insight-shell { padding: 0; overflow: hidden; }.insight-tabs { border: 0; border-bottom: 1px solid var(--ui-divider); border-radius: 0; }
 .rvi-empty { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; min-height: 100px; padding: 18px; }.rvi-empty strong { color: var(--text-primary); }.rvi-empty span { flex: 1 1 280px; color: var(--text-muted); font-size: 11px; }.rvi-empty button { padding: 7px 10px; }
-.insight-performance { grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr)); }.match-rvi-evidence { grid-column: 1 / -1; }.scoreboard-section, .match-tab-panel { min-width: 0; }.scoreboard-section { padding: 0; }.scoreboard-heading { padding-inline: 2px; }.scoreboard-scroll { overflow-x: auto; padding-bottom: 4px; }.annotation-grid { align-items: stretch; }
+.insight-performance { grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr)); }.match-rvi-evidence { grid-column: 1 / -1; }.scoreboard-section, .match-tab-panel { min-width: 0; }.scoreboard-section { padding: 0; }.scoreboard-heading { padding-inline: 2px; }.scoreboard-scroll { overflow-x: auto; padding-bottom: 4px; }.annotation-grid { grid-template-columns: 1fr; }
 .eyebrow { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .8px; }
 .compact-session { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); }.compact-session > div { display: flex; flex-direction: column; }.compact-session button { padding: var(--space-2) var(--space-3); }
 .review-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
@@ -1065,8 +984,8 @@ h2 { margin: 0; }
 .positive { color: var(--win); }.negative, .error { color: var(--loss); }
 .owner-augment-context { display: grid; gap: 9px; padding-top: var(--space-3); }.owner-augment-context > header { display: flex; align-items: end; justify-content: space-between; gap: var(--space-3); }.owner-augment-context h3 { margin: 2px 0 0; color: var(--text-primary); font: 14px var(--font-heading); }.owner-augment-context > header > span { font-size: 12px; }.augment-grid { display: grid; grid-template-columns: repeat(4, minmax(210px, 1fr)); gap: 8px; }.policy-note { margin: 0; color: var(--text-muted); font-size: 11px; }
 textarea { width: 100%; box-sizing: border-box; min-height: 110px; resize: vertical; background: var(--surface-0); color: var(--text-primary); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: var(--space-3); font: 12px var(--font-body); }
-.tag-list, .inline, .experiment-outcome, .session-games { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-2); }.tag { border: 1px solid var(--border-subtle); background: var(--surface-2); color: var(--text-secondary); border-radius: 99px; padding: 4px 9px; }.tag.selected { color: var(--gold-bright); border-color: var(--gold); }
-.inline input { flex: 1; }.experiment-outcome { justify-content: space-between; align-items: center; }.outcome-note { flex-basis: 100%; }
+.tag-list, .inline, .session-games { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-2); }.tag { border: 1px solid var(--border-subtle); background: var(--surface-2); color: var(--text-secondary); border-radius: 99px; padding: 4px 9px; }.tag.selected { color: var(--gold-bright); border-color: var(--gold); }
+.inline input { flex: 1; }
 .timeline-chronology { min-width: 0; }
 .timeline-visuals { display: grid; grid-template-columns: minmax(0, 1fr) minmax(310px, 380px); align-items: start; gap: clamp(18px, 2.5vw, 34px); }
 .timeline-map-column { min-width: 0; }.timeline-map-tabs { margin-bottom: 8px; }.timeline-map-pane { min-width: 0; }
@@ -1101,9 +1020,7 @@ textarea { width: 100%; box-sizing: border-box; min-height: 110px; resize: verti
 .event-row img.kill-feed-icon { width: 15px; height: 15px; border-radius: 0; object-fit: contain; filter: drop-shadow(0 0 3px rgba(200,170,110,.55)); }
 .kill-copy { min-width: 0; }.kill-copy > strong { color: var(--text-primary); font-size: 11px; }.kill-copy > strong span { margin-inline: 4px; color: var(--gold); font-size: 11px; font-weight: 500; text-transform: uppercase; }.kill-copy > span { margin-top: 2px; color: var(--text-muted); font-size: 11px; }
 .purchase-path { display: flex; align-items: end; gap: 6px; flex-wrap: wrap; margin-top: var(--space-3); font-size: 12px; }.purchase-path strong { flex-basis: 100%; }.purchase-path figure { margin: 0; text-align: center; }.purchase-path img { display: block; width: 34px; height: 34px; border: 1px solid var(--border-strong); border-radius: 4px; }.purchase-path figcaption { margin-top: 2px; color: var(--text-muted); }
-.session-list, .experiments-page { display: grid; gap: var(--space-3); }.session-head > div { display: flex; flex-direction: column; }.match-control { display: flex; align-items: center; position: relative; }.match-chip { display: flex; align-items: center; gap: 4px; background: var(--surface-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 3px; cursor: pointer; }.match-chip img { width: 30px; height: 30px; border-radius: var(--radius-sm); }.boundary summary { cursor: pointer; padding: 0 4px; }.boundary[open] { position: relative; }.boundary[open] > button { display: block; width: 110px; background: var(--surface-3); color: var(--text-primary); border: 1px solid var(--border-subtle); padding: 4px; font-size: 12px; cursor: pointer; }
-.experiments-page { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }.experiments-page .card:first-child { display: grid; gap: var(--space-2); }.status { margin-left: var(--space-2); color: var(--gold); text-transform: uppercase; font-size: 12px; }
-.scope-label { display: grid; gap: 4px; font-size: 11px; }.scope-label select { min-height: 72px; }.experiment-actions { display: flex; gap: var(--space-2); margin-top: var(--space-2); }.experiment-actions button { padding: 4px 8px; font-size: 12px; }
+.session-list { display: grid; gap: var(--space-3); }.session-head > div { display: flex; flex-direction: column; }.match-control { display: flex; align-items: center; position: relative; }.match-chip { display: flex; align-items: center; gap: 4px; background: var(--surface-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 3px; cursor: pointer; }.match-chip img { width: 30px; height: 30px; border-radius: var(--radius-sm); }.boundary summary { cursor: pointer; padding: 0 4px; }.boundary[open] { position: relative; }.boundary[open] > button { display: block; width: 110px; background: var(--surface-3); color: var(--text-primary); border: 1px solid var(--border-subtle); padding: 4px; font-size: 12px; cursor: pointer; }
 .bookmark-row { width: 100%; display: grid; grid-template-columns: 34px 1fr 36px; align-items: center; gap: var(--space-2); padding: var(--space-2); background: var(--surface-2); color: var(--text-primary); border: 1px solid var(--border-subtle); text-align: left; }.bookmark-row img { width: 32px; height: 32px; border-radius: 50%; }
 @media (max-width: 1120px) { .augment-grid { grid-template-columns: repeat(2, minmax(220px, 1fr)); }.timeline-visuals { grid-template-columns: 1fr; }.gold-chart-wrap { height: 280px; }.match-bans { display: none; } }
 @media (max-width: 980px) { .rvi-review { grid-template-columns: 1fr; }.rvi-copy { padding: 16px 4px 0; }.rvi-copy p { max-width: 62ch; } }

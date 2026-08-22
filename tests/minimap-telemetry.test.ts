@@ -116,12 +116,12 @@ function campObservation(
     source: "minimap_cv",
     sourceConfidence: 1,
     frameSequence,
-    providerVersion: 4_001,
+    providerVersion: 6_001,
   }
 }
 
 describe("minimap telemetry integration", () => {
-  it("persists only confirmed camp transitions at their first supporting time", () => {
+  it("persists confirmed camp transitions and suppresses impossible pre-respawn repeats", () => {
     const db = new Database(":memory:")
     db.pragma("foreign_keys = ON")
     applyMigrations(db)
@@ -228,13 +228,23 @@ describe("minimap telemetry integration", () => {
       { gameTimeMs: 6_500, state: "dead", confidence: 1 },
     ])
     const storedClears = db.prepare(`
-      SELECT cleared_at_ms AS clearedAtMs, attribution, evidence_json AS evidenceJson
+      SELECT cleared_at_ms AS clearedAtMs, respawn_at_ms AS respawnAtMs,
+             attribution, evidence_json AS evidenceJson
       FROM camp_clear_events
       WHERE game_id = 77 AND puuid = 'owner' AND camp_key = 'west_blue'
       ORDER BY cleared_at_ms
-    `).all() as Array<{ clearedAtMs: number; attribution: string; evidenceJson: string }>
-    expect(storedClears.map(({ clearedAtMs }) => clearedAtMs)).toEqual([2_500, 6_500])
-    expect(storedClears[0]).toMatchObject({ clearedAtMs: 2_500, attribution: "local" })
+    `).all() as Array<{
+      clearedAtMs: number
+      respawnAtMs: number
+      attribution: string
+      evidenceJson: string
+    }>
+    expect(storedClears).toHaveLength(1)
+    expect(storedClears[0]).toMatchObject({
+      clearedAtMs: 2_500,
+      respawnAtMs: 272_500,
+      attribution: "local",
+    })
     expect(JSON.parse(storedClears[0].evidenceJson)).toMatchObject({
       localPositionObserved: true,
       localPositionDistance: 0,
@@ -339,7 +349,7 @@ describe("minimap telemetry integration", () => {
     db.pragma("foreign_keys = ON")
 
     expect(applyMigrations(db)).toBe(latestSchemaVersion)
-    expect(latestSchemaVersion).toBe(34)
+    expect(latestSchemaVersion).toBe(35)
     const tables = new Set((db.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table'",
     ).all() as { name: string }[]).map((row) => row.name))

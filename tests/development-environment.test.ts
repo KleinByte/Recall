@@ -44,7 +44,7 @@ describe("development environment contract", () => {
     expect(readme).toContain(`pnpm ${pnpmVersion}`)
   })
 
-  it("keeps native build policy compatible and both SQLite ABIs in lockstep", () => {
+  it("keeps native build policy compatible across SQLite and ONNX runtimes", () => {
     const workspace = read("pnpm-workspace.yaml")
     expect(workspace).toContain("nodeLinker: hoisted")
     expect(workspace).toContain("packageImportMethod: copy")
@@ -53,6 +53,7 @@ describe("development environment contract", () => {
     expect(workspace).toContain("  electron: true")
     expect(workspace).toContain("  electron-winstaller: true")
     expect(workspace).toContain("  esbuild: true")
+    expect(workspace).toContain("  onnxruntime-node: true")
 
     expect(packageJson.scripts["rebuild:electron"])
       .toBe("electron-builder install-app-deps")
@@ -63,8 +64,12 @@ describe("development environment contract", () => {
     }
     expect(builder.asarUnpack).toEqual([
       "**/node_modules/better-sqlite3/prebuilds/win32-x64.node",
+      "**/node_modules/onnxruntime-node/bin/napi-v6/win32/x64/onnxruntime_binding.node",
+      "**/node_modules/onnxruntime-node/bin/napi-v6/win32/x64/onnxruntime.dll",
     ])
     expect(builder.files).toContain("!node_modules/better-sqlite3/build/**/*")
+    expect(builder.files).toContain("!node_modules/onnxruntime-node/bin/napi-v6/linux/**/*")
+    expect(packageJson.dependencies["onnxruntime-node"]).toMatch(/^\d+\.\d+\.\d+$/)
     expect(packageJson.devDependencies).not.toHaveProperty("@electron/rebuild")
     expect(read("scripts/rebuild-node-native.mjs")).not.toContain('"--force"')
 

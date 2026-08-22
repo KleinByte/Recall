@@ -92,7 +92,6 @@ function reviewFixture(): MatchReview {
       note: "",
       bookmarked: false,
       tags: [],
-      experimentOutcomes: [],
     },
     timeline: {
       status: "ready",

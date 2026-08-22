@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest"
 import {
+  buildChallengeGroups,
   challengeGameModeLabel,
   challengeGameModes,
+  challengeKind,
   challengeMatchesGameMode,
+  challengeMatchesGroup,
+  challengeMatchesKind,
   challengeMatchesMap,
   challengeMatchesCategory,
   challengeTierProgress,
@@ -134,5 +138,64 @@ describe("challenge presentation helpers", () => {
     expect(challengeMatchesMap(swiftplay, "Summoner's Rift")).toBe(true)
     expect(challengeMatchesMap(swiftplay, "Howling Abyss")).toBe(false)
     expect(challengeMatchesMap(mayhem, "Howling Abyss")).toBe(true)
+  })
+
+  it("builds capstone groups from parent ids", () => {
+    const capstone = challenge({
+      challengeId: 10,
+      name: "The Sage",
+      isCapstone: 1,
+      parentId: 999,
+    })
+    const second = challenge({ challengeId: 12, name: "Visionary", parentId: 10 })
+    const first = challenge({ challengeId: 11, name: "Adaptable", parentId: 10 })
+    const standalone = challenge({ challengeId: 13, name: "Solo act" })
+
+    expect(buildChallengeGroups([second, standalone, capstone, first])).toEqual([
+      { capstone, members: [first, second] },
+    ])
+  })
+
+  it("includes nested capstones and all of their descendants", () => {
+    const parent = challenge({
+      challengeId: 10,
+      name: "Mastermind",
+      isCapstone: 1,
+    })
+    const nested = challenge({
+      challengeId: 11,
+      name: "Visionary",
+      isCapstone: 1,
+      parentId: 10,
+    })
+    const member = challenge({
+      challengeId: 12,
+      name: "Ward Hunter",
+      parentId: 11,
+    })
+
+    const groups = buildChallengeGroups([member, parent, nested])
+
+    expect(groups.find((group) => group.capstone === parent)?.members)
+      .toEqual([nested, member])
+    expect(groups.find((group) => group.capstone === nested)?.members)
+      .toEqual([member])
+  })
+
+  it("filters capstones, group members, and standalone challenges", () => {
+    const capstoneIds = new Set([10])
+    const capstone = challenge({ challengeId: 10, isCapstone: 1 })
+    const grouped = challenge({ challengeId: 11, parentId: 10 })
+    const standalone = challenge({ challengeId: 12, parentId: 999 })
+
+    expect(challengeKind(capstone, capstoneIds)).toBe("capstone")
+    expect(challengeKind(grouped, capstoneIds)).toBe("grouped")
+    expect(challengeKind(standalone, capstoneIds)).toBe("standalone")
+    expect(challengeMatchesKind(grouped, "grouped", capstoneIds)).toBe(true)
+    expect(challengeMatchesKind(grouped, "capstone", capstoneIds)).toBe(false)
+    const groupMemberIds = new Set([11])
+    expect(challengeMatchesGroup(capstone, 10, groupMemberIds)).toBe(true)
+    expect(challengeMatchesGroup(grouped, 10, groupMemberIds)).toBe(true)
+    expect(challengeMatchesGroup(standalone, 10, groupMemberIds)).toBe(false)
   })
 })

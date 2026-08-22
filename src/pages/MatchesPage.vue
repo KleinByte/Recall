@@ -29,7 +29,7 @@ import type {
   StatsSummary,
   TrackedMode,
 } from "../types/stats"
-import type { AnnotationTag, PracticeExperiment } from "../types/review"
+import type { AnnotationTag } from "../types/review"
 
 const props = defineProps<{
   champions: Champion[] | null
@@ -83,9 +83,7 @@ const sortDir = ref<"asc" | "desc">("desc")
 const bookmarked = ref(false)
 const hasNotes = ref(false)
 const tagId = ref<number>()
-const experimentId = ref<number>()
 const tags = ref<AnnotationTag[]>([])
-const experiments = ref<PracticeExperiment[]>([])
 
 const page = ref(1)
 const pageSize = ref(25)
@@ -111,7 +109,6 @@ const query = computed<MatchQuery>(() => ({
   bookmarked: bookmarked.value || undefined,
   hasNotes: hasNotes.value || undefined,
   tagIds: tagId.value ? [tagId.value] : undefined,
-  experimentId: experimentId.value,
 }))
 
 async function load() {
@@ -157,7 +154,6 @@ onMounted(async () => {
   })
   events.on("lcu:status", () => void refreshMatches())
   void api.listTags().then((rows) => { tags.value = rows })
-  void api.listExperiments().then((rows) => { experiments.value = rows })
   events.on("review:updated", () => void refreshMatches())
 })
 
@@ -192,8 +188,7 @@ const hasFilters = computed(
     minRecallScore.value !== undefined ||
     bookmarked.value ||
     hasNotes.value ||
-    tagId.value !== undefined ||
-    experimentId.value !== undefined,
+    tagId.value !== undefined,
 )
 
 const clearFilters = () => {
@@ -205,7 +200,6 @@ const clearFilters = () => {
   bookmarked.value = false
   hasNotes.value = false
   tagId.value = undefined
-  experimentId.value = undefined
 }
 
 const averageGrade = computed(() => recallGradeFromRecallScore(summary.value?.averageRecallScore))
@@ -319,15 +313,6 @@ const averageGrade = computed(() => recallGradeFromRecallScore(summary.value?.av
           <select v-model="tagId" class="league-select">
             <option :value="undefined">Any tag</option>
             <option v-for="tag in tags" :key="tag.id" :value="tag.id">{{ tag.name }}</option>
-          </select>
-        </Field>
-
-        <Field v-if="experiments.length" label="Experiment" compact>
-          <select v-model="experimentId" class="league-select">
-            <option :value="undefined">Any experiment</option>
-            <option v-for="experiment in experiments" :key="experiment.id" :value="experiment.id">
-              {{ experiment.name }}
-            </option>
           </select>
         </Field>
 

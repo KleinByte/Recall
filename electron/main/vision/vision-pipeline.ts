@@ -23,6 +23,7 @@ import {
 } from "./opencv-calibration.js"
 import { OpenCvCampDetector } from "./opencv-camp-detector.js"
 import { OpenCvChampionDetector } from "./opencv-champion-detector.js"
+import type { LearnedChampionDetectionResult } from "./onnx-champion-detector.js"
 import {
   cropAndResize,
   frameToMat,
@@ -126,6 +127,7 @@ export class VisionPipeline {
     frame: RgbaFrame
     includeCamps: boolean
     includeVisualValidation?: boolean
+    learned?: LearnedChampionDetectionResult
   }): VisionFrameResult {
     if (this.activeSessionId !== input.sessionId || this.activeGameId !== input.gameId) {
       throw new Error("vision_stale_session")
@@ -151,8 +153,9 @@ export class VisionPipeline {
         rgba,
         gameId: input.gameId,
         gameTimeMs: input.gameTimeMs,
+        learnedDetections: input.learned?.detections,
       })
-      const championMs = performance.now() - championStarted
+      const championMs = performance.now() - championStarted + (input.learned?.inferenceMs ?? 0)
 
       let campObservations: VisionFrameResult["campObservations"] = []
       const campStarted = performance.now()
@@ -160,6 +163,7 @@ export class VisionPipeline {
         const occludedCampKeys = new Set<CampKey>()
         for (const camp of CAMP_BY_KEY.values()) {
           if (champion.proposals.some((proposal) =>
+            proposal.identityAccepted === true &&
             normalizedDistance(proposal.center, camp.center) <= camp.patchRadius + proposal.radius)) {
             occludedCampKeys.add(camp.key)
           }
@@ -184,7 +188,7 @@ export class VisionPipeline {
         championObservations: champion.observations,
         campObservations,
         metrics: {
-          totalMs: performance.now() - started,
+          totalMs: performance.now() - started + (input.learned?.inferenceMs ?? 0),
           visualValidationMs,
           championMs,
           campMs,

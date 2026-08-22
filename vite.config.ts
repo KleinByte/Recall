@@ -7,8 +7,15 @@ import pkg from "./package.json" with { type: "json" }
 // Pure JavaScript dependencies used by the main process are bundled so their
 // transitive dependency trees cannot be pruned by the desktop packager. Keep
 // only native or intentionally external runtime modules here.
-const mainProcessExternals = ["@techstark/opencv-js", "better-sqlite3", "electron", "ws"]
+const mainProcessExternals = [
+  "@techstark/opencv-js",
+  "better-sqlite3",
+  "electron",
+  "onnxruntime-node",
+  "ws",
+]
 const rendererEntryBudgetBytes = 250 * 1024
+const minimapTrainingGlob = "**/.minimap-training/**"
 
 function rendererEntryBudget(): Plugin {
   return {
@@ -66,6 +73,7 @@ export default defineConfig(({ command }) => {
               sourcemap,
               minify: isBuild,
               outDir: "dist-electron/main",
+              watch: isServe ? { exclude: minimapTrainingGlob } : null,
               rolldownOptions: {
                 external: mainProcessExternals,
               },
@@ -81,6 +89,7 @@ export default defineConfig(({ command }) => {
               sourcemap: sourcemap ? "inline" : undefined, // #332
               minify: isBuild,
               outDir: "dist-electron/preload",
+              watch: isServe ? { exclude: minimapTrainingGlob } : null,
               rolldownOptions: {
                 external: ["electron"],
               },
@@ -92,15 +101,20 @@ export default defineConfig(({ command }) => {
         renderer: {},
       }),
     ],
-    server:
-      process.env.VSCODE_DEBUG &&
-      (() => {
-        const url = new URL(pkg.debug.env.VITE_DEV_SERVER_URL)
-        return {
-          host: url.hostname,
-          port: +url.port,
-        }
-      })(),
+    server: {
+      watch: {
+        ignored: [minimapTrainingGlob],
+      },
+      ...(process.env.VSCODE_DEBUG
+        ? (() => {
+            const url = new URL(pkg.debug.env.VITE_DEV_SERVER_URL)
+            return {
+              host: url.hostname,
+              port: +url.port,
+            }
+          })()
+        : {}),
+    },
     clearScreen: false,
     build: {
       // ECharts is loaded only with chart-bearing pages. Rolldown's default

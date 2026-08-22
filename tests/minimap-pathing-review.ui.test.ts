@@ -76,15 +76,15 @@ describe("minimap pathing review fallback", () => {
     )
     expect(wrapper.find("canvas").exists()).toBe(false)
   })
-  it("renders map-backed playback without connecting unknown telemetry gaps", async () => {
+  it("renders observed and estimated routes while keeping rejected gaps separate", async () => {
     apiMocks.getJunglePathingReview.mockResolvedValue({
       analysis: {
         analysisId: "playback",
         gameId: 44,
         puuid: "owner",
         inputHash: "2".repeat(64),
-        graphVersion: 1,
-        modelVersion: 2,
+        graphVersion: 3,
+        modelVersion: 3,
         status: "complete",
         coverage: {},
         createdAt: 1,
@@ -107,6 +107,20 @@ describe("minimap pathing review fallback", () => {
       }, {
         gameId: 44,
         participantKey: "ally:local",
+        startTimeMs: 3_000,
+        endTimeMs: 4_500,
+        kind: "inferred",
+        points: [
+          { x: 0.28, y: 0.63 },
+          { x: 0.35, y: 0.56 },
+          { x: 0.42, y: 0.51 },
+        ],
+        confidence: 0.72,
+        inferenceMode: "smoothed_postgame",
+        modelVersion: 3,
+      }, {
+        gameId: 44,
+        participantKey: "ally:local",
         startTimeMs: 4_500,
         endTimeMs: 4_500,
         kind: "unknown",
@@ -119,7 +133,7 @@ describe("minimap pathing review fallback", () => {
         puuid: "owner",
         campKey: "west_blue",
         clearedAtMs: 4_000,
-        respawnAtMs: 304_000,
+        respawnAtMs: 274_000,
         source: "minimap_cv",
         sourceConfidence: 0.9,
         attribution: "local",
@@ -130,7 +144,7 @@ describe("minimap pathing review fallback", () => {
           transitionConfidence: 0.9,
         },
         routeIndex: 0,
-        algorithmVersion: 3,
+        algorithmVersion: 4,
       }],
     })
 
@@ -147,13 +161,15 @@ describe("minimap pathing review fallback", () => {
     expect(wrapper.get(".playback-map").attributes("style")).toContain("map11.png")
     expect(wrapper.get("select").element.value).toBe("ally:local")
     expect(wrapper.text()).toContain("Nunu · You")
-    expect(wrapper.findAll(".path-layer polyline")).toHaveLength(1)
+    expect(wrapper.findAll(".path-layer polyline")).toHaveLength(2)
+    expect(wrapper.findAll(".path-layer polyline.estimated")).toHaveLength(1)
     expect(wrapper.findAll(".sighting-marker")).toHaveLength(1)
     expect(wrapper.findAll(".clear-tick")).toHaveLength(1)
     expect(wrapper.get(".first-clear-summary").text()).toContain("Incomplete")
     expect(wrapper.get(".first-clear-summary").text()).toContain("1 / 6 unique camps")
     expect(wrapper.text()).not.toContain("Live Client + position")
     expect(wrapper.text()).toContain("Minimap CV")
+    expect(wrapper.text()).toContain("brief sighting reshapes the estimate")
     expect(wrapper.find("canvas").exists()).toBe(false)
   })
 

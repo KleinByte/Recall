@@ -34,7 +34,7 @@ next month.
   playstyle trends, lobby comparisons, and a mode-specific Recall Vector Index
   with mode-appropriate match arms, a career Range arm, and inspectable evidence.
 - Provides a review journal with bookmarks, notes, tags, session boundaries,
-  timeline events, and reusable practice experiments.
+  and timeline events.
 - Stores everything on your machine and includes integrity checks, verified
   backups, and safe restoration in the Data Trust Center.
 
@@ -64,10 +64,10 @@ stats, performance grades, builds, augments, objectives, multikills, and the
 context needed to understand why a result looked good or bad.
 
 The history view is paged and can be filtered or sorted by mode, result,
-champion, grade, date, duration, KDA, damage, bookmarks, notes, tags, and
-experiments. Its rows keep champion, assigned role, result, KDA, CS pace,
-damage, lobby rank, and date aligned for quick scanning. League Classic has its
-own filter instead of being folded into Other.
+champion, grade, date, duration, KDA, damage, bookmarks, notes, and tags. Its
+rows keep champion, assigned role, result, KDA, CS pace, damage, lobby rank,
+and date aligned for quick scanning. League Classic has its own filter instead
+of being folded into Other.
 
 ![Match history with role-aware rows, lobby rank, and a League Classic filter](docs/screenshots/recall-matches.jpg)
 

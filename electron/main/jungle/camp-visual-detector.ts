@@ -6,7 +6,7 @@ import type { CampKey, CampVisualState, RgbaFrame } from "../../../src/shared/mi
  * contracts so Electron main never owns OpenCV objects or handwritten image
  * primitives.
  */
-export const CAMP_VISUAL_DETECTOR_VERSION = 4
+export const CAMP_VISUAL_DETECTOR_VERSION = 6
 
 export interface CampVisualTemplateAsset {
   campKey: CampKey | "*"
@@ -21,7 +21,13 @@ export interface CampClassification {
   state: CampVisualState
   confidence: number
   scoreMargin: number
-  method?: "template" | "adaptive_alive_baseline"
+  method?:
+    | "template"
+    | "adaptive_alive_baseline"
+    | "native_camp_icon"
+    | "native_camp_icon_absence"
+    | "native_respawn_timer"
+    | "overlay_countdown"
 }
 
 /**

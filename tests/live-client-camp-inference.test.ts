@@ -52,12 +52,49 @@ describe("LiveClientCampInference", () => {
     })).toMatchObject({
       campKey: "west_blue",
       clearedAtMs: 100_000,
+      respawnAtMs: 370_000,
       source: "live_client_inference",
       attribution: "local",
       routeIndex: 0,
       evidence: {
         creepScoreDelta: 4,
         expectedNextCamp: true,
+      },
+    })
+  })
+
+  it("uses a fresh last-seen local position when the clear evidence arrives under an overlay", () => {
+    const inference = new LiveClientCampInference()
+    const hidden: ChampionTrackSnapshot = {
+      ...localAt("west_blue"),
+      state: "temporarily_occluded",
+      position: undefined,
+      lastObservedPosition: CAMP_BY_KEY.get("west_blue")!.center,
+      lastObservedGameTimeMs: 100_000,
+    }
+    const base = {
+      gameId: 77,
+      puuid: "owner",
+      localParticipantKey: "ally:local",
+      tracks: [hidden],
+      routeIndex: 0,
+    }
+
+    expect(inference.observe({
+      ...base,
+      gameTimeMs: 101_000,
+      evidence: delta(4, 70),
+    })).toBeUndefined()
+    expect(inference.observe({
+      ...base,
+      gameTimeMs: 102_000,
+      evidence: delta(0, 0),
+    })).toMatchObject({
+      campKey: "west_blue",
+      clearedAtMs: 101_000,
+      evidence: {
+        localPositionObserved: true,
+        evidenceAgeMs: 1_000,
       },
     })
   })

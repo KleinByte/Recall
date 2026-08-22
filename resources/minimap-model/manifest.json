@@ -1,0 +1,1473 @@
+{
+  "schemaVersion": 1,
+  "model": "Recall YOLO11m League of Legends Minimap Detection",
+  "repository": "https://github.com/KleinByte/Recall",
+  "revision": "9b1d47f8023d1b364c48a3cf39f0efffb0a3acd6",
+  "sourceFile": "best.pt",
+  "sourceSha256": "72322eeb44d223a851b9c6ca1847fb05dbaebb3bf7e02df72880ad5e7d1a5a05",
+  "artifactFile": "yolo11m-minimap.onnx",
+  "artifactSha256": "5f2f3f4d5b7ffed3dcbe1c7a7aa013571200064b1820b77cf9b052184fdffe02",
+  "artifactBytes": 80768948,
+  "format": "onnx",
+  "opset": 17,
+  "input": {
+    "name": "images",
+    "shape": [
+      1,
+      3,
+      256,
+      256
+    ],
+    "color": "RGB",
+    "range": [
+      0,
+      1
+    ]
+  },
+  "classCount": 173,
+  "labelsFile": "labels.json",
+  "license": "CC-BY-NC-4.0",
+  "attribution": "boboyes/leagueoflegends-minimap-detection and bsowlx/DeepestLeague",
+  "training": {
+    "dataDragonPatch": "16.16.1",
+    "rosterSha256": "3a81919514a8f24f17456f18c724788cbaa4f2c2c86b75a1cd24c398a6b55543",
+    "baseModel": {
+      "repository": "boboyes/leagueoflegends-minimap-detection",
+      "revision": "5c98bdcfa1961a3bb1be57591e7d20d6eb0ac531",
+      "sourceFile": "yolo11m-minimap.pt",
+      "sourceSha256": "c247901341e905fd39633ccb7a4ef3133bcb7c8f9375bfda962d13f6bfa3d755",
+      "artifactSha256": "6717d20d48258adcaab4abc9ec7027a6e3c8947969ede89c7d8594f8a36b28a6",
+      "classCount": 170,
+      "classNames": [
+        "Aatrox",
+        "Ahri",
+        "Akali",
+        "Akshan",
+        "Alistar",
+        "Ambessa",
+        "Amumu",
+        "Anivia",
+        "Annie",
+        "Aphelios",
+        "Ashe",
+        "AurelionSol",
+        "Aurora",
+        "Azir",
+        "Bard",
+        "Belveth",
+        "Blitzcrank",
+        "Brand",
+        "Braum",
+        "Briar",
+        "Caitlyn",
+        "Camille",
+        "Cassiopeia",
+        "Chogath",
+        "Corki",
+        "Darius",
+        "Diana",
+        "DrMundo",
+        "Draven",
+        "Ekko",
+        "Elise",
+        "Evelynn",
+        "Ezreal",
+        "FiddleSticks",
+        "Fiora",
+        "Fizz",
+        "Galio",
+        "Gangplank",
+        "Garen",
+        "Gnar",
+        "Gragas",
+        "Graves",
+        "Gwen",
+        "Hecarim",
+        "Heimerdinger",
+        "Hwei",
+        "Illaoi",
+        "Irelia",
+        "Ivern",
+        "Janna",
+        "JarvanIV",
+        "Jax",
+        "Jayce",
+        "Jhin",
+        "Jinx",
+        "KSante",
+        "Kaisa",
+        "Kalista",
+        "Karma",
+        "Karthus",
+        "Kassadin",
+        "Katarina",
+        "Kayle",
+        "Kayn",
+        "Kennen",
+        "Khazix",
+        "Kindred",
+        "Kled",
+        "KogMaw",
+        "Leblanc",
+        "LeeSin",
+        "Leona",
+        "Lillia",
+        "Lissandra",
+        "Lucian",
+        "Lulu",
+        "Lux",
+        "Malphite",
+        "Malzahar",
+        "Maokai",
+        "MasterYi",
+        "Mel",
+        "Milio",
+        "MissFortune",
+        "MonkeyKing",
+        "Mordekaiser",
+        "Morgana",
+        "Naafiri",
+        "Nami",
+        "Nasus",
+        "Nautilus",
+        "Neeko",
+        "Nidalee",
+        "Nilah",
+        "Nocturne",
+        "Nunu",
+        "Olaf",
+        "Orianna",
+        "Ornn",
+        "Pantheon",
+        "Poppy",
+        "Pyke",
+        "Qiyana",
+        "Quinn",
+        "Rakan",
+        "Rammus",
+        "RekSai",
+        "Rell",
+        "Renata",
+        "Renekton",
+        "Rengar",
+        "Riven",
+        "Rumble",
+        "Ryze",
+        "Samira",
+        "Sejuani",
+        "Senna",
+        "Seraphine",
+        "Sett",
+        "Shaco",
+        "Shen",
+        "Shyvana",
+        "Singed",
+        "Sion",
+        "Sivir",
+        "Skarner",
+        "Smolder",
+        "Sona",
+        "Soraka",
+        "Swain",
+        "Sylas",
+        "Syndra",
+        "TahmKench",
+        "Taliyah",
+        "Talon",
+        "Taric",
+        "Teemo",
+        "Thresh",
+        "Tristana",
+        "Trundle",
+        "Tryndamere",
+        "TwistedFate",
+        "Twitch",
+        "Udyr",
+        "Urgot",
+        "Varus",
+        "Vayne",
+        "Veigar",
+        "Velkoz",
+        "Vex",
+        "Vi",
+        "Viego",
+        "Viktor",
+        "Vladimir",
+        "Volibear",
+        "Warwick",
+        "Xayah",
+        "Xerath",
+        "XinZhao",
+        "Yasuo",
+        "Yone",
+        "Yorick",
+        "Yuumi",
+        "Zac",
+        "Zed",
+        "Zeri",
+        "Ziggs",
+        "Zilean",
+        "Zoe",
+        "Zyra"
+      ]
+    },
+    "focusChampions": [
+      "Locke",
+      "Yunara",
+      "Zaahen"
+    ],
+    "evaluation": {
+      "schemaVersion": 1,
+      "outputDirectory": "C:\\Users\\Klein\\Dev\\source\\repos\\lol-challenge-tracker\\.minimap-training\\runs\\evaluations\\yolo11m-roster-16.16.1-test",
+      "reportPath": "C:\\Users\\Klein\\Dev\\source\\repos\\lol-challenge-tracker\\.minimap-training\\runs\\evaluations\\yolo11m-roster-16.16.1-test\\evaluation.json",
+      "weights": "C:\\Users\\Klein\\Dev\\source\\repos\\lol-challenge-tracker\\.minimap-training\\runs\\yolo11m-roster-16.16.1\\weights\\best.pt",
+      "weightsSha256": "72322eeb44d223a851b9c6ca1847fb05dbaebb3bf7e02df72880ad5e7d1a5a05",
+      "datasetConfig": "C:\\Users\\Klein\\Dev\\source\\repos\\lol-challenge-tracker\\.minimap-training\\data\\synthetic\\lol-minimap-16.16.1-focused\\config.yaml",
+      "split": "test",
+      "classCount": 173,
+      "overall": {
+        "precision": 0.996149269267388,
+        "recall": 0.9875335290608046,
+        "mAP50": 0.9946801615633188,
+        "mAP50_95": 0.8138039882630929,
+        "fps": 670.8262725541541
+      },
+      "focusChampions": {
+        "Locke": {
+          "evaluated": true,
+          "precision": 0.9957571615294979,
+          "recall": 0.9935344827586207,
+          "mAP50": 0.9949891274802934,
+          "mAP50_95": 0.8174091338169427
+        },
+        "Yunara": {
+          "evaluated": true,
+          "precision": 0.9986678698813912,
+          "recall": 0.9961935834692768,
+          "mAP50": 0.994991805517618,
+          "mAP50_95": 0.822238810667157
+        },
+        "Zaahen": {
+          "evaluated": true,
+          "precision": 0.9982047855865603,
+          "recall": 0.9894679989197948,
+          "mAP50": 0.994961956521739,
+          "mAP50_95": 0.8105791308151208
+        }
+      },
+      "perClass": {
+        "Aatrox": {
+          "evaluated": true,
+          "precision": 0.9918193034019332,
+          "recall": 0.9803536345776032,
+          "mAP50": 0.9938021851034773,
+          "mAP50_95": 0.7979602422264304
+        },
+        "Ahri": {
+          "evaluated": true,
+          "precision": 0.9936359698502487,
+          "recall": 0.9899598393574297,
+          "mAP50": 0.9948994357998796,
+          "mAP50_95": 0.8277296937630277
+        },
+        "Akali": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9775800190403671,
+          "mAP50": 0.9949199999999999,
+          "mAP50_95": 0.8175173131368053
+        },
+        "Akshan": {
+          "evaluated": true,
+          "precision": 0.9959887455526134,
+          "recall": 0.9872716176098887,
+          "mAP50": 0.9949401197604791,
+          "mAP50_95": 0.8330915181293124
+        },
+        "Alistar": {
+          "evaluated": true,
+          "precision": 0.9946044083487688,
+          "recall": 0.9961538461538462,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8111440174255738
+        },
+        "Ambessa": {
+          "evaluated": true,
+          "precision": 0.9998788746060551,
+          "recall": 0.9869646182495344,
+          "mAP50": 0.9949812382739213,
+          "mAP50_95": 0.8339923972837926
+        },
+        "Amumu": {
+          "evaluated": true,
+          "precision": 0.997953804211807,
+          "recall": 0.9933038832422063,
+          "mAP50": 0.994959100204499,
+          "mAP50_95": 0.8089680622814024
+        },
+        "Anivia": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9938184002172472,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8163128198665689
+        },
+        "Annie": {
+          "evaluated": true,
+          "precision": 0.9982240766728413,
+          "recall": 0.9924385633270322,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8191192247114198
+        },
+        "Aphelios": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.966909716455734,
+          "mAP50": 0.993895086023343,
+          "mAP50_95": 0.8112252941602114
+        },
+        "Ashe": {
+          "evaluated": true,
+          "precision": 0.9924124098133177,
+          "recall": 0.9908652959349074,
+          "mAP50": 0.9949429657794676,
+          "mAP50_95": 0.8242154647497447
+        },
+        "AurelionSol": {
+          "evaluated": true,
+          "precision": 0.992110558151841,
+          "recall": 0.99017072606082,
+          "mAP50": 0.9949212598425198,
+          "mAP50_95": 0.8209180512795159
+        },
+        "Aurora": {
+          "evaluated": true,
+          "precision": 0.9930731072701351,
+          "recall": 0.9824902723735408,
+          "mAP50": 0.9947470456630878,
+          "mAP50_95": 0.8054957626952441
+        },
+        "Azir": {
+          "evaluated": true,
+          "precision": 0.9959971921665884,
+          "recall": 0.9913341091273197,
+          "mAP50": 0.9948392756539235,
+          "mAP50_95": 0.814609646960427
+        },
+        "Bard": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9905680297205095,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8124417330873184
+        },
+        "Belveth": {
+          "evaluated": true,
+          "precision": 0.994635988135955,
+          "recall": 0.9933629321900925,
+          "mAP50": 0.9949461400359066,
+          "mAP50_95": 0.813711128223954
+        },
+        "Blitzcrank": {
+          "evaluated": true,
+          "precision": 0.9970974477140524,
+          "recall": 0.987037037037037,
+          "mAP50": 0.9945026642984015,
+          "mAP50_95": 0.8107774384346589
+        },
+        "Brand": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9848806728504702,
+          "mAP50": 0.9949628252788104,
+          "mAP50_95": 0.8007717804062346
+        },
+        "Braum": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9927575900015705,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8179634682753317
+        },
+        "Briar": {
+          "evaluated": true,
+          "precision": 0.9997485900145432,
+          "recall": 0.9878048780487805,
+          "mAP50": 0.9948585858585858,
+          "mAP50_95": 0.7955482692680468
+        },
+        "Caitlyn": {
+          "evaluated": true,
+          "precision": 0.9966159046299959,
+          "recall": 0.9817813765182186,
+          "mAP50": 0.9947209745641379,
+          "mAP50_95": 0.8058499174084159
+        },
+        "Camille": {
+          "evaluated": true,
+          "precision": 0.9958255950672045,
+          "recall": 0.9937759336099585,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8076511167082918
+        },
+        "Cassiopeia": {
+          "evaluated": true,
+          "precision": 0.9957259792426677,
+          "recall": 0.976820879832783,
+          "mAP50": 0.9939787117959374,
+          "mAP50_95": 0.8242177455293044
+        },
+        "Chogath": {
+          "evaluated": true,
+          "precision": 0.9998092888562188,
+          "recall": 0.9898785425101214,
+          "mAP50": 0.9949797570850202,
+          "mAP50_95": 0.8276560271279492
+        },
+        "Corki": {
+          "evaluated": true,
+          "precision": 0.9979363923002171,
+          "recall": 0.9909605093298609,
+          "mAP50": 0.9949793814432989,
+          "mAP50_95": 0.8247717762325862
+        },
+        "Darius": {
+          "evaluated": true,
+          "precision": 0.9960440507618502,
+          "recall": 0.9840954274353877,
+          "mAP50": 0.9949203187250996,
+          "mAP50_95": 0.8011767123600013
+        },
+        "Diana": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9773996400348129,
+          "mAP50": 0.9940772128060263,
+          "mAP50_95": 0.8083808006474651
+        },
+        "DrMundo": {
+          "evaluated": true,
+          "precision": 0.9947096620042982,
+          "recall": 0.9741935483870968,
+          "mAP50": 0.9944733550500324,
+          "mAP50_95": 0.8161255221689222
+        },
+        "Draven": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9906956957595157,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8064965323557679
+        },
+        "Ekko": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9904370547786604,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8254489649951022
+        },
+        "Elise": {
+          "evaluated": true,
+          "precision": 0.9979856022588764,
+          "recall": 0.9733335639296004,
+          "mAP50": 0.9933219115867745,
+          "mAP50_95": 0.8146065767515379
+        },
+        "Evelynn": {
+          "evaluated": true,
+          "precision": 0.9968800642702553,
+          "recall": 0.9922330097087378,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8180389126421069
+        },
+        "Ezreal": {
+          "evaluated": true,
+          "precision": 0.9980030024297257,
+          "recall": 0.9818312547078785,
+          "mAP50": 0.994980198019802,
+          "mAP50_95": 0.8130819549822995
+        },
+        "Fiddlesticks": {
+          "evaluated": true,
+          "precision": 0.9941616877202436,
+          "recall": 0.9767636338108857,
+          "mAP50": 0.994054623652749,
+          "mAP50_95": 0.8160494601324937
+        },
+        "Fiora": {
+          "evaluated": true,
+          "precision": 0.9974824547790095,
+          "recall": 0.9924953095684803,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8130562877663261
+        },
+        "Fizz": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9873387559913877,
+          "mAP50": 0.9949795081967213,
+          "mAP50_95": 0.8188739208590221
+        },
+        "Galio": {
+          "evaluated": true,
+          "precision": 0.9979141620215999,
+          "recall": 0.9925811867349399,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8075658061182602
+        },
+        "Gangplank": {
+          "evaluated": true,
+          "precision": 0.9943808029236392,
+          "recall": 0.9901574803149606,
+          "mAP50": 0.9949801587301587,
+          "mAP50_95": 0.822273272052864
+        },
+        "Garen": {
+          "evaluated": true,
+          "precision": 0.9960923242121277,
+          "recall": 0.9976780511422697,
+          "mAP50": 0.9949609375,
+          "mAP50_95": 0.8080358545260472
+        },
+        "Gnar": {
+          "evaluated": true,
+          "precision": 0.9968143686885316,
+          "recall": 0.9942748091603053,
+          "mAP50": 0.9949808429118775,
+          "mAP50_95": 0.8144264134499911
+        },
+        "Gragas": {
+          "evaluated": true,
+          "precision": 0.9941591556606234,
+          "recall": 0.9934335167992971,
+          "mAP50": 0.9948824228926637,
+          "mAP50_95": 0.8160257229159955
+        },
+        "Graves": {
+          "evaluated": true,
+          "precision": 0.9832069635369238,
+          "recall": 0.9671814671814671,
+          "mAP50": 0.9861694299742951,
+          "mAP50_95": 0.7884465070547442
+        },
+        "Gwen": {
+          "evaluated": true,
+          "precision": 0.9977134615851775,
+          "recall": 0.9885057471264368,
+          "mAP50": 0.994961464354528,
+          "mAP50_95": 0.809327775368954
+        },
+        "Hecarim": {
+          "evaluated": true,
+          "precision": 0.993149159262724,
+          "recall": 0.9941634241245136,
+          "mAP50": 0.994941634241245,
+          "mAP50_95": 0.8009751969064149
+        },
+        "Heimerdinger": {
+          "evaluated": true,
+          "precision": 0.9974587090039545,
+          "recall": 0.9980657640232108,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8237514289821555
+        },
+        "Hwei": {
+          "evaluated": true,
+          "precision": 0.9959541959351869,
+          "recall": 0.9827141038236025,
+          "mAP50": 0.9949598393574298,
+          "mAP50_95": 0.8059668663076021
+        },
+        "Illaoi": {
+          "evaluated": true,
+          "precision": 0.9991336706165234,
+          "recall": 0.9957716701902748,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8256101585516873
+        },
+        "Irelia": {
+          "evaluated": true,
+          "precision": 0.9984776574653981,
+          "recall": 0.9925788497217068,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8174338807689404
+        },
+        "Ivern": {
+          "evaluated": true,
+          "precision": 0.9967456848901701,
+          "recall": 0.9921722113502935,
+          "mAP50": 0.9949803149606299,
+          "mAP50_95": 0.8242633997451321
+        },
+        "Janna": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9829098183280442,
+          "mAP50": 0.994943820224719,
+          "mAP50_95": 0.815184304353411
+        },
+        "JarvanIV": {
+          "evaluated": true,
+          "precision": 0.9938547303820059,
+          "recall": 0.9841392971729873,
+          "mAP50": 0.9918474013964027,
+          "mAP50_95": 0.8095598776966566
+        },
+        "Jax": {
+          "evaluated": true,
+          "precision": 0.9980793124766559,
+          "recall": 0.9823201061921026,
+          "mAP50": 0.9947217068645641,
+          "mAP50_95": 0.8239191134205226
+        },
+        "Jayce": {
+          "evaluated": true,
+          "precision": 0.995233551670281,
+          "recall": 0.9858870967741935,
+          "mAP50": 0.9941416030099189,
+          "mAP50_95": 0.8102639417076201
+        },
+        "Jhin": {
+          "evaluated": true,
+          "precision": 0.9951267572110187,
+          "recall": 0.9829545454545454,
+          "mAP50": 0.994793114916476,
+          "mAP50_95": 0.8051790327300768
+        },
+        "Jinx": {
+          "evaluated": true,
+          "precision": 0.9941499332563833,
+          "recall": 0.9918864097363083,
+          "mAP50": 0.994959266802444,
+          "mAP50_95": 0.8171612971890498
+        },
+        "KSante": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9786055553572546,
+          "mAP50": 0.9947148288973383,
+          "mAP50_95": 0.8103605865110236
+        },
+        "Kaisa": {
+          "evaluated": true,
+          "precision": 0.9965958776086392,
+          "recall": 0.982421875,
+          "mAP50": 0.9949217221135028,
+          "mAP50_95": 0.826656576954725
+        },
+        "Kalista": {
+          "evaluated": true,
+          "precision": 0.9905552578256318,
+          "recall": 0.9894255232348588,
+          "mAP50": 0.9949056603773584,
+          "mAP50_95": 0.8037750121958366
+        },
+        "Karma": {
+          "evaluated": true,
+          "precision": 0.9975607247467637,
+          "recall": 0.9907235621521335,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8070465578123496
+        },
+        "Karthus": {
+          "evaluated": true,
+          "precision": 0.9961262991742704,
+          "recall": 0.9909490205380224,
+          "mAP50": 0.9949613152804643,
+          "mAP50_95": 0.825026587339013
+        },
+        "Kassadin": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9954142047291277,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8170171496132814
+        },
+        "Katarina": {
+          "evaluated": true,
+          "precision": 0.9875110717869777,
+          "recall": 0.9937888198757764,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8260423316951782
+        },
+        "Kayle": {
+          "evaluated": true,
+          "precision": 0.9936725398863004,
+          "recall": 0.985615310600108,
+          "mAP50": 0.9947704655742317,
+          "mAP50_95": 0.812956902146183
+        },
+        "Kayn": {
+          "evaluated": true,
+          "precision": 0.9956907456806636,
+          "recall": 0.9895452762954896,
+          "mAP50": 0.9949570815450645,
+          "mAP50_95": 0.8050130773451155
+        },
+        "Kennen": {
+          "evaluated": true,
+          "precision": 0.9957303084563871,
+          "recall": 0.9865642994241842,
+          "mAP50": 0.9947358490566037,
+          "mAP50_95": 0.8173286027347503
+        },
+        "Khazix": {
+          "evaluated": true,
+          "precision": 0.997995257506922,
+          "recall": 0.9916682888149768,
+          "mAP50": 0.9949799599198398,
+          "mAP50_95": 0.8300522165098269
+        },
+        "Kindred": {
+          "evaluated": true,
+          "precision": 0.9972908139279373,
+          "recall": 0.9920159680638723,
+          "mAP50": 0.9949799196787149,
+          "mAP50_95": 0.8278950668103111
+        },
+        "Kled": {
+          "evaluated": true,
+          "precision": 0.9980133915965629,
+          "recall": 0.9811932234919218,
+          "mAP50": 0.9949014187316058,
+          "mAP50_95": 0.8281882020014253
+        },
+        "KogMaw": {
+          "evaluated": true,
+          "precision": 0.9979845672991771,
+          "recall": 0.9766699291020414,
+          "mAP50": 0.9948225552823626,
+          "mAP50_95": 0.8076200380199836
+        },
+        "Leblanc": {
+          "evaluated": true,
+          "precision": 0.9965251854890241,
+          "recall": 0.9770992366412213,
+          "mAP50": 0.9945851727928016,
+          "mAP50_95": 0.815463753638214
+        },
+        "LeeSin": {
+          "evaluated": true,
+          "precision": 0.9949746780791205,
+          "recall": 0.9885714285714285,
+          "mAP50": 0.994942638623327,
+          "mAP50_95": 0.8143441128286923
+        },
+        "Leona": {
+          "evaluated": true,
+          "precision": 0.9961969718584842,
+          "recall": 0.9998032239698674,
+          "mAP50": 0.9949232245681382,
+          "mAP50_95": 0.7999154386416214
+        },
+        "Lillia": {
+          "evaluated": true,
+          "precision": 0.9952612019639752,
+          "recall": 0.9939271255060729,
+          "mAP50": 0.9947753829689269,
+          "mAP50_95": 0.8163570370758263
+        },
+        "Lissandra": {
+          "evaluated": true,
+          "precision": 0.9952799513477893,
+          "recall": 0.9928443649373881,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8139264136502191
+        },
+        "Locke": {
+          "evaluated": true,
+          "precision": 0.9957571615294979,
+          "recall": 0.9935344827586207,
+          "mAP50": 0.9949891274802934,
+          "mAP50_95": 0.8174091338169427
+        },
+        "Lucian": {
+          "evaluated": true,
+          "precision": 0.9960279813336719,
+          "recall": 0.9764243614931237,
+          "mAP50": 0.994285871676227,
+          "mAP50_95": 0.8230544791186374
+        },
+        "Lulu": {
+          "evaluated": true,
+          "precision": 0.9958471071138255,
+          "recall": 0.9834254143646409,
+          "mAP50": 0.9945907473309609,
+          "mAP50_95": 0.8098486724271673
+        },
+        "Lux": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9859510933870563,
+          "mAP50": 0.9949792960662526,
+          "mAP50_95": 0.8173805758587017
+        },
+        "Malphite": {
+          "evaluated": true,
+          "precision": 0.9976218527406578,
+          "recall": 0.9897330595482546,
+          "mAP50": 0.9949588477366255,
+          "mAP50_95": 0.8295881141765277
+        },
+        "Malzahar": {
+          "evaluated": true,
+          "precision": 0.9977380661450751,
+          "recall": 0.9961977186311787,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8304221431625335
+        },
+        "Maokai": {
+          "evaluated": true,
+          "precision": 0.9980086530885942,
+          "recall": 0.9788534312276628,
+          "mAP50": 0.9948625823185885,
+          "mAP50_95": 0.8075273421914704
+        },
+        "MasterYi": {
+          "evaluated": true,
+          "precision": 0.9939768134168154,
+          "recall": 0.9898785425101214,
+          "mAP50": 0.9941767653909303,
+          "mAP50_95": 0.8079310243758838
+        },
+        "Mel": {
+          "evaluated": true,
+          "precision": 0.9924018126610553,
+          "recall": 0.98125,
+          "mAP50": 0.9932702680602896,
+          "mAP50_95": 0.8183943428611581
+        },
+        "Milio": {
+          "evaluated": true,
+          "precision": 0.9981607118973687,
+          "recall": 0.990308410196223,
+          "mAP50": 0.9949816176470588,
+          "mAP50_95": 0.8113518193387156
+        },
+        "MissFortune": {
+          "evaluated": true,
+          "precision": 0.9945572597270154,
+          "recall": 0.9871244635193133,
+          "mAP50": 0.9948924711161591,
+          "mAP50_95": 0.8154760236051013
+        },
+        "MonkeyKing": {
+          "evaluated": true,
+          "precision": 0.9960194391309883,
+          "recall": 0.996316758747698,
+          "mAP50": 0.9949445456135477,
+          "mAP50_95": 0.8111556526276299
+        },
+        "Mordekaiser": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9867985521567549,
+          "mAP50": 0.994611111111111,
+          "mAP50_95": 0.819508374422415
+        },
+        "Morgana": {
+          "evaluated": true,
+          "precision": 0.9975113242476474,
+          "recall": 0.9848484848484849,
+          "mAP50": 0.994867924528302,
+          "mAP50_95": 0.8047594758938565
+        },
+        "Naafiri": {
+          "evaluated": true,
+          "precision": 0.9979039533688052,
+          "recall": 0.9918516495996269,
+          "mAP50": 0.994979079497908,
+          "mAP50_95": 0.8063616555569164
+        },
+        "Nami": {
+          "evaluated": true,
+          "precision": 0.9980069351830537,
+          "recall": 0.9799221377854761,
+          "mAP50": 0.9946366865694204,
+          "mAP50_95": 0.8153646979497294
+        },
+        "Nasus": {
+          "evaluated": true,
+          "precision": 0.9948548313431093,
+          "recall": 0.9839357429718876,
+          "mAP50": 0.9944755797403454,
+          "mAP50_95": 0.8123071291775137
+        },
+        "Nautilus": {
+          "evaluated": true,
+          "precision": 0.9994193782972757,
+          "recall": 0.9863813229571985,
+          "mAP50": 0.9947696737044146,
+          "mAP50_95": 0.8150454822252293
+        },
+        "Neeko": {
+          "evaluated": true,
+          "precision": 0.9987740376585773,
+          "recall": 0.9922779922779923,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8255697734645114
+        },
+        "Nidalee": {
+          "evaluated": true,
+          "precision": 0.9787268577498616,
+          "recall": 0.9893842887473461,
+          "mAP50": 0.993912213740458,
+          "mAP50_95": 0.8073789046796032
+        },
+        "Nilah": {
+          "evaluated": true,
+          "precision": 0.9921487304880081,
+          "recall": 0.9872504625888814,
+          "mAP50": 0.9949217221135028,
+          "mAP50_95": 0.8215054092821417
+        },
+        "Nocturne": {
+          "evaluated": true,
+          "precision": 0.9970634098679864,
+          "recall": 0.9898373983739838,
+          "mAP50": 0.9949188640973631,
+          "mAP50_95": 0.8151785265379848
+        },
+        "Nunu": {
+          "evaluated": true,
+          "precision": 0.9959964197503474,
+          "recall": 0.9931204867381935,
+          "mAP50": 0.995,
+          "mAP50_95": 0.82220320438959
+        },
+        "Olaf": {
+          "evaluated": true,
+          "precision": 0.9933880888652333,
+          "recall": 0.9958932238193019,
+          "mAP50": 0.9949793814432989,
+          "mAP50_95": 0.7967557968795764
+        },
+        "Orianna": {
+          "evaluated": true,
+          "precision": 0.9935577249022303,
+          "recall": 0.9928636688585685,
+          "mAP50": 0.9949356223175966,
+          "mAP50_95": 0.8182861917912627
+        },
+        "Ornn": {
+          "evaluated": true,
+          "precision": 0.9905556665002279,
+          "recall": 0.9757914338919925,
+          "mAP50": 0.9938736964395626,
+          "mAP50_95": 0.8188451955217829
+        },
+        "Pantheon": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9906015245881713,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8191548969623106
+        },
+        "Poppy": {
+          "evaluated": true,
+          "precision": 0.9915901962648107,
+          "recall": 0.9866858658335309,
+          "mAP50": 0.9948313863101319,
+          "mAP50_95": 0.8030090570852513
+        },
+        "Pyke": {
+          "evaluated": true,
+          "precision": 0.9974002743516187,
+          "recall": 0.977366255144033,
+          "mAP50": 0.9940870342253432,
+          "mAP50_95": 0.8227688371054158
+        },
+        "Qiyana": {
+          "evaluated": true,
+          "precision": 0.9975556167745486,
+          "recall": 0.9863013698630136,
+          "mAP50": 0.9948252427184466,
+          "mAP50_95": 0.8077586841482491
+        },
+        "Quinn": {
+          "evaluated": true,
+          "precision": 0.9979693987562803,
+          "recall": 0.9770685581080021,
+          "mAP50": 0.9946123338740874,
+          "mAP50_95": 0.8148068578319073
+        },
+        "Rakan": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9898972634170868,
+          "mAP50": 0.9949797160243409,
+          "mAP50_95": 0.8202162143694249
+        },
+        "Rammus": {
+          "evaluated": true,
+          "precision": 0.9972472864650985,
+          "recall": 0.9907578558225508,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8212680125860778
+        },
+        "RekSai": {
+          "evaluated": true,
+          "precision": 0.99591689529195,
+          "recall": 0.9874972478787049,
+          "mAP50": 0.9947222222222222,
+          "mAP50_95": 0.803991976426272
+        },
+        "Rell": {
+          "evaluated": true,
+          "precision": 0.9951882303936395,
+          "recall": 0.9938775510204082,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8123678414560533
+        },
+        "Renata": {
+          "evaluated": true,
+          "precision": 0.9980387687796665,
+          "recall": 0.9881242475992416,
+          "mAP50": 0.9949804305283757,
+          "mAP50_95": 0.7965016237202692
+        },
+        "Renekton": {
+          "evaluated": true,
+          "precision": 0.9920417167884918,
+          "recall": 0.9893282437474743,
+          "mAP50": 0.994920477137177,
+          "mAP50_95": 0.8135162402183802
+        },
+        "Rengar": {
+          "evaluated": true,
+          "precision": 0.9935523121304745,
+          "recall": 0.9856791155312875,
+          "mAP50": 0.9942814371257486,
+          "mAP50_95": 0.8335906265720909
+        },
+        "Riven": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9864216309871988,
+          "mAP50": 0.9949625468164794,
+          "mAP50_95": 0.8182181280669456
+        },
+        "Rumble": {
+          "evaluated": true,
+          "precision": 0.9962813705444958,
+          "recall": 0.9886214377565604,
+          "mAP50": 0.9949069561055033,
+          "mAP50_95": 0.8120396573869048
+        },
+        "Ryze": {
+          "evaluated": true,
+          "precision": 0.9979039056310315,
+          "recall": 0.9795841714176288,
+          "mAP50": 0.9947559994410262,
+          "mAP50_95": 0.8056293127073282
+        },
+        "Samira": {
+          "evaluated": true,
+          "precision": 0.9980789488002911,
+          "recall": 0.9784346685025771,
+          "mAP50": 0.9947943488663552,
+          "mAP50_95": 0.817734218728004
+        },
+        "Sejuani": {
+          "evaluated": true,
+          "precision": 0.9969430249648618,
+          "recall": 0.9859719438877755,
+          "mAP50": 0.9947991036183211,
+          "mAP50_95": 0.8154617807503686
+        },
+        "Senna": {
+          "evaluated": true,
+          "precision": 0.9969486966992083,
+          "recall": 0.9849624060150376,
+          "mAP50": 0.994943396226415,
+          "mAP50_95": 0.8080976380137999
+        },
+        "Seraphine": {
+          "evaluated": true,
+          "precision": 0.9960720601310826,
+          "recall": 0.9865125240847784,
+          "mAP50": 0.9946785053644099,
+          "mAP50_95": 0.821367876865964
+        },
+        "Sett": {
+          "evaluated": true,
+          "precision": 0.9937826046837203,
+          "recall": 0.984635911018609,
+          "mAP50": 0.9943395882895568,
+          "mAP50_95": 0.7938486269450206
+        },
+        "Shaco": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9876355742941694,
+          "mAP50": 0.9948969072164949,
+          "mAP50_95": 0.8073638335607963
+        },
+        "Shen": {
+          "evaluated": true,
+          "precision": 0.9952385400800348,
+          "recall": 0.9941634241245136,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8171250756372217
+        },
+        "Shyvana": {
+          "evaluated": true,
+          "precision": 0.9845271590558122,
+          "recall": 0.9826931366073502,
+          "mAP50": 0.9943908212974432,
+          "mAP50_95": 0.8115752490784285
+        },
+        "Singed": {
+          "evaluated": true,
+          "precision": 0.9958356395873186,
+          "recall": 0.9861159463093829,
+          "mAP50": 0.9949585921325051,
+          "mAP50_95": 0.822539951816526
+        },
+        "Sion": {
+          "evaluated": true,
+          "precision": 0.9923843481261038,
+          "recall": 0.9742699696371704,
+          "mAP50": 0.9940087089105476,
+          "mAP50_95": 0.8178045220978643
+        },
+        "Sivir": {
+          "evaluated": true,
+          "precision": 0.9963697043304414,
+          "recall": 0.9917525773195877,
+          "mAP50": 0.995,
+          "mAP50_95": 0.7998859288198122
+        },
+        "Skarner": {
+          "evaluated": true,
+          "precision": 0.9981941712047858,
+          "recall": 0.9978586723768736,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8147884012482585
+        },
+        "Smolder": {
+          "evaluated": true,
+          "precision": 0.9929684293874554,
+          "recall": 0.9897750511247444,
+          "mAP50": 0.994815895514307,
+          "mAP50_95": 0.8147966481071244
+        },
+        "Sona": {
+          "evaluated": true,
+          "precision": 0.9978185997197588,
+          "recall": 0.9945054945054945,
+          "mAP50": 0.995,
+          "mAP50_95": 0.7934882298781881
+        },
+        "Soraka": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9842573925157904,
+          "mAP50": 0.9943155893536121,
+          "mAP50_95": 0.8175808945278693
+        },
+        "Swain": {
+          "evaluated": true,
+          "precision": 0.9884521880229887,
+          "recall": 0.9765166340508806,
+          "mAP50": 0.9945498274086345,
+          "mAP50_95": 0.8078611655971475
+        },
+        "Sylas": {
+          "evaluated": true,
+          "precision": 0.9944408716391917,
+          "recall": 0.983739837398374,
+          "mAP50": 0.9944367031840605,
+          "mAP50_95": 0.8066242314879176
+        },
+        "Syndra": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9846807605287234,
+          "mAP50": 0.995,
+          "mAP50_95": 0.7999201091222654
+        },
+        "TahmKench": {
+          "evaluated": true,
+          "precision": 0.9979857952233803,
+          "recall": 0.9791983243200233,
+          "mAP50": 0.9948804771409562,
+          "mAP50_95": 0.8225803279976514
+        },
+        "Taliyah": {
+          "evaluated": true,
+          "precision": 0.9946692284402487,
+          "recall": 0.9900199600798403,
+          "mAP50": 0.9949597585513079,
+          "mAP50_95": 0.8261849254996673
+        },
+        "Talon": {
+          "evaluated": true,
+          "precision": 0.9981250858293647,
+          "recall": 0.9822106622240481,
+          "mAP50": 0.9948713235294117,
+          "mAP50_95": 0.8268070933206907
+        },
+        "Taric": {
+          "evaluated": true,
+          "precision": 0.9980755547022276,
+          "recall": 0.9935454081172576,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8222837927434778
+        },
+        "Teemo": {
+          "evaluated": true,
+          "precision": 0.9965711118013786,
+          "recall": 0.989406779661017,
+          "mAP50": 0.9949363057324841,
+          "mAP50_95": 0.8006072909442545
+        },
+        "Thresh": {
+          "evaluated": true,
+          "precision": 0.9985847735571592,
+          "recall": 0.9912739965095986,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8047387725870626
+        },
+        "Tristana": {
+          "evaluated": true,
+          "precision": 0.9979663475013956,
+          "recall": 0.9893679407402175,
+          "mAP50": 0.9949188637635364,
+          "mAP50_95": 0.7990478044617484
+        },
+        "Trundle": {
+          "evaluated": true,
+          "precision": 0.9980332782441067,
+          "recall": 0.9911344182327493,
+          "mAP50": 0.9948630136986301,
+          "mAP50_95": 0.8094975413698826
+        },
+        "Tryndamere": {
+          "evaluated": true,
+          "precision": 0.9914211074845267,
+          "recall": 0.9859719438877755,
+          "mAP50": 0.9948010619726506,
+          "mAP50_95": 0.8107529299046632
+        },
+        "TwistedFate": {
+          "evaluated": true,
+          "precision": 0.9936313674482532,
+          "recall": 0.9670637466639525,
+          "mAP50": 0.9927627587993911,
+          "mAP50_95": 0.8053774652631235
+        },
+        "Twitch": {
+          "evaluated": true,
+          "precision": 0.998653652241652,
+          "recall": 0.9858870967741935,
+          "mAP50": 0.9948995983935743,
+          "mAP50_95": 0.8105142100639535
+        },
+        "Udyr": {
+          "evaluated": true,
+          "precision": 0.969562540463721,
+          "recall": 0.9758064516129032,
+          "mAP50": 0.9881269173545426,
+          "mAP50_95": 0.7909296183085182
+        },
+        "Urgot": {
+          "evaluated": true,
+          "precision": 0.9955243804829194,
+          "recall": 0.9868421052631579,
+          "mAP50": 0.9943512133171286,
+          "mAP50_95": 0.8270161155197131
+        },
+        "Varus": {
+          "evaluated": true,
+          "precision": 0.997866814174513,
+          "recall": 0.9910652050682535,
+          "mAP50": 0.9949787685774948,
+          "mAP50_95": 0.8097385525155134
+        },
+        "Vayne": {
+          "evaluated": true,
+          "precision": 0.9981693403081081,
+          "recall": 0.9895671780402788,
+          "mAP50": 0.9949817184643509,
+          "mAP50_95": 0.8162528417440391
+        },
+        "Veigar": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9915345170712533,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8267853581624021
+        },
+        "Velkoz": {
+          "evaluated": true,
+          "precision": 0.9997091100539163,
+          "recall": 0.9901768172888016,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8165780172551866
+        },
+        "Vex": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9889399172293878,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8143619076683153
+        },
+        "Vi": {
+          "evaluated": true,
+          "precision": 0.9948738697557511,
+          "recall": 0.9938398357289527,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8071139175282476
+        },
+        "Viego": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9901155801844073,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8116554285408704
+        },
+        "Viktor": {
+          "evaluated": true,
+          "precision": 0.998026868977305,
+          "recall": 0.9898415287197,
+          "mAP50": 0.9949802761341223,
+          "mAP50_95": 0.8099177450887757
+        },
+        "Vladimir": {
+          "evaluated": true,
+          "precision": 0.9978571194506828,
+          "recall": 0.9907703172265926,
+          "mAP50": 0.9949786780383795,
+          "mAP50_95": 0.8119414309456696
+        },
+        "Volibear": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9877066339874695,
+          "mAP50": 0.9949624060150376,
+          "mAP50_95": 0.8054286093488567
+        },
+        "Warwick": {
+          "evaluated": true,
+          "precision": 0.9961598127742569,
+          "recall": 0.9919851594662471,
+          "mAP50": 0.9948257153975096,
+          "mAP50_95": 0.8113349073708743
+        },
+        "Xayah": {
+          "evaluated": true,
+          "precision": 0.9866977369647335,
+          "recall": 0.9921875,
+          "mAP50": 0.9949803149606299,
+          "mAP50_95": 0.8044322174412049
+        },
+        "Xerath": {
+          "evaluated": true,
+          "precision": 0.9994599655568247,
+          "recall": 0.9921722113502935,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8122534424866259
+        },
+        "XinZhao": {
+          "evaluated": true,
+          "precision": 0.980661034253396,
+          "recall": 0.9938144329896907,
+          "mAP50": 0.9942323651452284,
+          "mAP50_95": 0.7845436430900976
+        },
+        "Yasuo": {
+          "evaluated": true,
+          "precision": 0.9980530247809217,
+          "recall": 0.9896094213957609,
+          "mAP50": 0.9949805447470818,
+          "mAP50_95": 0.8281668087708329
+        },
+        "Yone": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9877845996310176,
+          "mAP50": 0.9948403193612775,
+          "mAP50_95": 0.8118162308683134
+        },
+        "Yorick": {
+          "evaluated": true,
+          "precision": 0.9945544414438393,
+          "recall": 0.9886792452830189,
+          "mAP50": 0.9949053380142227,
+          "mAP50_95": 0.8167214398728267
+        },
+        "Yunara": {
+          "evaluated": true,
+          "precision": 0.9986678698813912,
+          "recall": 0.9961935834692768,
+          "mAP50": 0.994991805517618,
+          "mAP50_95": 0.822238810667157
+        },
+        "Yuumi": {
+          "evaluated": true,
+          "precision": 0.9960894921986934,
+          "recall": 0.9950058817661571,
+          "mAP50": 0.9949019607843137,
+          "mAP50_95": 0.8093074276327974
+        },
+        "Zaahen": {
+          "evaluated": true,
+          "precision": 0.9982047855865603,
+          "recall": 0.9894679989197948,
+          "mAP50": 0.994961956521739,
+          "mAP50_95": 0.8105791308151208
+        },
+        "Zac": {
+          "evaluated": true,
+          "precision": 0.9942568133897156,
+          "recall": 0.9924098671726755,
+          "mAP50": 0.9949618320610688,
+          "mAP50_95": 0.8206505083813518
+        },
+        "Zed": {
+          "evaluated": true,
+          "precision": 0.9985502874700087,
+          "recall": 0.9862475442043221,
+          "mAP50": 0.9949017681728881,
+          "mAP50_95": 0.816774650215075
+        },
+        "Zeri": {
+          "evaluated": true,
+          "precision": 0.994528748368353,
+          "recall": 0.9861139265315051,
+          "mAP50": 0.9940849252071963,
+          "mAP50_95": 0.8137579372015769
+        },
+        "Ziggs": {
+          "evaluated": true,
+          "precision": 0.995475661165285,
+          "recall": 0.9872727272727273,
+          "mAP50": 0.9947310684844537,
+          "mAP50_95": 0.8099472036794715
+        },
+        "Zilean": {
+          "evaluated": true,
+          "precision": 1.0,
+          "recall": 0.9890098077862686,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8222321548050087
+        },
+        "Zoe": {
+          "evaluated": true,
+          "precision": 0.9992178777584406,
+          "recall": 0.9958592132505176,
+          "mAP50": 0.995,
+          "mAP50_95": 0.8146592683452779
+        },
+        "Zyra": {
+          "evaluated": true,
+          "precision": 0.9962039046481936,
+          "recall": 0.9764705882352941,
+          "mAP50": 0.9948223968946296,
+          "mAP50_95": 0.8158999324288446
+        }
+      }
+    }
+  }
+}

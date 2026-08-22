@@ -1,10 +1,10 @@
 import { championNameById } from "./format"
 import { mapPositionPercent, type ReviewMapId } from "./map-coordinate"
+import { isUsableMapPosition } from "./timeline-playback"
 import {
-  playbackPositionAt,
-  type PlaybackPosition,
-} from "./timeline-playback"
-import { SUMMONERS_RIFT_CAMPS } from "../shared/minimap/camp-map"
+  campRespawnDurationMs,
+  SUMMONERS_RIFT_CAMPS,
+} from "../shared/minimap/camp-map"
 import type {
   CampClearEvent,
   NormalizedPoint,
@@ -18,13 +18,19 @@ import type { ParticipantRow } from "../types/stats"
 export const DEFAULT_MINIMAP_PLAYBACK_CONFIDENCE = 0.68
 export const MIN_MINIMAP_PLAYBACK_CONFIDENCE = 0.5
 export const MAX_MINIMAP_PLAYBACK_CONFIDENCE = 0.95
+export const DEFAULT_PLAYBACK_TRAIL_LOOKBACK_MS = 30_000
 const INSTANT_SEGMENT_HOLD_MS = 1_500
 const RESPAWN_SOON_MS = 30_000
 const CAMP_CLEAR_PULSE_MS = 3_000
+const ROUTE_TIME_EPSILON_MS = 2
+const ROUTE_POINT_EPSILON = 0.0001
+const MAXIMUM_CONTINUOUS_CV_GAP_MS = 1_000
+const BASE_TRAVEL_ALLOWANCE = 0.035
+const TRAVEL_ALLOWANCE_PER_SECOND = 0.045
+const IMPOSSIBLE_TRANSITION_PENALTY = 55
 
 interface ParticipantSegmentIndex {
   segments: PathSegment[]
-  startTimes: number[]
   /** Nondecreasing maximum end time through each segment index. */
   prefixMaximumEnd: number[]
 }
@@ -75,11 +81,31 @@ export interface UnifiedCampMarker {
   respawnInMs?: number
 }
 
-interface MinimapSegmentPosition {
+interface UnifiedRouteControl {
+  timestamp: number
   point: NormalizedPoint
-  segment: PathSegment
-  exact: boolean
+  source: "cv_observed" | "cv_estimated" | "riot_snapshot"
+  origin: "minimap_cv" | "riot_timeline"
+  confidence: number
+  runKey?: string
 }
+
+interface CvRouteRun {
+  key: string
+  controls: UnifiedRouteControl[]
+  confidence: number
+}
+
+interface UnifiedParticipantRoute {
+  controls: UnifiedRouteControl[]
+  timestamps: number[]
+}
+
+const noMinimapReviewCacheKey = {}
+const unifiedRouteCache = new WeakMap<
+  TimelineFrame[],
+  WeakMap<object, Map<string, UnifiedParticipantRoute>>
+>()
 
 function normalizeIdentity(value?: string) {
   return value?.trim().toLocaleLowerCase().replaceAll(" ", "") ?? ""
@@ -141,7 +167,6 @@ function indexedSegments(review: MinimapPathingReview | undefined) {
     let maximumEnd = Number.NEGATIVE_INFINITY
     result.set(participantKey, {
       segments,
-      startTimes: segments.map((segment) => segment.startTimeMs),
       prefixMaximumEnd: segments.map((segment) => {
         maximumEnd = Math.max(maximumEnd, segment.endTimeMs)
         return maximumEnd
@@ -172,24 +197,6 @@ function lowerBound(values: number[], target: number) {
     else high = middle
   }
   return low
-}
-
-function segmentsAtTimestamp(
-  index: ParticipantSegmentIndex | undefined,
-  timestamp: number,
-) {
-  if (!index || index.segments.length === 0) return []
-  const lastCandidate = upperBound(
-    index.startTimes,
-    timestamp + INSTANT_SEGMENT_HOLD_MS,
-  ) - 1
-  const result: PathSegment[] = []
-  for (let current = lastCandidate; current >= 0; current -= 1) {
-    if (index.prefixMaximumEnd[current] < timestamp - INSTANT_SEGMENT_HOLD_MS) break
-    const segment = index.segments[current]
-    if (segmentContainsTimestamp(segment, timestamp)) result.push(segment)
-  }
-  return result
 }
 
 /**
@@ -319,6 +326,10 @@ function interpolatePoint(left: NormalizedPoint, right: NormalizedPoint, amount:
   }
 }
 
+function pointDistance(left: NormalizedPoint, right: NormalizedPoint) {
+  return Math.hypot(left.x - right.x, left.y - right.y)
+}
+
 function segmentContainsTimestamp(segment: PathSegment, timestamp: number) {
   if (segment.endTimeMs > segment.startTimeMs) {
     return timestamp >= segment.startTimeMs && timestamp <= segment.endTimeMs
@@ -334,96 +345,517 @@ function pointAtSegmentTime(segment: PathSegment, timestamp: number): Normalized
     1,
     (timestamp - segment.startTimeMs) / (segment.endTimeMs - segment.startTimeMs),
   ))
-  const pointPosition = progress * (points.length - 1)
-  const leftIndex = Math.floor(pointPosition)
-  const rightIndex = Math.min(points.length - 1, leftIndex + 1)
-  if (leftIndex === rightIndex) return points[leftIndex]
-  return interpolatePoint(points[leftIndex], points[rightIndex], pointPosition - leftIndex)
-}
-
-function minimapPositionAt(
-  index: ParticipantSegmentIndex | undefined,
-  timestamp: number,
-  minimumConfidence: number,
-  kinds: PathSegmentKind[],
-): MinimapSegmentPosition | undefined {
-  return segmentsAtTimestamp(index, timestamp)
-    .filter((segment) =>
-      segment.modelVersion >= 2 &&
-      segment.confidence >= minimumConfidence &&
-      kinds.includes(segment.kind) &&
-      segmentContainsTimestamp(segment, timestamp),
-    )
-    .flatMap((segment) => {
-      const point = pointAtSegmentTime(segment, timestamp)
-      return point ? [{
-        point,
-        segment,
-        exact: segment.points.length === 1 ||
-          timestamp === segment.startTimeMs || timestamp === segment.endTimeMs,
-      }] : []
-    })
-    .sort((left, right) =>
-      right.segment.confidence - left.segment.confidence ||
-      right.segment.startTimeMs - left.segment.startTimeMs,
-    )[0]
-}
-
-function timelinePosition(
-  frames: TimelineFrame[],
-  events: TimelineEvent[],
-  participantId: number,
-  timestamp: number,
-  mapId: ReviewMapId,
-): { raw: PlaybackPosition; result: UnifiedPlaybackPosition } | undefined {
-  const raw = playbackPositionAt(frames, events, participantId, timestamp, mapId)
-  if (!raw) return undefined
-  const point = mapPositionPercent(raw.position, mapId)
-  return {
-    raw,
-    result: {
-      participantId,
-      point,
-      source: raw.exact ? "riot_snapshot" : "estimated",
-      origin: "riot_timeline",
-      exact: raw.exact,
-      confidence: raw.exact ? 1 : Math.max(.45, .8 - (raw.toTimestamp - raw.fromTimestamp) / 300_000),
-      fromTimestamp: raw.fromTimestamp,
-      toTimestamp: raw.toTimestamp,
-    },
+  const distances = points.slice(1).map((point, index) =>
+    pointDistance(points[index], point),
+  )
+  const totalDistance = distances.reduce((sum, distance) => sum + distance, 0)
+  if (totalDistance <= ROUTE_POINT_EPSILON) return points[0]
+  const targetDistance = progress * totalDistance
+  let traversed = 0
+  for (let index = 0; index < distances.length; index += 1) {
+    const next = traversed + distances[index]
+    if (targetDistance <= next || index === distances.length - 1) {
+      const amount = distances[index] <= ROUTE_POINT_EPSILON
+        ? 0
+        : (targetDistance - traversed) / distances[index]
+      return interpolatePoint(points[index], points[index + 1], amount)
+    }
+    traversed = next
   }
+  return points.at(-1)
 }
 
 function normalizedPercent(value: number) {
   return Number((value * 100).toFixed(10))
 }
 
-function minimapResult(
+/**
+ * Add a control without allowing two sources at the same timestamp to create
+ * a zero-duration jump. Riot's post-game snapshot is the authoritative anchor;
+ * duplicate CV endpoints otherwise retain their strongest confidence.
+ */
+function appendRouteControl(
+  controls: UnifiedRouteControl[],
+  incoming: UnifiedRouteControl,
+) {
+  const existingIndex = controls.findIndex((control) =>
+    Math.abs(control.timestamp - incoming.timestamp) <= ROUTE_TIME_EPSILON_MS,
+  )
+  if (existingIndex < 0) {
+    controls.push(incoming)
+    return
+  }
+  const existing = controls[existingIndex]
+  const sourcePriority = (source: UnifiedRouteControl["source"]) =>
+    source === "riot_snapshot" ? 3 : source === "cv_observed" ? 2 : 1
+  if (sourcePriority(incoming.source) > sourcePriority(existing.source) ||
+      (sourcePriority(incoming.source) === sourcePriority(existing.source) &&
+        incoming.confidence > existing.confidence)) {
+    controls[existingIndex] = incoming
+  }
+}
+
+function timelineRouteControls(
+  frames: TimelineFrame[],
   participantId: number,
-  position: MinimapSegmentPosition,
+  mapId: ReviewMapId,
+) {
+  const controls: UnifiedRouteControl[] = []
+  for (const frame of frames) {
+    const participant = frame.participants.find((entry) =>
+      entry.participantId === participantId,
+    )
+    const position = participant?.position
+    if (!isUsableMapPosition(position, mapId)) continue
+    const percent = mapPositionPercent(position!, mapId)
+    appendRouteControl(controls, {
+      timestamp: frame.timestamp,
+      point: { x: percent.left / 100, y: percent.top / 100 },
+      source: "riot_snapshot",
+      origin: "riot_timeline",
+      confidence: 1,
+    })
+  }
+  return controls.sort((left, right) => left.timestamp - right.timestamp)
+}
+
+function smoothedRunControls(controls: UnifiedRouteControl[]) {
+  if (controls.length < 3) return controls
+  return controls.map((control, index) => {
+    const previous = controls[index - 1]
+    const next = controls[index + 1]
+    if (!previous || !next ||
+        control.timestamp - previous.timestamp > MAXIMUM_CONTINUOUS_CV_GAP_MS ||
+        next.timestamp - control.timestamp > MAXIMUM_CONTINUOUS_CV_GAP_MS ||
+        pointDistance(previous.point, control.point) > 0.08 ||
+        pointDistance(control.point, next.point) > 0.08) return control
+    return {
+      ...control,
+      point: {
+        x: previous.point.x * 0.2 + control.point.x * 0.6 + next.point.x * 0.2,
+        y: previous.point.y * 0.2 + control.point.y * 0.6 + next.point.y * 0.2,
+      },
+    }
+  })
+}
+
+function observedCvRouteRuns(
+  index: ParticipantSegmentIndex | undefined,
+  minimumConfidence: number,
+) {
+  if (!index) return []
+  const runs: CvRouteRun[] = []
+  for (const segment of index.segments) {
+    if (segment.modelVersion < 2 || segment.kind !== "observed" ||
+        segment.confidence < minimumConfidence || segment.points.length === 0 ||
+        segment.points.some((point) => !usableNormalizedPoint(point))) continue
+    const segmentControls = segment.points.map((point, pointIndex) => ({
+      timestamp: pointTimestamp(segment, pointIndex),
+      point,
+      source: "cv_observed" as const,
+      origin: "minimap_cv" as const,
+      confidence: segment.confidence,
+    }))
+    const previous = runs.at(-1)
+    const previousControl = previous?.controls.at(-1)
+    const firstControl = segmentControls[0]
+    const continuous = Boolean(
+      previous && previousControl &&
+      firstControl.timestamp - previousControl.timestamp <= ROUTE_TIME_EPSILON_MS &&
+      pointDistance(previousControl.point, firstControl.point) <= 0.005,
+    )
+    const run = continuous ? previous! : {
+      key: `cv-run:${runs.length}:${Math.round(segment.startTimeMs)}`,
+      controls: [],
+      confidence: segment.confidence,
+    }
+    if (!continuous) runs.push(run)
+    for (const control of segmentControls) {
+      appendRouteControl(run.controls, { ...control, runKey: run.key })
+    }
+    run.confidence = Math.max(run.confidence, segment.confidence)
+  }
+  for (const run of runs) {
+    run.controls.sort((left, right) => left.timestamp - right.timestamp)
+    run.controls = smoothedRunControls(run.controls)
+  }
+  return runs.filter((run) => run.controls.length > 0)
+}
+
+function transitionPenalty(
+  from: UnifiedRouteControl,
+  to: UnifiedRouteControl,
+) {
+  const elapsedMs = to.timestamp - from.timestamp
+  if (elapsedMs <= 0) return Number.POSITIVE_INFINITY
+  const allowance = BASE_TRAVEL_ALLOWANCE +
+    elapsedMs / 1_000 * TRAVEL_ALLOWANCE_PER_SECOND
+  const excess = Math.max(0, pointDistance(from.point, to.point) - allowance)
+  return excess * IMPOSSIBLE_TRANSITION_PENALTY
+}
+
+function cvRunReward(run: CvRouteRun) {
+  const durationMs = Math.max(
+    0,
+    run.controls.at(-1)!.timestamp - run.controls[0].timestamp,
+  )
+  return run.confidence * (
+    0.45 +
+    Math.min(2.2, durationMs / 1_000 * 0.65) +
+    Math.min(1.15, Math.log2(run.controls.length + 1) * 0.34)
+  )
+}
+
+/**
+ * Selects the coherent CV runs between two mandatory Riot anchors. Short CV
+ * sightings are valuable, but a map-wide two-frame identity swap costs more
+ * than it contributes. This turns missing/rejected runs into an estimated
+ * bridge instead of snapping the token to each detector decision.
+ */
+function coherentCvRunsBetween(
+  runs: CvRouteRun[],
+  left: UnifiedRouteControl,
+  right: UnifiedRouteControl,
+) {
+  const candidates = runs.flatMap((run) => {
+    const controls = run.controls.filter((control) =>
+      control.timestamp > left.timestamp + ROUTE_TIME_EPSILON_MS &&
+      control.timestamp < right.timestamp - ROUTE_TIME_EPSILON_MS,
+    )
+    return controls.length ? [{ ...run, controls }] : []
+  }).sort((first, second) =>
+    first.controls[0].timestamp - second.controls[0].timestamp,
+  )
+  if (candidates.length === 0) return []
+
+  const scores = candidates.map((run) =>
+    cvRunReward(run) - transitionPenalty(left, run.controls[0]),
+  )
+  const previous = candidates.map(() => -1)
+  for (let current = 0; current < candidates.length; current += 1) {
+    const reward = cvRunReward(candidates[current])
+    for (let candidate = 0; candidate < current; candidate += 1) {
+      const from = candidates[candidate].controls.at(-1)!
+      const to = candidates[current].controls[0]
+      if (to.timestamp <= from.timestamp) continue
+      const score = scores[candidate] + reward - transitionPenalty(from, to)
+      if (score > scores[current]) {
+        scores[current] = score
+        previous[current] = candidate
+      }
+    }
+  }
+
+  let bestScore = 0
+  let bestIndex = -1
+  for (let index = 0; index < candidates.length; index += 1) {
+    const score = scores[index] - transitionPenalty(
+      candidates[index].controls.at(-1)!,
+      right,
+    )
+    if (score > bestScore) {
+      bestScore = score
+      bestIndex = index
+    }
+  }
+  const selected: CvRouteRun[] = []
+  while (bestIndex >= 0) {
+    selected.unshift(candidates[bestIndex])
+    bestIndex = previous[bestIndex]
+  }
+  return selected
+}
+
+function coherentCvRunsAfter(
+  runs: CvRouteRun[],
+  left: UnifiedRouteControl,
+) {
+  const candidates = runs.flatMap((run) => {
+    const controls = run.controls.filter((control) =>
+      control.timestamp > left.timestamp + ROUTE_TIME_EPSILON_MS,
+    )
+    return controls.length ? [{ ...run, controls }] : []
+  }).sort((first, second) =>
+    first.controls[0].timestamp - second.controls[0].timestamp,
+  )
+  const scores = candidates.map((run) =>
+    cvRunReward(run) - transitionPenalty(left, run.controls[0]),
+  )
+  const previous = candidates.map(() => -1)
+  let bestScore = 0
+  let bestIndex = -1
+  for (let current = 0; current < candidates.length; current += 1) {
+    const reward = cvRunReward(candidates[current])
+    for (let candidate = 0; candidate < current; candidate += 1) {
+      const from = candidates[candidate].controls.at(-1)!
+      const to = candidates[current].controls[0]
+      if (to.timestamp <= from.timestamp) continue
+      const score = scores[candidate] + reward - transitionPenalty(from, to)
+      if (score > scores[current]) {
+        scores[current] = score
+        previous[current] = candidate
+      }
+    }
+    if (scores[current] > bestScore) {
+      bestScore = scores[current]
+      bestIndex = current
+    }
+  }
+  const selected: CvRouteRun[] = []
+  while (bestIndex >= 0) {
+    selected.unshift(candidates[bestIndex])
+    bestIndex = previous[bestIndex]
+  }
+  return selected
+}
+
+function routeControlPointAt(
+  controls: UnifiedRouteControl[],
+  timestamp: number,
+) {
+  if (controls.length === 0) return undefined
+  const timestamps = controls.map((control) => control.timestamp)
+  const afterIndex = upperBound(timestamps, timestamp)
+  const before = afterIndex > 0 ? controls[afterIndex - 1] : undefined
+  if (before && Math.abs(before.timestamp - timestamp) <= ROUTE_TIME_EPSILON_MS) {
+    return before.point
+  }
+  const after = afterIndex < controls.length ? controls[afterIndex] : undefined
+  if (!before || !after || after.timestamp <= before.timestamp) return undefined
+  return interpolatePoint(
+    before.point,
+    after.point,
+    (timestamp - before.timestamp) / (after.timestamp - before.timestamp),
+  )
+}
+
+function inferredPointTimestamp(segment: PathSegment, pointIndex: number) {
+  if (segment.points.length <= 1 || segment.endTimeMs <= segment.startTimeMs) {
+    return segment.startTimeMs
+  }
+  const distances = segment.points.slice(1).map((point, index) =>
+    pointDistance(segment.points[index], point),
+  )
+  const totalDistance = distances.reduce((sum, distance) => sum + distance, 0)
+  if (totalDistance <= ROUTE_POINT_EPSILON) return pointTimestamp(segment, pointIndex)
+  const traversed = distances.slice(0, pointIndex).reduce((sum, distance) => sum + distance, 0)
+  return segment.startTimeMs +
+    (segment.endTimeMs - segment.startTimeMs) * traversed / totalDistance
+}
+
+/**
+ * Adds graph-backed model-three inference only when it agrees with the
+ * already-selected evidence endpoints. This preserves the navigation shape
+ * through fog without allowing a rejected CV identity jump back into playback.
+ */
+function appendCoherentInferredControls(input: {
+  controls: UnifiedRouteControl[]
+  segmentIndex?: ParticipantSegmentIndex
+  hasObservedCvRuns: boolean
+  minimumConfidence: number
+}) {
+  const inferredSegments = input.segmentIndex?.segments.filter((segment) =>
+    segment.modelVersion >= 3 &&
+    segment.kind === "inferred" &&
+    segment.confidence >= Math.max(0.35, input.minimumConfidence * 0.65) &&
+    segment.points.length >= 2 &&
+    segment.points.every(usableNormalizedPoint),
+  ) ?? []
+  if (inferredSegments.length === 0) return
+  input.controls.sort((left, right) => left.timestamp - right.timestamp)
+  for (const [segmentIndex, segment] of inferredSegments.entries()) {
+    const first = segment.points[0]
+    const last = segment.points.at(-1)!
+    const baselineStart = routeControlPointAt(input.controls, segment.startTimeMs)
+    const baselineEnd = routeControlPointAt(input.controls, segment.endTimeMs)
+    if (input.hasObservedCvRuns && (
+      !baselineStart || !baselineEnd ||
+      pointDistance(baselineStart, first) > 0.065 ||
+      pointDistance(baselineEnd, last) > 0.065
+    )) continue
+    const runKey = `cv-inferred:${segmentIndex}:${Math.round(segment.startTimeMs)}`
+    segment.points.forEach((point, pointIndex) => appendRouteControl(input.controls, {
+      timestamp: inferredPointTimestamp(segment, pointIndex),
+      point,
+      source: "cv_estimated",
+      origin: "minimap_cv",
+      confidence: segment.confidence,
+      runKey,
+    }))
+    input.controls.sort((left, right) => left.timestamp - right.timestamp)
+  }
+}
+
+function buildUnifiedParticipantRoute(input: {
+  frames: TimelineFrame[]
+  minimapReview?: MinimapPathingReview
+  participantKey?: string
+  participantId: number
+  mapId: ReviewMapId
+  minimumConfidence: number
+}): UnifiedParticipantRoute {
+  const riot = timelineRouteControls(input.frames, input.participantId, input.mapId)
+  const segmentIndex = input.participantKey
+    ? indexedSegments(input.minimapReview).get(input.participantKey)
+    : undefined
+  const cvRuns = observedCvRouteRuns(segmentIndex, input.minimumConfidence)
+  const controls: UnifiedRouteControl[] = []
+
+  if (riot.length >= 2) {
+    for (let index = 1; index < riot.length; index += 1) {
+      const left = riot[index - 1]
+      const right = riot[index]
+      appendRouteControl(controls, left)
+      for (const run of coherentCvRunsBetween(cvRuns, left, right)) {
+        for (const control of run.controls) appendRouteControl(controls, control)
+      }
+      appendRouteControl(controls, right)
+    }
+    for (const run of coherentCvRunsAfter(cvRuns, riot.at(-1)!)) {
+      for (const control of run.controls) appendRouteControl(controls, control)
+    }
+  } else {
+    for (const control of riot) appendRouteControl(controls, control)
+    for (const run of cvRuns) {
+      for (const control of run.controls) appendRouteControl(controls, control)
+    }
+  }
+
+  appendCoherentInferredControls({
+    controls,
+    segmentIndex,
+    hasObservedCvRuns: cvRuns.length > 0,
+    minimumConfidence: input.minimumConfidence,
+  })
+
+  controls.sort((left, right) => left.timestamp - right.timestamp)
+  return { controls, timestamps: controls.map((control) => control.timestamp) }
+}
+
+function cachedUnifiedParticipantRoute(input: {
+  frames: TimelineFrame[]
+  minimapReview?: MinimapPathingReview
+  participantKey?: string
+  participantId: number
+  mapId: ReviewMapId
+  minimumConfidence: number
+}) {
+  let byReview = unifiedRouteCache.get(input.frames)
+  if (!byReview) {
+    byReview = new WeakMap()
+    unifiedRouteCache.set(input.frames, byReview)
+  }
+  const reviewKey = input.minimapReview ?? noMinimapReviewCacheKey
+  let routes = byReview.get(reviewKey)
+  if (!routes) {
+    routes = new Map()
+    byReview.set(reviewKey, routes)
+  }
+  const cacheKey = [
+    input.participantId,
+    input.participantKey ?? "riot-only",
+    input.mapId,
+    input.minimumConfidence.toFixed(3),
+    input.frames.length,
+    input.minimapReview?.segments.length ?? 0,
+  ].join(":")
+  let route = routes.get(cacheKey)
+  if (!route) {
+    route = buildUnifiedParticipantRoute(input)
+    routes.set(cacheKey, route)
+  }
+  return route
+}
+
+function playbackResultFromControl(
+  participantId: number,
+  control: UnifiedRouteControl,
 ): UnifiedPlaybackPosition {
-  const observed = position.segment.kind === "observed"
   return {
     participantId,
     point: {
-      left: normalizedPercent(position.point.x),
-      top: normalizedPercent(position.point.y),
+      left: normalizedPercent(control.point.x),
+      top: normalizedPercent(control.point.y),
     },
-    source: observed ? "cv_observed" : "estimated",
-    origin: "minimap_cv",
-    exact: observed && position.exact,
-    confidence: position.segment.confidence,
-    fromTimestamp: position.segment.startTimeMs,
-    toTimestamp: position.segment.endTimeMs,
-    segmentKind: position.segment.kind,
+    source: control.source === "cv_estimated" ? "estimated" : control.source,
+    origin: control.origin,
+    exact: control.source !== "cv_estimated",
+    confidence: control.confidence,
+    fromTimestamp: control.timestamp,
+    toTimestamp: control.timestamp,
+    segmentKind: control.source === "cv_observed"
+      ? "observed"
+      : control.source === "cv_estimated" ? "inferred" : undefined,
+  }
+}
+
+function routePositionAt(input: {
+  route: UnifiedParticipantRoute
+  events: TimelineEvent[]
+  participantId: number
+  timestamp: number
+  mapId: ReviewMapId
+}): UnifiedPlaybackPosition | undefined {
+  const { controls, timestamps } = input.route
+  if (controls.length === 0) return undefined
+  const afterIndex = upperBound(timestamps, input.timestamp)
+  const before = afterIndex > 0 ? controls[afterIndex - 1] : undefined
+  if (before && Math.abs(before.timestamp - input.timestamp) <= ROUTE_TIME_EPSILON_MS) {
+    return playbackResultFromControl(input.participantId, before)
+  }
+  let after = afterIndex < controls.length ? controls[afterIndex] : undefined
+  if (!before || !after) return undefined
+
+  const death = input.events.find((event) =>
+    event.type === "CHAMPION_KILL" && event.targetId === input.participantId &&
+    event.timestamp > before.timestamp && event.timestamp < after!.timestamp &&
+    isUsableMapPosition(event.position, input.mapId),
+  )
+  if (death) {
+    if (input.timestamp > death.timestamp) return undefined
+    const percent = mapPositionPercent(death.position!, input.mapId)
+    after = {
+      timestamp: death.timestamp,
+      point: { x: percent.left / 100, y: percent.top / 100 },
+      source: "riot_snapshot",
+      origin: "riot_timeline",
+      confidence: 1,
+    }
+  }
+
+  const progress = Math.max(0, Math.min(
+    1,
+    (input.timestamp - before.timestamp) / (after.timestamp - before.timestamp),
+  ))
+  const point = interpolatePoint(before.point, after.point, progress)
+  const cvObserved = before.source === "cv_observed" &&
+    after.source === "cv_observed" && before.runKey === after.runKey
+  const gapMs = after.timestamp - before.timestamp
+  const confidence = cvObserved
+    ? Math.min(before.confidence, after.confidence)
+    : Math.max(
+      0.35,
+      Math.min(before.confidence, after.confidence) * Math.exp(-gapMs / 240_000),
+    )
+  return {
+    participantId: input.participantId,
+    point: { left: normalizedPercent(point.x), top: normalizedPercent(point.y) },
+    source: cvObserved ? "cv_observed" : "estimated",
+    origin: before.origin === "minimap_cv" || after.origin === "minimap_cv"
+      ? "minimap_cv"
+      : "riot_timeline",
+    exact: false,
+    confidence,
+    fromTimestamp: before.timestamp,
+    toTimestamp: after.timestamp,
+    segmentKind: cvObserved ? "observed" : undefined,
   }
 }
 
 /**
- * Resolves a participant position with explicit evidence precedence:
- * observed CV, exact Riot snapshot, high-confidence reconstructed CV, then
- * Riot's timestamp-linear interpolation. Unknown CV gaps never bridge their
- * neighboring observations.
+ * Resolves one continuous evidence route. Riot snapshots remain mandatory
+ * anchors, coherent CV sightings bend the route between them, and every
+ * missing interval is estimated between the surrounding accepted controls.
  */
 export function unifiedPlaybackPositionAt(input: {
   frames: TimelineFrame[]
@@ -439,36 +871,21 @@ export function unifiedPlaybackPositionAt(input: {
   const participantKey = input.bindings.find(
     (binding) => binding.participantId === input.participantId,
   )?.participantKey
-  const segments = participantKey
-    ? indexedSegments(input.minimapReview).get(participantKey)
-    : undefined
-
-  const observedCv = minimapPositionAt(
-    segments,
-    input.timestamp,
+  const route = cachedUnifiedParticipantRoute({
+    frames: input.frames,
+    minimapReview: input.minimapReview,
+    participantKey,
+    participantId: input.participantId,
+    mapId: input.mapId,
     minimumConfidence,
-    ["observed"],
-  )
-  if (observedCv) return minimapResult(input.participantId, observedCv)
-
-  const timeline = timelinePosition(
-    input.frames,
-    input.events,
-    input.participantId,
-    input.timestamp,
-    input.mapId,
-  )
-  if (timeline?.raw.exact) return timeline.result
-
-  const reconstructedCv = minimapPositionAt(
-    segments,
-    input.timestamp,
-    minimumConfidence,
-    ["interpolated", "inferred"],
-  )
-  if (reconstructedCv) return minimapResult(input.participantId, reconstructedCv)
-
-  return timeline?.result
+  })
+  return routePositionAt({
+    route,
+    events: input.events,
+    participantId: input.participantId,
+    timestamp: input.timestamp,
+    mapId: input.mapId,
+  })
 }
 
 export function unifiedPlaybackPositionsAt(input: Omit<
@@ -539,7 +956,7 @@ export function minimapPlaybackTrails(input: {
   minimumConfidence?: number
 }): UnifiedPlaybackTrail[] {
   const minimumConfidence = clampMinimapPlaybackConfidence(input.minimumConfidence)
-  const lookbackMs = input.lookbackMs ?? 5 * 60_000
+  const lookbackMs = input.lookbackMs ?? DEFAULT_PLAYBACK_TRAIL_LOOKBACK_MS
   const earliest = Math.max(0, input.timestamp - lookbackMs)
   const keyByParticipantId = new Map(input.bindings.map((binding) => [
     binding.participantId,
@@ -615,6 +1032,86 @@ export function minimapPlaybackTrails(input: {
   })
 }
 
+/** Returns the same fused route used by champion tokens, including its current point. */
+export function unifiedPlaybackTrails(input: {
+  frames: TimelineFrame[]
+  events: TimelineEvent[]
+  minimapReview?: MinimapPathingReview
+  bindings: MinimapParticipantBinding[]
+  participantIds: number[]
+  timestamp: number
+  mapId: ReviewMapId
+  lookbackMs?: number
+  minimumConfidence?: number
+}): UnifiedPlaybackTrail[] {
+  const minimumConfidence = clampMinimapPlaybackConfidence(input.minimumConfidence)
+  const lookbackMs = input.lookbackMs ?? DEFAULT_PLAYBACK_TRAIL_LOOKBACK_MS
+  const keyByParticipantId = new Map(input.bindings.map((binding) => [
+    binding.participantId,
+    binding.participantKey,
+  ]))
+  return input.participantIds.flatMap((participantId) => {
+    const route = cachedUnifiedParticipantRoute({
+      frames: input.frames,
+      minimapReview: input.minimapReview,
+      participantKey: keyByParticipantId.get(participantId),
+      participantId,
+      mapId: input.mapId,
+      minimumConfidence,
+    })
+    const current = routePositionAt({
+      route,
+      events: input.events,
+      participantId,
+      timestamp: input.timestamp,
+      mapId: input.mapId,
+    })
+    if (!current) return []
+    const latestDeath = input.events.filter((event) =>
+      event.type === "CHAMPION_KILL" && event.targetId === participantId &&
+      event.timestamp <= input.timestamp,
+    ).at(-1)
+    const earliest = Math.max(
+      0,
+      input.timestamp - lookbackMs,
+      latestDeath?.timestamp ?? 0,
+    )
+    const points: NormalizedPoint[] = []
+    const start = routePositionAt({
+      route,
+      events: input.events,
+      participantId,
+      timestamp: earliest,
+      mapId: input.mapId,
+    })
+    if (start) points.push({ x: start.point.left / 100, y: start.point.top / 100 })
+    const includedControls = route.controls.filter((control) =>
+      control.timestamp > earliest && control.timestamp < input.timestamp,
+    )
+    points.push(...includedControls.map((control) => control.point))
+    points.push({ x: current.point.left / 100, y: current.point.top / 100 })
+    const routePoints = decimate(dedupePoints(points))
+    if (routePoints.length < 2) return []
+    const hasCvEvidence = includedControls.some((control) =>
+      control.origin === "minimap_cv",
+    ) || current.origin === "minimap_cv"
+    return [{
+      // Vue must patch this polyline in place while playback advances. Including
+      // the clock bounds in the key recreated the SVG node every tick, which
+      // made its antialiasing and drop shadow visibly flash.
+      key: `fused:${participantId}`,
+      participantId,
+      source: current.source,
+      origin: hasCvEvidence ? "minimap_cv" as const : "riot_timeline" as const,
+      confidence: current.confidence,
+      points: routePoints.map((point) => ({
+        left: normalizedPercent(point.x),
+        top: normalizedPercent(point.y),
+      })),
+    }]
+  })
+}
+
 export function reliableMinimapSegments(
   review: MinimapPathingReview | undefined,
   minimumConfidence?: number,
@@ -659,9 +1156,15 @@ export function minimapCampMarkersAt(
       const latestClear = campClears.filter((clear) =>
         clear.campKey === camp.key && clear.clearedAtMs <= timestamp,
       ).sort((left, right) => left.clearedAtMs - right.clearedAtMs).at(-1)
-      const respawnInMs = latestClear?.respawnAtMs === undefined
+      const fallbackRespawnDuration = campRespawnDurationMs(camp.key)
+      const respawnAtMs = latestClear?.respawnAtMs ?? (
+        latestClear && fallbackRespawnDuration !== undefined
+          ? latestClear.clearedAtMs + fallbackRespawnDuration
+          : undefined
+      )
+      const respawnInMs = respawnAtMs === undefined
         ? undefined
-        : latestClear.respawnAtMs - timestamp
+        : respawnAtMs - timestamp
       const available = !latestClear || (respawnInMs !== undefined && respawnInMs <= 0)
       return {
         key: camp.key,

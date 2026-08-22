@@ -34,10 +34,6 @@ export class ReviewService {
          JOIN matches m ON m.game_id = a.game_id AND m.puuid = a.puuid
          WHERE a.puuid = ? AND a.bookmarked = 1 AND m.is_matched = 1`,
       ).get(puuid) as { count: number }).count,
-      activeExperimentCount: (this.db.prepare(
-        `SELECT COUNT(*) AS count FROM practice_experiments
-         WHERE puuid = ? AND status = 'active'`,
-      ).get(puuid) as { count: number }).count,
     }
   }
 

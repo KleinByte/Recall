@@ -10,7 +10,10 @@ const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const probe = path.join(scriptDirectory, "native-probe.cjs")
 
 function run(runtime, moduleName, environment = {}) {
-  const result = spawnSync(runtime, [probe, moduleName], {
+  const extraArguments = moduleName === "onnxruntime-node"
+    ? [path.resolve(scriptDirectory, "..", "resources", "minimap-model", "yolo11m-minimap.onnx")]
+    : []
+  const result = spawnSync(runtime, [probe, moduleName, ...extraArguments], {
     cwd: path.resolve(scriptDirectory, ".."),
     env: { ...process.env, ...environment },
     stdio: "inherit",
@@ -26,5 +29,7 @@ function run(runtime, moduleName, environment = {}) {
 
 run(process.execPath, "better-sqlite3-node")
 run(electronExecutable, "better-sqlite3", { ELECTRON_RUN_AS_NODE: "1" })
+run(process.execPath, "onnxruntime-node")
+run(electronExecutable, "onnxruntime-node", { ELECTRON_RUN_AS_NODE: "1" })
 
-console.log("Native module doctor passed for the Node test and Electron application runtimes.")
+console.log("Native module doctor passed for SQLite and ONNX inference under Node and Electron.")

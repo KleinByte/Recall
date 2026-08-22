@@ -5,6 +5,7 @@ import {
   minimapCampMarkersAt,
   minimapPlaybackTrails,
   unifiedPlaybackPositionAt,
+  unifiedPlaybackTrails,
 } from "../src/helpers/unified-playback"
 import type { MinimapPathingReview } from "../src/shared/minimap/review"
 import type { TimelineFrame } from "../src/types/review"
@@ -153,7 +154,7 @@ describe("unified timeline and minimap playback", () => {
     ])
   })
 
-  it("prefers a high-confidence observed CV position over an exact Riot snapshot", () => {
+  it("keeps an exact Riot snapshot authoritative while connecting nearby CV evidence", () => {
     const result = unifiedPlaybackPositionAt({
       frames: [frame(60_000, { x: 1_482, y: 1_488 })],
       events: [],
@@ -178,11 +179,12 @@ describe("unified timeline and minimap playback", () => {
     })
 
     expect(result).toMatchObject({
-      source: "cv_observed",
-      origin: "minimap_cv",
-      confidence: .92,
-      point: { left: 25, top: 65 },
+      source: "riot_snapshot",
+      origin: "riot_timeline",
+      confidence: 1,
     })
+    expect(result?.point.left).toBeCloseTo(10, 2)
+    expect(result?.point.top).toBeCloseTo(90, 2)
   })
 
   it("falls back to the Riot baseline when CV confidence is below threshold", () => {
@@ -215,7 +217,7 @@ describe("unified timeline and minimap playback", () => {
     expect(result?.point.top).toBeCloseTo(90, 1)
   })
 
-  it("does not bridge unknown CV gaps and uses the Riot interpolation only as baseline", () => {
+  it("estimates continuously across unknown CV gaps using both surrounding sightings", () => {
     const minimapReview: MinimapPathingReview = {
       ...review,
       segments: [{
@@ -258,10 +260,12 @@ describe("unified timeline and minimap playback", () => {
     })
 
     expect(result?.source).toBe("estimated")
-    expect(result?.origin).toBe("riot_timeline")
+    expect(result?.origin).toBe("minimap_cv")
+    expect(result?.point.left).toBeCloseTo(45, 0)
+    expect(result?.point.top).toBeCloseTo(50, 0)
   })
 
-  it("prefers an exact Riot snapshot over reconstructed CV but CV inference over Riot interpolation", () => {
+  it("does not let legacy inferred segments override the fused Riot baseline", () => {
     const minimapReview: MinimapPathingReview = {
       ...review,
       segments: [{
@@ -295,7 +299,166 @@ describe("unified timeline and minimap playback", () => {
     })
 
     expect(exact?.source).toBe("riot_snapshot")
-    expect(between).toMatchObject({ source: "estimated", origin: "minimap_cv" })
+    expect(between).toMatchObject({ source: "estimated", origin: "riot_timeline" })
+  })
+
+  it("uses validated model-three graph inference to shape fog-of-war playback", () => {
+    const minimapReview: MinimapPathingReview = {
+      ...review,
+      segments: [{
+        gameId: 42,
+        participantKey: "ally:riot:local#na1",
+        startTimeMs: 20_000,
+        endTimeMs: 40_000,
+        kind: "inferred",
+        points: [
+          { x: .35, y: .65 },
+          { x: .35, y: .45 },
+          { x: .65, y: .35 },
+        ],
+        confidence: .82,
+        inferenceMode: "smoothed_postgame",
+        modelVersion: 3,
+      }],
+    }
+    const position = unifiedPlaybackPositionAt({
+      frames: [
+        frame(0, { x: 1_482, y: 1_488 }),
+        frame(60_000, { x: 13_338, y: 13_393 }),
+      ],
+      events: [],
+      minimapReview,
+      bindings,
+      participantId: 1,
+      timestamp: 30_000,
+      mapId: 11,
+    })
+
+    expect(position).toMatchObject({
+      source: "estimated",
+      origin: "minimap_cv",
+      exact: false,
+    })
+    expect(position!.point.left).toBeLessThan(45)
+  })
+
+  it("uses brief coherent sightings to bend the route and rejects an overlay-sized jump", () => {
+    const minimapReview: MinimapPathingReview = {
+      ...review,
+      segments: [{
+        gameId: 42,
+        participantKey: "ally:riot:local#na1",
+        startTimeMs: 28_000,
+        endTimeMs: 29_000,
+        kind: "observed",
+        points: [{ x: .46, y: .54 }, { x: .48, y: .52 }],
+        confidence: .94,
+        modelVersion: 2,
+      }, {
+        gameId: 42,
+        participantKey: "ally:riot:local#na1",
+        startTimeMs: 30_000,
+        endTimeMs: 30_750,
+        kind: "observed",
+        points: [{ x: .95, y: .95 }, { x: .96, y: .94 }],
+        confidence: .94,
+        modelVersion: 2,
+      }, {
+        gameId: 42,
+        participantKey: "ally:riot:local#na1",
+        startTimeMs: 32_000,
+        endTimeMs: 33_000,
+        kind: "observed",
+        points: [{ x: .52, y: .48 }, { x: .54, y: .46 }],
+        confidence: .94,
+        modelVersion: 2,
+      }],
+    }
+    const input = {
+      frames: [
+        frame(0, { x: 1_482, y: 1_488 }),
+        frame(60_000, { x: 13_338, y: 13_393 }),
+      ],
+      events: [],
+      minimapReview,
+      bindings,
+      participantId: 1,
+      mapId: 11 as const,
+    }
+
+    const falseObservationTime = unifiedPlaybackPositionAt({
+      ...input,
+      timestamp: 30_375,
+    })
+    const briefSighting = unifiedPlaybackPositionAt({
+      ...input,
+      timestamp: 32_500,
+    })
+    const afterSighting = unifiedPlaybackPositionAt({
+      ...input,
+      timestamp: 34_000,
+    })
+
+    expect(falseObservationTime).toMatchObject({
+      source: "estimated",
+      origin: "minimap_cv",
+    })
+    expect(falseObservationTime!.point.left).toBeLessThan(60)
+    expect(falseObservationTime!.point.top).toBeLessThan(60)
+    expect(briefSighting).toMatchObject({
+      source: "cv_observed",
+      origin: "minimap_cv",
+    })
+    expect(briefSighting!.point.left).toBeCloseTo(53, 0)
+    expect(afterSighting).toMatchObject({ source: "estimated", origin: "minimap_cv" })
+  })
+
+  it("uses the exact fused route for a single continuous playback trail", () => {
+    const minimapReview: MinimapPathingReview = {
+      ...review,
+      segments: [{
+        gameId: 42,
+        participantKey: "ally:riot:local#na1",
+        startTimeMs: 10_000,
+        endTimeMs: 11_000,
+        kind: "observed",
+        points: [{ x: .2, y: .8 }, { x: .22, y: .78 }],
+        confidence: .9,
+        modelVersion: 2,
+      }, {
+        gameId: 42,
+        participantKey: "ally:riot:local#na1",
+        startTimeMs: 40_000,
+        endTimeMs: 41_000,
+        kind: "observed",
+        points: [{ x: .65, y: .35 }, { x: .67, y: .33 }],
+        confidence: .9,
+        modelVersion: 2,
+      }],
+    }
+    const trails = unifiedPlaybackTrails({
+      frames: [
+        frame(0, { x: 1_482, y: 1_488 }),
+        frame(60_000, { x: 13_338, y: 13_393 }),
+      ],
+      events: [],
+      minimapReview,
+      bindings,
+      participantIds: [1],
+      timestamp: 50_000,
+      mapId: 11,
+      lookbackMs: 50_000,
+    })
+
+    expect(trails).toHaveLength(1)
+    expect(trails[0]).toMatchObject({
+      key: "fused:1",
+      participantId: 1,
+      origin: "minimap_cv",
+    })
+    expect(trails[0].points.length).toBeGreaterThanOrEqual(6)
+    expect(trails[0].points[0].left).toBeCloseTo(10, 0)
+    expect(trails[0].points.at(-1)!.left).toBeGreaterThan(70)
   })
 
   it("keeps separate CV trail polylines across unknown evidence gaps", () => {
@@ -342,7 +505,7 @@ describe("unified timeline and minimap playback", () => {
     expect(trails[1].points[0].left).toBeCloseTo(60)
   })
 
-  it("coalesces adjacent observed samples into one bounded SVG trail", () => {
+  it("coalesces samples into one bounded 30-second SVG trail", () => {
     const segments = Array.from({ length: 150 }, (_, index) => ({
       gameId: 42,
       participantKey: "ally:riot:local#na1",
@@ -365,7 +528,7 @@ describe("unified timeline and minimap playback", () => {
 
     expect(trails).toHaveLength(1)
     expect(trails[0].points.length).toBeLessThanOrEqual(96)
-    expect(trails[0].points[0]).toEqual({ left: 10, top: 80 })
+    expect(trails[0].points[0]).toEqual({ left: 13, top: 77 })
     expect(trails[0].points.at(-1)?.left).toBeCloseTo(25)
   })
 
@@ -394,6 +557,12 @@ describe("unified timeline and minimap playback", () => {
     expect(minimapCampMarkersAt([clear], 380_000).find((camp) => camp.key === "west_blue"))
       .toMatchObject({ state: "respawning", respawnInMs: 20_000 })
     expect(minimapCampMarkersAt([clear], 400_000).find((camp) => camp.key === "west_blue"))
+      .toMatchObject({ state: "available", respawnInMs: undefined })
+
+    const legacyClear = { ...clear, campKey: "west_gromp" as const, respawnAtMs: undefined }
+    expect(minimapCampMarkersAt([legacyClear], 219_999).find((camp) => camp.key === "west_gromp"))
+      .toMatchObject({ state: "respawning", respawnInMs: 1 })
+    expect(minimapCampMarkersAt([legacyClear], 220_000).find((camp) => camp.key === "west_gromp"))
       .toMatchObject({ state: "available", respawnInMs: undefined })
   })
 

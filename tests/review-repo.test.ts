@@ -43,30 +43,6 @@ describe("ReviewRepository", () => {
     expect(saved.tags.map((entry) => entry.name)).toEqual(["Review"])
   })
 
-  it("attaches every matching active experiment and preserves outcomes", () => {
-    const experiment = reviews.createExperiment(PUUID, {
-      name: "Track deaths",
-      hypothesis: "Fewer isolated deaths",
-      championIds: [84],
-      modes: ["aram"],
-    })
-    expect(reviews.attachMatchingExperiments(buildMatchRow({
-      gameId: 1,
-      playedAt: Date.now() + 1,
-    }))).toBe(1)
-    expect(reviews.setExperimentOutcome(
-      1,
-      PUUID,
-      experiment.id,
-      "mixed",
-      "One avoidable death",
-    )).toBe(true)
-    expect(reviews.getAnnotation(1, PUUID).experimentOutcomes[0]).toMatchObject({
-      outcome: "mixed",
-      note: "One avoidable death",
-    })
-  })
-
   it("cascades all match-owned review records when a match is deleted", () => {
     const tag = reviews.createTag(PUUID, "Saved")
     reviews.saveAnnotation(1, PUUID, {

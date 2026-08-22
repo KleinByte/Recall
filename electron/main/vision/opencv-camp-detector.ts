@@ -30,7 +30,15 @@ interface PreparedFeatures {
   gray: any
   gradient: any
   iconColorRatio: number
+  centralDarkRatio: number
+  neutralBrightRatio: number
+  neutralBrightAspectRatio: number
+  neutralBrightHorizontalSpan: number
+  neutralBrightVerticalSpan: number
+  saturatedColorRatio: number
 }
+
+export type CampPatchFeatureMetrics = Omit<PreparedFeatures, "gray" | "gradient">
 
 interface PreparedTemplate extends PreparedFeatures {
   source: CampVisualTemplateAsset
@@ -45,8 +53,8 @@ interface StableFeatureSequence {
 
 interface AdaptiveState {
   learning?: StableFeatureSequence
-  learningRejected: boolean
   baseline?: PreparedFeatures
+  sawAliveIcon?: boolean
 }
 
 export interface AdaptiveCampDetectorOptions {
@@ -54,7 +62,28 @@ export interface AdaptiveCampDetectorOptions {
   latestLearningStartMs: number
   learningWindowEndMs: number
   lateRecoveryStartMs: number
-  minimumLateIconColorRatio: number
+  minimumAliveIconColorRatio: number
+  maximumAliveIconColorRatio: number
+  minimumAliveIconDarkRatio: number
+  maximumAliveIconSaturatedRatio: number
+  minimumRespawnSoonIconColorRatio: number
+  maximumRespawnSoonIconColorRatio: number
+  minimumRespawnSoonDarkRatio: number
+  maximumRespawnSoonDarkRatio: number
+  minimumRespawnSoonSaturatedRatio: number
+  maximumRespawnSoonSaturatedRatio: number
+  minimumCountdownBrightRatio: number
+  maximumCountdownBrightRatio: number
+  minimumCountdownDarkRatio: number
+  minimumCountdownHorizontalSpan: number
+  minimumCountdownVerticalSpan: number
+  minimumCountdownAspectRatio: number
+  maximumCountdownSaturatedRatio: number
+  minimumBlankDeadDarkRatio: number
+  maximumBlankDeadIconColorRatio: number
+  maximumBlankDeadBrightRatio: number
+  maximumBlankDeadLineVerticalSpan: number
+  maximumBlankDeadSaturatedRatio: number
   stableFramesRequired: number
   minimumLearningDurationMs: number
   maximumLearningGapMs: number
@@ -72,7 +101,28 @@ const DEFAULT_ADAPTIVE_OPTIONS: AdaptiveCampDetectorOptions = {
   latestLearningStartMs: 99_000,
   learningWindowEndMs: 106_000,
   lateRecoveryStartMs: 130_000,
-  minimumLateIconColorRatio: 0.025,
+  minimumAliveIconColorRatio: 0.34,
+  maximumAliveIconColorRatio: 0.72,
+  minimumAliveIconDarkRatio: 0.5,
+  maximumAliveIconSaturatedRatio: 0.3,
+  minimumRespawnSoonIconColorRatio: 0.75,
+  maximumRespawnSoonIconColorRatio: 1,
+  minimumRespawnSoonDarkRatio: 0.05,
+  maximumRespawnSoonDarkRatio: 0.4,
+  minimumRespawnSoonSaturatedRatio: 0.2,
+  maximumRespawnSoonSaturatedRatio: 0.65,
+  minimumCountdownBrightRatio: 0.025,
+  maximumCountdownBrightRatio: 0.3,
+  minimumCountdownDarkRatio: 0.06,
+  minimumCountdownHorizontalSpan: 0.4,
+  minimumCountdownVerticalSpan: 0.2,
+  minimumCountdownAspectRatio: 0.7,
+  maximumCountdownSaturatedRatio: 0.28,
+  minimumBlankDeadDarkRatio: 0.4,
+  maximumBlankDeadIconColorRatio: 0.18,
+  maximumBlankDeadBrightRatio: 0.025,
+  maximumBlankDeadLineVerticalSpan: 0.12,
+  maximumBlankDeadSaturatedRatio: 0.18,
   stableFramesRequired: 3,
   minimumLearningDurationMs: 1_000,
   maximumLearningGapMs: 8_000,
@@ -91,8 +141,12 @@ function featuresFromRgba(cv: OpenCv, rgba: any): PreparedFeatures {
   const hsv = new cv.Mat()
   const gray = new cv.Mat()
   const gold = new cv.Mat()
+  const dark = new cv.Mat()
+  const neutralBright = new cv.Mat()
+  const saturated = new cv.Mat()
   const centralMask = cv.Mat.zeros(TEMPLATE_SIZE, TEMPLATE_SIZE, cv.CV_8UC1)
   const centralGold = new cv.Mat()
+  const centralDark = new cv.Mat()
   const lowerGold = new cv.Mat(
     TEMPLATE_SIZE,
     TEMPLATE_SIZE,
@@ -105,12 +159,39 @@ function featuresFromRgba(cv: OpenCv, rgba: any): PreparedFeatures {
     cv.CV_8UC3,
     new cv.Scalar(38, 255, 255),
   )
+  const lowerNeutralBright = new cv.Mat(
+    TEMPLATE_SIZE,
+    TEMPLATE_SIZE,
+    cv.CV_8UC3,
+    new cv.Scalar(0, 0, 165),
+  )
+  const upperNeutralBright = new cv.Mat(
+    TEMPLATE_SIZE,
+    TEMPLATE_SIZE,
+    cv.CV_8UC3,
+    new cv.Scalar(179, 55, 255),
+  )
+  const lowerSaturated = new cv.Mat(
+    TEMPLATE_SIZE,
+    TEMPLATE_SIZE,
+    cv.CV_8UC3,
+    new cv.Scalar(0, 70, 65),
+  )
+  const upperSaturated = new cv.Mat(
+    TEMPLATE_SIZE,
+    TEMPLATE_SIZE,
+    cv.CV_8UC3,
+    new cv.Scalar(179, 255, 255),
+  )
   try {
     cv.resize(rgba, resized, new cv.Size(TEMPLATE_SIZE, TEMPLATE_SIZE), 0, 0, cv.INTER_LINEAR)
     cv.cvtColor(resized, rgb, cv.COLOR_RGBA2RGB)
     cv.cvtColor(rgb, hsv, cv.COLOR_RGB2HSV)
     cv.cvtColor(resized, gray, cv.COLOR_RGBA2GRAY)
     cv.inRange(hsv, lowerGold, upperGold, gold)
+    cv.threshold(gray, dark, 64, 255, cv.THRESH_BINARY_INV)
+    cv.inRange(hsv, lowerNeutralBright, upperNeutralBright, neutralBright)
+    cv.inRange(hsv, lowerSaturated, upperSaturated, saturated)
     cv.circle(
       centralMask,
       new cv.Point(Math.floor(TEMPLATE_SIZE / 2), Math.floor(TEMPLATE_SIZE / 2)),
@@ -119,16 +200,32 @@ function featuresFromRgba(cv: OpenCv, rgba: any): PreparedFeatures {
       -1,
     )
     cv.bitwise_and(gold, centralMask, centralGold)
+    cv.bitwise_and(dark, centralMask, centralDark)
     const centralPixels = Math.max(1, Number(cv.countNonZero(centralMask)))
+    const neutralBrightCount = Number(cv.countNonZero(neutralBright))
+    const neutralBrightBounds = neutralBrightCount > 0
+      ? cv.boundingRect(neutralBright)
+      : { width: 0, height: 0 }
+    const totalPixels = TEMPLATE_SIZE * TEMPLATE_SIZE
     return {
       gray: gray.clone(),
       gradient: gradientMagnitude(cv, gray),
       iconColorRatio: Number(cv.countNonZero(centralGold)) / centralPixels,
+      centralDarkRatio: Number(cv.countNonZero(centralDark)) / centralPixels,
+      neutralBrightRatio: neutralBrightCount / totalPixels,
+      neutralBrightAspectRatio: neutralBrightBounds.width /
+        Math.max(1, neutralBrightBounds.height),
+      neutralBrightHorizontalSpan: neutralBrightBounds.width / TEMPLATE_SIZE,
+      neutralBrightVerticalSpan: neutralBrightBounds.height / TEMPLATE_SIZE,
+      saturatedColorRatio: Number(cv.countNonZero(saturated)) / totalPixels,
     }
   } finally {
     safeDelete(
-      resized, rgb, hsv, gray, gold, centralMask, centralGold,
+      resized, rgb, hsv, gray, gold, dark, neutralBright, saturated,
+      centralMask, centralGold, centralDark,
       lowerGold, upperGold,
+      lowerNeutralBright, upperNeutralBright,
+      lowerSaturated, upperSaturated,
     )
   }
 }
@@ -205,6 +302,12 @@ function templateFromSequence(cv: OpenCv, sequence: StableFeatureSequence): Prep
       gray: gray.clone(),
       gradient: gradientMagnitude(cv, gray),
       iconColorRatio: 0,
+      centralDarkRatio: 0,
+      neutralBrightRatio: 0,
+      neutralBrightAspectRatio: 0,
+      neutralBrightHorizontalSpan: 0,
+      neutralBrightVerticalSpan: 0,
+      saturatedColorRatio: 0,
     }
   } finally {
     safeDelete(floatMean, gray)
@@ -328,6 +431,44 @@ export class OpenCvCampDetector {
     }
   }
 
+  private learnAliveBaseline(
+    state: AdaptiveState,
+    features: PreparedFeatures,
+    gameTimeMs: number | undefined,
+  ) {
+    if (state.baseline || gameTimeMs === undefined ||
+        gameTimeMs < this.options.learningWindowStartMs) return
+    const lateRecovery = gameTimeMs >= this.options.lateRecoveryStartMs
+    if (gameTimeMs > this.options.learningWindowEndMs && !lateRecovery) return
+    if (!state.learning) {
+      if (!lateRecovery && gameTimeMs > this.options.latestLearningStartMs) return
+      state.learning = beginSequence(this.cv, features.gray, gameTimeMs)
+      return
+    }
+    if (gameTimeMs <= state.learning.latestObservedAtMs) return
+    const learningGapMs = gameTimeMs - state.learning.latestObservedAtMs
+    const stable = learningGapMs <= this.options.maximumLearningGapMs &&
+      mseFromSequenceMean(this.cv, features.gray, state.learning) <=
+        this.options.maximumStableMse
+    if (!stable) {
+      safeDelete(state.learning.accumulated)
+      state.learning = beginSequence(this.cv, features.gray, gameTimeMs)
+      return
+    }
+    appendSequence(this.cv, state.learning, features.gray, gameTimeMs)
+    if (state.learning.count < this.options.stableFramesRequired ||
+        gameTimeMs - state.learning.firstObservedAtMs <
+          this.options.minimumLearningDurationMs) return
+    const learned = templateFromSequence(this.cv, state.learning)
+    safeDelete(state.learning.accumulated)
+    state.learning = undefined
+    if (variance(this.cv, learned.gray) < this.options.minimumBaselineVariance) {
+      safeDelete(learned.gray, learned.gradient)
+      return
+    }
+    state.baseline = learned
+  }
+
   private classifyAdaptive(
     camp: CampDefinition,
     features: PreparedFeatures,
@@ -336,67 +477,104 @@ export class OpenCvCampDetector {
     if (camp.respawnRule === "epic" || camp.respawnRule === "scuttle") {
       return { campKey: camp.key, state: "unknown", confidence: 0, scoreMargin: 0 }
     }
-    const state = this.adaptiveStates.get(camp.key) ?? { learningRejected: false }
+    const state = this.adaptiveStates.get(camp.key) ?? {}
     this.adaptiveStates.set(camp.key, state)
 
-    if (!state.baseline) {
-      if (gameTimeMs === undefined || gameTimeMs < this.options.learningWindowStartMs) {
-        return { campKey: camp.key, state: "unknown", confidence: 0, scoreMargin: 0 }
-      }
-      const lateRecovery = gameTimeMs >= this.options.lateRecoveryStartMs
-      const lateIconVisible = features.iconColorRatio >=
-        this.options.minimumLateIconColorRatio
-      if (gameTimeMs > this.options.learningWindowEndMs &&
-          (!lateRecovery || !lateIconVisible)) {
-        safeDelete(state.learning?.accumulated)
-        state.learning = undefined
-        return { campKey: camp.key, state: "unknown", confidence: 0, scoreMargin: 0 }
-      }
-      if (state.learningRejected && !lateRecovery) {
-        return { campKey: camp.key, state: "unknown", confidence: 0, scoreMargin: 0 }
-      }
-      if (!state.learning) {
-        if (!lateRecovery && gameTimeMs > this.options.latestLearningStartMs) {
-          state.learningRejected = true
-          return { campKey: camp.key, state: "unknown", confidence: 0, scoreMargin: 0 }
-        }
-        if (lateRecovery) state.learningRejected = false
-        state.learning = beginSequence(this.cv, features.gray, gameTimeMs)
-        return { campKey: camp.key, state: "unknown", confidence: 0.2, scoreMargin: 0 }
-      }
-      if (gameTimeMs <= state.learning.latestObservedAtMs) {
-        return { campKey: camp.key, state: "unknown", confidence: 0, scoreMargin: 0 }
-      }
-      const learningGapMs = gameTimeMs - state.learning.latestObservedAtMs
-      const stable = learningGapMs <= this.options.maximumLearningGapMs &&
-        mseFromSequenceMean(this.cv, features.gray, state.learning) <= this.options.maximumStableMse
-      if (!stable) {
-        safeDelete(state.learning.accumulated)
-        state.learning = undefined
-        state.learningRejected = !lateRecovery
-        return { campKey: camp.key, state: "unknown", confidence: 0, scoreMargin: 0 }
-      }
-      appendSequence(this.cv, state.learning, features.gray, gameTimeMs)
-      if (state.learning.count < this.options.stableFramesRequired ||
-          gameTimeMs - state.learning.firstObservedAtMs < this.options.minimumLearningDurationMs) {
-        return { campKey: camp.key, state: "unknown", confidence: 0.35, scoreMargin: 0 }
-      }
-      const learned = templateFromSequence(this.cv, state.learning)
-      safeDelete(state.learning.accumulated)
+    const aliveIconVisible = features.iconColorRatio >=
+        this.options.minimumAliveIconColorRatio &&
+      features.iconColorRatio <= this.options.maximumAliveIconColorRatio &&
+      features.centralDarkRatio >= this.options.minimumAliveIconDarkRatio &&
+      features.saturatedColorRatio <=
+        this.options.maximumAliveIconSaturatedRatio
+    const respawnSoonVisible = features.iconColorRatio >=
+        this.options.minimumRespawnSoonIconColorRatio &&
+      features.iconColorRatio <= this.options.maximumRespawnSoonIconColorRatio &&
+      features.centralDarkRatio >= this.options.minimumRespawnSoonDarkRatio &&
+      features.centralDarkRatio <= this.options.maximumRespawnSoonDarkRatio &&
+      features.saturatedColorRatio >=
+        this.options.minimumRespawnSoonSaturatedRatio &&
+      features.saturatedColorRatio <=
+        this.options.maximumRespawnSoonSaturatedRatio &&
+      features.neutralBrightRatio < this.options.minimumCountdownBrightRatio
+    const countdownVisible = features.neutralBrightRatio >=
+        this.options.minimumCountdownBrightRatio &&
+      features.neutralBrightRatio <=
+        this.options.maximumCountdownBrightRatio &&
+      features.centralDarkRatio >= this.options.minimumCountdownDarkRatio &&
+      features.neutralBrightHorizontalSpan >=
+        this.options.minimumCountdownHorizontalSpan &&
+      features.neutralBrightVerticalSpan >=
+        this.options.minimumCountdownVerticalSpan &&
+      features.neutralBrightAspectRatio >=
+        this.options.minimumCountdownAspectRatio &&
+      features.saturatedColorRatio <=
+        this.options.maximumCountdownSaturatedRatio
+
+    if (respawnSoonVisible) {
+      safeDelete(state.learning?.accumulated)
       state.learning = undefined
-      if (variance(this.cv, learned.gray) < this.options.minimumBaselineVariance) {
-        safeDelete(learned.gray, learned.gradient)
-        state.learningRejected = !lateRecovery
-        return { campKey: camp.key, state: "unknown", confidence: 0, scoreMargin: 0 }
+      return {
+        campKey: camp.key,
+        state: "respawn_soon",
+        confidence: 0.84,
+        scoreMargin: features.iconColorRatio -
+          this.options.minimumRespawnSoonIconColorRatio,
+        method: "native_respawn_timer",
       }
-      state.baseline = learned
+    }
+    if (countdownVisible) {
+      safeDelete(state.learning?.accumulated)
+      state.learning = undefined
+      return {
+        campKey: camp.key,
+        state: "respawn_long",
+        confidence: clamp(0.8 + features.neutralBrightRatio * 0.5),
+        scoreMargin: features.neutralBrightAspectRatio -
+          this.options.minimumCountdownAspectRatio,
+        method: "overlay_countdown",
+      }
+    }
+
+    if (aliveIconVisible) {
+      state.sawAliveIcon = true
+      this.learnAliveBaseline(state, features, gameTimeMs)
+      const score = state.baseline
+        ? scoreFeatures(this.cv, features, state.baseline)
+        : 0.82
       return {
         campKey: camp.key,
         state: "alive",
-        confidence: 0.82,
-        scoreMargin: 0.22,
-        method: "adaptive_alive_baseline",
+        confidence: clamp(0.82 + Math.max(0, score - 0.7) * 0.4),
+        scoreMargin: Math.max(0, score - 0.7),
+        method: "native_camp_icon",
       }
+    }
+
+    const neutralBrightIsAbsenceSafe = features.neutralBrightRatio <
+        this.options.maximumBlankDeadBrightRatio ||
+      features.neutralBrightVerticalSpan <=
+        this.options.maximumBlankDeadLineVerticalSpan
+    const blankDeadVisible = features.iconColorRatio <=
+        this.options.maximumBlankDeadIconColorRatio &&
+      features.centralDarkRatio >=
+        this.options.minimumBlankDeadDarkRatio &&
+      neutralBrightIsAbsenceSafe &&
+      features.saturatedColorRatio < this.options.maximumBlankDeadSaturatedRatio
+    if (state.sawAliveIcon && blankDeadVisible) {
+      return {
+        campKey: camp.key,
+        state: "dead",
+        confidence: 0.8,
+        scoreMargin: features.centralDarkRatio -
+          this.options.minimumBlankDeadDarkRatio,
+        method: "native_camp_icon_absence",
+      }
+    }
+
+    if (!state.baseline) {
+      safeDelete(state.learning?.accumulated)
+      state.learning = undefined
+      return { campKey: camp.key, state: "unknown", confidence: 0, scoreMargin: 0 }
     }
 
     const score = scoreFeatures(this.cv, features, state.baseline)
@@ -440,6 +618,29 @@ export class OpenCvCampDetector {
       confidence: clamp(0.78 + (this.options.changedScore - score) * 0.5),
       scoreMargin: this.options.changedScore - score,
       method: "adaptive_alive_baseline",
+    }
+  }
+
+  /** Numeric evidence seam for tuning against saved, pre-cropped camp patches. */
+  inspectPatch(patch: RgbaFrame): CampPatchFeatureMetrics {
+    const rgba = frameToMat(this.cv, patch)
+    try {
+      const features = featuresFromRgba(this.cv, rgba)
+      try {
+        return {
+          iconColorRatio: features.iconColorRatio,
+          centralDarkRatio: features.centralDarkRatio,
+          neutralBrightRatio: features.neutralBrightRatio,
+          neutralBrightAspectRatio: features.neutralBrightAspectRatio,
+          neutralBrightHorizontalSpan: features.neutralBrightHorizontalSpan,
+          neutralBrightVerticalSpan: features.neutralBrightVerticalSpan,
+          saturatedColorRatio: features.saturatedColorRatio,
+        }
+      } finally {
+        safeDelete(features.gray, features.gradient)
+      }
+    } finally {
+      rgba.delete()
     }
   }
 

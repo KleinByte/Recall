@@ -9,7 +9,11 @@ import type {
 } from "../../../src/shared/minimap/contracts.js"
 import { normalizedDistance } from "../../../src/shared/minimap/contracts.js"
 import { MinimapTelemetryRepository } from "../database/minimap-telemetry-repo.js"
-import { CAMP_BY_KEY } from "../jungle/camp-map.js"
+import {
+  CAMP_BY_KEY,
+  CAMP_CLEAR_ALGORITHM_VERSION,
+  campRespawnDurationMs,
+} from "../jungle/camp-map.js"
 import { CampAttributionEngine } from "../jungle/camp-attribution-engine.js"
 import { CampStateMachine } from "../jungle/camp-state-machine.js"
 import {
@@ -935,7 +939,12 @@ export class MinimapTelemetryCoordinator {
       if (transition.state === "alive" && transition.previousState !== "alive") {
         // A confirmed respawn starts a new camp life. Evidence deduplication is
         // only meant to merge CV and Live Client reports for the same clear.
-        this.lastRecordedClearAt.delete(transition.campKey)
+        const previousClear = this.lastRecordedClearAt.get(transition.campKey)
+        const respawnDuration = campRespawnDurationMs(transition.campKey)
+        if (previousClear === undefined || respawnDuration === undefined ||
+            transition.observedAtMs >= previousClear + respawnDuration - 10_000) {
+          this.lastRecordedClearAt.delete(transition.campKey)
+        }
       }
       if (transition.previousState !== "alive" ||
           !["dead", "respawn_long", "respawn_soon"].includes(transition.state)) continue
@@ -947,6 +956,14 @@ export class MinimapTelemetryCoordinator {
       const local = context.localParticipantKey
         ? alignedTracks.find((track) => track.participantKey === context.localParticipantKey)
         : undefined
+      const localPositionAgeMs = local?.lastObservedGameTimeMs === undefined
+        ? Number.POSITIVE_INFINITY
+        : Math.max(0, transition.observedAtMs - local.lastObservedGameTimeMs)
+      const localPosition = local?.state === "visible" && local.position
+        ? local.position
+        : local?.lastObservedPosition && localPositionAgeMs <= 2_000 && local.confidence >= 0.35
+          ? local.lastObservedPosition
+          : undefined
       const nearbyAllies = alignedTracks.filter((track) =>
         track.state === "visible" && track.team === "ally" && track.position &&
         normalizedDistance(track.position, camp.center) <= camp.attributionRadius).length
@@ -955,9 +972,9 @@ export class MinimapTelemetryCoordinator {
         normalizedDistance(track.position, camp.center) <= camp.attributionRadius).length
       const evidence = {
         campTransition: true,
-        localPositionObserved: local?.state === "visible" && Boolean(local.position),
-        localPositionDistance: local?.position
-          ? normalizedDistance(local.position, camp.center)
+        localPositionObserved: Boolean(localPosition),
+        localPositionDistance: localPosition
+          ? normalizedDistance(localPosition, camp.center)
           : undefined,
         creepScoreDelta: alignedEvidence?.evidence.creepScoreDelta,
         goldResidual: alignedEvidence?.evidence.goldResidual,
@@ -969,7 +986,10 @@ export class MinimapTelemetryCoordinator {
             local?.state === "dead"
           : undefined,
         transitionConfidence: transition.confidence,
-        evidenceAgeMs: alignedEvidence?.distanceMs ?? Number.MAX_SAFE_INTEGER,
+        evidenceAgeMs: Math.max(
+          Number.isFinite(localPositionAgeMs) ? localPositionAgeMs : 0,
+          alignedEvidence?.distanceMs ?? Number.MAX_SAFE_INTEGER,
+        ),
       }
       const attributed = this.attribution.attribute(evidence)
       this.liveCampInference.markObservedClear(transition.campKey, transition.observedAtMs)
@@ -978,13 +998,16 @@ export class MinimapTelemetryCoordinator {
         puuid: context.puuid,
         campKey: transition.campKey,
         clearedAtMs: transition.observedAtMs,
+        respawnAtMs: campRespawnDurationMs(transition.campKey) === undefined
+          ? undefined
+          : transition.observedAtMs + campRespawnDurationMs(transition.campKey)!,
         source: "minimap_cv",
         sourceConfidence: transition.confidence,
         attribution: attributed.attribution,
         attributionConfidence: attributed.confidence,
         evidence,
         routeIndex: attributed.attribution === "local" ? this.localClearCount : undefined,
-        algorithmVersion: 2,
+        algorithmVersion: CAMP_CLEAR_ALGORITHM_VERSION,
       }
       this.recordCampClearEvent(event)
     }
@@ -1028,7 +1051,11 @@ export class MinimapTelemetryCoordinator {
 
   private recordCampClearEvent(event: CampClearEvent) {
     const previous = this.lastRecordedClearAt.get(event.campKey)
-    if (previous !== undefined && Math.abs(event.clearedAtMs - previous) <= 15_000) {
+    const respawnDuration = campRespawnDurationMs(event.campKey)
+    const minimumRepeatMs = respawnDuration === undefined
+      ? 15_000
+      : Math.max(15_000, respawnDuration - 10_000)
+    if (previous !== undefined && event.clearedAtMs - previous < minimumRepeatMs) {
       return false
     }
     this.repository.recordCampClear(event)

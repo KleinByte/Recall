@@ -18,12 +18,10 @@ function campPatch(alive: boolean): RgbaFrame {
   const data = new Uint8Array(width * height * 4)
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      let value = 42 + ((x * 11 + y * 7 + Math.floor(x / 3) * 5) % 54)
-      if (alive && x >= 5 && x <= 18 && y >= 5 && y <= 18) {
-        value = (x + y) % 2 === 0 ? 238 : 18
-      }
+      let value = 25 + ((x * 11 + y * 7 + Math.floor(x / 3) * 5) % 30)
       const index = (y * width + x) * 4
-      data.set([value, value, value, 255], index)
+      const iconPixel = alive && Math.abs(x - 12) + Math.abs(y - 12) <= 6
+      data.set(iconPixel ? [205, 140, 42, 255] : [value, value, value, 255], index)
     }
   }
   return { width, height, data, capturedMonotonicMs: 0, frameSequence: 1 }
@@ -38,17 +36,75 @@ function broadOcclusion(): RgbaFrame {
   return patch
 }
 
+function withThinPathLine(patch: RgbaFrame): RgbaFrame {
+  const result = { ...patch, data: Uint8Array.from(patch.data) }
+  for (let x = 0; x < result.width; x += 1) {
+    result.data.set([218, 220, 216, 255], (12 * result.width + x) * 4)
+  }
+  return result
+}
+
 function lateAliveCampPatch(): RgbaFrame {
+  return campPatch(true)
+}
+
+function countdownPatch(): RgbaFrame {
   const patch = campPatch(false)
-  for (let y = 5; y <= 18; y += 1) {
-    for (let x = 5; x <= 18; x += 1) {
-      if ((x + y) % 3 !== 0) continue
-      patch.data.set([205, 155, 58, 255], (y * patch.width + x) * 4)
+  const white = (x: number, y: number) => {
+    patch.data.set([224, 226, 222, 255], (y * patch.width + x) * 4)
+  }
+  for (let y = 7; y <= 16; y += 1) white(3, y)
+  white(2, 8)
+  white(7, 10)
+  white(7, 14)
+  for (let x = 10; x <= 14; x += 1) white(x, 7)
+  for (let y = 8; y <= 11; y += 1) white(14, y)
+  for (let x = 10; x <= 14; x += 1) white(x, 12)
+  for (let y = 13; y <= 16; y += 1) white(10, y)
+  for (let x = 10; x <= 14; x += 1) white(x, 16)
+  for (let x = 18; x <= 21; x += 1) white(x, 7)
+  for (let y = 8; y <= 11; y += 1) white(21, y)
+  for (let x = 18; x <= 21; x += 1) white(x, 12)
+  for (let y = 13; y <= 16; y += 1) white(18, y)
+  for (let x = 18; x <= 21; x += 1) white(x, 16)
+  return patch
+}
+
+function routeNodePatch(): RgbaFrame {
+  const patch = campPatch(false)
+  for (let y = 5; y <= 19; y += 1) {
+    for (let x = 5; x <= 19; x += 1) {
+      if (Math.hypot(x - 12, y - 12) > 8) continue
+      patch.data.set([184, 190, 194, 255], (y * patch.width + x) * 4)
+    }
+  }
+  for (let y = 8; y <= 16; y += 1) {
+    patch.data.set([245, 245, 242, 255], (y * patch.width + 12) * 4)
+  }
+  return patch
+}
+
+function selectedRouteNodePatch(): RgbaFrame {
+  const patch = campPatch(false)
+  for (let y = 4; y <= 20; y += 1) {
+    for (let x = 4; x <= 20; x += 1) {
+      if (Math.hypot(x - 12, y - 12) > 8) continue
+      patch.data.set([205, 145, 38, 255], (y * patch.width + x) * 4)
     }
   }
   return patch
 }
 
+function respawnSoonPatch(): RgbaFrame {
+  const patch = campPatch(false)
+  for (let y = 5; y <= 19; y += 1) {
+    for (let x = 5; x <= 19; x += 1) {
+      if (Math.hypot(x - 12, y - 12) > 7) continue
+      patch.data.set([190, 130, 35, 255], (y * patch.width + x) * 4)
+    }
+  }
+  return patch
+}
 
 function minimapFrameWithAliveCamp(frameSequence: number): RgbaFrame {
   const width = 240
@@ -56,14 +112,12 @@ function minimapFrameWithAliveCamp(frameSequence: number): RgbaFrame {
   const data = new Uint8Array(width * height * 4)
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      let value = 48 + ((x * 7 + y * 11 + Math.floor(x / 5) * 3) % 42)
+      let value = 25 + ((x * 7 + y * 11 + Math.floor(x / 5) * 3) % 30)
       const dx = x - CAMP.center.x * width
       const dy = y - CAMP.center.y * height
-      if (Math.hypot(dx, dy) <= width * CAMP.patchRadius * 0.7) {
-        value = (x + y) % 2 === 0 ? 236 : 16
-      }
       const index = (y * width + x) * 4
-      data.set([value, value, value, 255], index)
+      const iconPixel = Math.abs(dx) + Math.abs(dy) <= width * CAMP.patchRadius * 0.55
+      data.set(iconPixel ? [205, 140, 42, 255] : [value, value, value, 255], index)
     }
   }
   return { width, height, data, capturedMonotonicMs: 0, frameSequence }
@@ -83,7 +137,7 @@ function observation(
     source: "minimap_cv",
     sourceConfidence,
     frameSequence,
-    providerVersion: 4_001,
+    providerVersion: 6_001,
   }
 }
 
@@ -97,11 +151,11 @@ describe("adaptive camp visual accuracy", () => {
       expect(detector.classifyPatch(absent, CAMP, 604_000).state).toBe("unknown")
       expect(detector.classifyPatch(absent, CAMP, 608_000).state).toBe("unknown")
 
-      expect(detector.classifyPatch(visible, CAMP, 612_000).state).toBe("unknown")
-      expect(detector.classifyPatch(visible, CAMP, 616_000).state).toBe("unknown")
+      expect(detector.classifyPatch(visible, CAMP, 612_000).state).toBe("alive")
+      expect(detector.classifyPatch(visible, CAMP, 616_000).state).toBe("alive")
       expect(detector.classifyPatch(visible, CAMP, 620_000)).toMatchObject({
         state: "alive",
-        method: "adaptive_alive_baseline",
+        method: "native_camp_icon",
       })
     } finally { detector.close() }
   })
@@ -110,12 +164,58 @@ describe("adaptive camp visual accuracy", () => {
     const detector = new OpenCvCampDetector(await loadOpenCv())
     const patch = campPatch(true)
     try {
-      expect(detector.classifyPatch(patch, CAMP, 91_100).state).toBe("unknown")
-      expect(detector.classifyPatch(patch, CAMP, 94_600).state).toBe("unknown")
+      expect(detector.classifyPatch(patch, CAMP, 91_100).state).toBe("alive")
+      expect(detector.classifyPatch(patch, CAMP, 94_600).state).toBe("alive")
       expect(detector.classifyPatch(patch, CAMP, 98_100)).toMatchObject({
         state: "alive",
-        method: "adaptive_alive_baseline",
+        method: "native_camp_icon",
       })
+    } finally { detector.close() }
+  })
+
+  it("does not learn a Blitz route node as an alive camp", async () => {
+    const detector = new OpenCvCampDetector(await loadOpenCv())
+    const routeNode = routeNodePatch()
+    const selectedRouteNode = selectedRouteNodePatch()
+    try {
+      expect(detector.classifyPatch(routeNode, CAMP, 91_100).state).toBe("unknown")
+      expect(detector.classifyPatch(routeNode, CAMP, 94_600).state).toBe("unknown")
+      expect(detector.classifyPatch(routeNode, CAMP, 98_100).state).toBe("unknown")
+      expect(detector.classifyPatch(selectedRouteNode, CAMP, 101_000).state).toBe("unknown")
+      expect(detector.classifyPatch(selectedRouteNode, CAMP, 102_000).state).toBe("unknown")
+      expect(detector.classifyPatch(selectedRouteNode, CAMP, 103_000).state).toBe("unknown")
+    } finally { detector.close() }
+  })
+
+  it("classifies countdown text and Riot's soon badge without treating either as alive", async () => {
+    const detector = new OpenCvCampDetector(await loadOpenCv())
+    try {
+      expect(detector.classifyPatch(countdownPatch(), CAMP, 200_000)).toMatchObject({
+        state: "respawn_long",
+        method: "overlay_countdown",
+      })
+      expect(detector.classifyPatch(respawnSoonPatch(), CAMP, 200_000)).toMatchObject({
+        state: "respawn_soon",
+        method: "native_respawn_timer",
+      })
+    } finally { detector.close() }
+  })
+
+  it("detects icon disappearance when timers are disabled, including through a thin route line", async () => {
+    const detector = new OpenCvCampDetector(await loadOpenCv())
+    const alive = campPatch(true)
+    const aliveWithLine = withThinPathLine(alive)
+    const absentWithLine = withThinPathLine(campPatch(false))
+    try {
+      expect(detector.classifyPatch(alive, CAMP, 200_000).state).toBe("alive")
+      expect(detector.classifyPatch(aliveWithLine, CAMP, 201_000).state).toBe("alive")
+      expect(detector.classifyPatch(absentWithLine, CAMP, 202_000)).toMatchObject({
+        state: "dead",
+        method: "native_camp_icon_absence",
+      })
+      expect(detector.classifyPatch(routeNodePatch(), CAMP, 203_000).state).toBe("unknown")
+      expect(detector.classifyPatch(selectedRouteNodePatch(), CAMP, 204_000).state)
+        .toBe("unknown")
     } finally { detector.close() }
   })
 
@@ -143,18 +243,18 @@ describe("adaptive camp visual accuracy", () => {
         gameTimeMs,
       }).find((entry) => entry.campKey === "west_blue")?.state,
     )
-    expect(learned).toEqual(["unknown", "unknown", "alive"])
+    expect(learned).toEqual(["alive", "alive", "alive"])
     detector.close()
   })
 
-  it("never restarts baseline learning after the early appearance changes", async () => {
+  it("never learns absent scenery as alive after a camp icon disappears", async () => {
     const detector = new OpenCvCampDetector(await loadOpenCv())
     try {
-      expect(detector.classifyPatch(campPatch(true), CAMP, 91_100).state).toBe("unknown")
-      expect(detector.classifyPatch(campPatch(false), CAMP, 94_600).state).toBe("unknown")
-      expect(detector.classifyPatch(campPatch(false), CAMP, 97_200).state).toBe("unknown")
-      expect(detector.classifyPatch(campPatch(false), CAMP, 99_800).state).toBe("unknown")
-      expect(detector.classifyPatch(campPatch(false), CAMP, 104_000).state).toBe("unknown")
+      expect(detector.classifyPatch(campPatch(true), CAMP, 91_100).state).toBe("alive")
+      expect(detector.classifyPatch(campPatch(false), CAMP, 94_600).state).toBe("dead")
+      expect(detector.classifyPatch(campPatch(false), CAMP, 97_200).state).toBe("dead")
+      expect(detector.classifyPatch(campPatch(false), CAMP, 99_800).state).toBe("dead")
+      expect(detector.classifyPatch(campPatch(false), CAMP, 104_000).state).toBe("dead")
     } finally { detector.close() }
   })
 
@@ -231,6 +331,34 @@ describe("camp state transition accuracy", () => {
     expect(machine.observe(observation("dead", 103_000, 2))).toBeUndefined()
     expect(machine.observe(observation("dead", 106_000, 3))).toBeUndefined()
     expect(machine.state("west_blue")).toBeUndefined()
+  })
+
+  it("can represent a countdown seen mid-respawn without inventing a clear", () => {
+    const machine = new CampStateMachine()
+
+    expect(machine.observe(observation("respawn_long", 100_000, 1))).toBeUndefined()
+    expect(machine.observe(observation("respawn_long", 101_000, 2))).toBeUndefined()
+    expect(machine.observe(observation("respawn_long", 102_000, 3))).toMatchObject({
+      previousState: "unknown",
+      state: "respawn_long",
+      observedAtMs: 100_000,
+    })
+  })
+
+  it("progresses from a long countdown to soon and does not regress on visual jitter", () => {
+    const machine = new CampStateMachine({ minimumConfirmationDurationMs: 0 })
+    for (const [index, time] of [100_000, 101_000, 102_000].entries()) {
+      machine.observe(observation("respawn_long", time, index + 1))
+    }
+    expect(machine.state("west_blue")?.state).toBe("respawn_long")
+    for (const [index, time] of [103_000, 104_000, 105_000].entries()) {
+      machine.observe(observation("respawn_soon", time, index + 4))
+    }
+    expect(machine.state("west_blue")?.state).toBe("respawn_soon")
+    for (const [index, time] of [106_000, 107_000, 108_000].entries()) {
+      machine.observe(observation("respawn_long", time, index + 7))
+    }
+    expect(machine.state("west_blue")?.state).toBe("respawn_soon")
   })
 
   it("does not count the same captured frame more than once", () => {

@@ -13,16 +13,12 @@ const apiMocks = vi.hoisted(() => ({
   getRviProfile: vi.fn(),
   getReviewSessions: vi.fn(),
   listTags: vi.fn(),
-  listExperiments: vi.fn(),
   listMatches: vi.fn(),
   saveAnnotation: vi.fn(),
   getTimeline: vi.fn(),
   createTag: vi.fn(),
   requestTimeline: vi.fn(),
   setSessionBoundary: vi.fn(),
-  createExperiment: vi.fn(),
-  updateExperiment: vi.fn(),
-  setExperimentOutcome: vi.fn(),
 }))
 const focusReviewGameId = vi.hoisted(() => ({ value: null as number | null }))
 
@@ -46,7 +42,6 @@ function reviewFixture(): MatchReview {
       note: "",
       bookmarked: false,
       tags: [],
-      experimentOutcomes: [],
     },
     timeline: { status: "pending" },
   } as MatchReview
@@ -74,11 +69,9 @@ describe("useReviewPageData", () => {
     apiMocks.getRviProfile.mockResolvedValue(undefined)
     apiMocks.getReviewSessions.mockResolvedValue({ rows: [] })
     apiMocks.listTags.mockResolvedValue([])
-    apiMocks.listExperiments.mockResolvedValue([])
     apiMocks.listMatches.mockResolvedValue({ rows: [] })
     apiMocks.saveAnnotation.mockImplementation(async (_gameId, annotation) => ({
       gameId: 42,
-      experimentOutcomes: [],
       tags: [],
       ...annotation,
     }))
@@ -107,7 +100,6 @@ describe("useReviewPageData", () => {
     expect(data.error.value).toBe("")
     expect(apiMocks.getReviewSessions).toHaveBeenCalledOnce()
     expect(apiMocks.listTags).toHaveBeenCalledOnce()
-    expect(apiMocks.listExperiments).toHaveBeenCalledOnce()
     expect(apiMocks.listMatches).toHaveBeenCalledWith({ bookmarked: true }, 1, 100)
 
     wrapper.unmount()

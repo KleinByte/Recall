@@ -18,14 +18,37 @@
     "!node_modules/better-sqlite3/prebuilds/darwin-*.node",
     "!node_modules/better-sqlite3/prebuilds/linux-*.node",
     "!node_modules/better-sqlite3/prebuilds/linuxmusl-*.node",
-    "!node_modules/better-sqlite3/prebuilds/win32-arm64.node"
+    "!node_modules/better-sqlite3/prebuilds/win32-arm64.node",
+    "!node_modules/onnxruntime-node/bin/napi-v6/darwin/**/*",
+    "!node_modules/onnxruntime-node/bin/napi-v6/linux/**/*",
+    "!node_modules/onnxruntime-node/bin/napi-v6/win32/arm64/**/*",
+    "!node_modules/onnxruntime-node/bin/napi-v6/win32/x64/DirectML.dll",
+    "!node_modules/onnxruntime-node/bin/napi-v6/win32/x64/dxcompiler.dll",
+    "!node_modules/onnxruntime-node/bin/napi-v6/win32/x64/dxil.dll"
   ],
   "extraResources": [
     "LICENSE",
-    "NOTICE"
+    "NOTICE",
+    "THIRD_PARTY_NOTICES.md",
+    {
+      "from": "resources/champion-portraits",
+      "to": "champion-portraits",
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
+      "from": "resources/minimap-model",
+      "to": "minimap-model",
+      "filter": [
+        "**/*"
+      ]
+    }
   ],
   "asarUnpack": [
-    "**/node_modules/better-sqlite3/prebuilds/win32-x64.node"
+    "**/node_modules/better-sqlite3/prebuilds/win32-x64.node",
+    "**/node_modules/onnxruntime-node/bin/napi-v6/win32/x64/onnxruntime_binding.node",
+    "**/node_modules/onnxruntime-node/bin/napi-v6/win32/x64/onnxruntime.dll"
   ],
   "win": {
     "target": [

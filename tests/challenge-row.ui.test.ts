@@ -67,4 +67,53 @@ describe("ChallengeRow disclosure", () => {
     expect(trigger.attributes("aria-expanded")).toBe("false")
     expect(wrapper.find("#challenge-details-101301").exists()).toBe(false)
   })
+
+  it("shows every capstone descendant and opens a selected member", async () => {
+    const capstone = {
+      ...challenge,
+      challengeId: 200_000,
+      name: "Mastermind",
+      isCapstone: 1,
+      idListType: "NONE",
+    }
+    const nestedCapstone = {
+      ...challenge,
+      challengeId: 200_100,
+      name: "Cornerstone",
+      isCapstone: 1,
+      parentId: 200_000,
+    }
+    const completed = {
+      ...challenge,
+      challengeId: 200_101,
+      name: "Clutch Plays",
+      nextLevel: null,
+      nextThreshold: null,
+      parentId: 200_100,
+    }
+    const retired = {
+      ...challenge,
+      challengeId: 200_102,
+      name: "Archived Objective",
+      isRetired: 1,
+      parentId: 200_100,
+    }
+
+    const wrapper = mount(ChallengeRow, {
+      props: {
+        challenge: capstone,
+        expanded: true,
+        members: [nestedCapstone, completed, retired],
+      },
+      global: { stubs: { FontAwesomeIcon: true } },
+    })
+
+    expect(wrapper.findAll(".member-card")).toHaveLength(3)
+    expect(wrapper.text()).toContain("Cornerstone")
+    expect(wrapper.text()).toContain("Clutch Plays")
+    expect(wrapper.text()).toContain("Archived Objective")
+
+    await wrapper.findAll(".member-card")[1].trigger("click")
+    expect(wrapper.emitted("openMember")).toEqual([[200_101]])
+  })
 })

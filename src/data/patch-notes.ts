@@ -29,6 +29,7 @@ export const patchNotes: readonly PatchNoteRelease[] = [
     "Unified playback evidence, improved map calibration, and fixed cropped minimap debugging.",
     "Added per-match jungle clear splits plus champion average, fastest, and longest full-clear times.",
     "Expanded review, Skill, Progress, release safety, update recovery, and the public product tour.",
+    "Removed practice experiments from review and match history.",
   ),
   note(
     "3.2.2",

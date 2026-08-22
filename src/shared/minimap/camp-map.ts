@@ -11,6 +11,7 @@ export interface CampDefinition {
 
 /** Versioned normalized anchors for the rendered Summoner's Rift minimap. */
 export const SUMMONERS_RIFT_CAMP_MAP_VERSION = 3
+export const CAMP_CLEAR_ALGORITHM_VERSION = 6
 
 // These are the centers of Riot's rendered minimap camp glyphs. They stay
 // explicit because the rendered map is not perfectly point-symmetric; deriving
@@ -83,3 +84,11 @@ export const SUMMONERS_RIFT_CAMPS: readonly CampDefinition[] = [
 ]
 
 export const CAMP_BY_KEY = new Map(SUMMONERS_RIFT_CAMPS.map((camp) => [camp.key, camp]))
+
+/** Patch 26.1 non-epic camp timers used for review playback and clear deduplication. */
+export function campRespawnDurationMs(campKey: CampKey) {
+  const rule = CAMP_BY_KEY.get(campKey)?.respawnRule
+  if (rule === "standard") return 2 * 60_000
+  if (rule === "buff") return 4.5 * 60_000
+  return undefined
+}

@@ -14,6 +14,7 @@ import type {
   ChampionMarkerTemplate,
 } from "../minimap/champion-marker-detector.js"
 import type { CampVisualTemplateAsset } from "../jungle/camp-visual-detector.js"
+import type { ChampionModelRuntimeStatus } from "./onnx-champion-detector.js"
 
 export interface VisionMetrics {
   totalMs: number
@@ -25,6 +26,7 @@ export interface VisionMetrics {
 export interface VisionRuntimeInfo {
   engine: "opencv_js"
   opencvVersion: string
+  championModel?: ChampionModelRuntimeStatus
 }
 
 export interface VisionFrameResult {

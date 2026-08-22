@@ -204,7 +204,6 @@ const itemName = (itemId: number) => itemAsset(itemId).name
           <span v-for="tag in match.tagNames ?? []" :key="tag" class="tag-chip">{{ tag }}</span>
           <span v-if="match.bookmarked" class="annotation" title="Bookmarked">★</span>
           <span v-if="match.hasNote" class="annotation">Note</span>
-          <span v-if="match.experimentCount" class="annotation">Experiment</span>
         </footer>
       </button>
     </article>

@@ -8,8 +8,6 @@ import {
   isUsableMapPosition,
   playbackCoverage,
   playbackMapEventLayer,
-  playbackPositionAt,
-  playbackTrailSamples,
   playbackWorldMarkers,
   spreadOverlappingMapPoints,
 } from "../helpers/timeline-playback"
@@ -20,9 +18,9 @@ import {
   minimapCampMarkersAt,
   minimapFirstEvidenceTimestamp,
   minimapPlaybackDuration,
-  minimapPlaybackTrails,
   reliableMinimapSegments,
   unifiedPlaybackPositionsAt,
+  unifiedPlaybackTrails,
   type UnifiedPlaybackSource,
 } from "../helpers/unified-playback"
 import type { CampClearEvent } from "../shared/minimap/contracts"
@@ -193,54 +191,20 @@ const expandedTokenLinks = computed(() => visibleTokens.value.filter((token) =>
   (Math.abs(token.display.left - token.display.sourceLeft) > .01 ||
     Math.abs(token.display.top - token.display.sourceTop) > .01),
 ))
-const riotTrails = computed(() => visibleParticipants.value.flatMap((participant) => {
-  const latestDeath = props.events.filter((event) =>
-    event.type === "CHAMPION_KILL" &&
-    event.targetId === participant.participantId &&
-    event.timestamp <= props.timestamp,
-  ).at(-1)
-  const points = playbackTrailSamples(
-    props.frames,
-    participant.participantId,
-    props.timestamp,
-    mapId.value,
-  ).filter((sample) => !latestDeath || sample.timestamp >= latestDeath.timestamp)
-    .map((sample) => mapPositionPercent(sample.position, mapId.value))
-  const current = playbackPositionAt(
-    props.frames,
-    props.events,
-    participant.participantId,
-    props.timestamp,
-    mapId.value,
-  )
-  if (current) {
-    const currentPoint = mapPositionPercent(current.position, mapId.value)
-    if (points.length === 0 ||
-        points.at(-1)?.left !== currentPoint.left || points.at(-1)?.top !== currentPoint.top) {
-      points.push(currentPoint)
-    }
-  }
-  if (points.length < 2) return []
-  return [{
-    key: `riot:${participant.participantId}`,
-    participant,
-    source: current?.exact ? "riot_snapshot" as const : "estimated" as const,
-    origin: "riot_timeline" as const,
-    confidence: current?.exact ? 1 : .55,
-    points: points.map((point) => `${point.left},${point.top}`).join(" "),
-  }]
-}))
-const cvTrails = computed(() => {
+const trails = computed(() => {
   const participantById = new Map(props.participants.map((participant) => [
     participant.participantId,
     participant,
   ]))
   const visibleIds = new Set(visibleParticipants.value.map((participant) => participant.participantId))
-  return minimapPlaybackTrails({
+  return unifiedPlaybackTrails({
+    frames: props.frames,
+    events: props.events,
     minimapReview: minimapEnabledForMap.value ? props.minimapReview : undefined,
     bindings: minimapBindings.value,
     participantIds: [...visibleIds],
     timestamp: props.timestamp,
+    mapId: mapId.value,
     minimumConfidence: minimumCvConfidence.value,
   }).flatMap((trail) => {
     const participant = participantById.get(trail.participantId)
@@ -251,7 +215,6 @@ const cvTrails = computed(() => {
     }] : []
   })
 })
-const trails = computed(() => [...riotTrails.value, ...cvTrails.value])
 const sourceCounts = computed(() => {
   const counts: Record<UnifiedPlaybackSource, number> = {
     cv_observed: 0,
@@ -564,7 +527,6 @@ onBeforeUnmount(() => {
             :key="trail.key"
             :class="[
               trail.participant.teamId === 100 ? 'blue' : 'red',
-              `source-${trail.source}`,
               `origin-${trail.origin}`,
               { owner: trail.participant.isPlayer === 1 },
             ]"
@@ -847,9 +809,10 @@ onBeforeUnmount(() => {
         <details class="accuracy-note">
           <summary>About playback evidence</summary>
           <p>
-            Solid CV trails are rendered from observed minimap segments above the minimum confidence threshold. Riot snapshots remain
-            the low-frequency baseline, and dashed paths are estimated or reconstructed. Unknown CV intervals stay disconnected rather
-            than inventing movement. Camp clears and respawns use the same playback clock as the gold chart and match events.
+            Riot snapshots anchor one continuous route. Reliable CV sightings bend that route between snapshots, while incoherent
+            detector jumps are discarded and missing intervals are estimated between the surrounding evidence. Even a brief accepted
+            sighting improves the route before it returns smoothly to estimation. Camp clears and respawns use the same playback clock
+            as the gold chart and match events.
           </p>
         </details>
       </aside>
@@ -965,19 +928,6 @@ onBeforeUnmount(() => {
 
 .trail-layer .blue { stroke: var(--ui-team-blue); }
 .trail-layer .red { stroke: var(--ui-team-red); }
-.trail-layer .origin-riot_timeline {
-  stroke-dasharray: 2.5 3;
-  opacity: .34;
-}
-.trail-layer .origin-minimap_cv.source-cv_observed {
-  stroke-width: 1.75;
-  opacity: .9;
-}
-.trail-layer .origin-minimap_cv.source-estimated {
-  stroke-width: 1.35;
-  stroke-dasharray: 4 2.5;
-  opacity: .58;
-}
 .trail-layer .owner {
   stroke: var(--ui-accent-strong);
   stroke-width: 2;
@@ -1161,26 +1111,12 @@ onBeforeUnmount(() => {
 .champion-token::before {
   position: absolute;
   inset: -6px;
-  border: 1px solid transparent;
+  border: 1px solid color-mix(in srgb, var(--team) 72%, white);
   border-radius: inherit;
   content: "";
+  opacity: .76;
   pointer-events: none;
 }
-.champion-token.cv-observed::before {
-  border-width: 2px;
-  border-color: #6ce0ca;
-  box-shadow: 0 0 8px rgb(108 224 202 / 55%);
-}
-.champion-token.riot-snapshot::before {
-  border-color: color-mix(in srgb, var(--team) 78%, white);
-  opacity: .75;
-}
-.champion-token.estimated::before {
-  border-style: dashed;
-  border-color: color-mix(in srgb, var(--team) 64%, var(--ui-text-muted));
-  opacity: .72;
-}
-.champion-token.cv-origin.estimated::before { border-color: #69d8c5; }
 .champion-token.owner {
   z-index: 6;
   width: 35px;

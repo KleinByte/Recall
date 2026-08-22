@@ -60,6 +60,8 @@ describe("Windows update compatibility", () => {
     expect(baseConfig.win.artifactName).toBe("${productName}-Windows-Setup.${ext}")
     expect(baseConfig.asarUnpack).toEqual([
       "**/node_modules/better-sqlite3/prebuilds/win32-x64.node",
+      "**/node_modules/onnxruntime-node/bin/napi-v6/win32/x64/onnxruntime_binding.node",
+      "**/node_modules/onnxruntime-node/bin/napi-v6/win32/x64/onnxruntime.dll",
     ])
     expect(baseConfig.files).toContain(
       "!node_modules/better-sqlite3/prebuilds/win32-arm64.node",

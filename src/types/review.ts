@@ -164,7 +164,6 @@ export interface MatchAnnotation {
   note: string
   bookmarked: boolean
   tags: AnnotationTag[]
-  experimentOutcomes: ExperimentOutcome[]
   updatedAt?: number
 }
 
@@ -191,7 +190,6 @@ export interface ReviewOverview {
   latest?: MatchReview
   recentSession?: ReviewSession
   bookmarkCount: number
-  activeExperimentCount: number
 }
 
 export interface OwnerAugmentSummary {
@@ -340,41 +338,4 @@ export interface TimelineSummary {
     beforeDifference: number
     afterDifference: number
   }[]
-}
-
-export type ExperimentStatus = "active" | "paused" | "completed"
-export type ExperimentOutcomeValue =
-  | "worked"
-  | "mixed"
-  | "did_not_work"
-  | "unrated"
-
-export interface PracticeExperiment {
-  id: number
-  name: string
-  hypothesis: string
-  championIds: number[]
-  modes: TrackedMode[]
-  status: ExperimentStatus
-  startedAt: number
-  endedAt?: number
-  games?: number
-  summary?: {
-    winRate: number
-    avgGrade?: number
-    kda: number
-    confidence: Confidence
-    baselineGames: number
-    baselineWinRate: number
-    baselineAvgGrade?: number
-    baselineKda: number
-    baselineConfidence: Confidence
-  }
-}
-
-export interface ExperimentOutcome {
-  experimentId: number
-  experimentName: string
-  outcome: ExperimentOutcomeValue
-  note: string
 }
