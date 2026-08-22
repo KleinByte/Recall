@@ -21,6 +21,16 @@ function note(
 /** Shipped releases, newest first. */
 export const patchNotes: readonly PatchNoteRelease[] = [
   note(
+    "3.4.1",
+    "2026-08-22",
+    "Reliable live tracking",
+    "Recall now starts and keeps minimap tracking through League Client disconnects and reconnects.",
+    "Starts Port 2999 polling and minimap capture as soon as the game process appears, even when an LCU transition is missed.",
+    "Keeps champion tracks and jungle camp states alive while the League Client UI disconnects or restarts.",
+    "Prevents optional player-name lookups and stalled local requests from delaying the first live snapshot.",
+    "Recovers interrupted active games after restart and finalizes captures only from correlated terminal evidence.",
+  ),
+  note(
     "3.4.0",
     "2026-08-22",
     "Smarter minimap tracking",
