@@ -21,6 +21,16 @@ function note(
 /** Shipped releases, newest first. */
 export const patchNotes: readonly PatchNoteRelease[] = [
   note(
+    "3.4.0",
+    "2026-08-22",
+    "Smarter minimap tracking",
+    "Recall now reads champion movement from the minimap with a bundled offline model for steadier playback and pathing reviews.",
+    "Added offline machine-learning champion detection with bundled portraits and a versioned minimap model.",
+    "Improved champion tracking, jungle camp recognition, and path reconstruction when frames are noisy or incomplete.",
+    "Expanded minimap training, evaluation, and regression tooling to keep future models reproducible.",
+    "Refined Challenges, match playback, Settings, and review layouts while removing retired practice experiments.",
+  ),
+  note(
     "3.3.0",
     "2026-08-20",
     "Sharper playback and jungle reviews",
