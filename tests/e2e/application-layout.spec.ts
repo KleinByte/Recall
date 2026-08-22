@@ -67,6 +67,7 @@ test("the real Electron shell remains readable without page-level overflow", asy
         .toBeVisible()
 
       if (surface.name === "settings") {
+        await page.getByRole("tab", { name: "Data", exact: true }).click()
         const createBackup = page.getByRole("button", { name: "Create backup" })
         await expect(createBackup).toBeEnabled()
         await createBackup.click()
