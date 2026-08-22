@@ -708,7 +708,7 @@ const splitChampions = (challenge: ChallengeRow) => {
   line-height: 1;
 }
 
-.result-readout small { color: var(--ui-text-subtle); font-size: 10px; }
+.result-readout small { color: var(--ui-text-subtle); font-size: var(--ui-text-micro); }
 
 .filter-deck {
   position: relative;
@@ -765,7 +765,7 @@ const splitChampions = (challenge: ChallengeRow) => {
   white-space: nowrap;
 }
 
-.selected-group small { color: var(--ui-text-muted); font-size: 10px; }
+.selected-group small { color: var(--ui-text-muted); font-size: var(--ui-text-micro); }
 .selected-group.default-scope { border-color: var(--ui-divider); box-shadow: inset 2px 0 color-mix(in srgb, var(--ui-accent) 38%, transparent); }
 .selected-group.default-scope > span { color: var(--ui-accent); }
 
@@ -828,7 +828,7 @@ const splitChampions = (challenge: ChallengeRow) => {
 .filter-toggle input { margin: 0; accent-color: var(--ui-accent); }
 .filter-toggle span { display: grid; gap: 1px; }
 .filter-toggle strong { color: var(--ui-text); font-size: var(--ui-text-label); font-weight: 500; }
-.filter-toggle small { color: var(--ui-text-muted); font-size: 9px; }
+.filter-toggle small { color: var(--ui-text-muted); font-size: var(--ui-text-micro); }
 
 .reset-filters { flex: 0 0 auto; }
 .filter-count {
@@ -839,7 +839,7 @@ const splitChampions = (challenge: ChallengeRow) => {
   border-radius: var(--ui-radius-pill);
   background: color-mix(in srgb, var(--ui-accent) 13%, var(--ui-surface-selected));
   color: var(--ui-accent-strong);
-  font: 10px var(--ui-font-numeric);
+  font: var(--ui-text-micro) var(--ui-font-numeric);
 }
 
 .ledger-head {
