@@ -157,9 +157,9 @@ export function createUpdaterService({
         // ordinary single-instance lock. It is removed if preparation fails.
         await beginInstall(version)
         await beforeInstall()
-        // Keep the NSIS progress window visible. The renderer covers database
-        // preparation, then Windows shows that installation is still active.
-        updater.quitAndInstall(false, true)
+        // Install silently after the renderer covers database preparation.
+        // Passing false here opens the assisted NSIS installer UI.
+        updater.quitAndInstall(true, true)
         return true
       } catch (error) {
         try {

@@ -34,7 +34,7 @@ describe("createUpdaterService", () => {
     service.stop()
   })
 
-  it("publishes progress and enables installation only after download", async () => {
+  it("silently installs and restarts only after the download is ready", async () => {
     const updater = client()
     const publish = vi.fn()
     const beforeInstall = vi.fn()
@@ -60,7 +60,7 @@ describe("createUpdaterService", () => {
     await expect(service.install()).resolves.toBe(true)
     expect(beginInstall).toHaveBeenCalledWith("1.2.0")
     expect(beforeInstall).toHaveBeenCalledOnce()
-    expect(updater.quitAndInstall).toHaveBeenCalledWith(false, true)
+    expect(updater.quitAndInstall).toHaveBeenCalledWith(true, true)
   })
 
   it("checks for updates every six hours without overlapping a pending check", async () => {

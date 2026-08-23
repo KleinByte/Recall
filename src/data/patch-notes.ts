@@ -21,6 +21,14 @@ function note(
 /** Shipped releases, newest first. */
 export const patchNotes: readonly PatchNoteRelease[] = [
   note(
+    "3.4.2",
+    "2026-08-22",
+    "Seamless app updates",
+    "Restart to update once again installs Recall quietly and opens the new version automatically.",
+    "Restored silent installation after Recall safely closes and protects the local match database.",
+    "Kept the update recovery guard and automatic relaunch behavior introduced in recent releases.",
+  ),
+  note(
     "3.4.1",
     "2026-08-22",
     "Reliable live tracking",
