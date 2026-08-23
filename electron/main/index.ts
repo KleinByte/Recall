@@ -3075,6 +3075,16 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
     getRepository().getChampionStats(withPuuid(filter)),
   )
 
+  ipcMain.handle(
+    "stats:champion-performance-snapshot",
+    (_event, filter: Partial<MatchQuery>) => {
+      const averages = getRepository().getStyleAverages(withPuuid(filter))
+      return averages
+        ? { csPerMin: averages.csPerMin, visionPerMin: averages.visionPerMin }
+        : undefined
+    },
+  )
+
   ipcMain.handle("stats:grades", (_event, filter: Partial<MatchQuery>) =>
     getRepository().getGradeDistribution(withPuuid(filter)),
   )

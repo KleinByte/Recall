@@ -952,6 +952,7 @@ function channelValue(channel: string, args: unknown[]) {
     }
     case "matches:champions": return [...new Set(recentMatches.map((row) => row.championId))]
     case "stats:champions": return championStats
+    case "stats:champion-performance-snapshot": return { csPerMin: 6.3, visionPerMin: 0.91 }
     case "stats:grades": return [{ grade: "S", count: 5 }, { grade: "A", count: 17 }, { grade: "B", count: 11 }, { grade: "C", count: 4 }]
     case "stats:skill-report": return skillReport
     case "stats:records": return personalRecords
@@ -997,7 +998,7 @@ function channelValue(channel: string, args: unknown[]) {
 
 export function installShowcaseEnvironment(scene = "dashboard") {
   const subscriptions = new Map<string, Set<(...args: unknown[]) => void>>()
-  window.ipcRenderer = {
+  window.showcaseIpcRenderer = {
     on(channel, listener) {
       const listeners = subscriptions.get(channel) ?? new Set()
       listeners.add(listener)

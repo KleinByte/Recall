@@ -14,7 +14,7 @@ describe("Recall Score UI contract", () => {
       "src/pages/MatchesPage.vue",
       "src/pages/ChampionsPage.vue",
       "src/pages/LiveGamePage.vue",
-      "src/components/ChampionDetail.vue",
+      "src/pages/ChampionDetailPage.vue",
       "src/components/skill/SkillOverview.vue",
       "src/components/skill/SkillInsights.vue",
     ]

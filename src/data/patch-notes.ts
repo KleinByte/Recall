@@ -21,6 +21,17 @@ function note(
 /** Shipped releases, newest first. */
 export const patchNotes: readonly PatchNoteRelease[] = [
   note(
+    "3.5.0",
+    "2026-08-22",
+    "Champion performance, in focus",
+    "Champion insights now live in a full, mode-scoped profile with clearer dashboard and ranked progress controls.",
+    "Open champions as navigable pages with Back and Forward history, scoped Recall grades, recent form, records, and conditional jungle analytics.",
+    "Choose Ranked Solo/Duo or all Summoner's Rift for Dashboard RVI, with Solo/Duo selected on every fresh visit.",
+    "Explore a performance-focused champion catalog with Damage per game, graded-pool coverage, and streamlined search and filters.",
+    "Review one ranked queue at a time on Progress while retaining every season, rank, LP, record, change, and graph.",
+    "Keeps champion challenge eligibility available as a collapsed secondary section within each champion profile.",
+  ),
+  note(
     "3.4.2",
     "2026-08-22",
     "Seamless app updates",

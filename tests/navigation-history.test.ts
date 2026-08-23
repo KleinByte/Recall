@@ -31,4 +31,24 @@ describe("application navigation history", () => {
     expect(navigation.page.value).toBe("progress")
     expect(navigation.canGoForward.value).toBe(false)
   })
+
+  it.each(["dashboard", "champions"] as const)(
+    "restores a champion opened from %s with Back and Forward",
+    async (origin) => {
+      const navigation = await import("../src/helpers/navigation")
+      navigation.goTo(origin)
+      navigation.openChampion(103)
+
+      expect(navigation.page.value).toBe("champion")
+      expect(navigation.detailChampionId.value).toBe(103)
+
+      navigation.goBack()
+      expect(navigation.page.value).toBe(origin)
+      expect(navigation.detailChampionId.value).toBeNull()
+
+      navigation.goForward()
+      expect(navigation.page.value).toBe("champion")
+      expect(navigation.detailChampionId.value).toBe(103)
+    },
+  )
 })

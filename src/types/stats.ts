@@ -274,6 +274,12 @@ export interface ChampionStatRow {
   gradedGames: number
 }
 
+/** Scoped rate statistics used by champion performance snapshots. */
+export interface ChampionPerformanceSnapshot {
+  csPerMin: number
+  visionPerMin: number
+}
+
 export interface StyleAxis {
   key: string
   label: string

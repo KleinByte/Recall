@@ -10,6 +10,7 @@ import type {
   ChallengeHistoryRow,
   ChallengeRow,
   ChampionNeed,
+  ChampionPerformanceSnapshot,
   ChampionRanking,
   ChampionStatRow,
   ChampionStatus,
@@ -53,7 +54,7 @@ import type {
   TimelineState,
 } from "../types/review"
 
-const ipc = () => window.ipcRenderer
+const ipc = () => window.showcaseIpcRenderer ?? window.ipcRenderer
 
 type IpcSubscriber = (...args: any[]) => void
 
@@ -334,6 +335,12 @@ export const api = {
 
   getChampionStats(filter: Partial<StatsFilter>): Promise<ChampionStatRow[]> {
     return invoke("stats:champions", filter)
+  },
+
+  getChampionPerformanceSnapshot(
+    filter: Partial<MatchQuery>,
+  ): Promise<ChampionPerformanceSnapshot | undefined> {
+    return invoke("stats:champion-performance-snapshot", filter)
   },
 
   getGradeDistribution(filter: Partial<MatchQuery>): Promise<GradeCount[]> {

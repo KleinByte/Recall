@@ -14,4 +14,6 @@ interface Window {
     send(channel: string, ...args: unknown[]): void
     invoke<T = unknown>(channel: string, ...args: unknown[]): Promise<T>
   }
+  /** Development-only IPC fixture used by the fictional product showcase. */
+  showcaseIpcRenderer?: Window["ipcRenderer"]
 }

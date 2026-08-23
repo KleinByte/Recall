@@ -15,6 +15,7 @@ import { useCoalescedTask } from "../helpers/use-coalesced-task"
 import { openChampion } from "../helpers/navigation"
 import {
   championIconUrl,
+  formatCompact,
   formatDecimal,
   formatPercent,
 } from "../helpers/format"
@@ -30,7 +31,6 @@ import {
   type ChampionRole,
 } from "../types/lol"
 import type {
-  ChampionNeed,
   ChampionRanking,
   ChampionStatRow,
   Confidence,
@@ -51,11 +51,11 @@ type SortKey =
   | "games"
   | "winRate"
   | "kda"
-  | "needs"
+  | "damage"
 
 type SortDirection = "asc" | "desc"
 
-type FilterKey = "all" | "played" | "untouched" | "needs"
+type FilterKey = "all" | "played" | "untouched" | "graded"
 type ArchetypeFilter = "all" | PrimaryArchetype
 type ClassFilter = "all" | ChampionRole
 
@@ -85,7 +85,7 @@ const FILTERS: { value: FilterKey; label: string }[] = [
   { value: "all", label: "All" },
   { value: "played", label: "Played" },
   { value: "untouched", label: "Untouched" },
-  { value: "needs", label: "Has challenges" },
+  { value: "graded", label: "Graded" },
 ]
 
 const CHAMPION_ROLE_LABELS: Readonly<Record<ChampionRole, string>> = Object.freeze({
@@ -99,7 +99,6 @@ const CHAMPION_ROLE_LABELS: Readonly<Record<ChampionRole, string>> = Object.free
 
 const stats = ref<ChampionStatRow[]>([])
 const profile = ref<ProfileSummary | null>(null)
-const needs = ref<Record<number, ChampionNeed[]>>({})
 const ranking = ref<ChampionRanking | null>(null)
 const sortKey = ref<SortKey>("rank")
 const sortDirection = ref<SortDirection>("desc")
@@ -141,17 +140,14 @@ async function load() {
   if (!props.champions) return
 
   try {
-    const ids = props.champions.map((champion) => champion.id)
-    const [nextStats, nextProfile, nextNeeds, nextRanking] = await Promise.all([
+    const [nextStats, nextProfile, nextRanking] = await Promise.all([
       api.getChampionStats({}),
       api.getProfile(),
-      api.getChampionNeeds(ids),
       api.getRankedChampions({}),
     ])
 
     stats.value = nextStats
     profile.value = nextProfile
-    needs.value = nextNeeds
     ranking.value = nextRanking
   } catch {
     stats.value = []
@@ -163,7 +159,6 @@ const refresh = useCoalescedTask(load)
 onMounted(() => {
   void refresh()
   events.on("stats:updated", () => void refresh())
-  events.on("challenges:updated", () => void refresh())
   events.on("lcu:status", () => void refresh())
 })
 
@@ -200,14 +195,11 @@ const decorated = computed(() => {
   return props.champions.map((champion) => {
     const recorded = statsById.value.get(champion.id)
     const mastery = masteryById.value.get(champion.id)
-    const championNeeds = needs.value[champion.id] ?? []
     const rank = rankById.value.get(champion.id)
     const earlySignal = earlyById.value.get(champion.id)
 
     return {
       champion,
-      needs: championNeeds,
-      needCount: championNeeds.length,
       masteryLevel: mastery?.championLevel ?? 0,
       masteryPoints: mastery?.championPoints ?? 0,
       riotGrade: mastery?.highestGrade,
@@ -216,6 +208,7 @@ const decorated = computed(() => {
       wins: recorded?.wins ?? 0,
       winRate: recorded?.winRate ?? 0,
       kda: recorded?.kda ?? 0,
+      damagePerGame: recorded?.avgDamageToChampions ?? 0,
       recallScore: rank?.recallScore ?? recorded?.averageRecallScore,
       confidence: rank?.confidence,
       earlySignal,
@@ -250,7 +243,7 @@ function matchesSearch(row: DecoratedChampion, needle: string) {
 function matchesStatus(row: DecoratedChampion, value: FilterKey) {
   if (value === "played") return row.games > 0
   if (value === "untouched") return row.games === 0
-  if (value === "needs") return row.needCount > 0
+  if (value === "graded") return row.recallScore !== undefined
   return true
 }
 
@@ -274,7 +267,7 @@ const filterCounts = computed(() => {
     all: candidates.length,
     played: candidates.filter((row) => matchesStatus(row, "played")).length,
     untouched: candidates.filter((row) => matchesStatus(row, "untouched")).length,
-    needs: candidates.filter((row) => matchesStatus(row, "needs")).length,
+    graded: candidates.filter((row) => matchesStatus(row, "graded")).length,
   }
 })
 
@@ -314,8 +307,8 @@ const pool = computed(() => {
     losses: games - wins,
     winRate: games > 0 ? wins / games : 0,
     averageRecallScore: recallScoreWeight > 0 ? recallScoreSum / recallScoreWeight : undefined,
-    needsTotal: decorated.value.reduce((total, row) => total + row.needCount, 0),
-    needsChampions: filterCounts.value.needs,
+    gradedChampions: graded.length,
+    gradedGames: recallScoreWeight,
   }
 })
 
@@ -356,8 +349,8 @@ const rows = computed(() => {
       case "kda":
         comparison = a.kda - b.kda
         break
-      case "needs":
-        comparison = a.needCount - b.needCount
+      case "damage":
+        comparison = a.damagePerGame - b.damagePerGame
         break
     }
 
@@ -384,21 +377,9 @@ function clearFilters() {
   <div class="page">
     <PageHeader
       title="Champions"
-      eyebrow="Mastery archive"
-      description="Mastery, recorded results, and the challenges each champion still counts toward."
-    >
-      <template #actions>
-        <Field label="Search champions" compact class="search-field">
-          <input
-            v-model="search"
-            class="league-input search"
-            type="search"
-            placeholder="Champion name"
-            aria-label="Search champions"
-          />
-        </Field>
-      </template>
-    </PageHeader>
+      eyebrow="Performance archive"
+      description="Mastery, Recall grades, and recorded performance across your champion pool."
+    />
 
     <EmptyState
       v-if="!champions"
@@ -436,9 +417,9 @@ function clearFilters() {
         />
         <StatTile
           density="compact"
-          label="Challenges remaining"
-          :value="pool.needsTotal.toString()"
-          :hint="`Spread over ${pool.needsChampions} champions`"
+          label="Graded pool"
+          :value="pool.gradedChampions.toString()"
+          :hint="`${pool.gradedGames} graded games`"
         />
       </Surface>
 
@@ -481,6 +462,15 @@ function clearFilters() {
                 {{ CHAMPION_ROLE_LABELS[value] }} · {{ classCounts[value] }}
               </option>
             </select>
+          </Field>
+          <Field label="Search champions" compact class="search-field">
+            <input
+              v-model="search"
+              class="league-input search"
+              type="search"
+              placeholder="Champion name"
+              aria-label="Search champions"
+            />
           </Field>
         </div>
 
@@ -562,11 +552,11 @@ function clearFilters() {
                     </span>
                   </button>
                 </th>
-                <th class="needs-col sortable" scope="col" :aria-sort="ariaSort('needs')">
-                  <button type="button" @click="setSort('needs')">
-                    Challenges remaining
-                    <span class="arrow" :class="{ idle: sortKey !== 'needs' }">
-                      {{ sortIcon("needs") }}
+                <th class="damage-col sortable" scope="col" :aria-sort="ariaSort('damage')">
+                  <button type="button" @click="setSort('damage')">
+                    Damage / game
+                    <span class="arrow" :class="{ idle: sortKey !== 'damage' }">
+                      {{ sortIcon("damage") }}
                     </span>
                   </button>
                 </th>
@@ -655,19 +645,9 @@ function clearFilters() {
                   <span v-if="row.games > 0">{{ formatDecimal(row.kda, 2) }}</span>
                   <span v-else class="muted">–</span>
                 </td>
-                <td class="needs-col">
-                  <span v-if="row.needCount === 0" class="muted done">All done</span>
-                  <span
-                    v-else
-                    class="needs"
-                    :title="row.needs.map((n) => n.name).join(', ')"
-                  >
-                    <span class="need-count numeric">{{ row.needCount }}</span>
-                    <span class="muted need-names">
-                      {{ row.needs.slice(0, 2).map((n) => n.name).join(", ")
-                      }}{{ row.needs.length > 2 ? "…" : "" }}
-                    </span>
-                  </span>
+                <td class="damage-col numeric">
+                  <span v-if="row.games > 0">{{ formatCompact(row.damagePerGame) }}</span>
+                  <span v-else class="muted">–</span>
                 </td>
               </tr>
             </tbody>
@@ -688,9 +668,8 @@ function clearFilters() {
       </Surface>
 
       <p class="muted footnote">
-        Your grade weighs a champion's results against how much you have played
-        them, so one strong game does not outrank a season. Riot grade is your
-        best career grade from champion mastery.
+        Your Recall grade weighs performance against sample size, so one strong
+        game does not outrank a season. Riot grade is your best career mastery grade.
       </p>
     </template>
   </div>
@@ -1004,42 +983,10 @@ td.champ-col {
   background: var(--loss);
 }
 
-.needs-col {
-  text-align: left !important;
-  width: 28%;
-}
+.damage-col { width: 12%; }
 
 .small {
   font-size: 11px;
-}
-
-.done {
-  font-size: 11px;
-}
-
-.needs {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-.need-count {
-  display: grid;
-  place-items: center;
-  min-width: 22px;
-  padding: 1px 5px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  color: var(--gold);
-  font-size: 11px;
-}
-
-.need-names {
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .empty {
@@ -1065,8 +1012,7 @@ td.champ-col {
 }
 
 @container recall-content (max-width: 1180px) {
-  .riot-col,
-  .need-names {
+  .riot-col {
     display: none;
   }
 }

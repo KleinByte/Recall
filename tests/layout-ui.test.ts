@@ -336,12 +336,14 @@ describe("desktop page layout", () => {
     expect(rankGraph).toContain("timestamps.length === 1")
   })
 
-  it("includes League Classic in the dashboard feed while retaining queue tags", () => {
+  it("keeps the dashboard feed broad while making its RVI scope explicit", () => {
     const dashboard = read("src/pages/DashboardPage.vue")
     const matches = read("src/components/MatchList.vue")
 
     expect(dashboard).toContain("api.getMatches({}, 6)")
-    expect(dashboard).toContain('modeFamily: "classic"')
+    expect(dashboard).toContain('{ mode: "sr_ranked_solo" }')
+    expect(dashboard).toContain('{ modeFamily: "sr" }')
+    expect(dashboard).toContain('aria-label="RVI scope"')
     expect(dashboard).not.toContain("2450")
     expect(matches).toContain("match.queueName ?? modeLabel(match.mode)")
   })
@@ -376,7 +378,7 @@ describe("desktop page layout", () => {
     expect(champions).not.toContain('class="sort-row"')
     expect(champions).toContain('@click="setSort(\'rank\')"')
     expect(champions).toContain('@click="setSort(\'games\')"')
-    expect(champions).toContain('@click="setSort(\'needs\')"')
+    expect(champions).toContain('@click="setSort(\'damage\')"')
     expect(champions).toContain(":aria-sort=\"ariaSort('winRate')\"")
   })
 

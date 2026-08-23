@@ -17,8 +17,7 @@ async function bootstrap() {
       navigation.focusReviewGameId.value = showcaseGameId
       navigation.page.value = "review"
     } else if (showcase === "champion") {
-      navigation.page.value = "champions"
-      navigation.detailChampionId.value = 20
+      navigation.openChampion(20)
     } else if (["skill-overview", "skill-insights", "skill-analyze"].includes(showcase)) {
       navigation.page.value = "skill"
     } else if (showcase === "progress") {

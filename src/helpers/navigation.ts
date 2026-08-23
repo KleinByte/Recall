@@ -10,6 +10,7 @@ export type PageId =
   | "skill"
   | "progress"
   | "champions"
+  | "champion"
   | "settings"
 
 /**
@@ -25,7 +26,7 @@ export const page = ref<PageId>("dashboard")
 /** A challenge the Challenges page should open and scroll to on arrival. */
 export const focusChallengeId = ref<number | null>(null)
 
-/** A champion whose breakdown is open, shown over whatever page is beneath. */
+/** The champion selected by the current champion-detail history entry. */
 export const detailChampionId = ref<number | null>(null)
 
 export const focusReviewGameId = ref<number | null>(null)
@@ -33,6 +34,7 @@ export const focusReviewGameId = ref<number | null>(null)
 export interface NavigationEntry {
   page: PageId
   reviewGameId?: number
+  championId?: number
 }
 
 const entries = ref<NavigationEntry[]>([{ page: "dashboard" }])
@@ -42,12 +44,17 @@ export const canGoBack = computed(() => entryIndex.value > 0)
 export const canGoForward = computed(() => entryIndex.value < entries.value.length - 1)
 
 const sameEntry = (left: NavigationEntry, right: NavigationEntry) =>
-  left.page === right.page && left.reviewGameId === right.reviewGameId
+  left.page === right.page &&
+  left.reviewGameId === right.reviewGameId &&
+  left.championId === right.championId
 
 function applyEntry(entry: NavigationEntry) {
   page.value = entry.page
   focusReviewGameId.value = entry.page === "review"
     ? entry.reviewGameId ?? null
+    : null
+  detailChampionId.value = entry.page === "champion"
+    ? entry.championId ?? null
     : null
 }
 
@@ -88,11 +95,12 @@ export function openChallenge(challengeId: number) {
 }
 
 export function openChampion(championId: number) {
-  detailChampionId.value = championId
+  navigate({ page: "champion", championId })
 }
 
 export function closeChampion() {
-  detailChampionId.value = null
+  if (page.value === "champion") goBack()
+  else detailChampionId.value = null
 }
 
 export function openMatch(match: MatchRow) {

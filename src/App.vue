@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineAsyncComponent, onMounted, ref } from "vue"
+import { computed, defineAsyncComponent, onMounted, ref } from "vue"
 import AppSidebar from "./components/AppSidebar.vue"
 import ChampSelectBanner from "./components/ChampSelectBanner.vue"
 import PatchNotesModal from "./components/PatchNotesModal.vue"
@@ -27,7 +27,7 @@ import type { LiveSession } from "./types/live"
 import type { RecordNotification } from "./types/notifications"
 import type { UpdateStatus } from "./types/update"
 
-const ChampionDetail = defineAsyncComponent(() => import("./components/ChampionDetail.vue"))
+const ChampionDetailPage = defineAsyncComponent(() => import("./pages/ChampionDetailPage.vue"))
 const ChallengesPage = defineAsyncComponent(() => import("./pages/ChallengesPage.vue"))
 const ChampionsPage = defineAsyncComponent(() => import("./pages/ChampionsPage.vue"))
 const DashboardPage = defineAsyncComponent(() => import("./pages/DashboardPage.vue"))
@@ -65,6 +65,7 @@ const events = useApiEvents()
 const isColoredWhenDone = ref(false)
 const showChampionNames = ref(false)
 const sidebarCollapsed = ref(false)
+const sidebarPage = computed(() => page.value === "champion" ? "champions" : page.value)
 
 async function fetchAramStats() {
   const response = await fetch(
@@ -271,7 +272,7 @@ onMounted(async () => {
 
     <div class="app">
       <AppSidebar
-        :page="page"
+        :page="sidebarPage"
         :connected="connected"
         :summoner="summoner"
         :refreshing="refreshing"
@@ -350,6 +351,12 @@ onMounted(async () => {
           :connected="connected"
         />
 
+        <ChampionDetailPage
+          v-else-if="page === 'champion' && detailChampionId !== null"
+          :champion-id="detailChampionId"
+          :champions="allChampions"
+        />
+
         <SettingsPage
           v-else-if="page === 'settings'"
           :is-colored-when-done="isColoredWhenDone"
@@ -369,12 +376,6 @@ onMounted(async () => {
           @install-update="installUpdateWithRecall"
         />
       </main>
-
-      <ChampionDetail
-        v-if="detailChampionId !== null"
-        :champion-id="detailChampionId"
-        :champions="allChampions"
-      />
 
       <PatchNotesModal
         v-if="showPatchNotes"

@@ -8,7 +8,6 @@ import type { Champion } from "../src/types/lol"
 const apiMocks = vi.hoisted(() => ({
   getChampionStats: vi.fn(),
   getProfile: vi.fn(),
-  getChampionNeeds: vi.fn(),
   getRankedChampions: vi.fn(),
   on: vi.fn(() => () => undefined),
 }))
@@ -58,7 +57,6 @@ describe("ChampionsPage collection filters", () => {
       },
     ])
     apiMocks.getProfile.mockResolvedValue({ challenges: null, ranked: null, mastery: [] })
-    apiMocks.getChampionNeeds.mockResolvedValue({ 89: [{ challengeId: 1, name: "Tank test" }] })
     apiMocks.getRankedChampions.mockResolvedValue({
       ranked: [], earlySignals: [], best: [], worst: [],
     })
@@ -99,5 +97,29 @@ describe("ChampionsPage collection filters", () => {
       .toBe("all")
     expect(wrapper.get<HTMLSelectElement>('select[aria-label="Filter by Riot class"]').element.value)
       .toBe("all")
+  })
+
+  it("is performance-focused with toolbar search, graded filtering, and damage sorting", async () => {
+    const wrapper = mount(ChampionsPage, {
+      props: { champions, connected: true },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain("Challenges remaining")
+    expect(wrapper.text()).not.toContain("Has challenges")
+    expect(wrapper.get(".toolbar").find('input[aria-label="Search champions"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain("Graded pool")
+    expect(wrapper.text()).toContain("6 graded games")
+
+    const graded = wrapper.findAll(".chip-row button")
+      .find((button) => button.text().includes("Graded"))!
+    await graded.trigger("click")
+    expect(wrapper.findAll("tbody .champion-row")).toHaveLength(2)
+
+    const damageSort = wrapper.findAll("thead button")
+      .find((button) => button.text().includes("Damage / game"))!
+    await damageSort.trigger("click")
+    expect(wrapper.get("tbody .champion-row").text()).toContain("Ahri")
+    expect(wrapper.get("tbody .champion-row .damage-col").text()).toBe("20.0k")
   })
 })

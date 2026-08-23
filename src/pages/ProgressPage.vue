@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue"
-import RankGraph from "../components/RankGraph.vue"
+import RankedHistoryPanel from "../components/RankedHistoryPanel.vue"
 import {
   Button as UiButton,
   EmptyState,
@@ -25,7 +25,6 @@ import {
 } from "../helpers/format"
 import {
   isRecognizedRankedQueue,
-  rankedQueueLabel,
 } from "../helpers/ranked-queues"
 import type { Champion } from "../types/lol"
 import type {
@@ -187,16 +186,7 @@ onMounted(() => {
 
 const rankedQueues = computed(() =>
   ranked.value
-    .filter((entry) => isRecognizedRankedQueue(entry.queue) && entry.points.length > 0)
-    .map((entry) => ({
-      ...entry,
-      label: rankedQueueLabel(entry.queue),
-      latest: entry.points[entry.points.length - 1],
-      change:
-        entry.points.length > 1
-          ? entry.points[entry.points.length - 1].points - entry.points[0].points
-          : 0,
-    })),
+    .filter((entry) => isRecognizedRankedQueue(entry.queue) && entry.points.length > 0),
 )
 
 const challengeMatches = computed(() => {
@@ -494,33 +484,12 @@ const activeRecordGroup = computed(() =>
       </div>
     </Panel>
 
-    <Panel v-if="rankedQueues.length" title="Ranked" class="ranked-panel">
-      <div class="queues">
-        <div v-for="queue in rankedQueues" :key="queue.queue" class="queue">
-          <div class="queue-head">
-            <div>
-              <div class="muted queue-label">{{ queue.label }}</div>
-              <div class="queue-rank">{{ queue.latest.label }}</div>
-            </div>
-            <div class="queue-meta">
-              <div class="numeric">{{ queue.latest.leaguePoints }} LP</div>
-              <div
-                v-if="queue.change !== 0"
-                class="numeric change"
-                :class="queue.change > 0 ? 'up' : 'down'"
-              >
-                {{ queue.change > 0 ? "+" : "" }}{{ queue.change }} since recording
-                began
-              </div>
-            </div>
-          </div>
-          <RankGraph v-if="queue.points.length > 1" :points="queue.points" />
-          <p v-else class="muted footnote">
-            One reading so far. The line appears once your rank moves.
-          </p>
-        </div>
-      </div>
-    </Panel>
+    <RankedHistoryPanel
+      v-if="rankedQueues.length"
+      :histories="rankedQueues"
+      allow-season-selection
+      class="ranked-panel"
+    />
 
     <EmptyState
       v-else
@@ -905,51 +874,6 @@ const activeRecordGroup = computed(() =>
   font-size: 11px;
 }
 
-.queues {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-5);
-}
-
-.queue-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: var(--space-3);
-}
-
-.queue-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 1.2px;
-}
-
-.queue-rank {
-  font-family: var(--font-display);
-  font-size: 18px;
-  color: var(--ui-accent-strong);
-}
-
-.queue-meta {
-  text-align: right;
-  font-size: 12px;
-  color: var(--text-primary);
-}
-
-.change {
-  font-size: 11px;
-  margin-top: 2px;
-}
-
-.change.up { color: var(--ui-positive); }
-
-.change.down { color: var(--ui-negative); }
-
-.footnote {
-  font-size: 11px;
-  margin: 0;
-}
-
 .goal-form {
   display: flex;
   flex-direction: column;
@@ -1155,7 +1079,6 @@ const activeRecordGroup = computed(() =>
   .record-scope-field { width: 100%; }
   .record-browser { grid-template-columns: minmax(0, 1fr); }
   .record-categories { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
-  .queue-head { gap: var(--ui-space-3); }
 }
 
 @container recall-content (max-width: 480px) {
@@ -1169,8 +1092,6 @@ const activeRecordGroup = computed(() =>
   .player-readings > div:nth-child(n), .team-readings > div:nth-child(n) { border-top: 0; border-left: 1px solid var(--ui-divider); }
   .player-readings > div:nth-child(odd), .team-readings > div:nth-child(odd) { border-left: 0; }
   .player-readings > div:nth-child(n + 3), .team-readings > div:nth-child(n + 3) { border-top: 1px solid var(--ui-divider); }
-  .queue-head { flex-direction: column; }
-  .queue-meta { text-align: left; }
   .kind-tabs { width: 100%; }
   .form-actions :deep(.ui-button) { flex: 1; }
   .record-row { grid-template-columns: 30px minmax(0, 1fr) auto; }

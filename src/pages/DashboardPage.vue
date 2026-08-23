@@ -33,10 +33,10 @@ import type {
   ChallengeRow,
   ChampionRanking,
   MatchRow,
-  ModeFamily,
   PerformanceProfile,
   ProfileSummary,
   RankedHistory,
+  StatsFilter,
   StatsSummary,
 } from "../types/stats"
 
@@ -72,7 +72,19 @@ const momentumMatches = ref<MatchRow[]>([])
 const ranked = ref<RankedHistory[]>([])
 const ranking = ref<ChampionRanking | null>(null)
 const rviProfile = ref<PerformanceProfile | undefined>(undefined)
-const rviFamily = ref<ModeFamily>("aram")
+type DashboardRviScope = "rankedSolo" | "allRift"
+const DASHBOARD_RVI_SCOPES: ReadonlyArray<{
+  id: DashboardRviScope
+  label: string
+  filter: Partial<StatsFilter>
+}> = [
+  { id: "rankedSolo", label: "Ranked Solo/Duo", filter: { mode: "sr_ranked_solo" } },
+  { id: "allRift", label: "All Summoner's Rift", filter: { modeFamily: "sr" } },
+]
+const rviScope = ref<DashboardRviScope>("rankedSolo")
+const rviLoading = ref(false)
+const rviFailed = ref(false)
+let rviRequestGeneration = 0
 const selectedChallenge = ref<ChallengeRow | null>(null)
 const momentumClock = ref(Date.now())
 let momentumExpiryTimer: ReturnType<typeof setTimeout> | undefined
@@ -137,23 +149,26 @@ async function loadAll() {
   await Promise.all([loadStats(), loadProfile(), loadChallenges(), loadRanked()])
 }
 
-/** The dashboard RVI snapshot follows whichever family has been played most. */
 async function loadRvi() {
-  const [rift, abyss, classic] = await Promise.all([
-    api.getSummary({ modeFamily: "sr" }),
-    api.getSummary({ modeFamily: "aram" }),
-    api.getSummary({ modeFamily: "classic" }),
-  ])
+  const request = ++rviRequestGeneration
+  const selected = DASHBOARD_RVI_SCOPES.find((scope) => scope.id === rviScope.value)!
+  rviLoading.value = true
+  rviFailed.value = false
+  rviProfile.value = undefined
+  try {
+    const nextProfile = await api.getRviProfile(selected.filter, "sr")
+    if (request !== rviRequestGeneration) return
+    rviProfile.value = nextProfile
+  } catch {
+    if (request !== rviRequestGeneration) return
+    rviFailed.value = true
+  } finally {
+    if (request === rviRequestGeneration) rviLoading.value = false
+  }
+}
 
-  rviFamily.value = [
-    { family: "sr" as const, games: rift.games },
-    { family: "aram" as const, games: abyss.games },
-    { family: "classic" as const, games: classic.games },
-  ].reduce((best, entry) => entry.games > best.games ? entry : best).family
-  rviProfile.value = await api.getRviProfile(
-    { modeFamily: rviFamily.value },
-    rviFamily.value,
-  )
+function changeRviScope() {
+  void loadRvi()
 }
 
 type RefreshScope = "all" | "stats" | "profile" | "challenges" | "ranked"
@@ -191,6 +206,8 @@ onMounted(() => {
 })
 
 const hasGames = computed(() => (summary.value?.games ?? 0) > 0)
+const selectedRviScope = computed(() =>
+  DASHBOARD_RVI_SCOPES.find((scope) => scope.id === rviScope.value)!)
 const averageGrade = computed(() => recallGradeFromRecallScore(summary.value?.averageRecallScore))
 const momentum = computed(() => performanceMomentum(
   momentumMatches.value,
@@ -386,12 +403,44 @@ const nearlyThere = computed(() =>
         />
 
         <Panel
-          v-if="rviProfile"
           title="Recall Vector Index"
-          :meta="`${rviProfile.score} · ${rviFamily === 'sr' ? `Summoner's Rift` : rviFamily === 'classic' ? 'League Classic' : 'ARAM'}`"
+          :meta="rviProfile ? `${rviProfile.score} · ${selectedRviScope.label}` : selectedRviScope.label"
           class="dashboard-panel rvi-panel"
         >
-          <PerformanceRadar :dimensions="rviProfile.dimensions" height="270px" />
+          <template #actions>
+            <label class="rvi-scope-control">
+              <select
+                v-model="rviScope"
+                class="league-select"
+                aria-label="RVI scope"
+                @change="changeRviScope"
+              >
+                <option v-for="scope in DASHBOARD_RVI_SCOPES" :key="scope.id" :value="scope.id">
+                  {{ scope.label }}
+                </option>
+              </select>
+            </label>
+          </template>
+          <EmptyState
+            v-if="rviLoading"
+            compact
+            title="Loading RVI profile"
+            :description="`Reading ${selectedRviScope.label} evidence.`"
+          />
+          <PerformanceRadar
+            v-else-if="rviProfile"
+            :dimensions="rviProfile.dimensions"
+            height="270px"
+          />
+          <EmptyState
+            v-else
+            compact
+            :tone="rviFailed ? 'warning' : 'neutral'"
+            :title="rviFailed ? 'RVI profile unavailable' : 'RVI is still building'"
+            :description="rviFailed
+              ? `Recall could not read ${selectedRviScope.label} evidence right now.`
+              : `${selectedRviScope.label} does not yet have enough measured Grade and RVI evidence for a profile.`"
+          />
         </Panel>
 
         <Panel v-if="recent.length" title="Recent games" class="dashboard-panel recent-panel">
@@ -711,6 +760,18 @@ h1 {
 .rank-panel,
 .rvi-panel {
   height: 360px;
+}
+
+.rvi-scope-control {
+  display: block;
+  min-width: 170px;
+}
+
+.rvi-scope-control .league-select {
+  width: 100%;
+  min-height: 30px;
+  padding-block: 4px;
+  font-size: 11px;
 }
 
 .recent-panel,
