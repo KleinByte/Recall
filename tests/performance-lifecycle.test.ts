@@ -107,4 +107,22 @@ describe("performance and resource lifecycle", () => {
     expect(afterSync).toContain("if (needsDirectCutover) await trackedTimelineTask")
     expect(afterSync).toContain("if (needsDirectCutover && riotBackfillTask)")
   })
+
+  it("keeps database opening fatal but treats derived startup analysis as rebuildable", () => {
+    const main = read("electron/main/index.ts")
+    const startup = main.slice(main.indexOf("async function main()"))
+    const openHistory = startup.indexOf("getRepository()")
+    const fatalDialog = startup.indexOf('"Recall could not open your history"')
+    const derivedAnalysis = startup.indexOf("await ensureRecallFrozen()")
+    const maintenanceWarning = startup.indexOf(
+      '"Recall opened with analysis pending"',
+    )
+
+    expect(openHistory).toBeGreaterThan(-1)
+    expect(fatalDialog).toBeGreaterThan(openHistory)
+    expect(derivedAnalysis).toBeGreaterThan(fatalDialog)
+    expect(maintenanceWarning).toBeGreaterThan(derivedAnalysis)
+    expect(startup).toContain("Recall checked ${rejected} backup candidate(s)")
+    expect(startup).toContain("Recall will retry after the next successful sync.")
+  })
 })

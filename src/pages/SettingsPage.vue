@@ -751,6 +751,18 @@ const formatDate = (value?: number) =>
             <div><dt>Augment matches</dt><dd>{{ trust.database.augmentMatchCount }}</dd></div>
             <div><dt>Schema drift</dt><dd>{{ trust.database.schemaDriftMatchCount }}</dd></div>
           </dl>
+          <div v-if="trust.database.recovery" class="recovery-note">
+            <strong>Recovered {{ formatDate(trust.database.recovery.recoveredAt) }}</strong>
+            <span>
+              Opened backup schema v{{ trust.database.recovery.sourceSchemaVersion }} and
+              validated it at v{{ trust.database.recovery.targetSchemaVersion }}.
+            </span>
+            <span v-if="trust.database.recovery.skippedBackups">
+              Skipped {{ trust.database.recovery.skippedBackups }} unusable backup(s).
+            </span>
+            <span class="path">Source: {{ trust.database.recovery.sourcePath }}</span>
+            <span class="path">Original preserved: {{ trust.database.recovery.originalPath }}</span>
+          </div>
           <p class="path">{{ trust.database.path }}</p>
         </Surface>
 
@@ -1068,6 +1080,8 @@ const formatDate = (value?: number) =>
 .trust-card { box-shadow: none; }
 .trust-card h3 { margin: 0 0 var(--ui-space-2); font: 15px var(--ui-font-heading); color: var(--ui-text-heading); }
 .trust-list { margin: 0; display: grid; gap: 4px; font-size: 11px; }.trust-list div { display: flex; justify-content: space-between; gap: var(--ui-space-2); }.trust-list dt { color: var(--ui-text-subtle); }.trust-list dd { margin: 0; text-align: right; }
+.recovery-note { display: grid; gap: 3px; margin-top: var(--ui-space-3); padding: var(--ui-space-2); border: 1px solid color-mix(in srgb, var(--ui-positive) 35%, transparent); border-radius: var(--ui-radius-sm); color: var(--ui-text-subtle); font-size: 11px; }
+.recovery-note strong { color: var(--ui-positive); }
 .backups { grid-column: 1 / -1; }.backup-row { display: flex; align-items: center; justify-content: space-between; gap: var(--ui-space-3); padding: var(--ui-space-2) 0; border-top: 1px solid var(--ui-divider); }.backup-row > div:first-child { display: flex; flex-direction: column; font-size: 11px; }
 .rate-limits { display: grid; gap: 2px; margin-top: var(--ui-space-2); font-size: 12px; color: var(--ui-text-subtle); }
 @container recall-content (max-width: 760px) { .trust-grid { grid-template-columns: 1fr; }.backups { grid-column: auto; }.backup-row { align-items: flex-start; flex-direction: column; } }

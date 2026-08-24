@@ -22,6 +22,7 @@ import type { MinimapVisionDebugSnapshot, MinimapVisionDebugStatus } from "../..
 import { MatchSourceRepository } from "./database/match-source-repo.js"
 import { resolveDisplayTimezone } from "./matches/time-contract.js"
 import {
+  DatabaseRecoveryExhaustedError,
   openDatabaseWithRecovery,
   type DatabaseRecovery,
 } from "./database/recovery.js"
@@ -337,6 +338,7 @@ let analysisWorker: AnalysisWorkerClient | undefined
 let statsRevision = 0
 let startupRestoreError: string | undefined
 let startupRecovery: DatabaseRecovery | undefined
+let startupMaintenanceError: string | undefined
 let riotBackfillAbort: AbortController | undefined
 let riotBackfillTask: Promise<void> | undefined
 let riotBackfillRevision = 0
@@ -377,8 +379,11 @@ function getDatabase() {
     if (result.recovery) {
       startupRecovery = result.recovery
       console.warn(
-        `Recall recovered a corrupt database from ${result.recovery.sourcePath}. ` +
-        `The damaged generation was preserved at ${result.recovery.quarantinedPath}.`,
+        `Recall recovered an unusable database from ${result.recovery.sourcePath}, ` +
+        `validated schema v${result.recovery.sourceSchemaVersion} at ` +
+        `v${result.recovery.targetSchemaVersion}, and preserved the original at ` +
+        `${result.recovery.quarantinedPath}. ` +
+        `${result.recovery.rejectedCandidates.length} candidate(s) were skipped.`,
       )
     }
   }
@@ -614,7 +619,12 @@ function getDataTrustService() {
       getDatabasePath(),
       getBackupManager(),
     )
-    if (startupRestoreError) dataTrustService.setStartupError(startupRestoreError)
+    const startupErrors = [startupRestoreError, startupMaintenanceError]
+      .filter((message): message is string => Boolean(message))
+    if (startupErrors.length > 0) {
+      dataTrustService.setStartupError(startupErrors.join("\n"))
+    }
+    if (startupRecovery) dataTrustService.setStartupRecovery(startupRecovery)
   }
   return dataTrustService
 }
@@ -3650,19 +3660,38 @@ async function main() {
   // handler registered" errors because IPC registration happens afterwards.
   try {
     getRepository()
-    await ensureRecallFrozen()
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
+    const rejected = error instanceof DatabaseRecoveryExhaustedError
+      ? error.attempts.length
+      : 0
     console.error(
       "Could not initialise Recall's database:",
       error instanceof Error ? error.stack ?? error.message : error,
     )
     dialog.showErrorBox(
       "Recall could not open your history",
-      `${message}\n\nYour database was left untouched at:\n${getDatabasePath()}`,
+      `${message}` +
+        (rejected > 0
+          ? `\n\nRecall checked ${rejected} backup candidate(s), but none could be safely migrated.`
+          : "") +
+        `\n\nYour database was left untouched at:\n${getDatabasePath()}`,
     )
     app.quit()
     return
+  }
+
+  // Derived analysis is rebuildable and must not make a successfully opened
+  // history look like a fatal database failure. Keep the app available and
+  // retry the work through the normal post-sync path.
+  try {
+    await ensureRecallFrozen()
+  } catch (error) {
+    startupMaintenanceError = error instanceof Error ? error.message : String(error)
+    console.warn(
+      "Recall opened its database but could not refresh derived analysis:",
+      error instanceof Error ? error.stack ?? error.message : error,
+    )
   }
 
   const startHidden = app.isPackaged && process.argv.includes(START_HIDDEN_ARG)
@@ -3672,10 +3701,22 @@ async function main() {
     void dialog.showMessageBox(win, {
       type: "warning",
       title: "Recall recovered your history",
-      message: "Recall found database corruption and opened the newest working backup.",
+      message: "Recall opened the newest backup that could be safely brought up to date.",
       detail:
-        `Recovered from:\n${startupRecovery.sourcePath}\n\n` +
-        `Damaged database preserved at:\n${startupRecovery.quarantinedPath}`,
+        `Recovered from:\n${startupRecovery.sourcePath}\n` +
+        `Schema v${startupRecovery.sourceSchemaVersion} → ` +
+        `v${startupRecovery.targetSchemaVersion}\n\n` +
+        `Original database preserved at:\n${startupRecovery.quarantinedPath}`,
+      buttons: ["Continue"],
+      defaultId: 0,
+    })
+  }
+  if (startupMaintenanceError) {
+    void dialog.showMessageBox(win, {
+      type: "warning",
+      title: "Recall opened with analysis pending",
+      message: "Your match history is available, but derived performance analysis could not be refreshed.",
+      detail: `${startupMaintenanceError}\n\nRecall will retry after the next successful sync.`,
       buttons: ["Continue"],
       defaultId: 0,
     })

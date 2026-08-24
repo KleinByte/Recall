@@ -50,8 +50,126 @@ interface RestoreIntent {
 const MANIFEST_SUFFIX = ".manifest.json"
 const RESTORE_INTENT = "restore-intent.json"
 
+export interface RecoveryBackupCandidate {
+  fileName: string
+  filePath: string
+  createdAt: number
+  schemaVersion?: number
+  managed: boolean
+}
+
+export interface RecoveryBackupRejection {
+  filePath: string
+  reason: string
+}
+
+export interface RecoveryBackupCatalog {
+  candidates: RecoveryBackupCandidate[]
+  rejected: RecoveryBackupRejection[]
+}
+
 function sha256(filePath: string) {
   return createHash("sha256").update(readFileSync(filePath)).digest("hex")
+}
+
+function parseManagedManifest(filePath: string): BackupManifest | undefined {
+  try {
+    const raw = JSON.parse(readFileSync(filePath, "utf8")) as Record<string, unknown>
+    if (raw.format !== "recall-managed-backup" || raw.manifestVersion !== 2 ||
+        typeof raw.fileName !== "string" || typeof raw.createdAt !== "number" ||
+        !Number.isFinite(raw.createdAt) || typeof raw.reason !== "string" ||
+        typeof raw.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(raw.sha256) ||
+        typeof raw.schemaVersion !== "number" || !Number.isInteger(raw.schemaVersion) ||
+        raw.schemaVersion < 0 || typeof raw.sizeBytes !== "number" ||
+        !Number.isInteger(raw.sizeBytes) || raw.sizeBytes < 0 ||
+        typeof raw.matchCount !== "number" || !Number.isInteger(raw.matchCount) ||
+        raw.matchCount < 0 || raw.integrity !== "ok") {
+      return undefined
+    }
+    return raw as unknown as BackupManifest
+  } catch {
+    return undefined
+  }
+}
+
+function timestampFromBackupName(fileName: string): number {
+  const match = /-(\d+)\.db$/.exec(fileName)
+  return match ? Number(match[1]) : 0
+}
+
+/**
+ * Builds the startup recovery catalog. Managed backups must match their
+ * immutable manifest and SHA-256; legacy update snapshots remain eligible for
+ * the same full SQLite and migration rehearsal performed by recovery.
+ */
+export function catalogRecoveryBackups(backupDir: string): RecoveryBackupCatalog {
+  const candidates: RecoveryBackupCandidate[] = []
+  const rejected: RecoveryBackupRejection[] = []
+  if (!existsSync(backupDir)) return { candidates, rejected }
+
+  let names: string[]
+  try {
+    names = readdirSync(backupDir)
+  } catch (error) {
+    rejected.push({
+      filePath: backupDir,
+      reason: `backup_catalog_unreadable:${error instanceof Error ? error.message : String(error)}`,
+    })
+    return { candidates, rejected }
+  }
+
+  for (const fileName of names.filter((name) =>
+    /^stats-(?:\d+|[a-z-]+-\d+)\.db$/.test(name))) {
+    const filePath = resolvedChild(backupDir, fileName)
+    try {
+      const fileStats = statSync(filePath)
+      if (!fileStats.isFile()) {
+        rejected.push({ filePath, reason: "backup_not_regular_file" })
+        continue
+      }
+
+      const manifestPath = `${filePath}${MANIFEST_SUFFIX}`
+      if (!existsSync(manifestPath)) {
+        candidates.push({
+          fileName,
+          filePath,
+          createdAt: timestampFromBackupName(fileName) || fileStats.mtimeMs,
+          managed: false,
+        })
+        continue
+      }
+
+      const manifest = parseManagedManifest(manifestPath)
+      if (!manifest || manifest.fileName !== fileName) {
+        rejected.push({ filePath, reason: "backup_manifest_invalid" })
+        continue
+      }
+      if (manifest.sizeBytes !== fileStats.size) {
+        rejected.push({ filePath, reason: "backup_size_mismatch" })
+        continue
+      }
+      if (sha256(filePath) !== manifest.sha256) {
+        rejected.push({ filePath, reason: "backup_hash_mismatch" })
+        continue
+      }
+      candidates.push({
+        fileName,
+        filePath,
+        createdAt: manifest.createdAt,
+        schemaVersion: manifest.schemaVersion,
+        managed: true,
+      })
+    } catch (error) {
+      rejected.push({
+        filePath,
+        reason: `backup_inspection_failed:${error instanceof Error ? error.message : String(error)}`,
+      })
+    }
+  }
+
+  candidates.sort((left, right) => right.createdAt - left.createdAt ||
+    right.fileName.localeCompare(left.fileName))
+  return { candidates, rejected }
 }
 
 function sha256Async(filePath: string): Promise<string> {
@@ -277,9 +395,8 @@ export class BackupManager {
       .filter((name) => name.endsWith(MANIFEST_SUFFIX))
       .flatMap((name) => {
         try {
-          const raw = JSON.parse(
-            readFileSync(path.join(this.backupDir, name), "utf8"),
-          ) as BackupManifest
+          const raw = parseManagedManifest(path.join(this.backupDir, name))
+          if (!raw) return []
           const database = resolvedChild(this.backupDir, raw.fileName)
           if (!existsSync(database)) return []
           const sizeMatches = statSync(database).size === raw.sizeBytes

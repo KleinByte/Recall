@@ -12,7 +12,10 @@ import {
 import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { openDatabase } from "../electron/main/database/connection.js"
+import {
+  DatabaseStartupError,
+  openDatabase,
+} from "../electron/main/database/connection.js"
 import {
   latestSchemaVersion,
   migrations,
@@ -85,7 +88,19 @@ describe("openDatabase", () => {
     db.exec("ALTER TABLE matches ADD COLUMN grade TEXT")
     db.close()
 
-    expect(() => openDatabase(file, options)).toThrow("duplicate column name")
+    let failure: unknown
+    try {
+      openDatabase(file, options)
+    } catch (error) {
+      failure = error
+    }
+
+    expect(failure).toBeInstanceOf(DatabaseStartupError)
+    expect(failure).toMatchObject({
+      phase: "migration",
+      recoverable: true,
+    })
+    expect((failure as Error).message).toContain("duplicate column name")
 
     expect(existsSync(file)).toBe(true)
     expect(readdirSync(dir).some((name) => name.includes(".damaged-"))).toBe(false)
@@ -102,7 +117,19 @@ describe("openDatabase", () => {
     db.pragma(`user_version = ${latestSchemaVersion + 1}`)
     db.close()
 
-    expect(() => openDatabase(file, options)).toThrow("newer than this Recall build")
+    let failure: unknown
+    try {
+      openDatabase(file, options)
+    } catch (error) {
+      failure = error
+    }
+
+    expect(failure).toBeInstanceOf(DatabaseStartupError)
+    expect(failure).toMatchObject({
+      phase: "compatibility",
+      recoverable: false,
+    })
+    expect((failure as Error).message).toContain("newer than this Recall build")
     expect(existsSync(file)).toBe(true)
   })
 
@@ -110,10 +137,30 @@ describe("openDatabase", () => {
     const original = Buffer.from("not a sqlite database")
     writeFileSync(file, original)
 
-    expect(() => openDatabase(file, options)).toThrow()
+    let failure: unknown
+    try {
+      openDatabase(file, options)
+    } catch (error) {
+      failure = error
+    }
+
+    expect(failure).toBeInstanceOf(DatabaseStartupError)
+    expect(failure).toMatchObject({ recoverable: true })
 
     expect(readFileSync(file)).toEqual(original)
     expect(readdirSync(dir)).toEqual(["stats.db"])
+  })
+
+  it("can migrate a self-contained staging database without WAL sidecars", () => {
+    createVersionOneDatabase()
+
+    const db = openDatabase(file, { ...options, journalMode: "DELETE" })
+
+    expect(db.pragma("journal_mode", { simple: true })).toBe("delete")
+    expect(db.pragma("user_version", { simple: true })).toBe(latestSchemaVersion)
+    db.close()
+    expect(existsSync(`${file}-wal`)).toBe(false)
+    expect(existsSync(`${file}-shm`)).toBe(false)
   })
 
   it("removes a partial brand-new database when setup fails", () => {

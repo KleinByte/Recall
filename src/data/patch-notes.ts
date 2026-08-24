@@ -21,6 +21,16 @@ function note(
 /** Shipped releases, newest first. */
 export const patchNotes: readonly PatchNoteRelease[] = [
   note(
+    "3.5.1",
+    "2026-08-24",
+    "Automatic history recovery",
+    "Recall can now recover an unusable local database from the newest backup that can be safely brought up to date.",
+    "Checks backups newest-first and runs every pending migration in a verified staging copy before opening it.",
+    "Skips corrupt, tampered, incompatible, and unmigratable backups while preserving the original database and SQLite sidecars.",
+    "Avoids unsafe replacement for locks, permissions, disk failures, and databases created by a newer Recall version.",
+    "Keeps match history available when rebuildable performance analysis needs a later retry, with recovery details in Data Trust.",
+  ),
+  note(
     "3.5.0",
     "2026-08-22",
     "Champion performance, in focus",

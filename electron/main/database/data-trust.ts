@@ -1,6 +1,7 @@
 import type { Database } from "better-sqlite3"
 import { statSync } from "node:fs"
 import type { BackupManager } from "./backup-manager.js"
+import type { DatabaseRecovery } from "./recovery.js"
 import { schedulerForRoute } from "../riot/request-scheduler.js"
 import {
   CANONICAL_GRADE_STORAGE_PARTITION,
@@ -15,6 +16,7 @@ export class DataTrustService {
   private lastIntegrityCheck = Date.now()
   private lastIntegrity: "ok" | "failed" | "unknown" = "ok"
   private startupError?: string
+  private startupRecovery?: DatabaseRecovery
 
   constructor(
     private readonly db: Database,
@@ -31,6 +33,10 @@ export class DataTrustService {
 
   setStartupError(message: string) {
     this.startupError = message
+  }
+
+  setStartupRecovery(recovery: DatabaseRecovery) {
+    this.startupRecovery = recovery
   }
 
   report(puuid?: string, keyConfigured = false, keyProtected = false) {
@@ -247,6 +253,15 @@ export class DataTrustService {
         schemaDriftMatchCount: counts.drifted,
         lastIntegrityCheck: this.lastIntegrityCheck,
         integrity: this.lastIntegrity,
+        recovery: this.startupRecovery ? {
+          recoveredAt: this.startupRecovery.recoveredAt,
+          sourcePath: this.startupRecovery.sourcePath,
+          originalPath: this.startupRecovery.quarantinedPath,
+          sourceSchemaVersion: this.startupRecovery.sourceSchemaVersion,
+          targetSchemaVersion: this.startupRecovery.targetSchemaVersion,
+          triggerPhase: this.startupRecovery.triggerPhase,
+          skippedBackups: this.startupRecovery.rejectedCandidates.length,
+        } : undefined,
       },
       leagueClient,
       riotHistory: {

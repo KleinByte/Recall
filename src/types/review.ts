@@ -93,6 +93,15 @@ export interface DataTrustReport {
     schemaDriftMatchCount: number
     lastIntegrityCheck?: number
     integrity: "ok" | "failed" | "unknown"
+    recovery?: {
+      recoveredAt: number
+      sourcePath: string
+      originalPath: string
+      sourceSchemaVersion: number
+      targetSchemaVersion: number
+      triggerPhase?: string
+      skippedBackups: number
+    }
   }
   leagueClient: SyncHealth
   riotHistory: SyncHealth & {
