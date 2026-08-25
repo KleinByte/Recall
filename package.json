@@ -1,6 +1,6 @@
 {
   "name": "recall",
-  "version": "3.5.1",
+  "version": "3.6.0",
   "main": "dist-electron/main/index.js",
   "description": "Game tracking, grades, challenges, and insights.",
   "author": "KleinByte",

@@ -45,3 +45,8 @@ yarn.lock
 !/docs/recall-vector-index.md
 !/docs/screenshots/
 !/docs/screenshots/**
+minimap_training/capture_riot_replay_dataset.py
+scripts/capture-riot-replay-dataset.py
+scripts/collect-riot-replays.mjs
+scripts/lib/riot-replay-api.mjs
+tests/riot-replay-collector.test.ts

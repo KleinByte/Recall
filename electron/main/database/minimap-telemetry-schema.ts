@@ -1,4 +1,4 @@
-export const MINIMAP_TELEMETRY_SCHEMA_VERSION = 34
+export const MINIMAP_TELEMETRY_SCHEMA_VERSION = 37
 
 export const MINIMAP_TELEMETRY_V33_UP = `
   CREATE TABLE minimap_capture_sessions (
@@ -202,5 +202,20 @@ export function verifyMinimapTelemetryV34(db: DatabaseLike) {
   for (const column of columns) if (column.name) required.delete(column.name)
   if (required.size > 0) {
     throw new Error(`minimap_capture_quality_columns_missing:${[...required].join(",")}`)
+  }
+}
+
+/** Exact per-point times let compact path runs interpolate without losing capture timing. */
+export const MINIMAP_TELEMETRY_V37_UP = `
+  ALTER TABLE path_segments
+    ADD COLUMN point_times_json TEXT
+      CHECK (point_times_json IS NULL OR json_valid(point_times_json));
+`
+
+export function verifyMinimapTelemetryV37(db: DatabaseLike) {
+  const columns = db.prepare("PRAGMA table_info(path_segments)")
+    .all() as Array<{ name?: string }>
+  if (!columns.some((column) => column.name === "point_times_json")) {
+    throw new Error("path_segment_point_times_missing")
   }
 }

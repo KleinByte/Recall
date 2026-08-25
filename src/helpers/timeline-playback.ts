@@ -203,6 +203,25 @@ function destroyedStructureTimes(events: TimelineEvent[]) {
   return destroyed
 }
 
+interface WorldEventIndex {
+  destroyedAt: Map<string, number>
+  epicKills: TimelineEvent[]
+}
+
+const worldEventIndexCache = new WeakMap<TimelineEvent[], WorldEventIndex>()
+
+function indexedWorldEvents(events: TimelineEvent[]) {
+  const cached = worldEventIndexCache.get(events)
+  if (cached) return cached
+  const index = {
+    destroyedAt: destroyedStructureTimes(events),
+    epicKills: events.filter((event) => event.type === "ELITE_MONSTER_KILL")
+      .sort((left, right) => left.timestamp - right.timestamp),
+  }
+  worldEventIndexCache.set(events, index)
+  return index
+}
+
 function epicState(timestamp: number, kills: TimelineEvent[], spawnAt: number, respawnAfter: number) {
   if (timestamp < spawnAt) return "dormant" as const
   const lastKill = kills.filter((event) => event.timestamp <= timestamp).at(-1)
@@ -361,7 +380,8 @@ export function playbackWorldMarkers(
 ): PlaybackWorldMarker[] {
   if (mapId !== 11) return []
 
-  const destroyedAt = destroyedStructureTimes(events)
+  const eventIndex = indexedWorldEvents(events)
+  const destroyedAt = eventIndex.destroyedAt
   const structures = SUMMONERS_RIFT_STRUCTURES.map((structure): PlaybackWorldMarker => {
     const destruction = destroyedAt.get(structure.id)
     const destroyed = destruction !== undefined && timestamp >= destruction
@@ -378,8 +398,7 @@ export function playbackWorldMarkers(
     state: "location",
   }))
 
-  const epicKills = events.filter((event) => event.type === "ELITE_MONSTER_KILL")
-    .sort((left, right) => left.timestamp - right.timestamp)
+  const epicKills = eventIndex.epicKills
   const elementalKills = epicKills.filter((event) => {
     const token = objectiveToken(event)
     return token.includes("DRAGON") && !token.includes("ELDER")

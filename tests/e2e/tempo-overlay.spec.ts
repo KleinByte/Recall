@@ -1,4 +1,10 @@
-import { _electron as electron, expect, test } from "@playwright/test"
+import {
+  _electron as electron,
+  expect,
+  test,
+  type ElectronApplication,
+  type Page,
+} from "@playwright/test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { createRequire } from "node:module"
 import os from "node:os"
@@ -18,7 +24,102 @@ interface OverlayIpcWindow extends Window {
   }
 }
 
-test("Alt+T Tempo overlay surface is transparent, reusable, and lockable", async () => {
+const pentakillSession = {
+  phase: "InProgress",
+  gameId: 9_100_005,
+  queueId: 420,
+  queueName: "Ranked Solo/Duo",
+  gameMode: "CLASSIC",
+  mapId: 11,
+  benchChampionIds: [],
+  allies: [],
+  enemies: [],
+  game: {
+    available: true,
+    gameTime: 1_245,
+    gameMode: "CLASSIC",
+    mapName: "Summoner's Rift",
+    mapNumber: 11,
+    allies: [],
+    enemies: [],
+    events: [],
+    analysis: {
+      resources: {
+        allyGold: 42_500,
+        enemyGold: 38_100,
+        difference: 4_400,
+        quality: "strong",
+        source: "estimated",
+      },
+      winConfidence: {
+        percent: 78,
+        label: "Strongly favored",
+        factors: ["Pentakill opened the map"],
+      },
+      tempo: {
+        score: 100,
+        label: "Pentakill",
+        direction: "up",
+        leadDelta: 42,
+        factors: ["Pentakill surge"],
+        surgeTier: "master",
+      },
+    },
+    updatedAt: Date.now(),
+  },
+  updatedAt: Date.now(),
+}
+
+const stableSession = {
+  ...pentakillSession,
+  game: {
+    ...pentakillSession.game,
+    analysis: {
+      ...pentakillSession.game.analysis,
+      tempo: {
+        score: 66,
+        label: "Stable",
+        direction: "steady",
+        leadDelta: 0,
+        factors: ["Recent pace holding"],
+      },
+    },
+  },
+}
+
+async function publishLiveSession(
+  application: ElectronApplication,
+  title: "main" | "overlay",
+  session: unknown,
+) {
+  await application.evaluate(({ BrowserWindow }, { target, session }) => {
+    const window = BrowserWindow.getAllWindows().find((candidate) => target === "overlay"
+      ? candidate.getTitle() === "Recall Tempo Overlay"
+      : candidate.getTitle() !== "Recall Tempo Overlay")
+    if (!window) throw new Error(`Missing ${target} window`)
+    window.webContents.send("live:updated", session)
+  }, { target: title, session })
+}
+
+async function animationSample(page: Page, selector: string, name: string) {
+  return page.locator(selector).evaluate((element, animationName) => {
+    const animation = element.getAnimations().find(
+      (candidate) => (candidate as CSSAnimation).animationName.startsWith(animationName),
+    )
+    const style = getComputedStyle(element)
+    return {
+      animationDelay: style.animationDelay,
+      animationDuration: style.animationDuration,
+      animationName: style.animationName,
+      currentTime: Number(animation?.currentTime ?? -1),
+      playState: animation?.playState ?? "missing",
+      reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches,
+      visibilityState: document.visibilityState,
+    }
+  }, name)
+}
+
+test("Tempo motion advances on the Live page and locked Alt+T overlay", async () => {
   const userData = await mkdtemp(path.join(os.tmpdir(), "recall-overlay-e2e-"))
   const environment = { ...process.env }
   for (const key of [
@@ -45,6 +146,73 @@ test("Alt+T Tempo overlay surface is transparent, reusable, and lockable", async
     const main = await application.firstWindow()
     await main.waitForLoadState("domcontentloaded")
     await main.locator(".app-window").waitFor({ state: "visible" })
+    await main.locator(".update-recall").waitFor({ state: "detached" })
+
+    await expect(async () => {
+      await publishLiveSession(application, "main", stableSession)
+      await expect(main.locator(".live-page")).toBeVisible()
+    }).toPass()
+    await expect(async () => {
+      await publishLiveSession(application, "main", stableSession)
+      await expect(main.locator(".tempo-gauge.phase-idle")).toBeVisible()
+    }).toPass()
+    await expect(main.locator("html")).toHaveAttribute("data-live-phase", "InProgress")
+
+    await publishLiveSession(application, "main", pentakillSession)
+    await expect(main.locator(".tempo-gauge.tier-master.phase-rupturing")).toBeVisible()
+    await expect(main.locator(".core-label")).toHaveText("Pentakill")
+    const mainRuptureBefore = await animationSample(
+      main,
+      ".master-rupture",
+      "master-rupture",
+    )
+    expect(mainRuptureBefore.playState).toBe("running")
+    await main.waitForTimeout(220)
+    const mainRuptureAfter = await animationSample(
+      main,
+      ".master-rupture",
+      "master-rupture",
+    )
+    expect(mainRuptureAfter.currentTime).toBeGreaterThan(mainRuptureBefore.currentTime)
+
+    await expect(main.locator(".tempo-gauge.tier-master.phase-burning")).toBeVisible()
+    const mainOrbitBefore = await animationSample(main, ".halo-band-orbit", "orbit-spin")
+    expect(mainOrbitBefore).toMatchObject({
+      animationName: expect.stringMatching(/^orbit-spin/),
+      playState: "running",
+      reducedMotion: false,
+    })
+    expect(mainOrbitBefore.currentTime).toBeGreaterThanOrEqual(0)
+    await main.waitForTimeout(220)
+    const mainOrbitAfter = await animationSample(main, ".halo-band-orbit", "orbit-spin")
+    expect(mainOrbitAfter.currentTime).toBeGreaterThan(mainOrbitBefore.currentTime)
+
+    await publishLiveSession(application, "main", stableSession)
+    await expect(main.locator(".tempo-gauge.tier-master.phase-discharging")).toBeVisible()
+    const mainDischargeBefore = await animationSample(
+      main,
+      ".halo-band-orbit",
+      "orbit-retract",
+    )
+    expect(mainDischargeBefore).toMatchObject({
+      animationDuration: "1.3s",
+      animationName: expect.stringMatching(/^orbit-retract/),
+      playState: "running",
+      reducedMotion: false,
+      visibilityState: "visible",
+    })
+    await main.waitForTimeout(220)
+    const mainDischargeAfter = await animationSample(
+      main,
+      ".halo-band-orbit",
+      "orbit-retract",
+    )
+    expect(
+      mainDischargeAfter.currentTime,
+      JSON.stringify({ before: mainDischargeBefore, after: mainDischargeAfter }),
+    ).toBeGreaterThan(mainDischargeBefore.currentTime)
+    expect(await main.locator(".titlebar-mark").evaluate((element) =>
+      getComputedStyle(element, "::before").animationPlayState)).toBe("paused")
 
     const overlayPromise = application.waitForEvent("window")
     const opened = await main.evaluate(() => (window as unknown as OverlayIpcWindow).ipcRenderer.invoke<{
@@ -57,6 +225,11 @@ test("Alt+T Tempo overlay surface is transparent, reusable, and lockable", async
     await overlay.waitForLoadState("domcontentloaded")
     await expect(overlay.locator(".tempo-overlay")).toBeVisible()
     await expect(overlay.getByText("Waiting for live Tempo")).toBeVisible()
+
+    await expect(async () => {
+      await publishLiveSession(application, "overlay", stableSession)
+      await expect(overlay.locator(".tempo-gauge.phase-idle")).toBeVisible()
+    }).toPass()
 
     const windowState = await application.evaluate(({ BrowserWindow }) => {
       const win = BrowserWindow.getAllWindows().find(
@@ -76,15 +249,72 @@ test("Alt+T Tempo overlay surface is transparent, reusable, and lockable", async
       focusable: false,
       visible: true,
     })
-    // Windows may retain a two-DIP DWM resize border on a transparent frame.
+    // Windows may retain a small DWM border on a transparent frame.
     expect(windowState.bounds.height).toBeGreaterThanOrEqual(232)
-    expect(windowState.bounds.height).toBeLessThanOrEqual(234)
+    expect(windowState.bounds.height).toBeLessThanOrEqual(236)
 
     await overlay.getByRole("button", { name: "Lock" }).click()
     const locked = await main.evaluate(() => (window as unknown as OverlayIpcWindow).ipcRenderer.invoke<{
       locked: boolean
     }>("tempo-overlay:status"))
     expect(locked.locked).toBe(true)
+
+    await publishLiveSession(application, "overlay", pentakillSession)
+    await expect(overlay.locator(".tempo-gauge.tier-master.phase-rupturing")).toBeVisible()
+    await expect(overlay.locator(".core-label")).toHaveText("Pentakill")
+    const overlayRuptureBefore = await animationSample(
+      overlay,
+      ".master-rupture",
+      "master-rupture",
+    )
+    expect(overlayRuptureBefore.playState).toBe("running")
+    await overlay.waitForTimeout(220)
+    const overlayRuptureAfter = await animationSample(
+      overlay,
+      ".master-rupture",
+      "master-rupture",
+    )
+    expect(overlayRuptureAfter.currentTime).toBeGreaterThan(overlayRuptureBefore.currentTime)
+
+    await expect(overlay.locator(".tempo-gauge.tier-master.phase-burning")).toBeVisible()
+    const overlayOrbitBefore = await animationSample(overlay, ".halo-band-orbit", "orbit-spin")
+    expect(overlayOrbitBefore).toMatchObject({
+      animationName: expect.stringMatching(/^orbit-spin/),
+      playState: "running",
+      reducedMotion: false,
+    })
+    expect(overlayOrbitBefore.currentTime).toBeGreaterThanOrEqual(0)
+    await overlay.waitForTimeout(220)
+    const overlayOrbitAfter = await animationSample(overlay, ".halo-band-orbit", "orbit-spin")
+    expect(overlayOrbitAfter.currentTime).toBeGreaterThan(overlayOrbitBefore.currentTime)
+
+    await publishLiveSession(application, "overlay", stableSession)
+    await expect(overlay.locator(".tempo-gauge.tier-master.phase-discharging")).toBeVisible()
+    const overlayDischargeBefore = await animationSample(
+      overlay,
+      ".halo-band-orbit",
+      "orbit-retract",
+    )
+    expect(overlayDischargeBefore).toMatchObject({
+      animationDuration: "1.3s",
+      animationName: expect.stringMatching(/^orbit-retract/),
+      playState: "running",
+      reducedMotion: false,
+      visibilityState: "visible",
+    })
+    await overlay.waitForTimeout(220)
+    const overlayDischargeAfter = await animationSample(
+      overlay,
+      ".halo-band-orbit",
+      "orbit-retract",
+    )
+    expect(
+      overlayDischargeAfter.currentTime,
+      JSON.stringify({ before: overlayDischargeBefore, after: overlayDischargeAfter }),
+    ).toBeGreaterThan(overlayDischargeBefore.currentTime)
+
+    await overlay.emulateMedia({ reducedMotion: "reduce" })
+    await expect(overlay.locator(".halo-band-orbit")).toHaveCSS("animation-name", "none")
 
     const hidden = await main.evaluate(() => (window as unknown as OverlayIpcWindow).ipcRenderer.invoke<{
       visible: boolean

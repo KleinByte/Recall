@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
+import MapReviewPopout from "../../components/review/MapReviewPopout.vue"
 import { api } from "../../helpers/api.js"
 import { publicAssetUrl } from "../../helpers/assets.js"
+import { usePlaybackClock } from "../../helpers/use-playback-clock.js"
 import {
   campRespawnDurationMs,
   SUMMONERS_RIFT_CAMPS,
@@ -13,8 +15,14 @@ import {
 import type {
   CampClearEvent,
   NormalizedPoint,
-  PathSegment,
 } from "../../shared/minimap/contracts.js"
+import {
+  pointAtTimedPath,
+  preparePathRuns,
+  timedPathPoints,
+  upperBoundPathTime,
+  visibleTimedPath,
+} from "../../shared/minimap/path-processing.js"
 import type { MinimapPathingReview } from "../../shared/minimap/review.js"
 
 const props = defineProps<{
@@ -31,14 +39,11 @@ const loading = computed(() => props.managed ? props.pathingLoading === true : l
 const error = computed(() => props.managed ? props.pathingError : localError.value)
 const review = computed(() => props.managed ? props.pathingReview : loadedReview.value)
 const selectedParticipant = ref<string>()
-const playbackTimeMs = ref(0)
+const expandedMap = ref(false)
 const showcaseCompleteRoute = import.meta.env.DEV &&
   new URLSearchParams(window.location.search).get("showcase") === "jungle"
-const playing = ref(false)
 const speed = ref(1)
 const speedOptions = [0.5, 1, 2, 4, 8] as const
-let animationFrame: number | undefined
-let previousAnimationTime: number | undefined
 let loadSequence = 0
 
 const mapStyle = computed(() => ({
@@ -90,6 +95,15 @@ const firstEvidenceTime = computed(() => Math.min(
   duration.value,
 ))
 const playbackAvailable = computed(() => hasTelemetry.value && duration.value > 0)
+const playback = usePlaybackClock({
+  duration: () => duration.value,
+  available: () => playbackAvailable.value,
+  speed,
+  renderFps: 30,
+  publishFps: 10,
+})
+const playbackTimeMs = playback.time
+const playing = playback.playing
 const playbackProgress = computed(() => duration.value > 0
   ? Math.min(100, Math.max(0, playbackTimeMs.value / duration.value * 100))
   : 0)
@@ -105,99 +119,74 @@ const observedCoverage = computed(() => {
   )
   return Math.round(observed / total * 100)
 })
-
-function interpolatedPoint(left: NormalizedPoint, right: NormalizedPoint, fraction: number): NormalizedPoint {
-  return {
-    x: left.x + (right.x - left.x) * fraction,
-    y: left.y + (right.y - left.y) * fraction,
-  }
-}
-
-function routePointsAt(segment: PathSegment, timestamp: number): NormalizedPoint[] {
-  if (timestamp < segment.startTimeMs || segment.points.length === 0) return []
-  if (segment.points.length === 1 || timestamp >= segment.endTimeMs) return segment.points
-  const progress = Math.max(0, Math.min(
-    1,
-    (timestamp - segment.startTimeMs) / Math.max(1, segment.endTimeMs - segment.startTimeMs),
-  ))
-  const distances = segment.points.slice(1).map((point, index) =>
-    Math.hypot(point.x - segment.points[index].x, point.y - segment.points[index].y),
-  )
-  const totalDistance = distances.reduce((sum, distance) => sum + distance, 0)
-  if (totalDistance <= 0.0001) return [segment.points[0]]
-  const targetDistance = progress * totalDistance
-  const points = [segment.points[0]]
-  let traversed = 0
-  for (let index = 0; index < distances.length; index += 1) {
-    const distance = distances[index]
-    const next = traversed + distance
-    if (targetDistance >= next && index < distances.length - 1) {
-      points.push(segment.points[index + 1])
-      traversed = next
-      continue
-    }
-    points.push(interpolatedPoint(
-      segment.points[index],
-      segment.points[index + 1],
-      distance <= 0.0001 ? 0 : Math.max(0, Math.min(1, (targetDistance - traversed) / distance)),
-    ))
-    break
-  }
-  return points
-}
-
-const renderedPaths = computed(() => selectedSegments.value.flatMap((segment, index) => {
-  if (segment.kind === "unknown") return []
-  const points = routePointsAt(segment, playbackTimeMs.value)
-  if (points.length < 2) return []
-  return [{
-    key: `${segment.participantKey}:${segment.startTimeMs}:${segment.endTimeMs}:${index}`,
-    points: points.map((point) => `${point.x * 100},${point.y * 100}`).join(" "),
-    confidence: segment.confidence,
-    estimated: segment.kind !== "observed",
-  }]
+const selectedPathRuns = computed(() => preparePathRuns(selectedSegments.value, {
+  smoothingStrength: selectedSegments.value.some((segment) => segment.modelVersion >= 4)
+    ? 0.42
+    : 0.74,
+  tolerance: 0.0028,
+  maximumPoints: 320,
 }))
-
-const separatedSightings = computed(() => selectedSegments.value.flatMap((segment, segmentIndex) => {
-  if (segment.kind !== "unknown" || segment.points.length === 0 || playbackTimeMs.value < segment.startTimeMs) {
-    return []
+const renderedPaths = computed(() => {
+  const groups = new Map<"observed" | "estimated", {
+    paths: string[]
+    confidence: number
+  }>([
+    ["observed", { paths: [], confidence: 1 }],
+    ["estimated", { paths: [], confidence: 1 }],
+  ])
+  for (const run of selectedPathRuns.value) {
+    const points = visibleTimedPath(run.points, playbackTimeMs.value)
+    if (points.length < 2) continue
+    const key = run.kind === "observed" ? "observed" : "estimated"
+    const group = groups.get(key)!
+    group.paths.push(points.map((sample, index) =>
+      `${index === 0 ? "M" : "L"}${sample.point.x * 100} ${sample.point.y * 100}`,
+    ).join(" "))
+    group.confidence = Math.min(group.confidence, run.confidence)
   }
-  const visiblePoints = playbackTimeMs.value >= segment.endTimeMs
-    ? segment.points
-    : [segment.points[0]]
-  return visiblePoints.map((point, pointIndex) => ({
-    key: `${segment.participantKey}:${segment.startTimeMs}:${segmentIndex}:${pointIndex}`,
-    point,
-    kind: segment.kind,
-    confidence: segment.confidence,
-  }))
-}))
+  return [...groups].flatMap(([key, group]) => group.paths.length ? [{
+    key,
+    d: group.paths.join(" "),
+    confidence: group.confidence,
+    estimated: key === "estimated",
+  }] : [])
+})
+
+const unknownSightings = computed(() => selectedSegments.value.flatMap((segment, segmentIndex) =>
+  segment.kind === "unknown"
+    ? timedPathPoints(segment).map((sample, pointIndex) => ({
+      ...sample,
+      key: `${segment.participantKey}:${segment.startTimeMs}:${segmentIndex}:${pointIndex}`,
+      kind: segment.kind,
+      confidence: segment.confidence,
+    }))
+    : [],
+).sort((left, right) => left.timestamp - right.timestamp))
+
+const separatedSightings = computed(() => {
+  const end = upperBoundPathTime(unknownSightings.value, playbackTimeMs.value)
+  const start = upperBoundPathTime(unknownSightings.value, playbackTimeMs.value - 60_000)
+  return unknownSightings.value.slice(Math.max(start, end - 32), end)
+})
 
 const currentPoint = computed(() => {
   let candidate: { point: NormalizedPoint; evidenceTime: number; exact: boolean } | undefined
-  for (const segment of selectedSegments.value) {
-    if (playbackTimeMs.value < segment.startTimeMs || segment.points.length === 0) continue
-    if (segment.kind !== "unknown") {
-      const points = routePointsAt(segment, playbackTimeMs.value)
-      const point = points.at(-1)
-      if (!point) continue
-      const evidenceTime = Math.min(playbackTimeMs.value, segment.endTimeMs)
-      if (!candidate || evidenceTime >= candidate.evidenceTime) {
-        candidate = {
-          point,
-          evidenceTime,
-          exact: segment.kind === "observed" && playbackTimeMs.value <= segment.endTimeMs,
-        }
-      }
-      continue
-    }
-    const ended = playbackTimeMs.value >= segment.endTimeMs
-    const point = ended ? segment.points.at(-1) : segment.points[0]
-    if (!point) continue
-    const evidenceTime = ended ? segment.endTimeMs : segment.startTimeMs
+  for (const run of selectedPathRuns.value) {
+    const current = pointAtTimedPath(run.points, playbackTimeMs.value)
+    if (!current) continue
+    const finalTime = run.points.at(-1)?.timestamp ?? current.timestamp
+    const evidenceTime = Math.min(playbackTimeMs.value, finalTime)
     if (!candidate || evidenceTime >= candidate.evidenceTime) {
-      candidate = { point, evidenceTime, exact: false }
+      candidate = {
+        point: current.point,
+        evidenceTime,
+        exact: run.kind === "observed" && playbackTimeMs.value <= finalTime,
+      }
     }
+  }
+  const latestUnknown = separatedSightings.value.at(-1)
+  if (latestUnknown && (!candidate || latestUnknown.timestamp >= candidate.evidenceTime)) {
+    candidate = { point: latestUnknown.point, evidenceTime: latestUnknown.timestamp, exact: false }
   }
   return candidate
 })
@@ -263,32 +252,15 @@ function pointStyle(point: NormalizedPoint) {
 }
 
 function stop() {
-  playing.value = false
-  previousAnimationTime = undefined
-  if (animationFrame !== undefined) cancelAnimationFrame(animationFrame)
-  animationFrame = undefined
+  playback.stop()
 }
 
 function setPlaybackTime(timestamp: number) {
-  playbackTimeMs.value = Math.max(0, Math.min(duration.value, timestamp))
+  playback.setTime(timestamp, false)
 }
 
 function setInitialPlaybackTime() {
   setPlaybackTime(showcaseCompleteRoute ? duration.value : firstEvidenceTime.value)
-}
-
-function animate(now: number) {
-  if (!playing.value) return
-  const previous = previousAnimationTime ?? now
-  previousAnimationTime = now
-  const next = playbackTimeMs.value + (now - previous) * speed.value
-  if (next >= duration.value) {
-    setPlaybackTime(duration.value)
-    stop()
-    return
-  }
-  setPlaybackTime(next)
-  animationFrame = requestAnimationFrame(animate)
 }
 
 function togglePlayback() {
@@ -298,9 +270,7 @@ function togglePlayback() {
   }
   if (!playbackAvailable.value) return
   if (playbackTimeMs.value >= duration.value) setPlaybackTime(firstEvidenceTime.value)
-  playing.value = true
-  previousAnimationTime = undefined
-  animationFrame = requestAnimationFrame(animate)
+  playback.play(firstEvidenceTime.value)
 }
 
 function seek(event: Event) {
@@ -339,7 +309,8 @@ async function load() {
   localError.value = undefined
   loadedReview.value = undefined
   selectedParticipant.value = undefined
-  playbackTimeMs.value = 0
+  expandedMap.value = false
+  setPlaybackTime(0)
   try {
     const result = await api.getJunglePathingReview(props.gameId)
     if (sequence !== loadSequence) return
@@ -444,7 +415,13 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="path-layout">
-        <div class="map-panel">
+        <MapReviewPopout
+          :open="expandedMap"
+          title="Jungle path playback"
+          labelled-by="jungle-map-popout-title"
+          @close="expandedMap = false"
+        >
+        <div class="map-panel" :class="{ expanded: expandedMap }">
           <div class="map-toolbar">
             <label v-if="participants.length">
               Champion track
@@ -458,18 +435,30 @@ onBeforeUnmount(() => {
                 </option>
               </select>
             </label>
-            <div class="coverage" :class="{ weak: observedCoverage < 60 }">
-              <strong>{{ observedCoverage }}%</strong>
-              observed coverage
+            <div class="map-toolbar-actions">
+              <div class="coverage" :class="{ weak: observedCoverage < 60 }">
+                <strong>{{ observedCoverage }}%</strong>
+                observed coverage
+              </div>
+              <button
+                type="button"
+                class="map-popout-button"
+                aria-label="Expand jungle path map"
+                title="Expand jungle path map"
+                @click="expandedMap = true"
+              >
+                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 3h6v2H5v4H3V3Zm8 0h6v6h-2V5h-4V3ZM3 11h2v4h4v2H3v-6Zm12 0h2v6h-6v-2h4v-4Z" /></svg>
+                <span>Expand</span>
+              </button>
             </div>
           </div>
 
           <div class="playback-map" :style="mapStyle">
             <svg class="path-layer" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-              <polyline
+              <path
                 v-for="path in renderedPaths"
                 :key="path.key"
-                :points="path.points"
+                :d="path.d"
                 :class="{ estimated: path.estimated }"
                 :style="{ opacity: Math.max(.3, path.confidence) }"
               />
@@ -571,9 +560,10 @@ onBeforeUnmount(() => {
             />
           </div>
           <p class="playback-note">
-            Solid lines are pixel-supported. Dashed routes estimate feasible fog-of-war travel between accepted sightings; even a brief sighting reshapes the estimate. Rejected gaps stay separated.
+            The selected champion’s route is smoothed for review. Solid lines are pixel-supported; dashed routes estimate feasible fog-of-war travel. Rejected gaps stay disconnected.
           </p>
         </div>
+        </MapReviewPopout>
 
         <div class="camp-panel">
           <div class="camp-heading">
@@ -707,6 +697,32 @@ h3, h4, p { margin: 0; }
   background: rgba(9, 18, 22, .42);
 }
 .map-panel { display: grid; gap: 11px; }
+.map-panel.expanded {
+  width: min(100%, calc(100vh - 120px));
+  min-width: min(620px, 100%);
+  margin: auto;
+  align-self: center;
+}
+.map-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.map-popout-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid rgba(128, 160, 170, .3);
+  border-radius: 6px;
+  background: rgba(5, 13, 18, .76);
+  color: inherit;
+  cursor: pointer;
+}
+.map-popout-button:hover { border-color: var(--ui-accent-strong, #62d9e2); }
+.map-popout-button svg { width: 14px; fill: currentColor; }
+.map-popout-button span { font-size: 12px; }
 .map-toolbar label, .speed-control {
   display: flex;
   gap: 10px;
@@ -761,7 +777,7 @@ select {
   overflow: visible;
   pointer-events: none;
 }
-.path-layer polyline {
+.path-layer path {
   fill: none;
   stroke: var(--ui-accent-strong, #62d9e2);
   stroke-width: 1.5;
@@ -770,7 +786,7 @@ select {
   vector-effect: non-scaling-stroke;
   filter: drop-shadow(0 0 2px rgb(2 10 14 / 75%));
 }
-.path-layer polyline.estimated {
+.path-layer path.estimated {
   stroke-dasharray: 4 3;
   opacity: .68;
 }

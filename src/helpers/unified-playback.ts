@@ -11,6 +11,13 @@ import type {
   PathSegment,
   PathSegmentKind,
 } from "../shared/minimap/contracts"
+import {
+  pointAtTimedPath,
+  simplifyTimedPath,
+  smoothTimedPath,
+  timedPathPoints,
+  type TimedPathPoint,
+} from "../shared/minimap/path-processing"
 import type { MinimapPathingReview } from "../shared/minimap/review"
 import type { TimelineEvent, TimelineFrame } from "../types/review"
 import type { ParticipantRow } from "../types/stats"
@@ -39,6 +46,36 @@ const minimapSegmentIndexCache = new WeakMap<
   MinimapPathingReview,
   Map<string, ParticipantSegmentIndex>
 >()
+const timedSegmentCache = new WeakMap<PathSegment, TimedPathPoint[]>()
+
+interface ParticipantDeathIndex {
+  events: TimelineEvent[]
+  timestamps: number[]
+}
+
+const deathEventIndexCache = new WeakMap<
+  TimelineEvent[],
+  Map<number, ParticipantDeathIndex>
+>()
+
+function indexedParticipantDeaths(events: TimelineEvent[], participantId: number) {
+  let byParticipant = deathEventIndexCache.get(events)
+  if (!byParticipant) {
+    byParticipant = new Map()
+    for (const event of events) {
+      if (event.type !== "CHAMPION_KILL" || event.targetId === undefined) continue
+      const index = byParticipant.get(event.targetId) ?? { events: [], timestamps: [] }
+      index.events.push(event)
+      byParticipant.set(event.targetId, index)
+    }
+    for (const index of byParticipant.values()) {
+      index.events.sort((left, right) => left.timestamp - right.timestamp)
+      index.timestamps = index.events.map((event) => event.timestamp)
+    }
+    deathEventIndexCache.set(events, byParticipant)
+  }
+  return byParticipant.get(participantId) ?? { events: [], timestamps: [] }
+}
 
 export type UnifiedPlaybackSource =
   | "cv_observed"
@@ -341,6 +378,14 @@ function pointAtSegmentTime(segment: PathSegment, timestamp: number): Normalized
   const points = segment.points
   if (points.length === 0 || points.some((point) => !usableNormalizedPoint(point))) return undefined
   if (points.length === 1 || segment.endTimeMs <= segment.startTimeMs) return points[0]
+  if (segment.pointTimesMs?.length === points.length) {
+    let timed = timedSegmentCache.get(segment)
+    if (!timed) {
+      timed = timedPathPoints(segment)
+      timedSegmentCache.set(segment, timed)
+    }
+    return pointAtTimedPath(timed, timestamp)?.point
+  }
   const progress = Math.max(0, Math.min(
     1,
     (timestamp - segment.startTimeMs) / (segment.endTimeMs - segment.startTimeMs),
@@ -378,21 +423,25 @@ function appendRouteControl(
   controls: UnifiedRouteControl[],
   incoming: UnifiedRouteControl,
 ) {
-  const existingIndex = controls.findIndex((control) =>
-    Math.abs(control.timestamp - incoming.timestamp) <= ROUTE_TIME_EPSILON_MS,
-  )
-  if (existingIndex < 0) {
+  const existing = controls.at(-1)
+  if (!existing || Math.abs(existing.timestamp - incoming.timestamp) > ROUTE_TIME_EPSILON_MS) {
     controls.push(incoming)
     return
   }
-  const existing = controls[existingIndex]
   const sourcePriority = (source: UnifiedRouteControl["source"]) =>
     source === "riot_snapshot" ? 3 : source === "cv_observed" ? 2 : 1
   if (sourcePriority(incoming.source) > sourcePriority(existing.source) ||
       (sourcePriority(incoming.source) === sourcePriority(existing.source) &&
         incoming.confidence > existing.confidence)) {
-    controls[existingIndex] = incoming
+    controls[controls.length - 1] = incoming
   }
+}
+
+function normalizeRouteControls(controls: UnifiedRouteControl[]) {
+  controls.sort((left, right) => left.timestamp - right.timestamp)
+  const normalized: UnifiedRouteControl[] = []
+  for (const control of controls) appendRouteControl(normalized, control)
+  controls.splice(0, controls.length, ...normalized)
 }
 
 function timelineRouteControls(
@@ -420,23 +469,18 @@ function timelineRouteControls(
 }
 
 function smoothedRunControls(controls: UnifiedRouteControl[]) {
-  if (controls.length < 3) return controls
-  return controls.map((control, index) => {
-    const previous = controls[index - 1]
-    const next = controls[index + 1]
-    if (!previous || !next ||
-        control.timestamp - previous.timestamp > MAXIMUM_CONTINUOUS_CV_GAP_MS ||
-        next.timestamp - control.timestamp > MAXIMUM_CONTINUOUS_CV_GAP_MS ||
-        pointDistance(previous.point, control.point) > 0.08 ||
-        pointDistance(control.point, next.point) > 0.08) return control
-    return {
-      ...control,
-      point: {
-        x: previous.point.x * 0.2 + control.point.x * 0.6 + next.point.x * 0.2,
-        y: previous.point.y * 0.2 + control.point.y * 0.6 + next.point.y * 0.2,
-      },
-    }
+  const smoothed = smoothTimedPath(controls.map((control) => ({
+    timestamp: control.timestamp,
+    point: control.point,
+  })), {
+    strength: 0.64,
+    maximumGapMs: MAXIMUM_CONTINUOUS_CV_GAP_MS,
+    maximumNeighbourDistance: 0.08,
   })
+  return controls.map((control, index) => ({
+    ...control,
+    point: smoothed[index].point,
+  }))
 }
 
 function observedCvRouteRuns(
@@ -449,9 +493,9 @@ function observedCvRouteRuns(
     if (segment.modelVersion < 2 || segment.kind !== "observed" ||
         segment.confidence < minimumConfidence || segment.points.length === 0 ||
         segment.points.some((point) => !usableNormalizedPoint(point))) continue
-    const segmentControls = segment.points.map((point, pointIndex) => ({
-      timestamp: pointTimestamp(segment, pointIndex),
-      point,
+    const segmentControls = timedPathPoints(segment).map((sample) => ({
+      timestamp: sample.timestamp,
+      point: sample.point,
       source: "cv_observed" as const,
       origin: "minimap_cv" as const,
       confidence: segment.confidence,
@@ -476,7 +520,7 @@ function observedCvRouteRuns(
     run.confidence = Math.max(run.confidence, segment.confidence)
   }
   for (const run of runs) {
-    run.controls.sort((left, right) => left.timestamp - right.timestamp)
+    normalizeRouteControls(run.controls)
     run.controls = smoothedRunControls(run.controls)
   }
   return runs.filter((run) => run.controls.length > 0)
@@ -662,7 +706,7 @@ function appendCoherentInferredControls(input: {
     segment.points.every(usableNormalizedPoint),
   ) ?? []
   if (inferredSegments.length === 0) return
-  input.controls.sort((left, right) => left.timestamp - right.timestamp)
+  normalizeRouteControls(input.controls)
   for (const [segmentIndex, segment] of inferredSegments.entries()) {
     const first = segment.points[0]
     const last = segment.points.at(-1)!
@@ -682,7 +726,7 @@ function appendCoherentInferredControls(input: {
       confidence: segment.confidence,
       runKey,
     }))
-    input.controls.sort((left, right) => left.timestamp - right.timestamp)
+    normalizeRouteControls(input.controls)
   }
 }
 
@@ -728,7 +772,7 @@ function buildUnifiedParticipantRoute(input: {
     minimumConfidence: input.minimumConfidence,
   })
 
-  controls.sort((left, right) => left.timestamp - right.timestamp)
+  normalizeRouteControls(controls)
   return { controls, timestamps: controls.map((control) => control.timestamp) }
 }
 
@@ -806,11 +850,17 @@ function routePositionAt(input: {
   let after = afterIndex < controls.length ? controls[afterIndex] : undefined
   if (!before || !after) return undefined
 
-  const death = input.events.find((event) =>
-    event.type === "CHAMPION_KILL" && event.targetId === input.participantId &&
-    event.timestamp > before.timestamp && event.timestamp < after!.timestamp &&
-    isUsableMapPosition(event.position, input.mapId),
-  )
+  const deaths = indexedParticipantDeaths(input.events, input.participantId)
+  const firstDeathIndex = upperBound(deaths.timestamps, before.timestamp)
+  let death: TimelineEvent | undefined
+  for (let index = firstDeathIndex;
+    index < deaths.events.length && deaths.events[index].timestamp < after.timestamp;
+    index += 1) {
+    if (isUsableMapPosition(deaths.events[index].position, input.mapId)) {
+      death = deaths.events[index]
+      break
+    }
+  }
   if (death) {
     if (input.timestamp > death.timestamp) return undefined
     const percent = mapPositionPercent(death.position!, input.mapId)
@@ -899,6 +949,9 @@ export function unifiedPlaybackPositionsAt(input: Omit<
 }
 
 function pointTimestamp(segment: PathSegment, index: number) {
+  if (segment.pointTimesMs?.length === segment.points.length) {
+    return segment.pointTimesMs[index] ?? segment.startTimeMs
+  }
   if (segment.points.length <= 1 || segment.endTimeMs <= segment.startTimeMs) {
     return segment.startTimeMs
   }
@@ -1067,10 +1120,8 @@ export function unifiedPlaybackTrails(input: {
       mapId: input.mapId,
     })
     if (!current) return []
-    const latestDeath = input.events.filter((event) =>
-      event.type === "CHAMPION_KILL" && event.targetId === participantId &&
-      event.timestamp <= input.timestamp,
-    ).at(-1)
+    const deaths = indexedParticipantDeaths(input.events, participantId)
+    const latestDeath = deaths.events[upperBound(deaths.timestamps, input.timestamp) - 1]
     const earliest = Math.max(
       0,
       input.timestamp - lookbackMs,
@@ -1085,12 +1136,16 @@ export function unifiedPlaybackTrails(input: {
       mapId: input.mapId,
     })
     if (start) points.push({ x: start.point.left / 100, y: start.point.top / 100 })
-    const includedControls = route.controls.filter((control) =>
-      control.timestamp > earliest && control.timestamp < input.timestamp,
-    )
+    const firstControl = upperBound(route.timestamps, earliest)
+    const lastControl = lowerBound(route.timestamps, input.timestamp)
+    const includedControls = route.controls.slice(firstControl, lastControl)
     points.push(...includedControls.map((control) => control.point))
     points.push({ x: current.point.left / 100, y: current.point.top / 100 })
-    const routePoints = decimate(dedupePoints(points))
+    const routePoints = simplifyTimedPath(
+      dedupePoints(points).map((point, index) => ({ timestamp: index, point })),
+      0.0025,
+      192,
+    ).map((sample) => sample.point)
     if (routePoints.length < 2) return []
     const hasCvEvidence = includedControls.some((control) =>
       control.origin === "minimap_cv",

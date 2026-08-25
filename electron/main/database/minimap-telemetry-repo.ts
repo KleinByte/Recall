@@ -107,6 +107,7 @@ interface PathSegmentRow {
   endTimeMs: number
   kind: PathSegment["kind"]
   pointsJson: string
+  pointTimesJson: string | null
   confidence: number
   uncertaintyJson: string | null
   inferenceMode: PathSegment["inferenceMode"] | null
@@ -616,8 +617,8 @@ export class MinimapTelemetryRepository {
     const insert = this.db.prepare(`
       INSERT INTO path_segments
         (analysis_id, participant_key, start_time_ms, end_time_ms, kind,
-         points_json, confidence, uncertainty_json, inference_mode, model_version)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         points_json, point_times_json, confidence, uncertainty_json, inference_mode, model_version)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     for (const segment of segments) {
       insert.run(
@@ -627,6 +628,7 @@ export class MinimapTelemetryRepository {
         Math.round(segment.endTimeMs),
         segment.kind,
         JSON.stringify(segment.points),
+        segment.pointTimesMs ? JSON.stringify(segment.pointTimesMs) : null,
         segment.confidence,
         segment.uncertaintyRadius ? JSON.stringify(segment.uncertaintyRadius) : null,
         segment.inferenceMode ?? null,
@@ -661,6 +663,7 @@ export class MinimapTelemetryRepository {
     const rows = run ? this.db.prepare(`
       SELECT participant_key AS participantKey, start_time_ms AS startTimeMs,
              end_time_ms AS endTimeMs, kind, points_json AS pointsJson,
+             point_times_json AS pointTimesJson,
              confidence, uncertainty_json AS uncertaintyJson,
              inference_mode AS inferenceMode, model_version AS modelVersion
       FROM path_segments
@@ -702,6 +705,9 @@ export class MinimapTelemetryRepository {
         endTimeMs: row.endTimeMs,
         kind: row.kind,
         points: parseJson(row.pointsJson, []),
+        pointTimesMs: row.pointTimesJson
+          ? parseJson(row.pointTimesJson, [])
+          : undefined,
         confidence: row.confidence,
         uncertaintyRadius: row.uncertaintyJson
           ? parseJson(row.uncertaintyJson, [])

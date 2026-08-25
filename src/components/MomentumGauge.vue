@@ -386,6 +386,7 @@ const streakText = computed(() =>
     class="momentum-gauge"
     :class="gaugeClass"
     :style="gaugeStyle"
+    data-live-motion="essential"
     role="meter"
     :aria-label="ariaLabel"
     :aria-valuenow="value"

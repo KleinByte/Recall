@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import { mount } from "@vue/test-utils"
+import { nextTick } from "vue"
 import { describe, expect, it } from "vitest"
 import MatchPlaybackMap from "../src/components/MatchPlaybackMap.vue"
 import type { MinimapPathingReview } from "../src/shared/minimap/review"
@@ -119,6 +120,8 @@ describe("unified match timeline playback", () => {
     expect(token.classes()).toContain("cv-origin")
     expect(token.attributes("title")).toContain("Observed CV")
     expect(token.attributes("title")).toContain("94% confidence")
+    expect(wrapper.findAll(".trail-layer .origin-minimap_cv")).toHaveLength(0)
+    await token.trigger("click")
     expect(wrapper.findAll(".trail-layer .origin-minimap_cv")).toHaveLength(1)
     const trailElement = wrapper.get(".trail-layer .origin-minimap_cv").element
     expect(wrapper.findAll(".camp-clear-tick")).toHaveLength(1)
@@ -134,6 +137,17 @@ describe("unified match timeline playback", () => {
     expect(fallback.classes()).toContain("estimated")
     expect(fallback.classes()).toContain("cv-origin")
     expect(fallback.attributes("title")).toContain("CV reconstructed")
+
+    await fallback.trigger("click")
+    expect(wrapper.findAll(".trail-layer polyline")).toHaveLength(0)
+
+    await wrapper.get('[aria-label="Expand map playback"]').trigger("click")
+    await nextTick()
+    expect(document.body.querySelector('[role="dialog"] #match-map-popout-title')?.textContent)
+      .toContain("Map playback")
+    ;(document.body.querySelector('[aria-label="Close expanded map"]') as HTMLButtonElement).click()
+    await nextTick()
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull()
 
     wrapper.unmount()
   })

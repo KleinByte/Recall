@@ -142,4 +142,33 @@ describe("accuracy-first minimap paths", () => {
     })
     expect(segment.kind).toBe("unknown")
   })
+
+  it("compacts continuous observations into one timed, smoothed run", () => {
+    const observations = [
+      observation({ gameTimeMs: 10_000, frameSequence: 10, position: { x: .2, y: .8 } }),
+      observation({ gameTimeMs: 10_250, frameSequence: 11, position: { x: .212, y: .79 } }),
+      observation({ gameTimeMs: 10_500, frameSequence: 12, position: { x: .202, y: .798 } }),
+      observation({ gameTimeMs: 10_750, frameSequence: 13, position: { x: .224, y: .78 } }),
+      observation({ gameTimeMs: 11_000, frameSequence: 14, position: { x: .235, y: .77 } }),
+    ]
+    const segments = new PathReconstructor().buildSegments({
+      policy,
+      gameId: 9,
+      participantKey: "ally:zac",
+      observations,
+    })
+
+    expect(segments).toHaveLength(1)
+    expect(segments[0]).toMatchObject({
+      kind: "observed",
+      startTimeMs: 10_000,
+      endTimeMs: 11_000,
+      modelVersion: 4,
+      pointTimesMs: [10_000, 10_250, 10_500, 10_750, 11_000],
+    })
+    expect(segments[0].points).toHaveLength(observations.length)
+    expect(segments[0].points[0]).toEqual(observations[0].position)
+    expect(segments[0].points.at(-1)).toEqual(observations.at(-1)!.position)
+    expect(segments[0].points[2].x).toBeGreaterThan(observations[2].position.x)
+  })
 })

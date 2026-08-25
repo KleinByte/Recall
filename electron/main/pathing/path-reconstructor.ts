@@ -4,6 +4,7 @@ import type {
   PathSegment,
 } from "../../../src/shared/minimap/contracts.js"
 import { clamp, normalizedDistance } from "../../../src/shared/minimap/contracts.js"
+import { compactObservedPathSegments } from "../../../src/shared/minimap/path-processing.js"
 import { PathingPolicyGate, type PathingPolicyContext } from "./pathing-policy-gate.js"
 import {
   nearestNavigationNode,
@@ -13,11 +14,11 @@ import {
 } from "./summoners-rift-graph.js"
 
 /**
- * Version 3 keeps rendered observations exact and estimates feasible travel
- * through fog of war over the navigation graph. Every new sighting becomes an
- * endpoint, so even a brief observation bends the surrounding estimate.
+ * Version 4 compacts continuous observations into timestamped, smoothed runs
+ * while retaining raw capture observations separately. Fog-of-war estimates
+ * remain disconnected from rejected gaps.
  */
-export const PATH_RECONSTRUCTION_MODEL_VERSION = 3
+export const PATH_RECONSTRUCTION_MODEL_VERSION = 4
 
 export interface ReconstructionOptions {
   /** Largest sampling gap that still represents continuous rendered evidence. */
@@ -99,7 +100,7 @@ export class PathReconstructor {
         ? this.observed({ ...input, start, end })
         : this.inferredOrUnknown({ ...input, start, end }))
     }
-    return result
+    return compactObservedPathSegments(result)
   }
 
   private isContinuous(
@@ -128,6 +129,7 @@ export class PathReconstructor {
       endTimeMs: input.end.gameTimeMs,
       kind: "observed",
       points: [input.start.position, input.end.position],
+      pointTimesMs: [input.start.gameTimeMs, input.end.gameTimeMs],
       confidence: Math.min(endpointConfidence(input.start), endpointConfidence(input.end)),
       modelVersion: PATH_RECONSTRUCTION_MODEL_VERSION,
     }
@@ -178,6 +180,11 @@ export class PathReconstructor {
       endTimeMs: input.end.gameTimeMs,
       kind: "inferred",
       points,
+      pointTimesMs: distanceProportionalTimes(
+        points,
+        input.start.gameTimeMs,
+        input.end.gameTimeMs,
+      ),
       confidence,
       uncertaintyRadius: points.map((_point, index) => {
         if (points.length <= 1) return 0
@@ -204,6 +211,7 @@ export class PathReconstructor {
       // These are two independently observed endpoints. Review rendering must
       // not connect them; retaining them lets it show both honest sightings.
       points: [input.start.position, input.end.position],
+      pointTimesMs: [input.start.gameTimeMs, input.end.gameTimeMs],
       confidence: 0,
       modelVersion: PATH_RECONSTRUCTION_MODEL_VERSION,
     }
@@ -214,4 +222,23 @@ function dedupePoints(points: NormalizedPoint[]) {
   return points.filter((point, index) =>
     index === 0 || normalizedDistance(points[index - 1], point) > 0.0001,
   )
+}
+
+function distanceProportionalTimes(
+  points: NormalizedPoint[],
+  startTimeMs: number,
+  endTimeMs: number,
+) {
+  if (points.length <= 1) return [startTimeMs]
+  const distances = points.slice(1).map((point, index) =>
+    normalizedDistance(points[index], point),
+  )
+  const total = distances.reduce((sum, distance) => sum + distance, 0)
+  let traversed = 0
+  return points.map((_point, index) => {
+    if (index === 0) return startTimeMs
+    traversed += distances[index - 1]
+    const fraction = total <= 0.0001 ? index / (points.length - 1) : traversed / total
+    return startTimeMs + (endTimeMs - startTimeMs) * fraction
+  })
 }

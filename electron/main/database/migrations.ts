@@ -13,8 +13,10 @@ import {
 import {
   MINIMAP_TELEMETRY_V33_UP,
   MINIMAP_TELEMETRY_V34_UP,
+  MINIMAP_TELEMETRY_V37_UP,
   verifyMinimapTelemetryV33,
   verifyMinimapTelemetryV34,
+  verifyMinimapTelemetryV37,
 } from "./minimap-telemetry-schema.js"
 
 export interface Migration {
@@ -2528,6 +2530,13 @@ export const migrations: Migration[] = [
         throw new Error("active_game_journal_foreign_key_violation")
       }
     },
+  },
+  {
+    // Compact reconstructed route runs still retain the exact capture time of
+    // every point, keeping interpolation correct without thousands of rows.
+    version: 37,
+    up: MINIMAP_TELEMETRY_V37_UP,
+    verify: verifyMinimapTelemetryV37,
   },
 ]
 

@@ -183,6 +183,8 @@ export interface PathSegment {
   endTimeMs: number
   kind: PathSegmentKind
   points: NormalizedPoint[]
+  /** Exact sample time for each point when the reconstructed artifact retains it. */
+  pointTimesMs?: number[]
   confidence: number
   uncertaintyRadius?: number[]
   inferenceMode?: "smoothed_postgame"

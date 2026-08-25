@@ -22,6 +22,7 @@ const assetName = computed(() => (
       `recall-mark--${variant}`,
       { 'is-animated': animated && variant === 'logo' },
     ]"
+    :data-live-motion="animated && variant === 'logo' ? 'ambient' : undefined"
     role="presentation"
     aria-hidden="true"
   >

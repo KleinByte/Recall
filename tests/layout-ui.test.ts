@@ -57,6 +57,7 @@ describe("desktop page layout", () => {
     expect(dialTokens).toContain("--dial-tier-master-bright: #e0a4ff")
     expect(dashboard).toContain("background: var(--ui-surface-panel-quiet)")
     expect(dial).toContain("var(--instrument-motion-ambient)")
+    expect(dial).toContain('data-live-motion="essential"')
     expect(dial).toContain('role="meter"')
     expect(dial).toContain("prefers-reduced-motion")
   })

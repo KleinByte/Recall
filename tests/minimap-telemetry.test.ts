@@ -349,7 +349,7 @@ describe("minimap telemetry integration", () => {
     db.pragma("foreign_keys = ON")
 
     expect(applyMigrations(db)).toBe(latestSchemaVersion)
-    expect(latestSchemaVersion).toBe(36)
+    expect(latestSchemaVersion).toBe(37)
     const tables = new Set((db.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table'",
     ).all() as { name: string }[]).map((row) => row.name))
@@ -373,7 +373,41 @@ describe("minimap telemetry integration", () => {
       "maximum_frame_gap_ms",
       "confirmed_observations",
     ]) expect(captureColumns.has(column), column).toBe(true)
+    const pathColumns = new Set((db.prepare(
+      "PRAGMA table_info(path_segments)",
+    ).all() as { name: string }[]).map((column) => column.name))
+    expect(pathColumns.has("point_times_json")).toBe(true)
 
+    db.close()
+  })
+
+  it("round-trips exact point times for compact path artifacts", () => {
+    const db = new Database(":memory:")
+    db.pragma("foreign_keys = ON")
+    applyMigrations(db)
+    const repository = new MinimapTelemetryRepository(db)
+    const analysisId = repository.startPathingAnalysis({
+      gameId: 77,
+      puuid: "owner",
+      inputHash: "a".repeat(64),
+      graphVersion: 3,
+      modelVersion: 4,
+      coverage: { observed: 3 },
+    })
+    repository.replacePathSegments(analysisId, [{
+      gameId: 77,
+      participantKey: "ally:owner",
+      startTimeMs: 1_000,
+      endTimeMs: 1_500,
+      kind: "observed",
+      points: [{ x: .2, y: .8 }, { x: .21, y: .79 }, { x: .23, y: .77 }],
+      pointTimesMs: [1_000, 1_250, 1_500],
+      confidence: .91,
+      modelVersion: 4,
+    }])
+
+    expect(repository.getReview(77, "owner").segments[0].pointTimesMs)
+      .toEqual([1_000, 1_250, 1_500])
     db.close()
   })
 

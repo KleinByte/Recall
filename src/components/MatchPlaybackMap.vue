@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue"
+import MapReviewPopout from "./review/MapReviewPopout.vue"
 import { championIconUrl } from "../helpers/format"
 import { playbackWorldObjectiveIconUrl } from "../helpers/game-assets"
 import { publicAssetUrl } from "../helpers/assets"
+import { usePlaybackClock } from "../helpers/use-playback-clock"
 import { mapPositionPercent, reviewMapId } from "../helpers/map-coordinate"
 import {
   isUsableMapPosition,
@@ -44,21 +46,18 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ "update:timestamp": [timestamp: number] }>()
 
-const playing = ref(false)
 const speed = ref(1)
 const speedOptions = [1, 2, 4, 10] as const
 const visibility = ref<Visibility>("all")
 const focusedParticipantId = ref<number>()
 const expandedParticipantId = ref<number>()
+const expandedMap = ref(false)
 const visibilityOptions: Array<{ value: Visibility; label: string }> = [
   { value: "all", label: "Everyone" },
   { value: "blue", label: "Blue" },
   { value: "red", label: "Red" },
   { value: "you", label: "You" },
 ]
-let animationFrame: number | undefined
-let previousAnimationTime: number | undefined
-let playbackClock = props.timestamp
 let lastEmittedTimestamp: number | undefined
 let stackCollapseTimer: number | undefined
 
@@ -124,6 +123,20 @@ const campEvidenceAvailable = computed(() => campClears.value.length > 0)
 const available = computed(() =>
   timelineAvailable.value || cvAvailable.value || campEvidenceAvailable.value,
 )
+const playback = usePlaybackClock({
+  duration: () => duration.value,
+  available: () => available.value,
+  speed,
+  initialTime: props.timestamp,
+  renderFps: 30,
+  publishFps: 10,
+  onPublish: (timestamp) => {
+    lastEmittedTimestamp = timestamp
+    emit("update:timestamp", timestamp)
+  },
+})
+const playbackTime = playback.time
+const playing = playback.playing
 const currentPositions = computed(() => new Map(
   unifiedPlaybackPositionsAt({
     frames: props.frames,
@@ -131,7 +144,7 @@ const currentPositions = computed(() => new Map(
     minimapReview: minimapEnabledForMap.value ? props.minimapReview : undefined,
     bindings: minimapBindings.value,
     participantIds: props.participants.map((participant) => participant.participantId),
-    timestamp: props.timestamp,
+    timestamp: playbackTime.value,
     mapId: mapId.value,
     minimumConfidence: minimumCvConfidence.value,
   }).map((position) => [position.participantId, position]),
@@ -192,18 +205,22 @@ const expandedTokenLinks = computed(() => visibleTokens.value.filter((token) =>
     Math.abs(token.display.top - token.display.sourceTop) > .01),
 ))
 const trails = computed(() => {
+  const participantId = focusedParticipantId.value
+  if (participantId === undefined || !visibleParticipants.value.some((participant) =>
+    participant.participantId === participantId,
+  )) return []
   const participantById = new Map(props.participants.map((participant) => [
     participant.participantId,
     participant,
   ]))
-  const visibleIds = new Set(visibleParticipants.value.map((participant) => participant.participantId))
   return unifiedPlaybackTrails({
     frames: props.frames,
     events: props.events,
     minimapReview: minimapEnabledForMap.value ? props.minimapReview : undefined,
     bindings: minimapBindings.value,
-    participantIds: [...visibleIds],
-    timestamp: props.timestamp,
+    participantIds: [participantId],
+    timestamp: playbackTime.value,
+    lookbackMs: 60_000,
     mapId: mapId.value,
     minimumConfidence: minimumCvConfidence.value,
   }).flatMap((trail) => {
@@ -226,7 +243,7 @@ const sourceCounts = computed(() => {
 })
 const currentEvents = computed(() => props.events.flatMap((event) => {
   if (
-    Math.abs(event.timestamp - props.timestamp) > 2_500 ||
+    Math.abs(event.timestamp - playbackTime.value) > 2_500 ||
     playbackMapEventLayer(event, mapId.value) !== "transient" ||
     !isUsableMapPosition(event.position, mapId.value)
   ) return []
@@ -244,16 +261,16 @@ const campTimelineTicks = computed(() => campClears.value.map((clear, index) => 
   left: duration.value > 0 ? clear.clearedAtMs / duration.value * 100 : 0,
 })))
 const campMarkers = computed(() => minimapEnabledForMap.value && campClears.value.length > 0
-  ? minimapCampMarkersAt(campClears.value, props.timestamp)
+  ? minimapCampMarkersAt(campClears.value, playbackTime.value)
   : [],
 )
 const completedCampClears = computed(() => campClears.value.filter((clear) =>
-  clear.clearedAtMs <= props.timestamp,
+  clear.clearedAtMs <= playbackTime.value,
 ))
 const latestCampClear = computed(() => completedCampClears.value.at(-1))
 const worldMarkers = computed(() => playbackWorldMarkers(
   props.events,
-  props.timestamp,
+  playbackTime.value,
   mapId.value,
   props.match.mode,
   props.match.gameVersion,
@@ -278,6 +295,18 @@ function focusParticipant(participantId: number) {
   focusedParticipantId.value = next
   expandedParticipantId.value = next
   cancelStackCollapse()
+}
+
+function clearFocus() {
+  focusedParticipantId.value = undefined
+  expandedParticipantId.value = undefined
+  cancelStackCollapse()
+}
+
+function handleMapClick(event: MouseEvent) {
+  const target = event.target
+  if (target instanceof Element && target.closest("button, .playback-event, .world-marker")) return
+  clearFocus()
 }
 
 function cancelStackCollapse() {
@@ -313,7 +342,11 @@ function tokenStyle(token: typeof visibleTokens.value[number]) {
       : token.participant.isPlayer === 1
         ? 16
         : token.stackLead ? 14 : 5 + token.display.clusterIndex
-  return { left: `${token.display.left}%`, top: `${token.display.top}%`, zIndex }
+  return {
+    "--token-x": token.display.left,
+    "--token-y": token.display.top,
+    zIndex,
+  }
 }
 
 function playbackSourceLabel(
@@ -330,7 +363,7 @@ function tokenTitle(token: typeof visibleTokens.value[number]) {
     ? ` · stacked with ${token.display.clusterSize - 1} other champion${token.display.clusterSize === 2 ? "" : "s"}`
     : ""
   const confidence = Math.round(token.current.confidence * 100)
-  return `${participantName(token.participant)} · ${playbackSourceLabel(token.current.source, token.current.origin)} · ${confidence}% confidence at ${formatTime(props.timestamp)}${stack}`
+  return `${participantName(token.participant)} · ${playbackSourceLabel(token.current.source, token.current.origin)} · ${confidence}% confidence at ${formatTime(playbackTime.value)}${stack}`
 }
 
 function campMarkerStyle(marker: typeof campMarkers.value[number]) {
@@ -404,10 +437,7 @@ function eventTitle(event: TimelineEvent) {
 }
 
 function setTimestamp(timestamp: number) {
-  const bounded = Math.max(0, Math.min(duration.value, timestamp))
-  playbackClock = bounded
-  lastEmittedTimestamp = bounded
-  emit("update:timestamp", bounded)
+  playback.setTime(timestamp)
 }
 
 function seek(event: Event) {
@@ -415,24 +445,7 @@ function seek(event: Event) {
 }
 
 function stop() {
-  playing.value = false
-  previousAnimationTime = undefined
-  if (animationFrame !== undefined) cancelAnimationFrame(animationFrame)
-  animationFrame = undefined
-}
-
-function animate(now: number) {
-  if (!playing.value) return
-  const previous = previousAnimationTime ?? now
-  previousAnimationTime = now
-  const next = playbackClock + (now - previous) * speed.value
-  if (next >= duration.value) {
-    setTimestamp(duration.value)
-    stop()
-    return
-  }
-  setTimestamp(next)
-  animationFrame = requestAnimationFrame(animate)
+  playback.stop()
 }
 
 function togglePlayback() {
@@ -441,18 +454,16 @@ function togglePlayback() {
     return
   }
   if (!available.value) return
-  const start = props.timestamp >= duration.value || props.timestamp < firstPositionTimestamp.value
+  const start = playbackTime.value >= duration.value || playbackTime.value < firstPositionTimestamp.value
     ? Number.isFinite(firstPositionTimestamp.value) ? firstPositionTimestamp.value : 0
-    : props.timestamp
+    : playbackTime.value
   setTimestamp(start)
-  playing.value = true
-  previousAnimationTime = undefined
-  animationFrame = requestAnimationFrame(animate)
+  playback.play(start)
 }
 
 function skip(delta: number) {
   stop()
-  setTimestamp(props.timestamp + delta)
+  setTimestamp(playbackTime.value + delta)
 }
 
 function handleKeyboard(event: KeyboardEvent) {
@@ -466,6 +477,9 @@ function handleKeyboard(event: KeyboardEvent) {
   } else if (event.key === "ArrowRight") {
     event.preventDefault()
     skip(15_000)
+  } else if (event.key === "Escape" && focusedParticipantId.value !== undefined) {
+    event.preventDefault()
+    clearFocus()
   }
 }
 
@@ -475,13 +489,14 @@ watch(() => props.match.gameId, () => {
   visibility.value = "all"
   focusedParticipantId.value = undefined
   expandedParticipantId.value = undefined
+  expandedMap.value = false
 })
 watch(() => props.timestamp, (timestamp) => {
   if (lastEmittedTimestamp !== undefined && Math.abs(timestamp - lastEmittedTimestamp) < .5) {
     lastEmittedTimestamp = undefined
     return
   }
-  playbackClock = timestamp
+  playback.syncTime(timestamp)
 })
 watch(available, (value) => {
   if (!value) stop()
@@ -505,22 +520,40 @@ onBeforeUnmount(() => {
         <span class="eyebrow">{{ mapName }}</span>
         <h3>Map playback</h3>
       </div>
-      <div class="coverage-stack" aria-label="Playback evidence coverage">
-        <div class="coverage" :class="{ weak: coverage.percent < 70 }">
-          <strong>{{ coverage.percent }}%</strong>
-          Riot timeline
+      <div class="playback-heading-actions">
+        <div class="coverage-stack" aria-label="Playback evidence coverage">
+          <div class="coverage" :class="{ weak: coverage.percent < 70 }">
+            <strong>{{ coverage.percent }}%</strong>
+            Riot timeline
+          </div>
+          <div v-if="minimapEnabledForMap" class="coverage cv" :class="{ weak: !cvAvailable }" :title="minimapError">
+            <strong v-if="minimapLoading">…</strong>
+            <strong v-else>{{ mappedCvParticipantIds.length }}</strong>
+            {{ mappedCvParticipantIds.length === 1 ? "CV track" : "CV tracks" }}
+            <small v-if="campClears.length">· {{ campClears.length }} clears</small>
+          </div>
         </div>
-        <div v-if="minimapEnabledForMap" class="coverage cv" :class="{ weak: !cvAvailable }" :title="minimapError">
-          <strong v-if="minimapLoading">…</strong>
-          <strong v-else>{{ mappedCvParticipantIds.length }}</strong>
-          {{ mappedCvParticipantIds.length === 1 ? "CV track" : "CV tracks" }}
-          <small v-if="campClears.length">· {{ campClears.length }} clears</small>
-        </div>
+        <button
+          type="button"
+          class="map-popout-button"
+          aria-label="Expand map playback"
+          title="Expand map playback"
+          @click="expandedMap = true"
+        >
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 3h6v2H5v4H3V3Zm8 0h6v6h-2V5h-4V3ZM3 11h2v4h4v2H3v-6Zm12 0h2v6h-6v-2h4v-4Z" /></svg>
+          <span>Expand</span>
+        </button>
       </div>
     </header>
 
-    <div class="playback-layout">
-      <div class="playback-map" :style="mapStyle" @pointerleave="scheduleStackCollapse">
+    <MapReviewPopout
+      :open="expandedMap"
+      title="Map playback"
+      labelled-by="match-map-popout-title"
+      @close="expandedMap = false"
+    >
+    <div class="playback-layout" :class="{ expanded: expandedMap }">
+      <div class="playback-map" :style="mapStyle" @pointerleave="scheduleStackCollapse" @click="handleMapClick">
         <svg class="trail-layer" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
           <polyline
             v-for="trail in trails"
@@ -554,8 +587,8 @@ onBeforeUnmount(() => {
             marker.teamId === 100 ? 'blue' : marker.teamId === 200 ? 'red' : 'neutral',
           ]"
           :style="worldMarkerStyle(marker)"
-          :title="`${marker.label} · ${marker.state} at ${formatTime(timestamp)}`"
-          :aria-label="`${marker.label} ${marker.state} at ${formatTime(timestamp)}`"
+          :title="`${marker.label} · ${marker.state} at ${formatTime(playbackTime)}`"
+          :aria-label="`${marker.label} ${marker.state} at ${formatTime(playbackTime)}`"
           role="img"
         >
           <svg v-if="marker.kind === 'tower'" viewBox="0 0 16 16" aria-hidden="true">
@@ -663,7 +696,7 @@ onBeforeUnmount(() => {
           <span v-if="marker.event.category === 'kill'" class="death-cross">×</span>
         </span>
 
-        <div class="map-clock" aria-hidden="true">{{ formatTime(timestamp) }}</div>
+        <div class="map-clock" aria-hidden="true">{{ formatTime(playbackTime) }}</div>
         <div v-if="focusedParticipant" class="focused-player">
           <span :class="focusedParticipant.teamId === 100 ? 'blue' : 'red'" />
           <b>{{ participantName(focusedParticipant) }}</b>
@@ -672,13 +705,14 @@ onBeforeUnmount(() => {
             · {{ Math.round(focusedPosition.confidence * 100) }}%
           </small>
         </div>
+        <div v-else-if="available" class="trail-hint">Click a champion to show its last 60 seconds</div>
 
         <div v-if="!available" class="map-empty">
           <strong>Playback unavailable</strong>
           <span>This match has neither positioned Riot frames nor usable minimap CV tracks.</span>
         </div>
         <div v-else-if="visibleTokens.length === 0" class="map-empty">
-          <strong>No position at {{ formatTime(timestamp) }}</strong>
+          <strong>No position at {{ formatTime(playbackTime) }}</strong>
           <span>Seek to the first observed position or CV segment.</span>
         </div>
       </div>
@@ -686,7 +720,7 @@ onBeforeUnmount(() => {
       <aside class="playback-sidebar">
         <div class="transport">
           <div class="clock" aria-live="off">
-            <strong>{{ formatTime(timestamp) }}</strong>
+            <strong>{{ formatTime(playbackTime) }}</strong>
             <span>{{ formatTime(duration) }}</span>
           </div>
           <div class="primary-controls">
@@ -731,7 +765,7 @@ onBeforeUnmount(() => {
             min="0"
             :max="duration"
             step="1000"
-            :value="timestamp"
+            :value="playbackTime"
             :disabled="!available"
             aria-label="Playback time"
             @input="seek"
@@ -809,7 +843,8 @@ onBeforeUnmount(() => {
         <details class="accuracy-note">
           <summary>About playback evidence</summary>
           <p>
-            Riot snapshots anchor one continuous route. Reliable CV sightings bend that route between snapshots, while incoherent
+            Click a champion token or roster portrait to show only that champion’s recent route; click it again, the empty map, or
+            press Escape to clear it. Riot snapshots anchor one continuous route. Reliable CV sightings bend that route, while incoherent
             detector jumps are discarded and missing intervals are estimated between the surrounding evidence. Even a brief accepted
             sighting improves the route before it returns smoothly to estimation. Camp clears and respawns use the same playback clock
             as the gold chart and match events.
@@ -817,6 +852,7 @@ onBeforeUnmount(() => {
         </details>
       </aside>
     </div>
+    </MapReviewPopout>
   </section>
 </template>
 
@@ -844,6 +880,28 @@ onBeforeUnmount(() => {
   color: var(--ui-text-heading);
   font: 18px var(--ui-font-heading);
 }
+
+.playback-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.map-popout-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--ui-border-emphasis);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-surface);
+  color: var(--ui-text-subtle);
+  cursor: pointer;
+}
+.map-popout-button:hover { border-color: var(--ui-accent); color: var(--ui-text-heading); }
+.map-popout-button svg { width: 15px; fill: currentColor; }
+.map-popout-button span { font-size: var(--ui-text-label); }
 
 .eyebrow {
   color: var(--ui-text-muted);
@@ -883,6 +941,24 @@ onBeforeUnmount(() => {
   gap: clamp(18px, 2.5vw, 32px);
 }
 
+.playback-layout.expanded {
+  width: min(1220px, 100%);
+  min-height: 0;
+  margin: auto;
+  grid-template-columns: minmax(560px, 1fr) minmax(300px, 360px);
+  align-items: start;
+}
+.playback-layout.expanded .playback-map {
+  width: 100%;
+  max-width: 860px;
+  margin: auto;
+}
+.playback-layout.expanded .playback-sidebar {
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
 .playback-map {
   position: relative;
   width: 100%;
@@ -895,6 +971,7 @@ onBeforeUnmount(() => {
   background-size: 100% 100%;
   box-shadow: 0 10px 28px rgb(0 0 0 / 22%), inset 0 0 26px rgb(0 0 0 / 18%);
   isolation: isolate;
+  container-type: size;
 }
 
 .playback-map::after {
@@ -1094,11 +1171,17 @@ onBeforeUnmount(() => {
 .champion-token {
   --team: var(--ui-team-blue);
   position: absolute;
+  top: 0;
+  left: 0;
   z-index: 5;
   width: 31px;
   height: 31px;
   padding: 2px;
-  transform: translate(-50%, -50%);
+  transform: translate3d(
+    calc(var(--token-x) * 1cqw - 50%),
+    calc(var(--token-y) * 1cqw - 50%),
+    0
+  );
   border: 2px solid var(--team);
   border-radius: 50%;
   background: #061018;
@@ -1126,7 +1209,11 @@ onBeforeUnmount(() => {
 }
 
 .champion-token.focused {
-  transform: translate(-50%, -50%) scale(1.24);
+  transform: translate3d(
+    calc(var(--token-x) * 1cqw - 50%),
+    calc(var(--token-y) * 1cqw - 50%),
+    0
+  ) scale(1.24);
   box-shadow: 0 0 0 2px #061018, 0 0 15px var(--team);
 }
 
@@ -1225,7 +1312,8 @@ onBeforeUnmount(() => {
 }
 
 .map-clock,
-.focused-player {
+.focused-player,
+.trail-hint {
   position: absolute;
   z-index: 4;
   border: 1px solid rgb(255 255 255 / 10%);
@@ -1256,6 +1344,16 @@ onBeforeUnmount(() => {
   font-size: var(--ui-text-label);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.trail-hint {
+  bottom: 10px;
+  left: 10px;
+  max-width: calc(100% - 20px);
+  padding: 5px 9px;
+  color: var(--ui-text-muted);
+  font-size: var(--ui-text-micro);
+  pointer-events: none;
 }
 
 .focused-player > span {
@@ -1638,9 +1736,14 @@ onBeforeUnmount(() => {
 
 .accuracy-note p { margin: 7px 0 0; }
 
-.playback-panel.compact .playback-layout {
+.playback-panel.compact .playback-layout:not(.expanded) {
   grid-template-columns: 1fr;
   gap: 13px;
+}
+
+.playback-panel.compact .playback-layout:not(.expanded) .playback-map {
+  width: min(100%, 640px);
+  margin-inline: auto;
 }
 
 .playback-panel.compact .playback-sidebar { gap: 10px; }
@@ -1655,8 +1758,20 @@ onBeforeUnmount(() => {
 }
 
 @keyframes stack-pop {
-  from { transform: translate(-50%, -50%) scale(.74); }
-  to { transform: translate(-50%, -50%) scale(1); }
+  from {
+    transform: translate3d(
+      calc(var(--token-x) * 1cqw - 50%),
+      calc(var(--token-y) * 1cqw - 50%),
+      0
+    ) scale(.74);
+  }
+  to {
+    transform: translate3d(
+      calc(var(--token-x) * 1cqw - 50%),
+      calc(var(--token-y) * 1cqw - 50%),
+      0
+    ) scale(1);
+  }
 }
 
 @keyframes camp-clear-pulse {
@@ -1668,6 +1783,17 @@ onBeforeUnmount(() => {
 @media (max-width: 900px) {
   .playback-layout { grid-template-columns: 1fr; }
   .playback-map { max-width: 620px; margin-inline: auto; }
+}
+
+@media (max-width: 1100px) {
+  .playback-layout.expanded {
+    width: min(860px, 100%);
+    grid-template-columns: 1fr;
+  }
+  .playback-layout.expanded .playback-sidebar {
+    max-height: none;
+    overflow-y: visible;
+  }
 }
 
 @media (max-width: 560px) {

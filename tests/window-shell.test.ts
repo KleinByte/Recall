@@ -72,12 +72,15 @@ describe("Recall desktop window shell", () => {
   it("suspends cosmetic main-window rendering during games and keeps DevTools opt-in", () => {
     const main = read("electron/main/index.ts")
     const app = read("src/App.vue")
+    const mark = read("src/components/RecallMark.vue")
     const style = read("src/style.css")
 
     expect(main).toContain('process.env.RECALL_OPEN_DEVTOOLS === "1"')
     expect(main).toContain("if (OPEN_DEVTOOLS) win.webContents.openDevTools()")
     expect(app).toContain("document.documentElement.dataset.livePhase = live.phase")
-    expect(style).toContain('html[data-live-phase="InProgress"] .app-window *')
+    expect(mark).toContain(':data-live-motion="animated && variant === \'logo\' ? \'ambient\' : undefined"')
+    expect(style).toContain('html[data-live-phase="InProgress"] [data-live-motion="ambient"]')
+    expect(style).not.toContain('html[data-live-phase="InProgress"] .app-window *')
     expect(style).toContain("animation-play-state: paused !important")
   })
 })

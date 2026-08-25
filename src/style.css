@@ -275,14 +275,16 @@ a:focus-visible,
 }
 
 /*
- * Recall often remains visible on a second monitor during a match. Ambient
- * brand/chart animations otherwise keep Chromium's compositor active while
- * League owns the performance-critical foreground. Data and controls remain
- * live; only nonessential motion is suspended until the match ends.
+ * Recall often remains visible on a second monitor during a match. Components
+ * opt into suspension only when their motion is purely ambient. Stateful live
+ * feedback (including Tempo), loading indicators, and controls keep moving.
  */
-html[data-live-phase="InProgress"] .app-window *,
-html[data-live-phase="InProgress"] .app-window *::before,
-html[data-live-phase="InProgress"] .app-window *::after {
+html[data-live-phase="InProgress"] [data-live-motion="ambient"],
+html[data-live-phase="InProgress"] [data-live-motion="ambient"] *,
+html[data-live-phase="InProgress"] [data-live-motion="ambient"]::before,
+html[data-live-phase="InProgress"] [data-live-motion="ambient"]::after,
+html[data-live-phase="InProgress"] [data-live-motion="ambient"] *::before,
+html[data-live-phase="InProgress"] [data-live-motion="ambient"] *::after {
   animation-play-state: paused !important;
   transition-duration: 0s !important;
 }

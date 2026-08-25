@@ -413,7 +413,7 @@ describe("unified timeline and minimap playback", () => {
     expect(afterSighting).toMatchObject({ source: "estimated", origin: "minimap_cv" })
   })
 
-  it("uses the exact fused route for a single continuous playback trail", () => {
+  it("geometry-simplifies the exact fused route for one stable playback trail", () => {
     const minimapReview: MinimapPathingReview = {
       ...review,
       segments: [{
@@ -456,7 +456,8 @@ describe("unified timeline and minimap playback", () => {
       participantId: 1,
       origin: "minimap_cv",
     })
-    expect(trails[0].points.length).toBeGreaterThanOrEqual(6)
+    expect(trails[0].points.length).toBeGreaterThanOrEqual(2)
+    expect(trails[0].points.length).toBeLessThanOrEqual(6)
     expect(trails[0].points[0].left).toBeCloseTo(10, 0)
     expect(trails[0].points.at(-1)!.left).toBeGreaterThan(70)
   })

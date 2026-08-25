@@ -5,7 +5,7 @@ defineOptions({ inheritAttrs: false })
 
 withDefaults(defineProps<{
   labelledBy: string
-  size?: "small" | "medium" | "large" | "wide"
+  size?: "small" | "medium" | "large" | "wide" | "fullscreen"
   align?: "center" | "top"
   padding?: "none" | "normal"
 }>(), {
@@ -123,6 +123,12 @@ onBeforeUnmount(() => {
 .size-medium { max-width: 680px; }
 .size-large { max-width: 860px; }
 .size-wide { max-width: 980px; }
+.size-fullscreen {
+  width: calc(100vw - 32px);
+  max-width: 1380px;
+  height: calc(100vh - 32px);
+  max-height: 960px;
+}
 .padding-none { padding: 0; }
 .padding-normal { overflow-y: auto; padding: var(--ui-space-5); }
 @media (max-width: 620px) {

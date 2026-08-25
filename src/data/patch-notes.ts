@@ -21,6 +21,16 @@ function note(
 /** Shipped releases, newest first. */
 export const patchNotes: readonly PatchNoteRelease[] = [
   note(
+    "3.6.0",
+    "2026-08-24",
+    "Fluid live Tempo and map reviews",
+    "Tempo celebrations now stay animated during live games, while expanded and more efficient map playback makes routes easier to inspect.",
+    "Keeps pentakill and other stateful Tempo motion running on the Live page and locked Alt+T overlay while still pausing purely ambient branding.",
+    "Adds full-screen match and jungle map review, with focused champion trails and clearer controls for inspecting recent movement.",
+    "Smooths and compacts reconstructed paths while preserving exact sample timing and leaving rejected evidence gaps disconnected.",
+    "Shares a bounded playback clock across reviews to reduce rendering work, prevent large catch-up jumps, and pause cleanly when hidden.",
+  ),
+  note(
     "3.5.1",
     "2026-08-24",
     "Automatic history recovery",
