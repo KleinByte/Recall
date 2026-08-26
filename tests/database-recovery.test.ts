@@ -18,6 +18,7 @@ import {
   DatabaseRecoveryExhaustedError,
   openDatabaseWithRecovery,
   recoverCorruptDatabase,
+  restoreDatabaseFromSelectedBackup,
 } from "../electron/main/database/recovery.js"
 import { DatabaseStartupError } from "../electron/main/database/connection.js"
 import {
@@ -83,6 +84,61 @@ function writeManagedManifest(filePath: string, createdAt: number, sha256: strin
 }
 
 describe("database startup recovery", () => {
+  it("migrates a user-selected backup and preserves the newer active generation", () => {
+    const newer = new Database(active)
+    newer.pragma(`user_version = ${latestSchemaVersion + 1}`)
+    newer.close()
+    const selected = path.join(backups, "chosen.db")
+    createVersionOneDatabase(selected, 42)
+
+    const result = restoreDatabaseFromSelectedBackup(active, selected, {
+      DatabaseClass: Database as never,
+      now: () => 500,
+    })
+
+    expect(result.recovery).toMatchObject({
+      sourcePath: selected,
+      sourceSchemaVersion: 1,
+      targetSchemaVersion: latestSchemaVersion,
+      triggerPhase: "compatibility",
+    })
+    expect(result.database.pragma("user_version", { simple: true }))
+      .toBe(latestSchemaVersion)
+    expect(result.database.prepare("SELECT game_id AS gameId FROM matches").get())
+      .toEqual({ gameId: 42 })
+    result.database.close()
+
+    const original = new Database(result.recovery.quarantinedPath, { readonly: true })
+    expect(original.pragma("user_version", { simple: true }))
+      .toBe(latestSchemaVersion + 1)
+    original.close()
+    const immutableSource = new Database(selected, { readonly: true })
+    expect(immutableSource.pragma(
+      "user_version",
+      { simple: true },
+    )).toBe(1)
+    immutableSource.close()
+  })
+
+  it("leaves the active generation untouched when a selected backup is too new", () => {
+    const activeDb = new Database(active)
+    activeDb.pragma(`user_version = ${latestSchemaVersion + 1}`)
+    activeDb.close()
+    const selected = path.join(backups, "chosen.db")
+    const selectedDb = new Database(selected)
+    selectedDb.pragma(`user_version = ${latestSchemaVersion + 1}`)
+    selectedDb.close()
+    const original = readFileSync(active)
+
+    expect(() => restoreDatabaseFromSelectedBackup(active, selected, {
+      DatabaseClass: Database as never,
+      now: () => 500,
+    })).toThrow("newer than this Recall build")
+
+    expect(readFileSync(active)).toEqual(original)
+    expect(readdirSync(path.dirname(active))).toEqual(["stats.db"])
+  })
+
   it("uses the newest working backup, migrates it, and preserves the failed generation", () => {
     writeFileSync(path.join(backups, "stats-daily-400.db"), "broken backup")
     const incompatible = path.join(backups, "stats-pre-update-300.db")

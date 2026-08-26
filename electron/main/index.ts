@@ -24,8 +24,10 @@ import { resolveDisplayTimezone } from "./matches/time-contract.js"
 import {
   DatabaseRecoveryExhaustedError,
   openDatabaseWithRecovery,
+  restoreDatabaseFromSelectedBackup,
   type DatabaseRecovery,
 } from "./database/recovery.js"
+import { DatabaseStartupError } from "./database/connection.js"
 import {
   createUpdateSnapshot,
   restoreLatestUpdateSnapshot,
@@ -388,6 +390,87 @@ function getDatabase() {
     }
   }
   return database
+}
+
+/**
+ * A newer schema is a deliberate downgrade boundary, not corruption. Let the
+ * user explicitly choose an older recovery point instead of silently rolling
+ * their history back or presenting the generic fatal database dialog.
+ */
+async function promptForCompatibleBackupRestore(
+  error: unknown,
+): Promise<boolean | undefined> {
+  if (!(error instanceof DatabaseStartupError) || error.phase !== "compatibility") {
+    return undefined
+  }
+
+  const prompt = await dialog.showMessageBox({
+    type: "warning",
+    title: "Recall needs an older backup",
+    message: "This version of Recall cannot open history written by a newer build.",
+    detail:
+      `${error.message}\n\n` +
+      "Choose a compatible Recall database backup. Recall will validate and " +
+      "migrate a copy before replacing the active database, and will preserve " +
+      "the newer database so it can be recovered later.",
+    buttons: ["Choose Backup…", "Quit Recall"],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  })
+  if (prompt.response !== 0) return false
+
+  while (true) {
+    const selection = await dialog.showOpenDialog({
+      title: "Choose a Recall database backup",
+      defaultPath: getDatabaseBackupDir(),
+      buttonLabel: "Validate and Restore",
+      filters: [
+        { name: "Recall database backups", extensions: ["db", "bak"] },
+        { name: "All files", extensions: ["*"] },
+      ],
+      properties: ["openFile", "dontAddToRecent"],
+    })
+    if (selection.canceled || selection.filePaths.length !== 1) return false
+
+    const sourcePath = selection.filePaths[0]
+    try {
+      const result = restoreDatabaseFromSelectedBackup(
+        getDatabasePath(),
+        sourcePath,
+        { backupDir: getDatabaseBackupDir() },
+      )
+      database = result.database
+      startupRecovery = result.recovery
+      console.warn(
+        `Recall restored the selected backup from ${sourcePath}, ` +
+        `validated schema v${result.recovery.sourceSchemaVersion} at ` +
+        `v${result.recovery.targetSchemaVersion}, and preserved the newer ` +
+        `database at ${result.recovery.quarantinedPath}.`,
+      )
+      return true
+    } catch (restoreError) {
+      console.error(
+        "Could not restore the selected startup backup:",
+        restoreError instanceof Error
+          ? restoreError.stack ?? restoreError.message
+          : restoreError,
+      )
+      const retry = await dialog.showMessageBox({
+        type: "error",
+        title: "Recall could not restore that backup",
+        message: "The selected backup could not be safely validated and migrated.",
+        detail:
+          `${restoreError instanceof Error ? restoreError.message : String(restoreError)}` +
+          "\n\nThe active database was left untouched.",
+        buttons: ["Choose Another Backup…", "Quit Recall"],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+      })
+      if (retry.response !== 0) return false
+    }
+  }
 }
 
 function getRepository(): MatchesRepository {
@@ -3658,16 +3741,41 @@ async function main() {
   // Open and validate persistent data before showing the renderer. If startup
   // cannot continue, a half-initialised window would only emit a wall of "No
   // handler registered" errors because IPC registration happens afterwards.
+  let databaseFailure: unknown
   try {
     getRepository()
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    const rejected = error instanceof DatabaseRecoveryExhaustedError
-      ? error.attempts.length
+    databaseFailure = error
+  }
+
+  if (databaseFailure !== undefined) {
+    const restored = await promptForCompatibleBackupRestore(databaseFailure)
+    if (restored === false) {
+      app.quit()
+      return
+    }
+    if (restored === true) {
+      try {
+        getRepository()
+        databaseFailure = undefined
+      } catch (error) {
+        databaseFailure = error
+      }
+    }
+  }
+
+  if (databaseFailure !== undefined) {
+    const message = databaseFailure instanceof Error
+      ? databaseFailure.message
+      : String(databaseFailure)
+    const rejected = databaseFailure instanceof DatabaseRecoveryExhaustedError
+      ? databaseFailure.attempts.length
       : 0
     console.error(
       "Could not initialise Recall's database:",
-      error instanceof Error ? error.stack ?? error.message : error,
+      databaseFailure instanceof Error
+        ? databaseFailure.stack ?? databaseFailure.message
+        : databaseFailure,
     )
     dialog.showErrorBox(
       "Recall could not open your history",
@@ -3701,7 +3809,7 @@ async function main() {
     void dialog.showMessageBox(win, {
       type: "warning",
       title: "Recall recovered your history",
-      message: "Recall opened the newest backup that could be safely brought up to date.",
+      message: "Recall opened a backup that could be safely brought up to date.",
       detail:
         `Recovered from:\n${startupRecovery.sourcePath}\n` +
         `Schema v${startupRecovery.sourceSchemaVersion} → ` +

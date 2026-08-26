@@ -21,6 +21,16 @@ function note(
 /** Shipped releases, newest first. */
 export const patchNotes: readonly PatchNoteRelease[] = [
   note(
+    "3.7.1",
+    "2026-08-26",
+    "Guided backup recovery",
+    "Recall now helps you choose a compatible backup when an older build encounters history written by a newer version.",
+    "Replaces the fatal newer-schema startup error with a guided backup picker and a safe option to quit.",
+    "Validates and migrates the selected backup in a disposable staging copy before replacing any active data.",
+    "Preserves the newer database as a complete recovery generation so it can be reopened by a compatible future build.",
+    "Rejects incompatible or damaged selections without changing active history and lets you choose another backup.",
+  ),
+  note(
     "3.7.0",
     "2026-08-25",
     "Cleaner timeline playback",

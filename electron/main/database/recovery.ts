@@ -50,6 +50,11 @@ export interface DatabaseRecoveryOptions extends OpenDatabaseOptions {
   onAttempt?: (attempt: DatabaseRecoveryAttempt) => void
 }
 
+export interface SelectedBackupRestoreOptions extends OpenDatabaseOptions {
+  /** Test seam for validating promotion rollback without changing production I/O. */
+  renameFile?: (source: string, destination: string) => void
+}
+
 export class DatabaseRecoveryExhaustedError extends Error {
   readonly code: string | undefined
   readonly phase: DatabaseStartupPhase | undefined
@@ -328,6 +333,87 @@ export function recoverCorruptDatabase(
   > = {},
 ): DatabaseRecovery | undefined {
   return recoverDatabase(databasePath, { ...options, backupDir }).publication?.recovery
+}
+
+/**
+ * Validates and migrates one user-selected backup in a disposable copy before
+ * replacing a newer, incompatible active generation. The selected backup is
+ * never modified, and the original active database remains recoverable until
+ * the migrated replacement has been reopened successfully.
+ */
+export function restoreDatabaseFromSelectedBackup(
+  databasePath: string,
+  sourcePath: string,
+  options: SelectedBackupRestoreOptions = {},
+): RecoveredDatabase & { recovery: DatabaseRecovery } {
+  const DatabaseClass = options.DatabaseClass ?? Database
+  const now = options.now ?? Date.now
+  const renameFile = options.renameFile ?? renameSync
+  const restoredAt = now()
+  const stagingPath = `${databasePath}.selected-recovery-${process.pid}-${restoredAt}`
+  removeGeneration(stagingPath)
+
+  let sourceSchemaVersion = 0
+  let replacement: { quarantinedPath: string; rollback(): void } | undefined
+  try {
+    copyFileSync(sourcePath, stagingPath)
+    sourceSchemaVersion = readSchemaVersion(stagingPath, DatabaseClass)
+    const staged = openDatabase(stagingPath, {
+      DatabaseClass,
+      now,
+      backupBeforeMigration: false,
+      journalMode: "DELETE",
+    })
+    staged.close()
+    verifyMigratedCandidate(stagingPath, DatabaseClass)
+
+    try {
+      replacement = replaceFailedGeneration(
+        databasePath,
+        stagingPath,
+        restoredAt,
+        renameFile,
+      )
+    } catch (error) {
+      throw new DatabaseRecoveryPromotionError(error)
+    }
+
+    try {
+      const database = openDatabase(databasePath, {
+        DatabaseClass,
+        now,
+        backupDir: options.backupDir,
+      })
+      return {
+        database,
+        recovery: {
+          sourcePath,
+          quarantinedPath: replacement.quarantinedPath,
+          recoveredAt: restoredAt,
+          sourceSchemaVersion,
+          targetSchemaVersion: latestSchemaVersion,
+          triggerPhase: "compatibility",
+          rejectedCandidates: [],
+        },
+      }
+    } catch (reopenError) {
+      try {
+        replacement.rollback()
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [reopenError, rollbackError],
+          "The selected backup could not be opened and the original could not be restored",
+        )
+      }
+      throw new Error(
+        `The selected backup could not be reopened; the original was restored: ` +
+          errorMessage(reopenError),
+        { cause: reopenError },
+      )
+    }
+  } finally {
+    removeGeneration(stagingPath)
+  }
 }
 
 export function openDatabaseWithRecovery(
