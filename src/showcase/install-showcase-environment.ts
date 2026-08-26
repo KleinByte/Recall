@@ -904,6 +904,140 @@ const lifetimeTotals = {
   teamContext: { measuredGames: 176, dragons: 302, barons: 87, heralds: 104, voidGrubs: 388, turrets: 1_106, inhibitors: 244 },
 }
 
+const showcaseDataTrust = {
+  state: "healthy",
+  clientHealth: {
+    status: "healthy",
+    totalStoredMatches: 184,
+    eligibleStatisticalMatches: 172,
+    gradableMatches: 172,
+    eligibleGrades: 172,
+    intentionallyUngradedModes: 0,
+    gradeCoverage: 1,
+    endpoint: {
+      source: "league_client",
+      firstObservedAt: SHOWCASE_NOW - 180 * 86_400_000,
+      lastAttemptAt: SHOWCASE_NOW - 90_000,
+      lastSuccessAt: SHOWCASE_NOW - 90_000,
+      itemsSeen: 20,
+      itemsWritten: 2,
+      running: false,
+    },
+  },
+  optionalHistory: {
+    status: "not_configured",
+    configured: false,
+    idsDiscovered: 0,
+    detailReady: 0,
+    imported: 0,
+    unresolved: 0,
+    range: {},
+    resumePosition: 0,
+  },
+  database: {
+    path: "C:\\Users\\Player\\AppData\\Roaming\\Recall\\stats.db",
+    sizeBytes: 46_874_624,
+    schemaVersion: 37,
+    matchCount: 184,
+    oldestPlayedAt: SHOWCASE_NOW - 180 * 86_400_000,
+    newestPlayedAt: SHOWCASE_NOW,
+    completeScoreboardPercent: 98.9,
+    gradedPercent: 100,
+    timelineCount: 148,
+    captureManifestPercent: 96.7,
+    augmentMatchCount: 12,
+    schemaDriftMatchCount: 0,
+    lastIntegrityCheck: SHOWCASE_NOW - 90_000,
+    integrity: "ok",
+    recovery: {
+      recoveredAt: SHOWCASE_NOW - 420_000,
+      sourcePath: "Recall Database Backups\\stats-1770000000000.db",
+      originalPath: "stats.db.recovery-original-1785000000000",
+      sourceSchemaVersion: 36,
+      targetSchemaVersion: 37,
+      triggerPhase: "open",
+      skippedBackups: 2,
+    },
+  },
+  leagueClient: {
+    source: "league_client",
+    firstObservedAt: SHOWCASE_NOW - 180 * 86_400_000,
+    lastAttemptAt: SHOWCASE_NOW - 90_000,
+    lastSuccessAt: SHOWCASE_NOW - 90_000,
+    itemsSeen: 20,
+    itemsWritten: 2,
+    running: false,
+  },
+  riotHistory: {
+    source: "riot_history",
+    keyConfigured: false,
+    keyProtected: false,
+    firstObservedAt: SHOWCASE_NOW - 180 * 86_400_000,
+    itemsSeen: 0,
+    itemsWritten: 0,
+    running: false,
+    coverage: {
+      status: "observed",
+      firstObservedAt: SHOWCASE_NOW - 180 * 86_400_000,
+      idsScanned: 0,
+      downloaded: 0,
+      imported: 0,
+      skipped: 0,
+    },
+    rateLimits: [],
+  },
+  backups: [
+    {
+      format: "recall-managed-backup",
+      manifestVersion: 2,
+      fileName: "stats-pre-cleanup-1787094300000.db",
+      createdAt: SHOWCASE_NOW - 300_000,
+      reason: "pre-cleanup",
+      protection: { kind: "until_user_deletes" },
+      appVersion: "3.3.0",
+      releaseSequence: 37,
+      schemaVersion: 37,
+      matchCount: 184,
+      sizeBytes: 46_874_624,
+      sha256: "showcase-pre-cleanup",
+      integrity: "ok",
+    },
+    {
+      format: "recall-managed-backup",
+      manifestVersion: 2,
+      fileName: "stats-daily-1787007600000.db",
+      createdAt: SHOWCASE_NOW - 86_400_000,
+      reason: "daily",
+      protection: { kind: "none" },
+      appVersion: "3.3.0",
+      releaseSequence: 37,
+      schemaVersion: 37,
+      matchCount: 182,
+      sizeBytes: 45_932_544,
+      sha256: "showcase-daily",
+      integrity: "ok",
+    },
+  ],
+} as const
+
+const showcaseCleanupPreview = {
+  items: [
+    {
+      id: "old-recovery-original",
+      fileName: "stats.db.recovery-original-1500000000000",
+      sizeBytes: 46_137_344,
+      reason: "old_recovery_original",
+    },
+    {
+      id: "stale-temporary",
+      fileName: "stats-daily-1.db.tmp-9",
+      sizeBytes: 8_192,
+      reason: "stale_temporary",
+    },
+  ],
+  reclaimableBytes: 46_145_536,
+} as const
+
 const showcaseGoals = [
   { id: 1, kind: "rank", targetKey: "RANKED_SOLO_5x5", targetValue: 3_600, label: "Reach Diamond", createdAt: SHOWCASE_NOW - 2_592_000_000, current: 3_374, progress: 0.78 },
   { id: 2, kind: "challenge", targetKey: "101", targetValue: 100, label: "Jungle Diff · Diamond", createdAt: SHOWCASE_NOW - 1_296_000_000, current: 91, progress: 0.91 },
@@ -924,11 +1058,17 @@ function summaryFor(filter: Record<string, unknown> | undefined) {
 function channelValue(channel: string, args: unknown[]) {
   const filter = (args[0] ?? {}) as Record<string, unknown>
   switch (channel) {
+    case "startup:state": return { kind: "ready" }
     case "window:is-maximized": return false
     case "lcu:status": return { connected: true, summoner: { accountId: "showcase-account", gameName: "RiverQuartz", profileIconId: 29, puuid: OWNER_PUUID, summonerId: 9_100_001, summonerLevel: 412, tagLine: "DEMO" } }
     case "champions:catalog": return champions
     case "settings:ui:get": return { isColoredWhenDone: true, showChampionNames: true, sidebarCollapsed: false }
     case "settings:ui:set": return args[0]
+    case "settings:launch-at-login:get": return true
+    case "settings:minimap-telemetry:get": return true
+    case "settings:minimap-vision-debug:get": return false
+    case "settings:minimap-vision-overlay:get": return false
+    case "settings:display-timezone:get": return { timeZone: "America/Chicago" }
     case "settings:last-seen-patch-notes-version:get": return "3.2.2"
     case "settings:last-seen-patch-notes-version:set": return args[0]
     case "cache:aram-stats:get": return {}
@@ -990,6 +1130,9 @@ function channelValue(channel: string, args: unknown[]) {
     case "annotations:save": return { ...review.annotation, ...(args[1] as object) }
     case "riot-api-key:status": return { configured: false, protected: false }
     case "stats:meta": return { databasePath: "showcase-memory-only", totalMatches: summary.games, oldestPlayedAt: SHOWCASE_NOW - 180 * 86_400_000 }
+    case "data-trust:get":
+    case "data-trust:check": return showcaseDataTrust
+    case "backups:cleanup:preview": return showcaseCleanupPreview
     case "settings:skill-view:get": return undefined
     case "performance-reference:status": return { state: "frozen", requiredMatches: 20, eligibleMatches: 172, largestScopeMatches: 172, scopeMatchCounts: {}, supportedScopes: ["sr"], supportedModes: ["sr_ranked_solo"], modeReferences: [] }
     default: return undefined

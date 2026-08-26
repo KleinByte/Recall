@@ -22,6 +22,7 @@ import type {
   StatsMeta,
 } from "../types/stats"
 import type { DataTrustReport } from "../types/review"
+import type { BackupCleanupPreview } from "../types/recovery"
 
 const props = defineProps<{
   isColoredWhenDone: boolean
@@ -51,10 +52,16 @@ const riotKeyMessage = ref("")
 const riotHistory = ref<RiotHistoryBackfillState>()
 const trust = ref<DataTrustReport>()
 const trustBusy = ref(false)
+const cleanupPreview = ref<BackupCleanupPreview>()
+const cleanupMessage = ref("")
 const launchAtLogin = ref(true)
 const minimapTelemetryEnabled = ref(true)
 const isDevelopment = import.meta.env.DEV
-const settingsTab = ref("general")
+const settingsTab = ref(
+  import.meta.env.DEV && document.documentElement.dataset.showcaseScene === "cleanup"
+    ? "data"
+    : "general",
+)
 const settingsTabs = [
   { value: "general", label: "General" },
   { value: "gameplay", label: "Gameplay" },
@@ -259,6 +266,29 @@ async function restoreBackup(fileName: string) {
     "Recall will create a pre-restore backup, replace the active database, and restart. Continue?",
   )) return
   await api.restoreBackup(fileName)
+}
+
+async function reviewBackupCleanup() {
+  cleanupMessage.value = ""
+  cleanupPreview.value = await api.previewBackupCleanup()
+}
+
+async function applyBackupCleanup() {
+  const preview = cleanupPreview.value
+  if (!preview?.items.length) return
+  if (!window.confirm(
+    `Delete ${preview.items.length} old backup artifact(s) and reclaim about ${bytes(preview.reclaimableBytes)}? ` +
+    "Recall will create a protected pre-cleanup backup first.",
+  )) return
+  trustBusy.value = true
+  try {
+    const result = await api.applyBackupCleanup(preview.items.map((item) => item.id))
+    cleanupMessage.value = `Removed ${result.deleted} old artifact(s) and reclaimed ${bytes(result.reclaimedBytes)}.`
+    cleanupPreview.value = undefined
+    await loadTrust()
+  } finally {
+    trustBusy.value = false
+  }
 }
 
 const bytes = (value?: number) => {
@@ -811,8 +841,31 @@ const formatDate = (value?: number) =>
         <Surface as="article" variant="inset" padding="compact" class="trust-card backups">
           <div class="trust-head">
             <h3>Backups</h3>
-            <UiButton size="compact" :disabled="trustBusy" @click="createBackup">Create backup</UiButton>
+            <div class="actions">
+              <UiButton size="compact" :disabled="trustBusy" @click="reviewBackupCleanup">Review cleanup</UiButton>
+              <UiButton size="compact" :disabled="trustBusy" @click="createBackup">Create backup</UiButton>
+            </div>
           </div>
+          <div v-if="cleanupPreview" class="cleanup-preview">
+            <strong>
+              {{ cleanupPreview.items.length
+                ? `${cleanupPreview.items.length} old artifact(s) · ${bytes(cleanupPreview.reclaimableBytes)} reclaimable`
+                : "Nothing can be safely cleaned up right now" }}
+            </strong>
+            <span v-if="cleanupPreview.items.length" class="muted">
+              Manual backups, pre-clear backups, corrupt or unknown files, and the newest recovery points are retained.
+            </span>
+            <UiButton
+              v-if="cleanupPreview.items.length"
+              size="compact"
+              variant="danger"
+              :disabled="trustBusy"
+              @click="applyBackupCleanup"
+            >
+              Clean up safely
+            </UiButton>
+          </div>
+          <p v-if="cleanupMessage" class="muted">{{ cleanupMessage }}</p>
           <EmptyState
             v-if="trust.backups.length === 0"
             compact
@@ -1083,6 +1136,7 @@ const formatDate = (value?: number) =>
 .recovery-note { display: grid; gap: 3px; margin-top: var(--ui-space-3); padding: var(--ui-space-2); border: 1px solid color-mix(in srgb, var(--ui-positive) 35%, transparent); border-radius: var(--ui-radius-sm); color: var(--ui-text-subtle); font-size: 11px; }
 .recovery-note strong { color: var(--ui-positive); }
 .backups { grid-column: 1 / -1; }.backup-row { display: flex; align-items: center; justify-content: space-between; gap: var(--ui-space-3); padding: var(--ui-space-2) 0; border-top: 1px solid var(--ui-divider); }.backup-row > div:first-child { display: flex; flex-direction: column; font-size: 11px; }
+.cleanup-preview { display: flex; align-items: center; gap: var(--ui-space-3); margin: var(--ui-space-3) 0; padding: var(--ui-space-3); border: 1px solid var(--ui-border); border-radius: var(--ui-radius-sm); background: var(--ui-surface-panel); }.cleanup-preview .muted { flex: 1; }
 .rate-limits { display: grid; gap: 2px; margin-top: var(--ui-space-2); font-size: 12px; color: var(--ui-text-subtle); }
 @container recall-content (max-width: 760px) { .trust-grid { grid-template-columns: 1fr; }.backups { grid-column: auto; }.backup-row { align-items: flex-start; flex-direction: column; } }
 </style>

@@ -22,6 +22,10 @@ import { createHash } from "node:crypto"
 import { createRequire } from "node:module"
 import path from "node:path"
 import { Worker } from "node:worker_threads"
+import type {
+  BackupCleanupItem,
+  BackupCleanupPreview,
+} from "../../../src/types/recovery.js"
 import {
   BACKUP_RELEASE_SEQUENCE,
   proposeBackupRetention,
@@ -36,7 +40,7 @@ export type BackupManifest = Omit<ManagedBackupManifestLegacy, "integrity"> & {
   integrity: "ok" | "failed" | "unknown"
 }
 
-interface BackupDetails {
+export interface BackupDetails {
   schemaVersion: number
   matchCount: number
 }
@@ -49,6 +53,8 @@ interface RestoreIntent {
 
 const MANIFEST_SUFFIX = ".manifest.json"
 const RESTORE_INTENT = "restore-intent.json"
+const STALE_ARTIFACT_AGE_MS = 24 * 60 * 60 * 1_000
+const OLD_RECOVERY_ORIGINAL_AGE_MS = 30 * 24 * 60 * 60 * 1_000
 
 export interface RecoveryBackupCandidate {
   fileName: string
@@ -247,8 +253,12 @@ function inspectAsync(filePath: string): Promise<BackupDetails> {
   })
 }
 
+export const inspectRecoveryBackupAsync = inspectAsync
+
 function resolvedChild(root: string, fileName: string) {
-  if (path.basename(fileName) !== fileName) throw new Error("Invalid backup path")
+  if (fileName.includes("/") || fileName.includes("\\") || path.basename(fileName) !== fileName) {
+    throw new Error("Invalid backup path")
+  }
   const resolvedRoot = path.resolve(root)
   const candidate = path.resolve(root, fileName)
   if (path.dirname(candidate) !== resolvedRoot) throw new Error("Invalid backup path")
@@ -328,7 +338,6 @@ export class BackupManager {
       writeFileSync(manifestStaging, JSON.stringify(manifest, null, 2), "utf8")
       renameSync(staging, destination)
       renameSync(manifestStaging, manifestPath)
-      this.applyRetentionSafely()
       return manifest
     } finally {
       rmSync(staging, { force: true })
@@ -379,7 +388,6 @@ export class BackupManager {
       await writeFile(manifestStaging, JSON.stringify(manifest, null, 2), "utf8")
       await rename(staging, destination)
       await rename(manifestStaging, manifestPath)
-      await this.applyRetentionSafelyAsync()
       return manifest
     } finally {
       await rm(staging, { force: true })
@@ -480,11 +488,127 @@ export class BackupManager {
     }
   }
 
-  private applyRetention() {
-    for (const backup of this.retentionProposal().delete) this.delete(backup.fileName)
+  /** Returns only allowlisted, path-confined files; nothing is deleted here. */
+  previewCleanup(): BackupCleanupPreview {
+    const now = this.now()
+    const items: BackupCleanupItem[] = this.retentionProposal(now).delete.map((entry) => ({
+      id: `backup:${entry.fileName}`,
+      fileName: entry.fileName,
+      sizeBytes: entry.sizeBytes,
+      reason: "automatic_budget",
+    }))
+
+    if (existsSync(this.backupDir)) {
+      for (const fileName of readdirSync(this.backupDir)) {
+        const filePath = resolvedChild(this.backupDir, fileName)
+        let details
+        try {
+          details = statSync(filePath)
+        } catch {
+          continue
+        }
+        if (!details.isFile() || now - details.mtimeMs < STALE_ARTIFACT_AGE_MS) continue
+
+        const temporary = fileName.includes(".tmp-")
+        const orphanSidecar = /-(?:wal|shm)$/.test(fileName) &&
+          !existsSync(filePath.replace(/-(?:wal|shm)$/, ""))
+        const orphanManifest = fileName.endsWith(MANIFEST_SUFFIX) &&
+          !existsSync(filePath.slice(0, -MANIFEST_SUFFIX.length))
+        const reason = temporary ? "stale_temporary" as const
+          : orphanSidecar ? "orphan_sidecar" as const
+            : orphanManifest ? "orphan_manifest" as const
+              : undefined
+        if (reason) items.push({
+          id: `backup-artifact:${fileName}`,
+          fileName,
+          sizeBytes: details.size,
+          reason,
+        })
+      }
+    }
+
+    const databaseDir = path.dirname(this.databasePath)
+    const databaseName = path.basename(this.databasePath)
+    const generations = new Map<string, { createdAt: number; sizeBytes: number }>()
+    if (existsSync(databaseDir)) {
+      for (const fileName of readdirSync(databaseDir)) {
+        const match = new RegExp(
+          `^${databaseName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.recovery-original-(\\d+)(?:-\\d+)?(?:-(?:wal|shm))?$`,
+        ).exec(fileName)
+        if (!match) continue
+        const generation = fileName.replace(/-(?:wal|shm)$/, "")
+        const filePath = resolvedChild(databaseDir, fileName)
+        const details = statSync(filePath)
+        const current = generations.get(generation) ?? {
+          createdAt: Number(match[1]) || details.mtimeMs,
+          sizeBytes: 0,
+        }
+        current.sizeBytes += details.size
+        generations.set(generation, current)
+      }
+    }
+    const orderedGenerations = [...generations.entries()]
+      .sort((left, right) => right[1].createdAt - left[1].createdAt)
+    for (const [fileName, details] of orderedGenerations.slice(1)) {
+      if (now - details.createdAt < OLD_RECOVERY_ORIGINAL_AGE_MS) continue
+      items.push({
+        id: `database-artifact:${fileName}`,
+        fileName,
+        sizeBytes: details.sizeBytes,
+        reason: "old_recovery_original",
+      })
+    }
+
+    const unique = [...new Map(items.map((item) => [item.id, item])).values()]
+    return {
+      items: unique,
+      reclaimableBytes: unique.reduce((sum, item) => sum + item.sizeBytes, 0),
+    }
   }
 
-  private retentionProposal() {
+  /** Creates a protected anchor, then applies the freshly recomputed preview. */
+  async applyCleanupAsync(
+    db: Database.Database,
+    approvedIds?: readonly string[],
+  ): Promise<{
+    deleted: number
+    reclaimedBytes: number
+  }> {
+    const requested = new Set(approvedIds ?? this.previewCleanup().items.map((item) => item.id))
+    const approved = this.previewCleanup().items.filter((item) => requested.has(item.id))
+    await this.createAsync(db, "pre-cleanup")
+    const stillAllowed = new Set(this.previewCleanup().items.map((item) => item.id))
+    let deleted = 0
+    let reclaimedBytes = 0
+    for (const item of approved.filter((entry) => stillAllowed.has(entry.id))) {
+      if (item.id.startsWith("backup:")) {
+        if (this.delete(item.id.slice("backup:".length))) {
+          deleted += 1
+          reclaimedBytes += item.sizeBytes
+        }
+        continue
+      }
+      if (item.id.startsWith("backup-artifact:")) {
+        const target = resolvedChild(this.backupDir, item.id.slice("backup-artifact:".length))
+        rmSync(target, { force: true })
+        deleted += 1
+        reclaimedBytes += item.sizeBytes
+        continue
+      }
+      if (item.id.startsWith("database-artifact:")) {
+        const base = resolvedChild(
+          path.dirname(this.databasePath),
+          item.id.slice("database-artifact:".length),
+        )
+        for (const suffix of ["", "-wal", "-shm"]) rmSync(`${base}${suffix}`, { force: true })
+        deleted += 1
+        reclaimedBytes += item.sizeBytes
+      }
+    }
+    return { deleted, reclaimedBytes }
+  }
+
+  private retentionProposal(now = this.now()) {
     const all = this.list()
     const currentDatabaseBytes = existsSync(this.databasePath)
       ? statSync(this.databasePath).size
@@ -493,30 +617,7 @@ export class BackupManager {
       all,
       currentDatabaseBytes,
       this.options.releaseSequence ?? BACKUP_RELEASE_SEQUENCE,
+      now,
     )
-  }
-
-  private applyRetentionSafely() {
-    try {
-      this.applyRetention()
-    } catch (error) {
-      // A verified backup has already been published. Retention failure must
-      // never make that successful recovery point appear to have failed.
-      console.warn("Could not apply backup retention", error)
-    }
-  }
-
-  private async applyRetentionSafelyAsync() {
-    try {
-      await Promise.all(this.retentionProposal().delete.flatMap((backup) => {
-        const database = resolvedChild(this.backupDir, backup.fileName)
-        return [
-          rm(database, { force: true }),
-          rm(`${database}${MANIFEST_SUFFIX}`, { force: true }),
-        ]
-      }))
-    } catch (error) {
-      console.warn("Could not apply backup retention", error)
-    }
   }
 }

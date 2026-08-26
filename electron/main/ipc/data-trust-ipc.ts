@@ -5,7 +5,8 @@ import type { DataTrustService } from "../database/data-trust.js"
 type BackupDatabase = Parameters<BackupManager["createAsync"]>[0]
 type BackupStore = Pick<
   BackupManager,
-  "createAsync" | "delete" | "list" | "prepareRestoreAsync"
+  "applyCleanupAsync" | "createAsync" | "delete" | "list" |
+  "prepareRestoreAsync" | "previewCleanup"
 >
 type DataTrustReader = Pick<DataTrustService, "check" | "report">
 type DataTrustReport = ReturnType<DataTrustReader["report"]>
@@ -83,5 +84,21 @@ export function registerDataTrustIpc(
     )
     dependencies.scheduleApplicationRestart()
     return true
+  })
+  ipcMain.handle("backups:cleanup:preview", () =>
+    dependencies.getBackupManager().previewCleanup())
+  ipcMain.handle("backups:cleanup:apply", async (_event, ids: unknown) => {
+    if (!Array.isArray(ids) || ids.length > 1_000 ||
+        ids.some((id) => typeof id !== "string" || id.length > 300)) {
+      throw new Error("Invalid cleanup preview")
+    }
+    const result = await dependencies.trackDatabaseTask(
+      dependencies.getBackupManager().applyCleanupAsync(
+        dependencies.getDatabase(),
+        ids as string[],
+      ),
+    )
+    dependencies.broadcastUpdated()
+    return result
   })
 }

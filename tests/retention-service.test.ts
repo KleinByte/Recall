@@ -32,4 +32,18 @@ describe("backup retention v2", () => {
       "bad.db", "legacy.db", "manual.db", "new.db",
     ])
   })
+
+  it("expires transient release protection after fourteen days", () => {
+    const day = 24 * 60 * 60 * 1_000
+    const now = 40 * day
+    const proposal = proposeBackupRetention([
+      { fileName: "new.db", createdAt: now, reason: "daily", sizeBytes: 600_000_000,
+        integrity: "ok", protection: { kind: "none" } },
+      { fileName: "old-update.db", createdAt: now - 20 * day, reason: "pre-update",
+        sizeBytes: 600_000_000, integrity: "ok",
+        protection: { kind: "through_release", throughReleaseSequence: 999 } },
+    ], 1, 1, now)
+
+    expect(proposal.delete.map((entry) => entry.fileName)).toEqual(["old-update.db"])
+  })
 })

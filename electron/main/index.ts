@@ -22,12 +22,15 @@ import type { MinimapVisionDebugSnapshot, MinimapVisionDebugStatus } from "../..
 import { MatchSourceRepository } from "./database/match-source-repo.js"
 import { resolveDisplayTimezone } from "./matches/time-contract.js"
 import {
-  DatabaseRecoveryExhaustedError,
-  openDatabaseWithRecovery,
   restoreDatabaseFromSelectedBackup,
-  type DatabaseRecovery,
 } from "./database/recovery.js"
-import { DatabaseStartupError } from "./database/connection.js"
+import { openDatabase } from "./database/connection.js"
+import {
+  listRecoveryBackups,
+  recoveryStartupState,
+  resolveRecoveryBackup,
+} from "./database/startup-recovery.js"
+import type { StartupState } from "../../src/types/recovery.js"
 import {
   createUpdateSnapshot,
   restoreLatestUpdateSnapshot,
@@ -316,7 +319,7 @@ let championNames: Map<number, string> | undefined
  * flag the quit request would be swallowed by the same handler that hides.
  */
 let quitting = false
-let database: ReturnType<typeof openDatabaseWithRecovery>["database"] | undefined
+let database: ReturnType<typeof openDatabase> | undefined
 let repository: MatchesRepository | undefined
 let challenges: ChallengesRepository | undefined
 let profiles: ProfileRepository | undefined
@@ -339,7 +342,7 @@ let recall: MatchGradingService | undefined
 let analysisWorker: AnalysisWorkerClient | undefined
 let statsRevision = 0
 let startupRestoreError: string | undefined
-let startupRecovery: DatabaseRecovery | undefined
+let startupState: StartupState = { kind: "ready" }
 let startupMaintenanceError: string | undefined
 let riotBackfillAbort: AbortController | undefined
 let riotBackfillTask: Promise<void> | undefined
@@ -374,103 +377,11 @@ function collectionDisabled(): boolean {
 
 function getDatabase() {
   if (!database) {
-    const result = openDatabaseWithRecovery(getDatabasePath(), {
+    database = openDatabase(getDatabasePath(), {
       backupDir: getDatabaseBackupDir(),
     })
-    database = result.database
-    if (result.recovery) {
-      startupRecovery = result.recovery
-      console.warn(
-        `Recall recovered an unusable database from ${result.recovery.sourcePath}, ` +
-        `validated schema v${result.recovery.sourceSchemaVersion} at ` +
-        `v${result.recovery.targetSchemaVersion}, and preserved the original at ` +
-        `${result.recovery.quarantinedPath}. ` +
-        `${result.recovery.rejectedCandidates.length} candidate(s) were skipped.`,
-      )
-    }
   }
   return database
-}
-
-/**
- * A newer schema is a deliberate downgrade boundary, not corruption. Let the
- * user explicitly choose an older recovery point instead of silently rolling
- * their history back or presenting the generic fatal database dialog.
- */
-async function promptForCompatibleBackupRestore(
-  error: unknown,
-): Promise<boolean | undefined> {
-  if (!(error instanceof DatabaseStartupError) || error.phase !== "compatibility") {
-    return undefined
-  }
-
-  const prompt = await dialog.showMessageBox({
-    type: "warning",
-    title: "Recall needs an older backup",
-    message: "This version of Recall cannot open history written by a newer build.",
-    detail:
-      `${error.message}\n\n` +
-      "Choose a compatible Recall database backup. Recall will validate and " +
-      "migrate a copy before replacing the active database, and will preserve " +
-      "the newer database so it can be recovered later.",
-    buttons: ["Choose Backup…", "Quit Recall"],
-    defaultId: 0,
-    cancelId: 1,
-    noLink: true,
-  })
-  if (prompt.response !== 0) return false
-
-  while (true) {
-    const selection = await dialog.showOpenDialog({
-      title: "Choose a Recall database backup",
-      defaultPath: getDatabaseBackupDir(),
-      buttonLabel: "Validate and Restore",
-      filters: [
-        { name: "Recall database backups", extensions: ["db", "bak"] },
-        { name: "All files", extensions: ["*"] },
-      ],
-      properties: ["openFile", "dontAddToRecent"],
-    })
-    if (selection.canceled || selection.filePaths.length !== 1) return false
-
-    const sourcePath = selection.filePaths[0]
-    try {
-      const result = restoreDatabaseFromSelectedBackup(
-        getDatabasePath(),
-        sourcePath,
-        { backupDir: getDatabaseBackupDir() },
-      )
-      database = result.database
-      startupRecovery = result.recovery
-      console.warn(
-        `Recall restored the selected backup from ${sourcePath}, ` +
-        `validated schema v${result.recovery.sourceSchemaVersion} at ` +
-        `v${result.recovery.targetSchemaVersion}, and preserved the newer ` +
-        `database at ${result.recovery.quarantinedPath}.`,
-      )
-      return true
-    } catch (restoreError) {
-      console.error(
-        "Could not restore the selected startup backup:",
-        restoreError instanceof Error
-          ? restoreError.stack ?? restoreError.message
-          : restoreError,
-      )
-      const retry = await dialog.showMessageBox({
-        type: "error",
-        title: "Recall could not restore that backup",
-        message: "The selected backup could not be safely validated and migrated.",
-        detail:
-          `${restoreError instanceof Error ? restoreError.message : String(restoreError)}` +
-          "\n\nThe active database was left untouched.",
-        buttons: ["Choose Another Backup…", "Quit Recall"],
-        defaultId: 0,
-        cancelId: 1,
-        noLink: true,
-      })
-      if (retry.response !== 0) return false
-    }
-  }
 }
 
 function getRepository(): MatchesRepository {
@@ -637,7 +548,9 @@ function getReviewRepository() {
 
 function getBackupManager() {
   if (!backupManager) {
-    backupManager = new BackupManager(getDatabasePath(), getDatabaseBackupDir())
+    backupManager = new BackupManager(getDatabasePath(), getDatabaseBackupDir(), {
+      appVersion: app.getVersion(),
+    })
   }
   return backupManager
 }
@@ -707,7 +620,6 @@ function getDataTrustService() {
     if (startupErrors.length > 0) {
       dataTrustService.setStartupError(startupErrors.join("\n"))
     }
-    if (startupRecovery) dataTrustService.setStartupRecovery(startupRecovery)
   }
   return dataTrustService
 }
@@ -874,18 +786,23 @@ async function createWindow(startHidden = false) {
     },
   })
 
-  if (VITE_DEV_SERVER_URL) {
-    win.loadURL(VITE_DEV_SERVER_URL)
-    // DevTools adds a renderer and keeps the shared GPU process busy even
-    // while Recall is behind a running game. Make it explicit for profiling
-    // and ordinary game testing; set RECALL_OPEN_DEVTOOLS=1 when needed.
-    if (OPEN_DEVTOOLS) win.webContents.openDevTools()
-  } else {
-    win.loadFile(indexHtml)
-  }
-
   win.once("ready-to-show", () => {
     if (!startHidden) win.show()
+  })
+
+  // Defer the first renderer load until the caller has registered startup
+  // IPC. Otherwise a fast local renderer can request `startup:state` before
+  // its handler exists and leave Recall displaying only its background.
+  setImmediate(() => {
+    if (VITE_DEV_SERVER_URL) {
+      void win.loadURL(VITE_DEV_SERVER_URL)
+      // DevTools adds a renderer and keeps the shared GPU process busy even
+      // while Recall is behind a running game. Make it explicit for profiling
+      // and ordinary game testing; set RECALL_OPEN_DEVTOOLS=1 when needed.
+      if (OPEN_DEVTOOLS) win.webContents.openDevTools()
+    } else {
+      void win.loadFile(indexHtml)
+    }
   })
 
   // Closing hides Recall so it can keep recording games. Minimising remains a
@@ -1501,7 +1418,7 @@ function reveal(win: BrowserWindow) {
  * The window hides rather than closes, so this is the only route back to it —
  * and the only way to actually quit.
  */
-function createTray(win: BrowserWindow) {
+function createTray(win: BrowserWindow, recoveryOnly = false) {
   const icon = nativeImage.createFromPath(
     path.join(process.env.VITE_PUBLIC, "favicon.ico"),
   )
@@ -1512,10 +1429,10 @@ function createTray(win: BrowserWindow) {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: "Open Recall", click: () => reveal(win) },
-      {
+      ...(!recoveryOnly ? [{
         label: "Show / hide Tempo overlay (Alt+T)",
         click: () => toggleTempoOverlay(win),
-      },
+      }] : []),
       { type: "separator" },
       {
         label: "Quit",
@@ -2746,15 +2663,7 @@ async function championNameFor(championId: number): Promise<string | undefined> 
   return catalog.find((champion) => champion.id === championId)?.name
 }
 
-function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
-  ipcMain.on("app-ready", () => {
-    void restoreActiveGameRuntime(win)
-      .catch((error) => {
-        console.warn(`Could not restore active game: ${(error as Error).message}`)
-      })
-      .finally(() => connectToLcu(win))
-  })
-
+function registerBaseIpc(win: BrowserWindow, updaterService: UpdaterService) {
   ipcMain.on("window:minimize", () => win.minimize())
   ipcMain.on("window:toggle-maximize", () => {
     if (win.isMaximized()) win.unmaximize()
@@ -2762,6 +2671,99 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
   })
   ipcMain.on("window:close", () => win.close())
   ipcMain.handle("window:is-maximized", () => win.isMaximized())
+  ipcMain.handle("startup:state", () => startupState)
+  registerUpdaterIpc(ipcMain, updaterService)
+}
+
+function registerRecoveryIpc(win: BrowserWindow) {
+  let externalSelection: string | undefined
+
+  ipcMain.handle("recovery:backups:list", () =>
+    listRecoveryBackups(getDatabaseBackupDir(), latestSchemaVersion))
+
+  ipcMain.handle("recovery:backup:browse", async () => {
+    const selection = await dialog.showOpenDialog(win, {
+      title: "Choose a Recall database backup",
+      defaultPath: getDatabaseBackupDir(),
+      buttonLabel: "Use this backup",
+      filters: [
+        { name: "Recall database backups", extensions: ["db", "bak"] },
+        { name: "All files", extensions: ["*"] },
+      ],
+      properties: ["openFile", "dontAddToRecent"],
+    })
+    if (selection.canceled || selection.filePaths.length !== 1) return undefined
+    externalSelection = path.resolve(selection.filePaths[0])
+    return { id: "external", fileName: path.basename(externalSelection) }
+  })
+
+  ipcMain.handle("recovery:backup:restore", async (_event, id: unknown) => {
+    if (typeof id !== "string" || id.length > 240) throw new Error("Invalid backup selection")
+    const sourcePath = id === "external"
+      ? externalSelection
+      : resolveRecoveryBackup(getDatabaseBackupDir(), id)
+    if (!sourcePath) throw new Error("Choose a backup first")
+
+    const previousState = startupState
+    startupState = {
+      kind: "restoring",
+      message: "Recall is validating, migrating, and restoring the selected backup.",
+      databasePath: getDatabasePath(),
+      supportedSchemaVersion: latestSchemaVersion,
+    }
+    broadcast(win, "startup:state-changed", startupState)
+    await new Promise<void>((resolve) => setImmediate(resolve))
+
+    try {
+      const result = restoreDatabaseFromSelectedBackup(
+        getDatabasePath(),
+        sourcePath,
+        { backupDir: getDatabaseBackupDir() },
+      )
+      result.database.close()
+      setImmediate(() => {
+        quitting = true
+        app.relaunch()
+        app.quit()
+      })
+      return true
+    } catch (error) {
+      startupState = previousState
+      broadcast(win, "startup:state-changed", startupState)
+      console.error(
+        "Could not restore the selected startup backup:",
+        error instanceof Error ? error.stack ?? error.message : error,
+      )
+      throw new Error(
+        `That backup could not be safely validated and migrated. ${
+          error instanceof Error ? error.message : String(error)
+        } The active database was left untouched.`,
+      )
+    }
+  })
+
+  ipcMain.handle("recovery:retry", () => {
+    setImmediate(() => {
+      quitting = true
+      app.relaunch()
+      app.quit()
+    })
+    return true
+  })
+  ipcMain.on("recovery:quit", () => {
+    quitting = true
+    app.quit()
+  })
+}
+
+function registerIpc(win: BrowserWindow) {
+  ipcMain.on("app-ready", () => {
+    void restoreActiveGameRuntime(win)
+      .catch((error) => {
+        console.warn(`Could not restore active game: ${(error as Error).message}`)
+      })
+      .finally(() => connectToLcu(win))
+  })
   ipcMain.handle("tempo-overlay:status", () => tempoOverlayStatus())
   ipcMain.handle("tempo-overlay:toggle", () => toggleTempoOverlay(win))
   ipcMain.handle("tempo-overlay:lock", () => setTempoOverlayLocked(win, true))
@@ -2770,8 +2772,6 @@ function registerIpc(win: BrowserWindow, updaterService: UpdaterService) {
   ipcMain.handle("minimap-vision-debug:toggle", () => toggleMinimapVisionDebugOverlay(win))
   ipcMain.handle("minimap-vision-debug:lock", () => setMinimapVisionDebugLocked(win, true))
   ipcMain.handle("minimap-vision-debug:reset-position", () => resetMinimapVisionDebugPosition(win))
-
-  registerUpdaterIpc(ipcMain, updaterService)
 
   ipcMain.handle("settings:ui:get", () => settingsStore.getRenderer("settings"))
   ipcMain.handle("settings:ui:set", (_event, value: UiSettings) =>
@@ -3712,9 +3712,9 @@ async function main() {
     if (restored) console.log("Restored the selected verified database backup")
   } catch (error) {
     startupRestoreError = (error as Error).message
-    dialog.showErrorBox(
-      "Recall could not restore the selected backup",
-      `${(error as Error).message}\n\nThe existing database was retained.`,
+    console.error(
+      "Recall could not restore the selected backup; the existing database was retained:",
+      error instanceof Error ? error.stack ?? error.message : error,
     )
   }
 
@@ -3738,9 +3738,9 @@ async function main() {
   }
   configureLoginItem(settingsStore.getMain("launch-at-login") !== false)
 
-  // Open and validate persistent data before showing the renderer. If startup
-  // cannot continue, a half-initialised window would only emit a wall of "No
-  // handler registered" errors because IPC registration happens afterwards.
+  // Open and validate persistent data before enabling normal application
+  // services. A failure now becomes a first-class renderer state: the window
+  // still opens, but no database-backed IPC or League collection starts.
   let databaseFailure: unknown
   try {
     getRepository()
@@ -3749,76 +3749,38 @@ async function main() {
   }
 
   if (databaseFailure !== undefined) {
-    const restored = await promptForCompatibleBackupRestore(databaseFailure)
-    if (restored === false) {
-      app.quit()
-      return
-    }
-    if (restored === true) {
-      try {
-        getRepository()
-        databaseFailure = undefined
-      } catch (error) {
-        databaseFailure = error
-      }
-    }
-  }
-
-  if (databaseFailure !== undefined) {
-    const message = databaseFailure instanceof Error
-      ? databaseFailure.message
-      : String(databaseFailure)
-    const rejected = databaseFailure instanceof DatabaseRecoveryExhaustedError
-      ? databaseFailure.attempts.length
-      : 0
     console.error(
       "Could not initialise Recall's database:",
       databaseFailure instanceof Error
         ? databaseFailure.stack ?? databaseFailure.message
         : databaseFailure,
     )
-    dialog.showErrorBox(
-      "Recall could not open your history",
-      `${message}` +
-        (rejected > 0
-          ? `\n\nRecall checked ${rejected} backup candidate(s), but none could be safely migrated.`
-          : "") +
-        `\n\nYour database was left untouched at:\n${getDatabasePath()}`,
+    startupState = recoveryStartupState(
+      databaseFailure,
+      getDatabasePath(),
+      latestSchemaVersion,
     )
-    app.quit()
-    return
   }
 
   // Derived analysis is rebuildable and must not make a successfully opened
   // history look like a fatal database failure. Keep the app available and
   // retry the work through the normal post-sync path.
-  try {
-    await ensureRecallFrozen()
-  } catch (error) {
-    startupMaintenanceError = error instanceof Error ? error.message : String(error)
-    console.warn(
-      "Recall opened its database but could not refresh derived analysis:",
-      error instanceof Error ? error.stack ?? error.message : error,
-    )
+  if (startupState.kind === "ready") {
+    try {
+      await ensureRecallFrozen()
+    } catch (error) {
+      startupMaintenanceError = error instanceof Error ? error.message : String(error)
+      console.warn(
+        "Recall opened its database but could not refresh derived analysis:",
+        error instanceof Error ? error.stack ?? error.message : error,
+      )
+    }
   }
 
-  const startHidden = app.isPackaged && process.argv.includes(START_HIDDEN_ARG)
+  const startHidden = startupState.kind === "ready" && app.isPackaged &&
+    process.argv.includes(START_HIDDEN_ARG)
   const win = await createWindow(startHidden)
-  createTray(win)
-  if (startupRecovery) {
-    void dialog.showMessageBox(win, {
-      type: "warning",
-      title: "Recall recovered your history",
-      message: "Recall opened a backup that could be safely brought up to date.",
-      detail:
-        `Recovered from:\n${startupRecovery.sourcePath}\n` +
-        `Schema v${startupRecovery.sourceSchemaVersion} → ` +
-        `v${startupRecovery.targetSchemaVersion}\n\n` +
-        `Original database preserved at:\n${startupRecovery.quarantinedPath}`,
-      buttons: ["Continue"],
-      defaultId: 0,
-    })
-  }
+  createTray(win, startupState.kind !== "ready")
   if (startupMaintenanceError) {
     void dialog.showMessageBox(win, {
       type: "warning",
@@ -3842,18 +3804,23 @@ async function main() {
     cancelInstall: () => clearUpdateMarker(app.getPath("userData")),
   })
 
-  registerIpc(win, updater)
-  tempoOverlayShortcutRegistered = globalShortcut.register(
-    "Alt+T",
-    () => toggleTempoOverlay(win),
-  )
-  if (!tempoOverlayShortcutRegistered) {
-    console.warn("Could not register the Alt+T Tempo overlay shortcut")
+  registerBaseIpc(win, updater)
+  if (startupState.kind === "ready") {
+    registerIpc(win)
+    tempoOverlayShortcutRegistered = globalShortcut.register(
+      "Alt+T",
+      () => toggleTempoOverlay(win),
+    )
+    if (!tempoOverlayShortcutRegistered) {
+      console.warn("Could not register the Alt+T Tempo overlay shortcut")
+    }
+    screen.on("display-removed", keepTempoOverlayOnScreen)
+    screen.on("display-metrics-changed", keepTempoOverlayOnScreen)
+    screen.on("display-removed", keepMinimapVisionDebugOnScreen)
+    screen.on("display-metrics-changed", keepMinimapVisionDebugOnScreen)
+  } else {
+    registerRecoveryIpc(win)
   }
-  screen.on("display-removed", keepTempoOverlayOnScreen)
-  screen.on("display-metrics-changed", keepTempoOverlayOnScreen)
-  screen.on("display-removed", keepMinimapVisionDebugOnScreen)
-  screen.on("display-metrics-changed", keepMinimapVisionDebugOnScreen)
   void updater.start()
 
   // A second launch reveals the running copy rather than starting another.

@@ -2,6 +2,7 @@
 import { computed, defineAsyncComponent, onMounted, ref } from "vue"
 import AppSidebar from "./components/AppSidebar.vue"
 import ChampSelectBanner from "./components/ChampSelectBanner.vue"
+import DatabaseRecovery from "./components/DatabaseRecovery.vue"
 import PatchNotesModal from "./components/PatchNotesModal.vue"
 import PostGameBanner from "./components/PostGameBanner.vue"
 import UpdateRecallAnimation from "./components/UpdateRecallAnimation.vue"
@@ -26,6 +27,7 @@ import type { MatchRow, PersonalRecord } from "./types/stats"
 import type { LiveSession } from "./types/live"
 import type { RecordNotification } from "./types/notifications"
 import type { UpdateStatus } from "./types/update"
+import type { StartupState } from "./types/recovery"
 
 const ChampionDetailPage = defineAsyncComponent(() => import("./pages/ChampionDetailPage.vue"))
 const ChallengesPage = defineAsyncComponent(() => import("./pages/ChallengesPage.vue"))
@@ -50,6 +52,7 @@ const refreshMessage = ref<string | null>(null)
 const showPatchNotes = ref(false)
 const updateStatus = ref<UpdateStatus>({ kind: "up-to-date" })
 const dismissedUpdateVersion = ref<string | null>(null)
+const startupState = ref<StartupState | null>(null)
 const installingUpdateVersion = new URLSearchParams(window.location.search)
   .get("updating")
 const showcaseMode = import.meta.env.DEV && new URLSearchParams(window.location.search).has("showcase")
@@ -178,6 +181,11 @@ onMounted(async () => {
   // The update-guard renderer intentionally has no IPC handlers and must not
   // touch application state while the installer is replacing the old build.
   if (installingUpdateVersion) return
+  startupState.value = await api.getStartupState()
+  events.on("startup:state-changed", (state: StartupState) => {
+    startupState.value = state
+  })
+  if (startupState.value.kind !== "ready") return
   api.notifyReady()
   void loadDataDragonVersion()
   void runStartupTransition()
@@ -270,7 +278,12 @@ onMounted(async () => {
       @open-record="openRecordNotification"
     />
 
-    <div class="app">
+    <DatabaseRecovery
+      v-if="startupState && startupState.kind !== 'ready'"
+      :state="startupState"
+    />
+
+    <div v-else-if="startupState" class="app">
       <AppSidebar
         :page="sidebarPage"
         :connected="connected"
@@ -394,6 +407,7 @@ onMounted(async () => {
         :version="updateAnimation.version"
       />
     </div>
+    <main v-else class="startup-loading" aria-label="Opening Recall" />
   </div>
 </template>
 
@@ -413,6 +427,13 @@ onMounted(async () => {
   flex: 1;
   background: var(--ui-canvas);
   color: var(--ui-text);
+}
+
+.startup-loading {
+  flex: 1;
+  background:
+    radial-gradient(circle at 50% 30%, var(--ui-page-ambient-energy), transparent 30%),
+    var(--ui-canvas);
 }
 
 .content {

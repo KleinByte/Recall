@@ -20,6 +20,8 @@ async function bootstrap() {
       navigation.openChampion(20)
     } else if (["skill-overview", "skill-insights", "skill-analyze"].includes(showcase)) {
       navigation.page.value = "skill"
+    } else if (showcase === "cleanup") {
+      navigation.page.value = "settings"
     } else if (showcase === "progress") {
       navigation.page.value = "progress"
     } else if (showcase === "live") {

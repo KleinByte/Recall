@@ -1,6 +1,11 @@
 import type { AramStats, Challenge, Champion, Summoner } from "../types/lol"
 import type { RawChallenge } from "../types/lcu"
 import type { UpdateStatus } from "../types/update"
+import type {
+  BackupCleanupPreview,
+  RecoveryBackupSummary,
+  StartupState,
+} from "../types/recovery"
 import type { MinimapVisionDebugStatus, StoredSettings, TempoOverlayStatus } from "../types/app"
 import type { SkillViewPreferences } from "../shared/skill-preferences"
 import type { MinimapPathingReview } from "../shared/minimap/review"
@@ -136,6 +141,30 @@ function lcuRequest<T>(path: string): Promise<T> {
 }
 
 export const api = {
+  getStartupState(): Promise<StartupState> {
+    return invoke("startup:state")
+  },
+
+  listRecoveryBackups(): Promise<RecoveryBackupSummary[]> {
+    return invoke("recovery:backups:list")
+  },
+
+  browseRecoveryBackup(): Promise<{ id: string; fileName: string } | undefined> {
+    return invoke("recovery:backup:browse")
+  },
+
+  restoreRecoveryBackup(id: string): Promise<boolean> {
+    return invoke("recovery:backup:restore", id)
+  },
+
+  retryDatabaseStartup(): Promise<boolean> {
+    return invoke("recovery:retry")
+  },
+
+  quitRecovery() {
+    send("recovery:quit")
+  },
+
   notifyReady() {
     send("app-ready")
   },
@@ -510,6 +539,14 @@ export const api = {
 
   deleteBackup(fileName: string): Promise<boolean> {
     return invoke("backups:delete", fileName)
+  },
+
+  previewBackupCleanup(): Promise<BackupCleanupPreview> {
+    return invoke("backups:cleanup:preview")
+  },
+
+  applyBackupCleanup(ids: string[]): Promise<{ deleted: number; reclaimedBytes: number }> {
+    return invoke("backups:cleanup:apply", ids)
   },
 
   getReviewOverview(): Promise<ReviewOverview> {

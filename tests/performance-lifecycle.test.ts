@@ -108,25 +108,28 @@ describe("performance and resource lifecycle", () => {
     expect(afterSync).toContain("if (needsDirectCutover && riotBackfillTask)")
   })
 
-  it("keeps database opening fatal but treats derived startup analysis as rebuildable", () => {
+  it("opens database-less recovery while keeping derived startup analysis rebuildable", () => {
     const main = read("electron/main/index.ts")
     const startup = main.slice(main.indexOf("async function main()"))
     const openHistory = startup.indexOf("getRepository()")
-    const fatalDialog = startup.indexOf('"Recall could not open your history"')
+    const recoveryState = startup.indexOf("startupState = recoveryStartupState(")
     const derivedAnalysis = startup.indexOf("await ensureRecallFrozen()")
     const maintenanceWarning = startup.indexOf(
       '"Recall opened with analysis pending"',
     )
 
     expect(openHistory).toBeGreaterThan(-1)
-    expect(fatalDialog).toBeGreaterThan(openHistory)
-    expect(derivedAnalysis).toBeGreaterThan(fatalDialog)
+    expect(recoveryState).toBeGreaterThan(openHistory)
+    expect(derivedAnalysis).toBeGreaterThan(recoveryState)
     expect(maintenanceWarning).toBeGreaterThan(derivedAnalysis)
-    expect(startup).toContain("await promptForCompatibleBackupRestore(databaseFailure)")
-    expect(startup).toContain("if (restored === false)")
+    expect(startup).toContain("const win = await createWindow(startHidden)")
+    expect(startup).toContain("registerBaseIpc(win, updater)")
+    expect(startup).toContain("registerRecoveryIpc(win)")
+    expect(startup).toContain('if (startupState.kind === "ready")')
     expect(main).toContain('title: "Choose a Recall database backup"')
     expect(main).toContain("restoreDatabaseFromSelectedBackup(")
-    expect(startup).toContain("Recall checked ${rejected} backup candidate(s)")
+    expect(startup).not.toContain('"Recall could not open your history"')
+    expect(startup).not.toContain("promptForCompatibleBackupRestore")
     expect(startup).toContain("Recall will retry after the next successful sync.")
   })
 })

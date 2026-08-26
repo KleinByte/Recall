@@ -21,6 +21,17 @@ function note(
 /** Shipped releases, newest first. */
 export const patchNotes: readonly PatchNoteRelease[] = [
   note(
+    "3.7.2",
+    "2026-08-26",
+    "Resilient history startup",
+    "Recall now opens a dedicated recovery workspace when local history cannot be opened, with safer backup selection and cleanup controls.",
+    "Keeps the application available without an active database when history is corrupt, locked, unmigratable, or written by a newer Recall build.",
+    "Ranks verified, compatible backups ahead of newer incompatible or damaged files and selects the newest usable recovery point automatically.",
+    "Validates and migrates a chosen backup in staging, preserves the original database, and records recovery provenance in Data Trust.",
+    "Adds a review-first cleanup action for stale temporary files and older recovery generations while retaining manual, protected, unknown, corrupt, and newest healthy backups.",
+    "Prevents fast renderer startup from racing database-recovery IPC registration and leaving Recall on a blank window.",
+  ),
+  note(
     "3.7.1",
     "2026-08-26",
     "Guided backup recovery",

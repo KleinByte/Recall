@@ -26,6 +26,7 @@
     "src/shared/performance-vocabulary.ts",
     "src/shared/recall-grade.ts",
     "src/shared/skill-preferences.ts",
-    "src/types/app.ts"
+    "src/types/app.ts",
+    "src/types/recovery.ts"
   ]
 }

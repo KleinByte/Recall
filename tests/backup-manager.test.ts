@@ -5,6 +5,8 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  utimesSync,
+  writeFileSync,
 } from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -105,7 +107,7 @@ describe("BackupManager", () => {
     expect(existsSync(`${backupPath}-shm`)).toBe(false)
   })
 
-  it("applies automatic retention after publishing an asynchronous backup", async () => {
+  it("previews retention and applies it only after creating a cleanup anchor", async () => {
     let timestamp = 1_700_000_000_000
     const backups = manager({ now: () => timestamp++ })
 
@@ -113,7 +115,15 @@ describe("BackupManager", () => {
     await backups.createAsync(db as never, "daily")
     await backups.createAsync(db as never, "daily")
 
-    expect(backups.list()).toHaveLength(1)
+    expect(backups.list()).toHaveLength(3)
+    expect(backups.previewCleanup().items).toHaveLength(2)
+
+    const result = await backups.applyCleanupAsync(db as never)
+    expect(result.deleted).toBe(2)
+    expect(backups.list().map((backup) => backup.reason).sort()).toEqual([
+      "daily",
+      "pre-cleanup",
+    ])
   })
 
   it("creates a pre-restore generation and restores after restart", async () => {
@@ -178,5 +188,44 @@ describe("BackupManager", () => {
       .rejects.toThrow("Backup")
     expect(() => manager().delete("../stats.db")).toThrow("Invalid backup path")
     expect(readFileSync(databasePath)).toEqual(original)
+  })
+
+  it("previews and removes only allowlisted stale artifacts", async () => {
+    const now = 1_700_000_000_000
+    const backups = manager({ now: () => now })
+    await backups.createAsync(db as never, "manual")
+    const oldTime = new Date(now - 40 * 24 * 60 * 60 * 1_000)
+    const staleTemp = path.join(backupDir, "stats-daily-1.db.tmp-99")
+    const orphanSidecar = path.join(backupDir, "stats-daily-2.db-wal")
+    const unknownDatabase = path.join(backupDir, "stats-legacy-3.db")
+    writeFileSync(staleTemp, "temporary")
+    writeFileSync(orphanSidecar, "sidecar")
+    writeFileSync(unknownDatabase, "unknown but retained")
+    for (const filePath of [staleTemp, orphanSidecar, unknownDatabase]) {
+      utimesSync(filePath, oldTime, oldTime)
+    }
+    const olderRecovery = `${databasePath}.recovery-original-${now - 50 * 24 * 60 * 60 * 1_000}`
+    const newestRecovery = `${databasePath}.recovery-original-${now - 40 * 24 * 60 * 60 * 1_000}`
+    writeFileSync(olderRecovery, "older")
+    writeFileSync(newestRecovery, "newest")
+
+    const preview = backups.previewCleanup()
+    expect(preview.items.map((item) => item.reason).sort()).toEqual([
+      "old_recovery_original",
+      "orphan_sidecar",
+      "stale_temporary",
+    ])
+    expect(preview.items.some((item) => item.fileName === path.basename(unknownDatabase)))
+      .toBe(false)
+
+    await backups.applyCleanupAsync(
+      db as never,
+      preview.items.map((item) => item.id),
+    )
+    expect(existsSync(staleTemp)).toBe(false)
+    expect(existsSync(orphanSidecar)).toBe(false)
+    expect(existsSync(olderRecovery)).toBe(false)
+    expect(existsSync(newestRecovery)).toBe(true)
+    expect(existsSync(unknownDatabase)).toBe(true)
   })
 })

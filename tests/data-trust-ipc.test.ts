@@ -44,6 +44,8 @@ function setup() {
     createAsync: vi.fn().mockResolvedValue(backup),
     delete: vi.fn().mockReturnValue(true),
     prepareRestoreAsync: vi.fn().mockResolvedValue(undefined),
+    previewCleanup: vi.fn().mockReturnValue({ items: [], reclaimableBytes: 0 }),
+    applyCleanupAsync: vi.fn().mockResolvedValue({ deleted: 0, reclaimedBytes: 0 }),
   }
   const database = {} as ReturnType<DataTrustIpcDependencies["getDatabase"]>
   const dependencies: DataTrustIpcDependencies = {
@@ -76,6 +78,8 @@ describe("registerDataTrustIpc", () => {
       "backups:create",
       "backups:delete",
       "backups:restore",
+      "backups:cleanup:preview",
+      "backups:cleanup:apply",
     ])
   })
 
@@ -130,5 +134,22 @@ describe("registerDataTrustIpc", () => {
     await expect(restoring).resolves.toBe(true)
     expect(dependencies.scheduleApplicationRestart).toHaveBeenCalledOnce()
     expect(dependencies.broadcastUpdated).not.toHaveBeenCalled()
+  })
+
+  it("previews cleanup without mutation and applies it through the database queue", async () => {
+    const { handlers, dependencies, backups, database } = setup()
+    expect(handlers.get("backups:cleanup:preview")!()).toEqual({
+      items: [],
+      reclaimableBytes: 0,
+    })
+    expect(backups.applyCleanupAsync).not.toHaveBeenCalled()
+
+    await expect(handlers.get("backups:cleanup:apply")!({}, ["backup:old.db"]))
+      .resolves.toEqual({
+      deleted: 0,
+      reclaimedBytes: 0,
+    })
+    expect(backups.applyCleanupAsync).toHaveBeenCalledWith(database, ["backup:old.db"])
+    expect(dependencies.broadcastUpdated).toHaveBeenCalledWith()
   })
 })

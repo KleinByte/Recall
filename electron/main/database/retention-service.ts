@@ -1,5 +1,6 @@
 export const BACKUP_RELEASE_SEQUENCE = 1
 export const MINIMUM_AUTOMATIC_BACKUP_BUDGET = 512 * 1024 * 1024
+export const TRANSIENT_BACKUP_PROTECTION_MS = 14 * 24 * 60 * 60 * 1_000
 
 export type ManagedBackupReason =
   | "daily" | "manual" | "pre-update" | "pre-migration"
@@ -72,7 +73,11 @@ export function proposeBackupRetention(
   input: readonly RetentionCandidate[],
   currentDatabaseBytes: number,
   releaseSequence = BACKUP_RELEASE_SEQUENCE,
+  now = Date.now(),
 ): BackupRetentionProposal {
+  // Kept in the signature for manifest-v2 callers; transient protection is
+  // now time-bounded because the historic sequence was never advanced.
+  void releaseSequence
   const budgetBytes = Math.max(MINIMUM_AUTOMATIC_BACKUP_BUDGET, 8 * currentDatabaseBytes)
   const ordered = [...input].sort((left, right) => right.createdAt - left.createdAt ||
     left.fileName.localeCompare(right.fileName))
@@ -87,7 +92,8 @@ export function proposeBackupRetention(
     else if (candidate.reason === "manual" || candidate.reason === "pre-clear") {
       keep.set(candidate.fileName, "user_protected")
     } else if (candidate.fileName === newestAutomatic) keep.set(candidate.fileName, "newest_healthy")
-    else if (candidate.protection && isProtectionActive(candidate.protection, releaseSequence)) {
+    else if (candidate.protection?.kind === "through_release" &&
+      candidate.createdAt + TRANSIENT_BACKUP_PROTECTION_MS > now) {
       keep.set(candidate.fileName, "manifest_protection")
     }
   }

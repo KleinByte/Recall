@@ -19,7 +19,8 @@ describe("Tempo overlay UI contract", () => {
   it("owns one native overlay window with shortcut, lock, and persistence controls", () => {
     const main = read("electron/main/index.ts")
 
-    expect(main).toContain('globalShortcut.register(\n    "Alt+T"')
+    expect(main).toContain("tempoOverlayShortcutRegistered = globalShortcut.register(")
+    expect(main).toContain('"Alt+T"')
     expect(main).toContain('title: "Recall Tempo Overlay"')
     expect(main).toContain('overlay.setAlwaysOnTop(true, "screen-saver")')
     expect(main).toContain("overlay.showInactive()")
