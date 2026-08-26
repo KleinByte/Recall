@@ -22,21 +22,24 @@ import {
   minimapPlaybackDuration,
   reliableMinimapSegments,
   unifiedPlaybackPositionsAt,
-  unifiedPlaybackTrails,
+  unifiedPlaybackTrailSegments,
   type UnifiedPlaybackSource,
 } from "../helpers/unified-playback"
 import type { CampClearEvent } from "../shared/minimap/contracts"
 import type { MinimapPathingReview } from "../shared/minimap/review"
 import type { MatchRow, ParticipantRow } from "../types/stats"
-import type { TimelineEvent, TimelineFrame } from "../types/review"
-
-type Visibility = "all" | "blue" | "red" | "you"
+import type {
+  ParticipantLifeInterval,
+  TimelineEvent,
+  TimelineFrame,
+} from "../types/review"
 
 const props = defineProps<{
   match: MatchRow
   participants: ParticipantRow[]
   frames: TimelineFrame[]
   events: TimelineEvent[]
+  lifeIntervals?: ParticipantLifeInterval[]
   timestamp: number
   compact?: boolean
   minimapReview?: MinimapPathingReview
@@ -48,16 +51,9 @@ const emit = defineEmits<{ "update:timestamp": [timestamp: number] }>()
 
 const speed = ref(1)
 const speedOptions = [1, 2, 4, 10] as const
-const visibility = ref<Visibility>("all")
 const focusedParticipantId = ref<number>()
 const expandedParticipantId = ref<number>()
 const expandedMap = ref(false)
-const visibilityOptions: Array<{ value: Visibility; label: string }> = [
-  { value: "all", label: "Everyone" },
-  { value: "blue", label: "Blue" },
-  { value: "red", label: "Red" },
-  { value: "you", label: "You" },
-]
 let lastEmittedTimestamp: number | undefined
 let stackCollapseTimer: number | undefined
 
@@ -141,6 +137,7 @@ const currentPositions = computed(() => new Map(
   unifiedPlaybackPositionsAt({
     frames: props.frames,
     events: props.events,
+    lifeIntervals: props.lifeIntervals,
     minimapReview: minimapEnabledForMap.value ? props.minimapReview : undefined,
     bindings: minimapBindings.value,
     participantIds: props.participants.map((participant) => participant.participantId),
@@ -149,12 +146,6 @@ const currentPositions = computed(() => new Map(
     minimumConfidence: minimumCvConfidence.value,
   }).map((position) => [position.participantId, position]),
 ))
-const visibleParticipants = computed(() => props.participants.filter((participant) => {
-  if (visibility.value === "blue") return participant.teamId === 100
-  if (visibility.value === "red") return participant.teamId === 200
-  if (visibility.value === "you") return participant.isPlayer === 1
-  return true
-}))
 const roster = computed(() => [...props.participants].sort((left, right) =>
   left.teamId - right.teamId || left.participantId - right.participantId,
 ))
@@ -166,7 +157,7 @@ const focusedPosition = computed(() => focusedParticipantId.value === undefined
   : currentPositions.value.get(focusedParticipantId.value),
 )
 const visibleTokens = computed(() => {
-  const tokens = visibleParticipants.value.flatMap((participant) => {
+  const tokens = props.participants.flatMap((participant) => {
     const current = currentPositions.value.get(participant.participantId)
     if (!current) return []
     return [{ participant, current, plotted: current.point }]
@@ -204,42 +195,25 @@ const expandedTokenLinks = computed(() => visibleTokens.value.filter((token) =>
   (Math.abs(token.display.left - token.display.sourceLeft) > .01 ||
     Math.abs(token.display.top - token.display.sourceTop) > .01),
 ))
-const trails = computed(() => {
+const trailSegments = computed(() => {
   const participantId = focusedParticipantId.value
-  if (participantId === undefined || !visibleParticipants.value.some((participant) =>
+  if (participantId === undefined || !props.participants.some((participant) =>
     participant.participantId === participantId,
   )) return []
-  const participantById = new Map(props.participants.map((participant) => [
-    participant.participantId,
-    participant,
-  ]))
-  return unifiedPlaybackTrails({
+  const participant = props.participants.find((candidate) =>
+    candidate.participantId === participantId,
+  )!
+  return unifiedPlaybackTrailSegments({
     frames: props.frames,
     events: props.events,
+    lifeIntervals: props.lifeIntervals,
     minimapReview: minimapEnabledForMap.value ? props.minimapReview : undefined,
     bindings: minimapBindings.value,
-    participantIds: [participantId],
+    participantId,
     timestamp: playbackTime.value,
-    lookbackMs: 60_000,
     mapId: mapId.value,
     minimumConfidence: minimumCvConfidence.value,
-  }).flatMap((trail) => {
-    const participant = participantById.get(trail.participantId)
-    return participant ? [{
-      ...trail,
-      participant,
-      points: trail.points.map((point) => `${point.left},${point.top}`).join(" "),
-    }] : []
-  })
-})
-const sourceCounts = computed(() => {
-  const counts: Record<UnifiedPlaybackSource, number> = {
-    cv_observed: 0,
-    riot_snapshot: 0,
-    estimated: 0,
-  }
-  for (const token of visibleTokens.value) counts[token.current.source] += 1
-  return counts
+  }).map((segment) => ({ ...segment, participant }))
 })
 const currentEvents = computed(() => props.events.flatMap((event) => {
   if (
@@ -249,25 +223,10 @@ const currentEvents = computed(() => props.events.flatMap((event) => {
   ) return []
   return [{ event, plotted: mapPositionPercent(event.position!, mapId.value) }]
 }))
-const timelineTicks = computed(() => props.events.filter((event) =>
-  event.category === "kill" || event.category === "objective",
-).map((event) => ({
-  event,
-  left: duration.value > 0 ? event.timestamp / duration.value * 100 : 0,
-})))
-const campTimelineTicks = computed(() => campClears.value.map((clear, index) => ({
-  key: `${clear.campKey}:${clear.clearedAtMs}:${index}`,
-  clear,
-  left: duration.value > 0 ? clear.clearedAtMs / duration.value * 100 : 0,
-})))
 const campMarkers = computed(() => minimapEnabledForMap.value && campClears.value.length > 0
   ? minimapCampMarkersAt(campClears.value, playbackTime.value)
   : [],
 )
-const completedCampClears = computed(() => campClears.value.filter((clear) =>
-  clear.clearedAtMs <= playbackTime.value,
-))
-const latestCampClear = computed(() => completedCampClears.value.at(-1))
 const worldMarkers = computed(() => playbackWorldMarkers(
   props.events,
   playbackTime.value,
@@ -467,7 +426,9 @@ function skip(delta: number) {
 }
 
 function handleKeyboard(event: KeyboardEvent) {
-  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLButtonElement) return
+  if (event.target instanceof HTMLInputElement ||
+      event.target instanceof HTMLButtonElement ||
+      event.target instanceof HTMLSelectElement) return
   if (event.code === "Space") {
     event.preventDefault()
     togglePlayback()
@@ -486,7 +447,6 @@ function handleKeyboard(event: KeyboardEvent) {
 watch(() => props.match.gameId, () => {
   stop()
   cancelStackCollapse()
-  visibility.value = "all"
   focusedParticipantId.value = undefined
   expandedParticipantId.value = undefined
   expandedMap.value = false
@@ -521,18 +481,6 @@ onBeforeUnmount(() => {
         <h3>Map playback</h3>
       </div>
       <div class="playback-heading-actions">
-        <div class="coverage-stack" aria-label="Playback evidence coverage">
-          <div class="coverage" :class="{ weak: coverage.percent < 70 }">
-            <strong>{{ coverage.percent }}%</strong>
-            Riot timeline
-          </div>
-          <div v-if="minimapEnabledForMap" class="coverage cv" :class="{ weak: !cvAvailable }" :title="minimapError">
-            <strong v-if="minimapLoading">…</strong>
-            <strong v-else>{{ mappedCvParticipantIds.length }}</strong>
-            {{ mappedCvParticipantIds.length === 1 ? "CV track" : "CV tracks" }}
-            <small v-if="campClears.length">· {{ campClears.length }} clears</small>
-          </div>
-        </div>
         <button
           type="button"
           class="map-popout-button"
@@ -555,15 +503,21 @@ onBeforeUnmount(() => {
     <div class="playback-layout" :class="{ expanded: expandedMap }">
       <div class="playback-map" :style="mapStyle" @pointerleave="scheduleStackCollapse" @click="handleMapClick">
         <svg class="trail-layer" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-          <polyline
-            v-for="trail in trails"
-            :key="trail.key"
+          <line
+            v-for="segment in trailSegments"
+            :key="segment.key"
+            :data-segment-key="segment.key"
             :class="[
-              trail.participant.teamId === 100 ? 'blue' : 'red',
-              `origin-${trail.origin}`,
-              { owner: trail.participant.isPlayer === 1 },
+              'trail-segment',
+              segment.participant.teamId === 100 ? 'blue' : 'red',
+              `origin-${segment.origin}`,
+              `evidence-${segment.evidence}`,
+              { owner: segment.participant.isPlayer === 1 },
             ]"
-            :points="trail.points"
+            :x1="segment.from.left"
+            :y1="segment.from.top"
+            :x2="segment.to.left"
+            :y2="segment.to.top"
           />
           <line
             v-for="token in expandedTokenLinks"
@@ -665,7 +619,8 @@ onBeforeUnmount(() => {
           @click="focusParticipant(token.participant.participantId)"
         >
           <img :src="championIconUrl(token.participant.championId)" alt="" @error="championImageFallback" />
-          <i v-if="token.participant.isPlayer === 1" aria-hidden="true" />
+          <i v-if="token.current.origin === 'minimap_cv'" class="token-badge cv-badge" aria-hidden="true" />
+          <i v-if="token.participant.isPlayer === 1" class="token-badge owner-badge" aria-hidden="true" />
           <b
             v-if="token.display.overlapping && !token.display.expanded && token.stackLead"
             class="stack-count"
@@ -705,7 +660,6 @@ onBeforeUnmount(() => {
             · {{ Math.round(focusedPosition.confidence * 100) }}%
           </small>
         </div>
-        <div v-else-if="available" class="trail-hint">Click a champion to show its last 60 seconds</div>
 
         <div v-if="!available" class="map-empty">
           <strong>Playback unavailable</strong>
@@ -719,10 +673,6 @@ onBeforeUnmount(() => {
 
       <aside class="playback-sidebar">
         <div class="transport">
-          <div class="clock" aria-live="off">
-            <strong>{{ formatTime(playbackTime) }}</strong>
-            <span>{{ formatTime(duration) }}</span>
-          </div>
           <div class="primary-controls">
             <button type="button" :disabled="!available" @click="skip(-15_000)" aria-label="Back 15 seconds" title="Back 15 seconds">
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 5v10l-5-5 5-5Zm2 0h2v10H9V5Zm4 0h2v10h-2V5Z" /></svg>
@@ -735,30 +685,19 @@ onBeforeUnmount(() => {
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M13 5v10l5-5-5-5Zm-4 0h2v10H9V5ZM5 5h2v10H5V5Z" /></svg>
             </button>
           </div>
+          <div class="clock" aria-live="off">
+            <strong>{{ formatTime(playbackTime) }}</strong>
+            <span>{{ formatTime(duration) }}</span>
+          </div>
+          <label class="speed-control">
+            <span class="visually-hidden">Playback speed</span>
+            <select v-model.number="speed" aria-label="Playback speed">
+              <option v-for="option in speedOptions" :key="option" :value="option">{{ option }}×</option>
+            </select>
+          </label>
         </div>
 
-        <div class="scrubber-shell">
-          <span
-            v-for="tick in timelineTicks"
-            :key="tick.event.eventId"
-            class="event-tick"
-            :class="tick.event.category"
-            :style="{ left: `${tick.left}%` }"
-          />
-          <button
-            v-for="tick in campTimelineTicks"
-            :key="tick.key"
-            type="button"
-            class="camp-clear-tick"
-            :class="{
-              local: tick.clear.attribution === 'local',
-              uncertain: tick.clear.attribution === 'uncertain',
-            }"
-            :style="{ left: `${tick.left}%` }"
-            :title="`${formatTime(tick.clear.clearedAtMs)} · ${campClearName(tick.clear.campKey)} · ${campClearSourceLabel(tick.clear.source)}`"
-            :aria-label="`Seek to ${campClearName(tick.clear.campKey)} clear at ${formatTime(tick.clear.clearedAtMs)}`"
-            @click="seekToCampClear(tick.clear)"
-          ></button>
+        <div v-if="expandedMap" class="scrubber-shell">
           <input
             class="scrubber"
             type="range"
@@ -772,51 +711,8 @@ onBeforeUnmount(() => {
           />
         </div>
 
-        <div class="evidence-legend" aria-label="Position evidence legend">
-          <span class="cv-observed"><i />Observed CV <b>{{ sourceCounts.cv_observed }}</b></span>
-          <span class="riot-snapshot"><i />Riot snapshot <b>{{ sourceCounts.riot_snapshot }}</b></span>
-          <span class="estimated"><i />Estimated <b>{{ sourceCounts.estimated }}</b></span>
-        </div>
-
-        <div v-if="campClears.length" class="camp-summary">
-          <div>
-            <span>Jungle route</span>
-            <strong>{{ completedCampClears.length }} / {{ campClears.length }} clears reached</strong>
-          </div>
-          <button
-            v-if="latestCampClear"
-            type="button"
-            @click="seekToCampClear(latestCampClear)"
-          >
-            <b>{{ latestCampClear.routeIndex === undefined ? "•" : latestCampClear.routeIndex + 1 }}</b>
-            <span>
-              {{ campClearName(latestCampClear.campKey) }}
-              <small>{{ formatTime(latestCampClear.clearedAtMs) }} · {{ campClearSourceLabel(latestCampClear.source) }}</small>
-            </span>
-          </button>
-        </div>
-        <p v-else-if="minimapLoading" class="minimap-status">Loading minimap telemetry…</p>
+        <p v-if="minimapLoading" class="minimap-status">Loading minimap telemetry…</p>
         <p v-else-if="minimapError" class="minimap-status error">{{ minimapError }}</p>
-
-        <div class="control-row">
-          <div class="control-group speed-controls">
-            <span>Speed</span>
-            <div class="segmented">
-              <button v-for="option in speedOptions" :key="option" type="button"
-                :class="{ selected: speed === option }" :aria-pressed="speed === option"
-                @click="speed = option">{{ option }}×</button>
-            </div>
-          </div>
-
-          <div class="control-group">
-            <span>Players</span>
-            <div class="segmented visibility-controls">
-              <button v-for="option in visibilityOptions" :key="option.value" type="button"
-                :class="{ selected: visibility === option.value }" :aria-pressed="visibility === option.value"
-                @click="visibility = option.value">{{ option.label }}</button>
-            </div>
-          </div>
-        </div>
 
         <div class="playback-roster" aria-label="Players in this match">
           <button
@@ -828,7 +724,6 @@ onBeforeUnmount(() => {
               {
                 owner: player.isPlayer === 1,
                 selected: focusedParticipantId === player.participantId,
-                'cv-track': mappedCvParticipantIds.includes(player.participantId),
               },
             ]"
             :title="participantName(player)"
@@ -837,6 +732,8 @@ onBeforeUnmount(() => {
             @click="focusParticipant(player.participantId)"
           >
             <img :src="championIconUrl(player.championId)" alt="" @error="championImageFallback" />
+            <i v-if="mappedCvParticipantIds.includes(player.participantId)" class="roster-badge cv-badge" aria-hidden="true" />
+            <i v-if="player.isPlayer === 1" class="roster-badge owner-badge" aria-hidden="true" />
           </button>
         </div>
 
@@ -884,7 +781,6 @@ onBeforeUnmount(() => {
 .playback-heading-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
 }
 
 .map-popout-button {
@@ -909,30 +805,6 @@ onBeforeUnmount(() => {
   letter-spacing: .8px;
   text-transform: uppercase;
 }
-
-.coverage-stack {
-  display: grid;
-  justify-items: end;
-  gap: 3px;
-}
-
-.coverage {
-  display: flex;
-  align-items: baseline;
-  gap: 5px;
-  color: var(--ui-text-muted);
-  font-size: var(--ui-text-label);
-}
-
-.coverage strong {
-  color: var(--ui-positive);
-  font: 13px var(--ui-font-heading);
-}
-
-.coverage.weak strong { color: var(--ui-warning); }
-.coverage.cv strong { color: #69d8c5; }
-.coverage.cv.weak strong { color: var(--ui-text-muted); }
-.coverage.cv small { color: var(--ui-text-muted); font-size: var(--ui-text-micro); }
 
 .playback-layout {
   display: grid;
@@ -994,7 +866,7 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-.trail-layer polyline {
+.trail-layer .trail-segment {
   fill: none;
   stroke-width: 1.1;
   stroke-linecap: round;
@@ -1011,6 +883,7 @@ onBeforeUnmount(() => {
   opacity: .95;
   filter: drop-shadow(0 0 3px var(--ui-accent));
 }
+.trail-layer .evidence-estimated { opacity: .46; }
 
 .overlap-link {
   stroke-width: .8;
@@ -1176,7 +1049,7 @@ onBeforeUnmount(() => {
   z-index: 5;
   width: 31px;
   height: 31px;
-  padding: 2px;
+  padding: 1px;
   transform: translate3d(
     calc(var(--token-x) * 1cqw - 50%),
     calc(var(--token-y) * 1cqw - 50%),
@@ -1185,27 +1058,14 @@ onBeforeUnmount(() => {
   border: 2px solid var(--team);
   border-radius: 50%;
   background: #061018;
-  box-shadow: 0 0 0 1px rgb(2 8 13 / 92%), 0 2px 7px rgb(0 0 0 / 68%);
+  box-shadow: 0 2px 6px rgb(0 0 0 / 62%);
   cursor: pointer;
   transition: transform 120ms ease, box-shadow 120ms ease;
 }
 
 .champion-token.red { --team: var(--ui-team-red); }
-.champion-token::before {
-  position: absolute;
-  inset: -6px;
-  border: 1px solid color-mix(in srgb, var(--team) 72%, white);
-  border-radius: inherit;
-  content: "";
-  opacity: .76;
-  pointer-events: none;
-}
 .champion-token.owner {
   z-index: 6;
-  width: 35px;
-  height: 35px;
-  border-color: var(--ui-accent-strong);
-  box-shadow: 0 0 0 1px rgb(2 8 13 / 92%), 0 0 10px color-mix(in srgb, var(--ui-accent) 72%, transparent);
 }
 
 .champion-token.focused {
@@ -1213,8 +1073,8 @@ onBeforeUnmount(() => {
     calc(var(--token-x) * 1cqw - 50%),
     calc(var(--token-y) * 1cqw - 50%),
     0
-  ) scale(1.24);
-  box-shadow: 0 0 0 2px #061018, 0 0 15px var(--team);
+  ) scale(1.08);
+  box-shadow: 0 0 9px color-mix(in srgb, var(--team) 68%, transparent), 0 2px 6px rgb(0 0 0 / 62%);
 }
 
 .champion-token.cluster-expanded:not(.focused) {
@@ -1229,15 +1089,25 @@ onBeforeUnmount(() => {
   object-fit: cover;
 }
 
-.champion-token > i {
+.champion-token > .token-badge {
   position: absolute;
-  right: -3px;
-  bottom: -3px;
-  width: 9px;
-  height: 9px;
-  border: 2px solid #061018;
+  width: 8px;
+  height: 8px;
+  border: 1px solid #061018;
   border-radius: 50%;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 70%);
+}
+
+.champion-token > .owner-badge {
+  right: -2px;
+  bottom: -2px;
   background: var(--ui-accent-strong);
+}
+
+.champion-token > .cv-badge {
+  top: -2px;
+  right: -2px;
+  background: #69d8c5;
 }
 
 .champion-token .stack-count {
@@ -1312,8 +1182,7 @@ onBeforeUnmount(() => {
 }
 
 .map-clock,
-.focused-player,
-.trail-hint {
+.focused-player {
   position: absolute;
   z-index: 4;
   border: 1px solid rgb(255 255 255 / 10%);
@@ -1344,16 +1213,6 @@ onBeforeUnmount(() => {
   font-size: var(--ui-text-label);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.trail-hint {
-  bottom: 10px;
-  left: 10px;
-  max-width: calc(100% - 20px);
-  padding: 5px 9px;
-  color: var(--ui-text-muted);
-  font-size: var(--ui-text-micro);
-  pointer-events: none;
 }
 
 .focused-player > span {
@@ -1403,8 +1262,9 @@ onBeforeUnmount(() => {
 .transport {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-width: 0;
 }
 
 .clock {
@@ -1417,7 +1277,7 @@ onBeforeUnmount(() => {
 
 .clock strong {
   color: var(--ui-text-heading);
-  font: 29px var(--ui-font-heading);
+  font: 22px var(--ui-font-heading);
 }
 
 .clock span {
@@ -1426,29 +1286,24 @@ onBeforeUnmount(() => {
 
 .clock span::before { content: "/ "; }
 
-.primary-controls,
-.segmented {
+.primary-controls {
   display: flex;
   gap: 5px;
-}
-
-.primary-controls button,
-.segmented button {
-  min-height: 30px;
-  border: 1px solid var(--ui-border);
-  border-radius: var(--ui-radius-xs);
-  background: var(--ui-surface-panel-quiet);
-  color: var(--ui-text-subtle);
-  cursor: pointer;
+  flex: 0 0 auto;
 }
 
 .primary-controls button {
+  min-height: 30px;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-panel-quiet);
+  color: var(--ui-text-subtle);
+  cursor: pointer;
   display: grid;
   place-items: center;
   width: 34px;
   height: 34px;
   padding: 7px;
-  border-radius: 50%;
 }
 
 .primary-controls svg {
@@ -1457,9 +1312,7 @@ onBeforeUnmount(() => {
   fill: currentColor;
 }
 
-.primary-controls button:hover:not(:disabled),
-.segmented button:hover,
-.segmented button.selected {
+.primary-controls button:hover:not(:disabled) {
   border-color: var(--ui-accent);
   color: var(--ui-accent-strong);
 }
@@ -1470,24 +1323,56 @@ onBeforeUnmount(() => {
 }
 
 .primary-controls .play-button {
-  width: 42px;
-  height: 42px;
-  padding: 10px;
+  width: 38px;
+  height: 34px;
+  padding: 8px;
   border-color: color-mix(in srgb, var(--ui-accent) 65%, var(--ui-border));
   background: color-mix(in srgb, var(--ui-accent) 15%, var(--ui-surface-panel-quiet));
   color: var(--ui-accent-strong);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--ui-accent) 18%, transparent);
+}
+
+.speed-control {
+  display: block;
+  width: 66px;
+  margin-left: auto;
+  flex: 0 0 66px;
+}
+
+.speed-control select {
+  width: 100%;
+  min-height: 34px;
+  padding: 4px 24px 4px 8px;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-panel-quiet);
+  color: var(--ui-text-heading);
+  font: var(--ui-text-label) var(--ui-font-heading);
+  cursor: pointer;
+}
+
+.speed-control select:hover,
+.speed-control select:focus-visible {
+  border-color: var(--ui-accent);
+  outline: none;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .scrubber-shell {
-  position: relative;
-  height: 22px;
+  min-width: 0;
 }
 
 .scrubber {
-  position: absolute;
-  z-index: 2;
-  inset: 0;
+  display: block;
   width: 100%;
   height: 22px;
   margin: 0;
@@ -1500,124 +1385,6 @@ onBeforeUnmount(() => {
   opacity: .45;
 }
 
-.event-tick {
-  position: absolute;
-  z-index: 1;
-  top: 1px;
-  width: 2px;
-  height: 5px;
-  transform: translateX(-50%);
-  border-radius: 2px;
-  background: var(--ui-negative);
-  opacity: .62;
-  pointer-events: none;
-}
-
-.event-tick.objective {
-  height: 8px;
-  background: var(--ui-warning);
-  opacity: .9;
-}
-
-.camp-clear-tick {
-  position: absolute;
-  z-index: 4;
-  bottom: 1px;
-  width: 8px;
-  height: 9px;
-  padding: 0;
-  transform: translateX(-50%);
-  border: 0;
-  border-radius: 2px 2px 50% 50%;
-  background: #69d8c5;
-  box-shadow: 0 0 0 1px rgb(3 10 16 / 88%);
-  cursor: pointer;
-  opacity: .78;
-}
-.camp-clear-tick.local {
-  height: 12px;
-  background: var(--ui-accent-strong);
-  opacity: 1;
-}
-.camp-clear-tick.uncertain {
-  border: 1px dashed var(--ui-warning);
-  background: rgb(3 10 16 / 92%);
-}
-.camp-clear-tick:hover,
-.camp-clear-tick:focus-visible {
-  z-index: 5;
-  transform: translateX(-50%) scale(1.35);
-  outline: 1px solid var(--ui-accent-strong);
-}
-
-.evidence-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 10px;
-  color: var(--ui-text-muted);
-  font-size: var(--ui-text-label);
-}
-.evidence-legend > span { display: inline-flex; align-items: center; gap: 5px; }
-.evidence-legend i {
-  width: 14px;
-  height: 3px;
-  border-radius: 99px;
-  background: currentColor;
-}
-.evidence-legend b { color: var(--ui-text-subtle); font-variant-numeric: tabular-nums; }
-.evidence-legend .cv-observed { color: #69d8c5; }
-.evidence-legend .riot-snapshot { color: var(--ui-team-blue); }
-.evidence-legend .estimated { color: var(--ui-text-muted); }
-.evidence-legend .estimated i {
-  height: 0;
-  border-top: 2px dashed currentColor;
-  background: transparent;
-}
-
-.camp-summary {
-  display: grid;
-  gap: 7px;
-  padding: 8px 9px;
-  border: 1px solid color-mix(in srgb, #69d8c5 30%, var(--ui-border));
-  border-radius: var(--ui-radius-sm);
-  background: color-mix(in srgb, #69d8c5 5%, var(--ui-surface-panel-quiet));
-}
-.camp-summary > div { display: flex; justify-content: space-between; gap: 10px; }
-.camp-summary > div span {
-  color: var(--ui-text-muted);
-  font-size: var(--ui-text-label);
-  letter-spacing: .6px;
-  text-transform: uppercase;
-}
-.camp-summary > div strong { color: var(--ui-text-heading); font-size: var(--ui-text-label); }
-.camp-summary > button {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  padding: 6px 7px;
-  border: 1px solid var(--ui-border);
-  border-radius: var(--ui-radius-xs);
-  background: rgb(3 10 16 / 45%);
-  color: var(--ui-text-subtle);
-  text-align: left;
-  cursor: pointer;
-}
-.camp-summary > button:hover { border-color: var(--ui-accent); }
-.camp-summary > button > b {
-  display: grid;
-  place-items: center;
-  width: 23px;
-  height: 23px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: #69d8c5;
-  color: #041215;
-  font: 11px var(--ui-font-heading);
-}
-.camp-summary > button > span { display: grid; min-width: 0; }
-.camp-summary small { color: var(--ui-text-muted); font-size: var(--ui-text-micro); }
-
 .minimap-status {
   margin: 0;
   color: var(--ui-text-muted);
@@ -1625,37 +1392,6 @@ onBeforeUnmount(() => {
 }
 .minimap-status.error { color: var(--ui-warning); }
 
-.control-row {
-  display: grid;
-  grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
-  gap: 12px;
-}
-
-.control-group {
-  display: grid;
-  gap: 6px;
-  min-width: 0;
-}
-
-.control-group > span {
-  color: var(--ui-text-muted);
-  font-size: var(--ui-text-label);
-  letter-spacing: .7px;
-  text-transform: uppercase;
-}
-
-.segmented button {
-  flex: 1 1 0;
-  min-width: 0;
-  min-height: 27px;
-  padding: 3px 7px;
-  overflow: hidden;
-  font-size: var(--ui-text-label);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.speed-controls .segmented button { min-width: 34px; }
 
 .playback-roster {
   display: grid;
@@ -1673,8 +1409,8 @@ onBeforeUnmount(() => {
   justify-self: center;
   width: 34px;
   height: 34px;
-  padding: 2px;
-  border: 2px solid color-mix(in srgb, var(--team) 58%, var(--ui-border));
+  padding: 1px;
+  border: 2px solid var(--team);
   border-radius: 50%;
   background: #061018;
   cursor: pointer;
@@ -1682,33 +1418,30 @@ onBeforeUnmount(() => {
 }
 
 .playback-roster button.red { --team: var(--ui-team-red); }
-.playback-roster button.cv-track::before {
-  position: absolute;
-  inset: -5px;
-  border: 1px solid #69d8c5;
-  border-radius: inherit;
-  content: "";
-  pointer-events: none;
-  opacity: .72;
-}
 .playback-roster button:hover,
 .playback-roster button.selected {
   z-index: 2;
-  transform: scale(1.12);
-  border-color: var(--team);
-  box-shadow: 0 0 0 1px #061018, 0 0 8px color-mix(in srgb, var(--team) 55%, transparent);
+  transform: scale(1.06);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--team) 58%, transparent);
 }
 
-.playback-roster button.owner::after {
+.playback-roster .roster-badge {
   position: absolute;
-  right: -2px;
-  bottom: -2px;
   width: 8px;
   height: 8px;
-  border: 2px solid #061018;
+  border: 1px solid #061018;
   border-radius: 50%;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 70%);
+}
+.playback-roster .owner-badge {
+  right: -2px;
+  bottom: -2px;
   background: var(--ui-accent-strong);
-  content: "";
+}
+.playback-roster .cv-badge {
+  top: -2px;
+  right: -2px;
+  background: #69d8c5;
 }
 
 .playback-roster img {
@@ -1747,10 +1480,10 @@ onBeforeUnmount(() => {
 }
 
 .playback-panel.compact .playback-sidebar { gap: 10px; }
-.playback-panel.compact .clock strong { font-size: 23px; }
+.playback-panel.compact .clock strong { font-size: 20px; }
 .playback-panel.compact .primary-controls button { width: 31px; height: 31px; }
-.playback-panel.compact .primary-controls .play-button { width: 38px; height: 38px; }
-.playback-panel.compact .control-row { grid-template-columns: 1fr; gap: 9px; }
+.playback-panel.compact .primary-controls .play-button { width: 36px; height: 31px; }
+.playback-panel.compact .speed-control select { min-height: 31px; }
 
 @keyframes event-pop {
   from { transform: translate(-50%, -50%) scale(.55); opacity: .2; }
@@ -1785,7 +1518,7 @@ onBeforeUnmount(() => {
   .playback-map { max-width: 620px; margin-inline: auto; }
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 900px) {
   .playback-layout.expanded {
     width: min(860px, 100%);
     grid-template-columns: 1fr;
@@ -1798,10 +1531,8 @@ onBeforeUnmount(() => {
 
 @media (max-width: 560px) {
   .playback-heading { align-items: flex-start; flex-direction: column; }
-  .transport { align-items: end; }
-  .control-row { grid-template-columns: 1fr; }
+  .transport { align-items: center; }
   .champion-token { width: 27px; height: 27px; }
-  .champion-token.owner { width: 31px; height: 31px; }
   .map-clock { top: 7px; right: 7px; }
 }
 
@@ -1812,9 +1543,7 @@ onBeforeUnmount(() => {
 
 @container recall-content (max-width: 560px) {
   .playback-heading { align-items: flex-start; flex-direction: column; }
-  .control-row { grid-template-columns: 1fr; }
   .champion-token { width: 27px; height: 27px; }
-  .champion-token.owner { width: 31px; height: 31px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

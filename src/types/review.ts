@@ -338,9 +338,19 @@ export interface TimelineEvent {
   approximate?: boolean
 }
 
+export interface ParticipantLifeInterval {
+  participantId: number
+  /** Exact joined kill time when available, otherwise the first dead observation. */
+  diedAtMs: number
+  /** Expected timer completion or the first subsequent alive observation. */
+  respawnAtMs?: number
+}
+
 export interface TimelineSummary {
   frames: TimelineFrame[]
   events: TimelineEvent[]
+  /** Present only when durable live-player state could be matched to the roster. */
+  participantLifeIntervals?: ParticipantLifeInterval[]
   turningPoints: {
     timestamp: number
     swing: number

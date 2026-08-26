@@ -21,6 +21,16 @@ function note(
 /** Shipped releases, newest first. */
 export const patchNotes: readonly PatchNoteRelease[] = [
   note(
+    "3.7.0",
+    "2026-08-25",
+    "Cleaner timeline playback",
+    "Playback is easier to read, jungle clears share the timeline, and champion movement now stays accurate through death and respawn.",
+    "Moves the jungle-clear summary into Timeline beside map playback instead of keeping it in a separate match tab.",
+    "Simplifies play, pause, skip, and speed controls while removing redundant playback-bar clutter.",
+    "Uses shorter, stable trail segments and cleaner champion markers that no longer shift as older movement expires.",
+    "Hides champion icons and trails while players are dead, then restores them only after verified respawn position evidence.",
+  ),
+  note(
     "3.6.0",
     "2026-08-24",
     "Fluid live Tempo and map reviews",

@@ -120,31 +120,57 @@ describe("unified match timeline playback", () => {
     expect(token.classes()).toContain("cv-origin")
     expect(token.attributes("title")).toContain("Observed CV")
     expect(token.attributes("title")).toContain("94% confidence")
-    expect(wrapper.findAll(".trail-layer .origin-minimap_cv")).toHaveLength(0)
+    expect(wrapper.findAll(".trail-layer .trail-segment")).toHaveLength(0)
+    expect(wrapper.find(".trail-hint").exists()).toBe(false)
+    expect(wrapper.find(".evidence-legend").exists()).toBe(false)
+    expect(wrapper.find(".visibility-controls").exists()).toBe(false)
+    expect(wrapper.find(".camp-summary").exists()).toBe(false)
+    expect(wrapper.find(".scrubber").exists()).toBe(false)
+    const speedSelect = wrapper.get(".speed-control select")
+    expect(speedSelect.findAll("option").map((option) => option.text()))
+      .toEqual(["1×", "2×", "4×", "10×"])
+    const selectSpace = new KeyboardEvent("keydown", {
+      code: "Space",
+      bubbles: true,
+      cancelable: true,
+    })
+    speedSelect.element.dispatchEvent(selectSpace)
+    expect(selectSpace.defaultPrevented).toBe(false)
+    expect(wrapper.findAll(".champion-token .token-badge")).toHaveLength(2)
+    expect(wrapper.findAll(".playback-roster .roster-badge")).toHaveLength(2)
     await token.trigger("click")
-    expect(wrapper.findAll(".trail-layer .origin-minimap_cv")).toHaveLength(1)
-    const trailElement = wrapper.get(".trail-layer .origin-minimap_cv").element
-    expect(wrapper.findAll(".camp-clear-tick")).toHaveLength(1)
+    expect(wrapper.findAll(".trail-layer .trail-segment").length).toBeGreaterThan(0)
+    expect(wrapper.findAll(".trail-layer .origin-minimap_cv").length).toBeGreaterThan(0)
+    const stableSegment = wrapper.findAll(".trail-layer .trail-segment").at(-1)!
+    const stableSegmentKey = stableSegment.attributes("data-segment-key")
+    const stableSegmentElement = stableSegment.element
     expect(wrapper.findAll(".camp-state-marker.local")).toHaveLength(1)
-    expect(wrapper.text()).toContain("1 / 1 clears reached")
 
-    await wrapper.get(".camp-clear-tick").trigger("click")
+    await wrapper.setProps({ timestamp: 60_100 })
+    const sharedSegment = wrapper.findAll(".trail-layer .trail-segment").find(
+      (segment) => segment.attributes("data-segment-key") === stableSegmentKey,
+    )
+    expect(sharedSegment?.element).toBe(stableSegmentElement)
+
+    await wrapper.get(".camp-state-marker.local").trigger("click")
     expect(wrapper.emitted("update:timestamp")?.at(-1)).toEqual([45_000])
 
     await wrapper.setProps({ timestamp: 90_000 })
-    expect(wrapper.get(".trail-layer .origin-minimap_cv").element).toBe(trailElement)
     const fallback = wrapper.get(".champion-token")
     expect(fallback.classes()).toContain("estimated")
     expect(fallback.classes()).toContain("cv-origin")
     expect(fallback.attributes("title")).toContain("CV reconstructed")
 
     await fallback.trigger("click")
-    expect(wrapper.findAll(".trail-layer polyline")).toHaveLength(0)
+    expect(wrapper.findAll(".trail-layer .trail-segment")).toHaveLength(0)
 
     await wrapper.get('[aria-label="Expand map playback"]').trigger("click")
     await nextTick()
     expect(document.body.querySelector('[role="dialog"] #match-map-popout-title')?.textContent)
       .toContain("Map playback")
+    expect(document.body.querySelectorAll('[role="dialog"] .scrubber')).toHaveLength(1)
+    expect(document.body.querySelector('[role="dialog"] .event-tick')).toBeNull()
+    expect(document.body.querySelector('[role="dialog"] .camp-clear-tick')).toBeNull()
     ;(document.body.querySelector('[aria-label="Close expanded map"]') as HTMLButtonElement).click()
     await nextTick()
     expect(document.body.querySelector('[role="dialog"]')).toBeNull()
@@ -168,6 +194,40 @@ describe("unified match timeline playback", () => {
     })
 
     expect(wrapper.findAll(".camp-state-marker")).toHaveLength(0)
+    wrapper.unmount()
+  })
+
+  it("removes a dead champion token until durable respawn evidence reaches the route", async () => {
+    const wrapper = mount(MatchPlaybackMap, {
+      props: {
+        match,
+        participants: [owner],
+        frames: [
+          frame(0, { x: 1_482, y: 1_488 }),
+          frame(30_000, { x: 7_410, y: 7_440 }),
+          frame(60_000, { x: 7_410, y: 7_440 }),
+          frame(90_000, { x: 1_482, y: 1_488 }),
+        ],
+        events: [{
+          eventId: "owner-death",
+          timestamp: 20_000,
+          type: "CHAMPION_KILL",
+          category: "kill" as const,
+          targetId: 1,
+          position: { x: 7_410, y: 7_440 },
+        }],
+        lifeIntervals: [{
+          participantId: 1,
+          diedAtMs: 20_000,
+          respawnAtMs: 80_000,
+        }],
+        timestamp: 60_000,
+      },
+    })
+
+    expect(wrapper.find(".champion-token").exists()).toBe(false)
+    await wrapper.setProps({ timestamp: 90_000 })
+    expect(wrapper.find(".champion-token").exists()).toBe(true)
     wrapper.unmount()
   })
 })

@@ -125,6 +125,28 @@ const ReviewScoreboardStub = defineComponent({
   },
 })
 
+const MatchPlaybackMapStub = defineComponent({
+  name: "MatchPlaybackMap",
+  props: [
+    "match",
+    "participants",
+    "frames",
+    "events",
+    "lifeIntervals",
+    "minimapReview",
+    "minimapLoading",
+    "minimapError",
+    "timestamp",
+  ],
+  emits: ["update:timestamp"],
+  setup(props) {
+    return () => h("section", {
+      class: "match-playback-map-stub",
+      "data-timestamp": String(props.timestamp),
+    })
+  },
+})
+
 describe("ReviewPage wiring", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -199,10 +221,36 @@ describe("ReviewPage wiring", () => {
     wrapper.unmount()
   })
 
-  it("shows jungle clear review in a dedicated tab only for jungle games", async () => {
+  it("places jungle clear splits beneath Timeline playback on the shared clock", async () => {
     const jungleReview = reviewFixture(true)
     apiMocks.getReviewOverview.mockResolvedValue({ latest: jungleReview })
     apiMocks.getMatchReview.mockResolvedValue(jungleReview)
+    apiMocks.getJunglePathingReview.mockResolvedValue({
+      participants: [{
+        participantKey: "ally:local",
+        championName: "Ashe",
+        team: "ally",
+        isLocal: true,
+      }],
+      segments: [],
+      campClears: [{
+        gameId: 42,
+        puuid: "owner",
+        campKey: "west_blue",
+        clearedAtMs: 125_000,
+        source: "minimap_cv",
+        sourceConfidence: 0.9,
+        attribution: "local",
+        attributionConfidence: 0.88,
+        evidence: {
+          campTransition: true,
+          localPositionObserved: true,
+          transitionConfidence: 0.9,
+        },
+        routeIndex: 0,
+        algorithmVersion: 4,
+      }],
+    })
 
     const wrapper = mount(ReviewPage, {
       props: { champions },
@@ -210,21 +258,33 @@ describe("ReviewPage wiring", () => {
         stubs: {
           MatchReviewHero: MatchReviewHeroStub,
           ReviewScoreboard: ReviewScoreboardStub,
+          MatchPlaybackMap: MatchPlaybackMapStub,
         },
       },
     })
     await flushPromises()
 
-    const jungleTab = wrapper.findAll(".match-tabs button").find(
-      (button) => button.text() === "Jungle clear",
+    const tabLabels = wrapper.findAll(".match-tabs button").map(
+      (button) => button.text(),
     )
-    expect(jungleTab).toBeDefined()
-    expect(wrapper.find('[aria-label="Jungle clear and pathing review"]').exists()).toBe(false)
+    expect(tabLabels).not.toContain("Jungle clear")
+    const timelineTab = wrapper.findAll(".match-tabs button").find(
+      (button) => button.text() === "Timeline",
+    )
+    expect(timelineTab).toBeDefined()
 
-    await jungleTab!.trigger("click")
+    await timelineTab!.trigger("click")
     await flushPromises()
 
-    expect(wrapper.get('[aria-label="Jungle clear and pathing review"]').exists()).toBe(true)
+    expect(wrapper.get(".match-playback-map-stub").attributes("data-timestamp")).toBe("0")
+    expect(wrapper.get('[aria-label="Jungle clear timeline summary"]').text())
+      .toContain("West Blue")
+
+    await wrapper.get(".clear-splits button").trigger("click")
+    await flushPromises()
+
+    expect(wrapper.get(".match-playback-map-stub").attributes("data-timestamp"))
+      .toBe("125000")
     wrapper.unmount()
   })
 })

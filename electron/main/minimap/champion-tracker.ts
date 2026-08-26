@@ -133,7 +133,14 @@ export class ChampionTracker {
     this.confirmedObservations = []
     const dead = new Set(input.deadParticipantKeys ?? [])
     const observed = new Set<string>()
-    const selected = this.selectUnambiguousObservations(input.observations)
+    for (const participantKey of dead) {
+      this.pendingInitial.delete(participantKey)
+      const track = this.tracks.get(participantKey)
+      if (track) track.pendingRelocation = undefined
+    }
+    const selected = this.selectUnambiguousObservations(
+      input.observations.filter((observation) => !dead.has(observation.participantKey)),
+    )
 
     for (const observation of selected) {
       const previous = this.tracks.get(observation.participantKey)

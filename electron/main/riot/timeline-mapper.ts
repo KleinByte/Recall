@@ -70,9 +70,19 @@ export interface CompactTimelineEvent {
   approximate?: boolean
 }
 
+export interface CompactParticipantLifeInterval {
+  participantId: number
+  /** Exact joined kill time when available, otherwise the first dead observation. */
+  diedAtMs: number
+  /** Expected timer completion or the first subsequent alive observation. */
+  respawnAtMs?: number
+}
+
 export interface CompactTimeline {
   frames: CompactTimelineFrame[]
   events: CompactTimelineEvent[]
+  /** Optional because post-game-only and historical timelines lack live state. */
+  participantLifeIntervals?: CompactParticipantLifeInterval[]
   turningPoints: {
     timestamp: number
     swing: number

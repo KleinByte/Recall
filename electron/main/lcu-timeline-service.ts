@@ -13,7 +13,11 @@ import {
   MatchSourceRepository,
   type RawPayloadIdentity,
 } from "./database/match-source-repo.js"
-import { TimelineRepository } from "./database/timeline-repo.js"
+import {
+  TimelineRepository,
+  type TimelineState,
+} from "./database/timeline-repo.js"
+import { deriveParticipantLifeIntervals } from "./matches/participant-life-intervals.js"
 
 type TimelineFrames = Parameters<typeof mapTimeline>[0]
 
@@ -83,7 +87,11 @@ export class LcuTimelineService {
 
   get(gameId: number, puuid: string) {
     const timelines = new TimelineRepository(this.db)
-    const current = timelines.state(gameId, puuid)
+    const current = this.withParticipantLifeIntervals(
+      gameId,
+      puuid,
+      timelines.state(gameId, puuid),
+    )
     if (current.status !== "not_requested") return current
 
     const local = timelines.source(gameId, puuid, "league_client")
@@ -111,9 +119,37 @@ export class LcuTimelineService {
       void Promise.resolve(this.onReady?.(gameId, puuid, remapped.summary)).catch((error) => {
         console.warn(`Timeline labels could not be reevaluated: ${(error as Error).message}`)
       })
-      return timelines.state(gameId, puuid)
+      return this.withParticipantLifeIntervals(
+        gameId,
+        puuid,
+        timelines.state(gameId, puuid),
+      )
     }
     return current
+  }
+
+  /** Adds durable live life-state to whichever authoritative timeline wins. */
+  private withParticipantLifeIntervals(
+    gameId: number,
+    puuid: string,
+    state: TimelineState,
+  ): TimelineState {
+    if (state.status !== "ready" || !state.summary || !this.liveCaptures) return state
+    const participants = this.db.prepare(
+      `SELECT participant_id AS participantId, team_id AS teamId,
+              is_player AS isPlayer, summoner_name AS summonerName
+       FROM match_participants WHERE game_id = ? AND puuid = ?`,
+    ).all(gameId, puuid) as LiveCaptureParticipant[]
+    const participantLifeIntervals = deriveParticipantLifeIntervals(
+      this.liveCaptures.listSnapshots(gameId, puuid),
+      participants,
+      state.summary.events,
+    )
+    if (participantLifeIntervals.length === 0) return state
+    return {
+      ...state,
+      summary: { ...state.summary, participantLifeIntervals },
+    }
   }
 
   async request(gameId: number, puuid: string, manualRetry = false) {

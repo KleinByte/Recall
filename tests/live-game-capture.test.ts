@@ -292,6 +292,40 @@ describe("LiveGameCaptureRepository", () => {
     })).snapshotWritten).toBe(false)
   })
 
+  it("captures death and respawn transitions without persisting timer ticks", () => {
+    const db = new Database(":memory:")
+    applyMigrations(db)
+    const repo = new LiveGameCaptureRepository(db as never)
+
+    expect(repo.record(10, "owner", snapshot(2)).snapshotWritten).toBe(true)
+    expect(repo.record(10, "owner", snapshot(4, {
+      allies: [{
+        ...snapshot(4).allies[0],
+        isDead: true,
+        respawnTimer: 12,
+      }],
+    })).snapshotWritten).toBe(true)
+    expect(repo.record(10, "owner", snapshot(5, {
+      allies: [{
+        ...snapshot(5).allies[0],
+        isDead: true,
+        respawnTimer: 11,
+      }],
+    })).snapshotWritten).toBe(false)
+    expect(repo.record(10, "owner", snapshot(6)).snapshotWritten).toBe(true)
+
+    expect(repo.listSnapshots(10, "owner").map((entry) => ({
+      gameTime: entry.gameTime,
+      reason: entry.reason,
+      isDead: entry.allies[0].isDead,
+      respawnTimer: entry.allies[0].respawnTimer,
+    }))).toEqual([
+      { gameTime: 2, reason: "first", isDead: false, respawnTimer: 0 },
+      { gameTime: 4, reason: "state_change", isDead: true, respawnTimer: 12 },
+      { gameTime: 6, reason: "state_change", isDead: false, respawnTimer: 0 },
+    ])
+  })
+
   it("derives honest item observations and tighter level milestones", () => {
     const first = snapshot(5)
     const second = snapshot(7, {

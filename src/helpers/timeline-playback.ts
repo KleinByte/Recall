@@ -5,6 +5,7 @@ import type {
 } from "../types/review"
 
 export const MAX_PLAYBACK_GAP_MS = 90_000
+const MINIMUM_FALLBACK_DEATH_MS = 10_000
 
 export interface PlaybackPosition {
   participantId: number
@@ -501,19 +502,33 @@ export function spreadOverlappingMapPoints(
   return points.map((point) => result.get(point.id)!)
 }
 
-function deathBetween(
-  events: TimelineEvent[],
-  participantId: number,
-  from: PositionSample,
-  to: PositionSample,
+function normalizedPositionDistance(
+  left: PositionSample["position"],
+  right: PositionSample["position"],
   mapId: ReviewMapId,
 ) {
-  return events.find((event) =>
-    event.type === "CHAMPION_KILL" &&
-    event.targetId === participantId &&
-    event.timestamp > from.timestamp &&
-    event.timestamp < to.timestamp &&
-    isUsableMapPosition(event.position, mapId),
+  const domain = REVIEW_MAP_DOMAINS[mapId]
+  return Math.hypot(
+    (left.x - right.x) / (domain.max.x - domain.min.x),
+    (left.y - right.y) / (domain.max.y - domain.min.y),
+  )
+}
+
+function credibleRespawnSample(
+  samples: PositionSample[],
+  death: TimelineEvent,
+  mapId: ReviewMapId,
+) {
+  const afterDeath = samples.filter(
+    (sample) => sample.timestamp >= death.timestamp + MINIMUM_FALLBACK_DEATH_MS,
+  )
+  if (isUsableMapPosition(death.position, mapId)) {
+    return afterDeath.find((sample) =>
+      normalizedPositionDistance(sample.position, death.position!, mapId) >= 0.012,
+    )
+  }
+  return afterDeath.find((sample, index) => index > 0 &&
+    normalizedPositionDistance(sample.position, afterDeath[index - 1].position, mapId) >= 0.012,
   )
 }
 
@@ -526,21 +541,36 @@ export function playbackPositionAt(
   maximumGapMs = MAX_PLAYBACK_GAP_MS,
 ): PlaybackPosition | undefined {
   const samples = samplesFor(frames, participantId, mapId)
+  const deaths = events.filter((event) =>
+    event.type === "CHAMPION_KILL" && event.targetId === participantId,
+  ).sort((left, right) => left.timestamp - right.timestamp)
+  const latestDeath = deaths.filter((death) => death.timestamp <= timestamp).at(-1)
+  const respawn = latestDeath
+    ? credibleRespawnSample(samples, latestDeath, mapId)
+    : undefined
+  if (latestDeath && timestamp >= latestDeath.timestamp &&
+      (!respawn || timestamp < respawn.timestamp)) return undefined
   const exact = samples.find((sample) => sample.timestamp === timestamp)
   if (exact) return interpolate(exact, exact, timestamp, participantId)
 
   const afterIndex = samples.findIndex((sample) => sample.timestamp > timestamp)
   const before = afterIndex > 0 ? samples[afterIndex - 1] : undefined
-  const after = afterIndex >= 0 ? samples[afterIndex] : undefined
+  let after = afterIndex >= 0 ? samples[afterIndex] : undefined
+  if (latestDeath && respawn && timestamp >= respawn.timestamp &&
+      (!before || before.timestamp < respawn.timestamp)) return undefined
+  if (before?.timestamp === timestamp) return interpolate(before, before, timestamp, participantId)
   if (!before || !after || after.timestamp - before.timestamp > maximumGapMs) return undefined
 
-  const death = deathBetween(events, participantId, before, after, mapId)
-  if (death) {
-    if (timestamp > death.timestamp) return undefined
-    return interpolate(before, {
-      timestamp: death.timestamp,
-      position: death.position!,
-    }, timestamp, participantId)
+  const nextDeath = deaths.find((death) =>
+    death.timestamp > timestamp && death.timestamp < after!.timestamp,
+  )
+  if (nextDeath) {
+    after = {
+      timestamp: nextDeath.timestamp,
+      position: isUsableMapPosition(nextDeath.position, mapId)
+        ? nextDeath.position!
+        : before.position,
+    }
   }
   // Timeline positions are sparse observations, not a recorded route. Linear
   // interpolation keeps elapsed time proportional to travel between anchors;

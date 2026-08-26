@@ -64,7 +64,7 @@ describe("timeline map playback", () => {
     expect(playbackPositionAt(sparse, [], 1, 60_000, 11)).toBeUndefined()
   })
 
-  it("uses a positioned death as the final anchor and hides the victim afterward", () => {
+  it("anchors movement at death, then waits for a changed post-death sample", () => {
     const events: TimelineEvent[] = [{
       eventId: "death",
       timestamp: 90_000,
@@ -74,9 +74,31 @@ describe("timeline map playback", () => {
       position: { x: 2_000, y: 3_000 },
     }]
     expect(playbackPositionAt(frames, events, 1, 75_000, 11)?.position).toEqual({ x: 1_500, y: 2_500 })
-    expect(playbackPositionAt(frames, events, 1, 90_000, 11)?.position).toEqual({ x: 2_000, y: 3_000 })
+    expect(playbackPositionAt(frames, events, 1, 90_000, 11)).toBeUndefined()
     expect(playbackPositionAt(frames, events, 1, 100_000, 11)).toBeUndefined()
+    expect(playbackPositionAt(frames, events, 1, 119_999, 11)).toBeUndefined()
     expect(playbackPositionAt(frames, events, 1, 120_000, 11)?.position).toEqual({ x: 3_000, y: 6_000 })
+  })
+
+  it("ignores implausibly early route changes when inferring a respawn", () => {
+    const observed = [
+      frame(0, { 1: { x: 1_000, y: 2_000 } }),
+      frame(21_000, { 1: { x: 3_000, y: 6_000 } }),
+      frame(40_000, { 1: { x: 4_000, y: 7_000 } }),
+    ]
+    const events: TimelineEvent[] = [{
+      eventId: "death-with-stale-sample",
+      timestamp: 20_000,
+      type: "CHAMPION_KILL",
+      category: "kill",
+      targetId: 1,
+      position: { x: 2_000, y: 3_000 },
+    }]
+
+    expect(playbackPositionAt(observed, events, 1, 21_000, 11)).toBeUndefined()
+    expect(playbackPositionAt(observed, events, 1, 29_999, 11)).toBeUndefined()
+    expect(playbackPositionAt(observed, events, 1, 40_000, 11)?.position)
+      .toEqual({ x: 4_000, y: 7_000 })
   })
 
   it("rejects out-of-map telemetry instead of clamping it to an edge", () => {

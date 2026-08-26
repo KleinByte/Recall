@@ -383,6 +383,83 @@ describe("champion marker precision", () => {
 })
 
 describe("champion tracker precision", () => {
+  it("discards pending initial confirmation while a participant is dead", () => {
+    const tracker = new ChampionTracker()
+
+    tracker.update({
+      gameTimeMs: 1_000,
+      observations: [observation(1_000, 1, 0.1, 0.1)],
+    })
+    tracker.update({
+      gameTimeMs: 1_150,
+      observations: [observation(1_150, 2, 0.11, 0.1)],
+    })
+
+    expect(tracker.update({
+      gameTimeMs: 1_300,
+      observations: [observation(1_300, 3, 0.12, 0.1)],
+      deadParticipantKeys: ["ally:zac"],
+    })).toEqual([])
+    expect(tracker.getConfirmedObservations()).toEqual([])
+
+    expect(tracker.update({
+      gameTimeMs: 1_450,
+      observations: [observation(1_450, 4, 0.13, 0.1)],
+    })).toEqual([])
+    expect(tracker.getConfirmedObservations()).toEqual([])
+  })
+
+  it("keeps the last track dead without confirming dead relocation observations", () => {
+    const tracker = new ChampionTracker()
+    tracker.update({
+      gameTimeMs: 1_000,
+      observations: [observation(1_000, 1, 0.1, 0.1)],
+    })
+    tracker.update({
+      gameTimeMs: 1_150,
+      observations: [observation(1_150, 2, 0.11, 0.1)],
+    })
+    tracker.update({
+      gameTimeMs: 1_300,
+      observations: [observation(1_300, 3, 0.12, 0.1)],
+    })
+    for (const [gameTimeMs, frameSequence, x] of [
+      [1_500, 4, .8],
+      [1_750, 5, .805],
+      [2_000, 6, .81],
+    ] as const) {
+      tracker.update({
+        gameTimeMs,
+        observations: [observation(gameTimeMs, frameSequence, x, .8)],
+      })
+    }
+
+    const dead = tracker.update({
+      gameTimeMs: 2_250,
+      observations: [observation(2_250, 7, .815, .8)],
+      deadParticipantKeys: ["ally:zac"],
+    })
+    expect(dead[0]).toMatchObject({
+      participantKey: "ally:zac",
+      state: "dead",
+      lastObservedPosition: { x: .12, y: .1 },
+      lastObservedGameTimeMs: 1_300,
+    })
+    expect(dead[0].position).toBeUndefined()
+    expect(tracker.getConfirmedObservations()).toEqual([])
+
+    const firstAfterRespawn = tracker.update({
+      gameTimeMs: 2_400,
+      observations: [observation(2_400, 8, .82, .8)],
+    })
+    expect(firstAfterRespawn[0]).toMatchObject({
+      state: "not_visible",
+      lastObservedPosition: { x: .12, y: .1 },
+      lastObservedGameTimeMs: 1_300,
+    })
+    expect(tracker.getConfirmedObservations()).toEqual([])
+  })
+
   it("confirms identity over time and accepts a corroborated long relocation", () => {
     const tracker = new ChampionTracker()
 

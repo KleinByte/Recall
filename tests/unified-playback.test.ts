@@ -2,13 +2,16 @@ import { describe, expect, it } from "vitest"
 import {
   bindMinimapParticipants,
   clampMinimapPlaybackConfidence,
+  DEFAULT_PLAYBACK_TRAIL_STEP_MS,
+  DEFAULT_PLAYBACK_TRAIL_WINDOW_MS,
   minimapCampMarkersAt,
   minimapPlaybackTrails,
   unifiedPlaybackPositionAt,
+  unifiedPlaybackTrailSegments,
   unifiedPlaybackTrails,
 } from "../src/helpers/unified-playback"
 import type { MinimapPathingReview } from "../src/shared/minimap/review"
-import type { TimelineFrame } from "../src/types/review"
+import type { TimelineEvent, TimelineFrame } from "../src/types/review"
 import type { ParticipantRow } from "../src/types/stats"
 
 function participant(input: Partial<ParticipantRow> & Pick<ParticipantRow, "participantId" | "teamId" | "championId">) {
@@ -460,6 +463,319 @@ describe("unified timeline and minimap playback", () => {
     expect(trails[0].points.length).toBeLessThanOrEqual(6)
     expect(trails[0].points[0].left).toBeCloseTo(10, 0)
     expect(trails[0].points.at(-1)!.left).toBeGreaterThan(70)
+  })
+
+  it("keeps absolute short-trail geometry stable and expires whole segments", () => {
+    expect(DEFAULT_PLAYBACK_TRAIL_WINDOW_MS).toBe(15_000)
+    expect(DEFAULT_PLAYBACK_TRAIL_STEP_MS).toBe(250)
+    const input = {
+      frames: [
+        frame(0, { x: 1_482, y: 1_488 }),
+        frame(60_000, { x: 13_338, y: 13_393 }),
+      ],
+      events: [],
+      bindings,
+      participantId: 1,
+      mapId: 11 as const,
+    }
+    const at = (timestamp: number) => unifiedPlaybackTrailSegments({
+      ...input,
+      timestamp,
+    })
+    const cursors = [30_100, 30_249, 30_250, 30_499, 30_500]
+    const geometryByKey = new Map<string, unknown>()
+
+    for (const timestamp of cursors) {
+      const segments = at(timestamp)
+      expect(segments.length).toBeLessThanOrEqual(
+        Math.ceil(DEFAULT_PLAYBACK_TRAIL_WINDOW_MS / DEFAULT_PLAYBACK_TRAIL_STEP_MS) + 1,
+      )
+      expect(segments.every((segment) =>
+        segment.toTimestamp - segment.fromTimestamp === DEFAULT_PLAYBACK_TRAIL_STEP_MS &&
+        timestamp - segment.fromTimestamp <=
+          DEFAULT_PLAYBACK_TRAIL_WINDOW_MS + DEFAULT_PLAYBACK_TRAIL_STEP_MS,
+      )).toBe(true)
+      for (const segment of segments) {
+        const geometry = {
+          fromTimestamp: segment.fromTimestamp,
+          toTimestamp: segment.toTimestamp,
+          from: segment.from,
+          to: segment.to,
+          evidence: segment.evidence,
+          origin: segment.origin,
+          confidence: segment.confidence,
+        }
+        const previous = geometryByKey.get(segment.key)
+        if (previous) expect(geometry).toEqual(previous)
+        else geometryByKey.set(segment.key, geometry)
+      }
+    }
+
+    const oldestKey = "trail:1:15000:15250"
+    expect(at(30_100).find((segment) => segment.key === oldestKey)).toBeDefined()
+    expect(at(30_249).find((segment) => segment.key === oldestKey)).toBeDefined()
+    expect(at(30_250).find((segment) => segment.key === oldestKey)).toBeUndefined()
+    expect(at(30_250).at(-1)).toMatchObject({
+      key: "trail:1:30000:30250",
+      evidence: "estimated",
+      origin: "riot_timeline",
+    })
+  })
+
+  it("leaves explicit unknown pathing intervals disconnected", () => {
+    const minimapReview: MinimapPathingReview = {
+      ...review,
+      segments: [{
+        gameId: 42,
+        participantKey: "ally:riot:local#na1",
+        startTimeMs: 0,
+        endTimeMs: 10_000,
+        kind: "observed",
+        points: [{ x: .1, y: .8 }, { x: .2, y: .7 }],
+        pointTimesMs: [0, 10_000],
+        confidence: .9,
+        modelVersion: 4,
+      }, {
+        gameId: 42,
+        participantKey: "ally:riot:local#na1",
+        startTimeMs: 10_000,
+        endTimeMs: 12_000,
+        kind: "unknown",
+        points: [{ x: .2, y: .7 }, { x: .3, y: .6 }],
+        pointTimesMs: [10_000, 12_000],
+        confidence: 0,
+        modelVersion: 4,
+      }, {
+        gameId: 42,
+        participantKey: "ally:riot:local#na1",
+        startTimeMs: 12_000,
+        endTimeMs: 30_000,
+        kind: "observed",
+        points: [{ x: .3, y: .6 }, { x: .6, y: .3 }],
+        pointTimesMs: [12_000, 30_000],
+        confidence: .9,
+        modelVersion: 4,
+      }],
+    }
+    const segments = unifiedPlaybackTrailSegments({
+      frames: [],
+      events: [],
+      minimapReview,
+      bindings,
+      participantId: 1,
+      timestamp: 20_000,
+      mapId: 11,
+    })
+
+    expect(segments.some((segment) =>
+      segment.fromTimestamp < 12_000 && segment.toTimestamp > 10_000,
+    )).toBe(false)
+    expect(segments.find((segment) => segment.key === "trail:1:9750:10000"))
+      .toMatchObject({ evidence: "observed", origin: "minimap_cv" })
+    expect(segments.find((segment) => segment.key === "trail:1:12000:12250"))
+      .toMatchObject({ evidence: "observed", origin: "minimap_cv" })
+  })
+
+  it("keeps a positioned victim hidden through unchanged dead snapshots", () => {
+    const events: TimelineEvent[] = [{
+      eventId: "positioned-death",
+      timestamp: 20_000,
+      type: "CHAMPION_KILL",
+      category: "kill",
+      targetId: 1,
+      position: { x: 7_410, y: 7_440 },
+    }]
+    const input = {
+      frames: [
+        frame(0, { x: 1_482, y: 1_488 }),
+        frame(30_000, { x: 7_410, y: 7_440 }),
+        frame(60_000, { x: 7_410, y: 7_440 }),
+        frame(90_000, { x: 10_374, y: 10_417 }),
+      ],
+      events,
+      bindings,
+      participantId: 1,
+      mapId: 11 as const,
+    }
+
+    expect(unifiedPlaybackPositionAt({ ...input, timestamp: 20_000 })).toBeUndefined()
+    expect(unifiedPlaybackPositionAt({ ...input, timestamp: 20_001 })).toBeUndefined()
+    expect(unifiedPlaybackPositionAt({ ...input, timestamp: 30_000 })).toBeUndefined()
+    expect(unifiedPlaybackPositionAt({ ...input, timestamp: 75_000 })).toBeUndefined()
+    expect(unifiedPlaybackPositionAt({ ...input, timestamp: 90_000 }))
+      .toMatchObject({ source: "riot_snapshot", fromTimestamp: 90_000 })
+  })
+
+  it("ignores an implausibly early fountain jump before later respawn evidence", () => {
+    const events: TimelineEvent[] = [{
+      eventId: "early-fountain-after-death",
+      timestamp: 20_000,
+      type: "CHAMPION_KILL",
+      category: "kill",
+      targetId: 1,
+      position: { x: 7_410, y: 7_440 },
+    }]
+    const input = {
+      frames: [
+        frame(0, { x: 4_446, y: 4_464 }),
+        // A dead snapshot can jump to blue fountain before the death timer ends.
+        frame(25_000, { x: 519, y: 521 }),
+        frame(35_000, { x: 1_482, y: 1_488 }),
+        frame(60_000, { x: 4_446, y: 4_464 }),
+      ],
+      events,
+      bindings,
+      participantId: 1,
+      mapId: 11 as const,
+    }
+
+    expect(unifiedPlaybackPositionAt({ ...input, timestamp: 25_000 })).toBeUndefined()
+    expect(unifiedPlaybackPositionAt({ ...input, timestamp: 34_999 })).toBeUndefined()
+    expect(unifiedPlaybackPositionAt({ ...input, timestamp: 35_000 }))
+      .toMatchObject({ source: "riot_snapshot", fromTimestamp: 35_000 })
+  })
+
+  it("does not let a positionless death or exact route control bypass life state", () => {
+    const events: TimelineEvent[] = [{
+      eventId: "death-without-position",
+      timestamp: 30_000,
+      type: "CHAMPION_KILL",
+      category: "kill",
+      targetId: 1,
+    }]
+    const input = {
+      frames: [
+        frame(0, { x: 1_482, y: 1_488 }),
+        frame(30_000, { x: 4_446, y: 4_464 }),
+        frame(60_000, { x: 7_410, y: 7_440 }),
+        frame(90_000, { x: 10_374, y: 10_417 }),
+      ],
+      events,
+      bindings,
+      participantId: 1,
+      mapId: 11 as const,
+    }
+
+    expect(unifiedPlaybackPositionAt({ ...input, timestamp: 30_001 })).toBeUndefined()
+    expect(unifiedPlaybackPositionAt({ ...input, timestamp: 60_000 })).toBeUndefined()
+    expect(unifiedPlaybackPositionAt({ ...input, timestamp: 89_999 })).toBeUndefined()
+    expect(unifiedPlaybackPositionAt({ ...input, timestamp: 90_000 }))
+      .toMatchObject({ source: "riot_snapshot", fromTimestamp: 90_000 })
+  })
+
+  it("uses durable life intervals and waits for post-respawn position evidence", () => {
+    const events: TimelineEvent[] = [{
+      eventId: "captured-death",
+      timestamp: 20_000,
+      type: "CHAMPION_KILL",
+      category: "kill",
+      targetId: 1,
+      position: { x: 7_410, y: 7_440 },
+    }]
+    const input = {
+      frames: [
+        frame(0, { x: 1_482, y: 1_488 }),
+        frame(30_000, { x: 7_410, y: 7_440 }),
+        frame(60_000, { x: 1_482, y: 1_488 }),
+        frame(90_000, { x: 4_446, y: 4_464 }),
+      ],
+      events,
+      lifeIntervals: [{ participantId: 1, diedAtMs: 20_000, respawnAtMs: 50_000 }],
+      bindings,
+      participantId: 1,
+      mapId: 11 as const,
+    }
+
+    expect(unifiedPlaybackPositionAt({ ...input, timestamp: 30_000 })).toBeUndefined()
+    expect(unifiedPlaybackPositionAt({ ...input, timestamp: 55_000 })).toBeUndefined()
+    expect(unifiedPlaybackPositionAt({ ...input, timestamp: 60_000 }))
+      .toMatchObject({ source: "riot_snapshot", fromTimestamp: 60_000 })
+  })
+
+  it("keeps consecutive death windows independent", () => {
+    const events: TimelineEvent[] = [{
+      eventId: "first-death",
+      timestamp: 20_000,
+      type: "CHAMPION_KILL",
+      category: "kill",
+      targetId: 1,
+      position: { x: 4_446, y: 4_464 },
+    }, {
+      eventId: "second-death",
+      timestamp: 110_000,
+      type: "CHAMPION_KILL",
+      category: "kill",
+      targetId: 1,
+      position: { x: 8_892, y: 8_929 },
+    }]
+    const input = {
+      frames: [
+        frame(0, { x: 1_482, y: 1_488 }),
+        frame(30_000, { x: 4_446, y: 4_464 }),
+        frame(60_000, { x: 1_482, y: 1_488 }),
+        frame(90_000, { x: 5_928, y: 5_952 }),
+        frame(120_000, { x: 8_892, y: 8_929 }),
+        frame(150_000, { x: 8_892, y: 8_929 }),
+        frame(180_000, { x: 1_482, y: 1_488 }),
+        frame(210_000, { x: 4_446, y: 4_464 }),
+      ],
+      events,
+      lifeIntervals: [
+        { participantId: 1, diedAtMs: 20_000, respawnAtMs: 50_000 },
+        { participantId: 1, diedAtMs: 110_000, respawnAtMs: 170_000 },
+      ],
+      bindings,
+      participantId: 1,
+      mapId: 11 as const,
+    }
+
+    expect(unifiedPlaybackPositionAt({ ...input, timestamp: 30_000 })).toBeUndefined()
+    expect(unifiedPlaybackPositionAt({ ...input, timestamp: 60_000 })).toBeDefined()
+    expect(unifiedPlaybackPositionAt({ ...input, timestamp: 150_000 })).toBeUndefined()
+    expect(unifiedPlaybackPositionAt({ ...input, timestamp: 180_000 })).toBeDefined()
+  })
+
+  it("breaks a trail until credible post-death movement is observed", () => {
+    const events: TimelineEvent[] = [{
+      eventId: "death-without-position",
+      timestamp: 20_125,
+      type: "CHAMPION_KILL",
+      category: "kill",
+      targetId: 1,
+    }]
+    const input = {
+      frames: [
+        frame(0, { x: 1_482, y: 1_488 }),
+        frame(60_000, { x: 7_410, y: 7_440 }),
+        frame(90_000, { x: 10_374, y: 10_417 }),
+        frame(120_000, { x: 11_856, y: 11_905 }),
+      ],
+      events,
+      bindings,
+      participantId: 1,
+      mapId: 11 as const,
+    }
+    const beforeRespawnEvidence = unifiedPlaybackTrailSegments({
+      ...input,
+      timestamp: 30_000,
+    })
+    const beforeCredibleRespawn = unifiedPlaybackTrailSegments({
+      ...input,
+      timestamp: 65_000,
+    })
+    const afterRespawnEvidence = unifiedPlaybackTrailSegments({
+      ...input,
+      timestamp: 95_000,
+    })
+
+    expect(beforeRespawnEvidence.at(-1)?.toTimestamp).toBe(20_000)
+    expect(beforeRespawnEvidence.some((segment) =>
+      segment.fromTimestamp <= events[0].timestamp &&
+      segment.toTimestamp > events[0].timestamp,
+    )).toBe(false)
+    expect(beforeCredibleRespawn).toEqual([])
+    expect(afterRespawnEvidence[0]?.fromTimestamp).toBe(90_000)
+    expect(afterRespawnEvidence.every((segment) => segment.fromTimestamp >= 90_000)).toBe(true)
   })
 
   it("keeps separate CV trail polylines across unknown evidence gaps", () => {

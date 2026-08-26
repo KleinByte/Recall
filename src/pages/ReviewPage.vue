@@ -19,7 +19,11 @@ import {
 import { focusReviewGameId, reviewMatch } from "../helpers/navigation"
 import { publicAssetUrl } from "../helpers/assets"
 import { timelineChartX } from "../helpers/timeline-chart"
-import { campClearName, minimapPlaybackDuration } from "../helpers/unified-playback"
+import {
+  campClearName,
+  minimapPlaybackDuration,
+  reliableMinimapSegments,
+} from "../helpers/unified-playback"
 import { lobbyStandings } from "../helpers/match-detail"
 import { positionForPlayer } from "../helpers/roles"
 import GradeBadge from "../components/GradeBadge.vue"
@@ -32,7 +36,7 @@ import MatchPlaybackMap from "../components/MatchPlaybackMap.vue"
 import WinProbabilityChart from "../components/WinProbabilityChart.vue"
 import RviPerformanceProfile from "../components/skill/PerformanceProfile.vue"
 import MatchRviSummary from "../components/review/MatchRviSummary.vue"
-import JunglePathingReview from "../features/minimap-telemetry/JunglePathingReview.vue"
+import JungleClearTimelineSummary from "../features/minimap-telemetry/JungleClearTimelineSummary.vue"
 import PageHeader from "../components/ui/PageHeader.vue"
 import Tabs from "../components/ui/Tabs.vue"
 import Button from "../components/ui/Button.vue"
@@ -55,7 +59,7 @@ import type { MinimapPathingReview } from "../shared/minimap/review"
 defineProps<{ champions: Champion[] | null }>()
 const events = useApiEvents()
 type Tab = "review" | "sessions" | "bookmarks"
-type MatchTab = "overview" | "jungle" | "stats" | "timeline" | "probability"
+type MatchTab = "overview" | "stats" | "timeline" | "probability"
 type InsightTab = "rvi" | "performance"
 const tab = ref<Tab>("review")
 const matchTab = ref<MatchTab>("overview")
@@ -116,6 +120,12 @@ const ownerWasJungling = computed(() => {
 const sharedTimelineMaximumTimestamp = computed(() => Math.max(
   (review.value?.match.durationSecs ?? 0) * 1_000,
   minimapPlaybackDuration(minimapReview.value),
+))
+const timelineSummary = computed(() => review.value?.timeline.status === "ready"
+  ? review.value.timeline.summary
+  : undefined)
+const hasMinimapPlaybackEvidence = computed(() => Boolean(
+  reliableMinimapSegments(minimapReview.value).length || minimapReview.value?.campClears.length,
 ))
 const {
   timelineMapView,
@@ -202,13 +212,10 @@ watch([review, minimapReview], ([currentReview, currentMinimap]) => {
     matchTab.value = "overview"
     insightTab.value = "performance"
     showcaseSceneApplied = true
-  } else if (showcaseReviewScene === "playback" && currentMinimap) {
+  } else if ((showcaseReviewScene === "playback" || showcaseReviewScene === "jungle") && currentMinimap) {
     matchTab.value = "timeline"
     timelineMapView.value = "playback"
     timelineCursorTimestamp.value = 960_000
-    showcaseSceneApplied = true
-  } else if (showcaseReviewScene === "jungle" && currentMinimap) {
-    matchTab.value = "jungle"
     showcaseSceneApplied = true
   }
 })
@@ -259,7 +266,6 @@ const matchLobbyStanding = computed(() => {
 })
 const matchTabs = computed<{ id: MatchTab; label: string }[]>(() => [
   { id: "overview", label: "Overview" },
-  ...(ownerWasJungling.value ? [{ id: "jungle" as const, label: "Jungle clear" }] : []),
   { id: "stats", label: "Stats" },
   { id: "timeline", label: "Timeline" },
   { id: "probability", label: "Win Probability" },
@@ -622,17 +628,6 @@ onMounted(() => {
         <MatchStatsTable :participants="review.scoreboard" :champions="champions" />
       </section>
 
-      <section v-if="ownerWasJungling && matchTab === 'jungle'" class="match-tab-panel jungle-clear-tab" role="tabpanel">
-        <JunglePathingReview
-          class="card"
-          :game-id="review.match.gameId"
-          :pathing-review="minimapReview"
-          :pathing-loading="minimapReviewLoading"
-          :pathing-error="minimapReviewError"
-          managed
-        />
-      </section>
-
       <div v-if="matchTab === 'overview'" class="review-grid annotation-grid">
         <section class="card">
           <h2 class="section-title">Notes and tags</h2>
@@ -654,10 +649,23 @@ onMounted(() => {
       </div>
 
       <section v-if="matchTab === 'timeline'" class="card match-tab-panel" role="tabpanel">
-        <div v-if="review.timeline.status === 'ready' && review.timeline.summary">
+        <div v-if="timelineSummary || hasMinimapPlaybackEvidence">
+          <div v-if="!timelineSummary" class="timeline-playback-fallback">
+            <div>
+              <span class="eyebrow">Recorded minimap evidence</span>
+              <p>Playback and your jungle clear remain available without Riot timeline snapshots.</p>
+            </div>
+            <button
+              class="league-button"
+              :disabled="review.timeline.status === 'loading'"
+              @click="loadTimeline(review.timeline.status === 'unavailable' || review.timeline.status === 'error')"
+            >
+              {{ review.timeline.status === 'loading' ? 'Loading…' : 'Load match timeline' }}
+            </button>
+          </div>
           <div class="timeline-chronology">
-          <div class="timeline-visuals">
-            <div class="gold-chart-column">
+          <div class="timeline-visuals" :class="{ 'playback-only': !timelineSummary }">
+            <div v-if="timelineSummary" class="gold-chart-column">
               <header class="timeline-card-heading">
                 <div><span class="eyebrow">Economy</span><h3>Team gold advantage</h3></div>
                 <span class="muted">Blue + / Red −</span>
@@ -747,6 +755,7 @@ onMounted(() => {
             </div>
             <div class="timeline-map-column">
               <Tabs
+                v-if="timelineSummary"
                 v-model="timelineMapView"
                 :options="timelineMapViewOptions"
                 label="Timeline map"
@@ -755,26 +764,36 @@ onMounted(() => {
               />
               <div class="timeline-map-pane" role="tabpanel">
                 <MatchDeathMap
-                  v-if="timelineMapView === 'deaths'"
+                  v-if="timelineSummary && timelineMapView === 'deaths'"
                   :match="review.match"
                   :participants="review.scoreboard"
-                  :events="review.timeline.summary.events"
+                  :events="timelineSummary.events"
                 />
                 <MatchPlaybackMap
                   v-else
                   compact
                   :match="review.match"
                   :participants="review.scoreboard"
-                  :frames="review.timeline.summary.frames"
-                  :events="review.timeline.summary.events"
+                  :frames="timelineSummary?.frames ?? []"
+                  :events="timelineSummary?.events ?? []"
+                  :life-intervals="timelineSummary?.participantLifeIntervals"
                   :minimap-review="minimapReview"
                   :minimap-loading="minimapReviewLoading"
                   :minimap-error="minimapReviewError"
                   v-model:timestamp="timelineCursorTimestamp"
                 />
               </div>
+              <JungleClearTimelineSummary
+                v-if="ownerWasJungling && (!timelineSummary || timelineMapView === 'playback')"
+                :review="minimapReview"
+                :timestamp="timelineCursorTimestamp"
+                :loading="minimapReviewLoading"
+                :error="minimapReviewError"
+                @seek="selectTimelineTimestamp"
+              />
             </div>
           </div>
+          <template v-if="timelineSummary">
           <div class="timeline-filters">
             <button v-for="filter in timelineFilters"
               :key="filter" class="league-button" :class="{ active: timelineFilter === filter }"
@@ -838,23 +857,24 @@ onMounted(() => {
               </template>
             </article>
           </div>
-          <div v-if="review.timeline.summary.events.some(event =>
+          <div v-if="timelineSummary.events.some(event =>
             event.participantId === owner?.participantId && event.type.startsWith('ITEM_')
           )" class="purchase-path">
             <strong>Your purchase path</strong>
-            <figure v-for="event in review.timeline.summary.events.filter(event =>
+            <figure v-for="event in timelineSummary.events.filter(event =>
               event.participantId === owner?.participantId && event.type.startsWith('ITEM_')
             )" :key="event.eventId" :title="itemName(event)">
               <img :src="itemIcon(event)" :alt="itemName(event)" />
               <figcaption>{{ eventTime(event.timestamp) }}</figcaption>
             </figure>
           </div>
-          <div v-if="review.timeline.summary.turningPoints.length" class="turning-points">
+          <div v-if="timelineSummary.turningPoints.length" class="turning-points">
             <strong>Measured turning points</strong>
-            <span v-for="point in review.timeline.summary.turningPoints" :key="point.timestamp">
+            <span v-for="point in timelineSummary.turningPoints" :key="point.timestamp">
               {{ Math.round(point.timestamp / 60000) }} min · {{ Math.abs(point.swing).toLocaleString() }} gold swing
             </span>
           </div>
+          </template>
           </div>
         </div>
         <div v-else class="timeline-empty">
@@ -865,6 +885,14 @@ onMounted(() => {
             @click="loadTimeline(review.timeline.status === 'unavailable' || review.timeline.status === 'error')">
             {{ review.timeline.status === 'loading' ? 'Loading…' : 'Load timeline' }}
           </button>
+          <JungleClearTimelineSummary
+            v-if="ownerWasJungling"
+            :review="minimapReview"
+            :timestamp="timelineCursorTimestamp"
+            :loading="minimapReviewLoading"
+            :error="minimapReviewError"
+            @seek="selectTimelineTimestamp"
+          />
         </div>
       </section>
 
@@ -987,7 +1015,10 @@ textarea { width: 100%; box-sizing: border-box; min-height: 110px; resize: verti
 .tag-list, .inline, .session-games { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-2); }.tag { border: 1px solid var(--border-subtle); background: var(--surface-2); color: var(--text-secondary); border-radius: 99px; padding: 4px 9px; }.tag.selected { color: var(--gold-bright); border-color: var(--gold); }
 .inline input { flex: 1; }
 .timeline-chronology { min-width: 0; }
+.timeline-playback-fallback { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-3); padding: 9px 10px; border: 1px solid color-mix(in srgb, #69d8c5 24%, var(--border-subtle)); border-radius: var(--radius-sm); background: color-mix(in srgb, #69d8c5 5%, var(--surface-1)); }
+.timeline-playback-fallback p { margin: 2px 0 0; color: var(--text-muted); font-size: 12px; }
 .timeline-visuals { display: grid; grid-template-columns: minmax(0, 1fr) minmax(310px, 380px); align-items: start; gap: clamp(18px, 2.5vw, 34px); }
+.timeline-visuals.playback-only { grid-template-columns: minmax(0, 520px); justify-content: end; }
 .timeline-map-column { min-width: 0; }.timeline-map-tabs { margin-bottom: 8px; }.timeline-map-pane { min-width: 0; }
 .timeline-card-heading { display: flex; align-items: end; justify-content: space-between; gap: 10px; min-height: 34px; margin-bottom: 8px; }.timeline-card-heading h3 { margin: 1px 0 0; color: var(--gold-bright); font: 16px var(--font-heading); }.timeline-card-heading > span { font-size: 11px; }
 .gold-chart-wrap { position: relative; height: 318px; overflow: hidden; touch-action: none; user-select: none; cursor: crosshair; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: linear-gradient(180deg, color-mix(in srgb, var(--surface-2) 82%, #0b2742) 0%, var(--surface-0) 50%, color-mix(in srgb, var(--surface-2) 84%, #35131c) 100%); }

@@ -10,6 +10,7 @@ import type {
 } from "../riot/timeline-mapper.js"
 import type { ParticipantRow } from "../matches/types.js"
 import { resolvePosition } from "../matches/position.js"
+import { deriveParticipantLifeIntervals } from "../matches/participant-life-intervals.js"
 import {
   decodeStoredJsonBody,
   gzipCanonicalJsonV1,
@@ -59,6 +60,7 @@ function stateFingerprint(snapshot: Omit<LiveGameSnapshot, "events">) {
         id: playerIdentity(player),
         position: player.position,
         level: player.level,
+        isDead: player.isDead,
         items: [...itemCounts(player)].sort((left, right) => left[0] - right[0]),
       }))
       .sort((left, right) => left.id.localeCompare(right.id)),
@@ -423,12 +425,23 @@ export class LiveGameCaptureRepository {
     timeline: CompactTimeline,
     participants: LiveCaptureParticipant[],
   ): CompactTimeline {
+    const snapshots = this.listSnapshots(gameId, puuid)
     const derived = deriveLiveTimelineEvents(
-      this.listSnapshots(gameId, puuid),
+      snapshots,
       participants,
       this.listEvents(gameId, puuid),
     )
-    if (derived.length === 0) return timeline
+    const participantLifeIntervals = deriveParticipantLifeIntervals(
+      snapshots,
+      participants,
+      timeline.events,
+    )
+    const lifeIntervalPatch = participantLifeIntervals.length > 0
+      ? { participantLifeIntervals }
+      : {}
+    if (derived.length === 0) return participantLifeIntervals.length > 0
+      ? { ...timeline, ...lifeIntervalPatch }
+      : timeline
 
     const enrichedDerived = derived.map((event) => {
       if (event.type !== "CHAMPION_KILL") return event
@@ -504,6 +517,7 @@ export class LiveGameCaptureRepository {
 
     return {
       ...timeline,
+      ...lifeIntervalPatch,
       events: [...retained, ...added].sort((left, right) =>
         left.timestamp - right.timestamp || left.eventId.localeCompare(right.eventId),
       ),

@@ -19,13 +19,19 @@ import {
   type TimedPathPoint,
 } from "../shared/minimap/path-processing"
 import type { MinimapPathingReview } from "../shared/minimap/review"
-import type { TimelineEvent, TimelineFrame } from "../types/review"
+import type {
+  ParticipantLifeInterval,
+  TimelineEvent,
+  TimelineFrame,
+} from "../types/review"
 import type { ParticipantRow } from "../types/stats"
 
 export const DEFAULT_MINIMAP_PLAYBACK_CONFIDENCE = 0.68
 export const MIN_MINIMAP_PLAYBACK_CONFIDENCE = 0.5
 export const MAX_MINIMAP_PLAYBACK_CONFIDENCE = 0.95
 export const DEFAULT_PLAYBACK_TRAIL_LOOKBACK_MS = 30_000
+export const DEFAULT_PLAYBACK_TRAIL_WINDOW_MS = 15_000
+export const DEFAULT_PLAYBACK_TRAIL_STEP_MS = 250
 const INSTANT_SEGMENT_HOLD_MS = 1_500
 const RESPAWN_SOON_MS = 30_000
 const CAMP_CLEAR_PULSE_MS = 3_000
@@ -35,6 +41,10 @@ const MAXIMUM_CONTINUOUS_CV_GAP_MS = 1_000
 const BASE_TRAVEL_ALLOWANCE = 0.035
 const TRAVEL_ALLOWANCE_PER_SECOND = 0.045
 const IMPOSSIBLE_TRANSITION_PENALTY = 55
+const RESPAWN_MOVEMENT_DISTANCE = 0.012
+const FOUNTAIN_EVIDENCE_RADIUS = 0.13
+const LIFE_INTERVAL_MATCH_TOLERANCE_MS = 2_000
+const MINIMUM_FALLBACK_DEATH_MS = 10_000
 
 interface ParticipantSegmentIndex {
   segments: PathSegment[]
@@ -109,6 +119,18 @@ export interface UnifiedPlaybackTrail {
   points: Array<{ left: number; top: number }>
 }
 
+export interface UnifiedPlaybackTrailSegment {
+  key: string
+  participantId: number
+  fromTimestamp: number
+  toTimestamp: number
+  from: { left: number; top: number }
+  to: { left: number; top: number }
+  evidence: "observed" | "estimated"
+  origin: "minimap_cv" | "riot_timeline"
+  confidence: number
+}
+
 export interface UnifiedCampMarker {
   key: CampClearEvent["campKey"]
   center: NormalizedPoint
@@ -136,6 +158,15 @@ interface CvRouteRun {
 interface UnifiedParticipantRoute {
   controls: UnifiedRouteControl[]
   timestamps: number[]
+  teamId?: number
+}
+
+interface PlaybackLifeWindow {
+  diedAtMs: number
+  respawnAtMs?: number
+  renderableRespawnAtMs?: number
+  respawnEvidence?: "explicit" | "route"
+  death?: TimelineEvent
 }
 
 const noMinimapReviewCacheKey = {}
@@ -773,7 +804,13 @@ function buildUnifiedParticipantRoute(input: {
   })
 
   normalizeRouteControls(controls)
-  return { controls, timestamps: controls.map((control) => control.timestamp) }
+  const teamId = input.frames.flatMap((frame) => frame.participants)
+    .find((participant) => participant.participantId === input.participantId)?.teamId
+  return {
+    controls,
+    timestamps: controls.map((control) => control.timestamp),
+    teamId,
+  }
 }
 
 function cachedUnifiedParticipantRoute(input: {
@@ -833,40 +870,175 @@ function playbackResultFromControl(
   }
 }
 
+function deathPoint(event: TimelineEvent | undefined, mapId: ReviewMapId) {
+  if (!event || !isUsableMapPosition(event.position, mapId)) return undefined
+  const percent = mapPositionPercent(event.position!, mapId)
+  return { x: percent.left / 100, y: percent.top / 100 }
+}
+
+function isFountainControl(control: UnifiedRouteControl, teamId: number | undefined) {
+  const fountain = teamId === 100
+    ? { x: 0.035, y: 0.965 }
+    : teamId === 200 ? { x: 0.965, y: 0.035 } : undefined
+  return fountain !== undefined && pointDistance(control.point, fountain) <= FOUNTAIN_EVIDENCE_RADIUS
+}
+
+function credibleRespawnControlAt(input: {
+  route: UnifiedParticipantRoute
+  death?: TimelineEvent
+  diedAtMs: number
+  earliestTimestamp?: number
+  mapId: ReviewMapId
+}) {
+  const firstCandidate = input.earliestTimestamp === undefined
+    ? upperBound(input.route.timestamps, input.diedAtMs)
+    : lowerBound(
+      input.route.timestamps,
+      Math.max(input.diedAtMs + ROUTE_TIME_EPSILON_MS, input.earliestTimestamp),
+    )
+  const candidates = input.route.controls.slice(firstCandidate)
+    .filter((control) => control.source !== "cv_estimated")
+  const reference = deathPoint(input.death, input.mapId)
+
+  if (reference) {
+    return candidates.find((control) =>
+      pointDistance(control.point, reference) >= RESPAWN_MOVEMENT_DISTANCE,
+    )?.timestamp
+  }
+
+  let previous: UnifiedRouteControl | undefined
+  for (const control of candidates) {
+    if (isFountainControl(control, input.route.teamId)) return control.timestamp
+    if (previous && pointDistance(previous.point, control.point) >= RESPAWN_MOVEMENT_DISTANCE) {
+      return control.timestamp
+    }
+    previous = control
+  }
+  return undefined
+}
+
+function participantLifeWindows(input: {
+  route: UnifiedParticipantRoute
+  events: TimelineEvent[]
+  lifeIntervals?: ParticipantLifeInterval[]
+  participantId: number
+  mapId: ReviewMapId
+}) {
+  const deaths = indexedParticipantDeaths(input.events, input.participantId).events
+  const explicit = (input.lifeIntervals ?? []).filter((interval) =>
+    interval.participantId === input.participantId &&
+    Number.isFinite(interval.diedAtMs) && interval.diedAtMs >= 0,
+  ).sort((left, right) => left.diedAtMs - right.diedAtMs)
+  const usedExplicit = new Set<ParticipantLifeInterval>()
+  const windows: PlaybackLifeWindow[] = deaths.map((death) => {
+    const matching = explicit.filter((interval) => !usedExplicit.has(interval) &&
+      Math.abs(interval.diedAtMs - death.timestamp) <= LIFE_INTERVAL_MATCH_TOLERANCE_MS)
+      .sort((left, right) =>
+        Math.abs(left.diedAtMs - death.timestamp) - Math.abs(right.diedAtMs - death.timestamp),
+      )[0]
+    if (matching) usedExplicit.add(matching)
+    const diedAtMs = matching
+      ? Math.min(death.timestamp, matching.diedAtMs)
+      : death.timestamp
+    const explicitRespawnAtMs = matching?.respawnAtMs
+    const respawnAtMs = matching
+      ? Number.isFinite(explicitRespawnAtMs) && explicitRespawnAtMs! > diedAtMs
+        ? explicitRespawnAtMs
+        : undefined
+      : credibleRespawnControlAt({
+        route: input.route,
+        death,
+        diedAtMs,
+        earliestTimestamp: diedAtMs + MINIMUM_FALLBACK_DEATH_MS,
+        mapId: input.mapId,
+      })
+    return {
+      diedAtMs,
+      respawnAtMs,
+      respawnEvidence: matching ? "explicit" : "route",
+      death,
+    }
+  })
+
+  for (const interval of explicit) {
+    if (usedExplicit.has(interval)) continue
+    windows.push({
+      diedAtMs: interval.diedAtMs,
+      respawnAtMs: Number.isFinite(interval.respawnAtMs) &&
+        interval.respawnAtMs! > interval.diedAtMs
+        ? interval.respawnAtMs
+        : undefined,
+      respawnEvidence: "explicit",
+    })
+  }
+  return windows.sort((left, right) => left.diedAtMs - right.diedAtMs)
+    .map((window) => ({
+      ...window,
+      renderableRespawnAtMs: renderableRespawnAt(input.route, window, input.mapId),
+    }))
+}
+
+function renderableRespawnAt(
+  route: UnifiedParticipantRoute,
+  window: PlaybackLifeWindow,
+  mapId: ReviewMapId,
+) {
+  if (window.respawnAtMs === undefined) return undefined
+  if (window.respawnEvidence === "route") return window.respawnAtMs
+  if (!window.death || !deathPoint(window.death, mapId)) {
+    const firstControl = lowerBound(route.timestamps, window.respawnAtMs)
+    return route.controls.slice(firstControl)
+      .find((control) => control.source !== "cv_estimated")?.timestamp
+  }
+  return credibleRespawnControlAt({
+    route,
+    death: window.death,
+    diedAtMs: window.diedAtMs,
+    earliestTimestamp: window.respawnAtMs,
+    mapId,
+  })
+}
+
+function latestLifeWindowAt(windows: PlaybackLifeWindow[], timestamp: number) {
+  const index = upperBound(windows.map((window) => window.diedAtMs), timestamp) - 1
+  return index >= 0 ? windows[index] : undefined
+}
+
 function routePositionAt(input: {
   route: UnifiedParticipantRoute
   events: TimelineEvent[]
+  lifeIntervals?: ParticipantLifeInterval[]
+  lifeWindows?: PlaybackLifeWindow[]
   participantId: number
   timestamp: number
   mapId: ReviewMapId
 }): UnifiedPlaybackPosition | undefined {
   const { controls, timestamps } = input.route
   if (controls.length === 0) return undefined
+  const lifeWindows = input.lifeWindows ?? participantLifeWindows(input)
+  const currentLifeWindow = latestLifeWindowAt(lifeWindows, input.timestamp)
+  const resumeAt = currentLifeWindow?.renderableRespawnAtMs
+  if (currentLifeWindow && input.timestamp >= currentLifeWindow.diedAtMs &&
+      (resumeAt === undefined || input.timestamp < resumeAt)) return undefined
+
   const afterIndex = upperBound(timestamps, input.timestamp)
   const before = afterIndex > 0 ? controls[afterIndex - 1] : undefined
+  if (currentLifeWindow && resumeAt !== undefined && input.timestamp >= resumeAt &&
+      (!before || before.timestamp < resumeAt)) return undefined
   if (before && Math.abs(before.timestamp - input.timestamp) <= ROUTE_TIME_EPSILON_MS) {
     return playbackResultFromControl(input.participantId, before)
   }
   let after = afterIndex < controls.length ? controls[afterIndex] : undefined
   if (!before || !after) return undefined
 
-  const deaths = indexedParticipantDeaths(input.events, input.participantId)
-  const firstDeathIndex = upperBound(deaths.timestamps, before.timestamp)
-  let death: TimelineEvent | undefined
-  for (let index = firstDeathIndex;
-    index < deaths.events.length && deaths.events[index].timestamp < after.timestamp;
-    index += 1) {
-    if (isUsableMapPosition(deaths.events[index].position, input.mapId)) {
-      death = deaths.events[index]
-      break
-    }
-  }
-  if (death) {
-    if (input.timestamp > death.timestamp) return undefined
-    const percent = mapPositionPercent(death.position!, input.mapId)
+  const nextLifeWindow = lifeWindows.find((window) =>
+    window.diedAtMs > input.timestamp && window.diedAtMs < after!.timestamp,
+  )
+  if (nextLifeWindow) {
+    const point = deathPoint(nextLifeWindow.death, input.mapId) ?? before.point
     after = {
-      timestamp: death.timestamp,
-      point: { x: percent.left / 100, y: percent.top / 100 },
+      timestamp: nextLifeWindow.diedAtMs,
+      point,
       source: "riot_snapshot",
       origin: "riot_timeline",
       confidence: 1,
@@ -910,6 +1082,7 @@ function routePositionAt(input: {
 export function unifiedPlaybackPositionAt(input: {
   frames: TimelineFrame[]
   events: TimelineEvent[]
+  lifeIntervals?: ParticipantLifeInterval[]
   minimapReview?: MinimapPathingReview
   bindings: MinimapParticipantBinding[]
   participantId: number
@@ -929,9 +1102,18 @@ export function unifiedPlaybackPositionAt(input: {
     mapId: input.mapId,
     minimumConfidence,
   })
+  const lifeWindows = participantLifeWindows({
+    route,
+    events: input.events,
+    lifeIntervals: input.lifeIntervals,
+    participantId: input.participantId,
+    mapId: input.mapId,
+  })
   return routePositionAt({
     route,
     events: input.events,
+    lifeIntervals: input.lifeIntervals,
+    lifeWindows,
     participantId: input.participantId,
     timestamp: input.timestamp,
     mapId: input.mapId,
@@ -946,6 +1128,162 @@ export function unifiedPlaybackPositionsAt(input: Omit<
     const position = unifiedPlaybackPositionAt({ ...input, participantId })
     return position ? [position] : []
   })
+}
+
+function positiveMilliseconds(value: number | undefined, fallback: number) {
+  return Number.isFinite(value) && (value as number) > 0
+    ? Math.max(1, Math.round(value as number))
+    : fallback
+}
+
+function intervalOverlapsUnknownSegment(
+  index: ParticipantSegmentIndex | undefined,
+  fromTimestamp: number,
+  toTimestamp: number,
+) {
+  if (!index) return false
+  const firstCandidate = lowerBound(index.prefixMaximumEnd, fromTimestamp)
+  for (let segmentIndex = firstCandidate; segmentIndex < index.segments.length; segmentIndex += 1) {
+    const segment = index.segments[segmentIndex]
+    if (segment.startTimeMs >= toTimestamp) break
+    if (
+      segment.modelVersion >= 2 &&
+      segment.kind === "unknown" &&
+      segment.startTimeMs < toTimestamp &&
+      segment.endTimeMs > fromTimestamp
+    ) return true
+  }
+  return false
+}
+
+function intervalOverlapsLifeGap(
+  windows: PlaybackLifeWindow[],
+  fromTimestamp: number,
+  toTimestamp: number,
+) {
+  for (const window of windows) {
+    if (window.diedAtMs >= toTimestamp) break
+    const resumeTimestamp = window.renderableRespawnAtMs
+    if (window.diedAtMs < toTimestamp &&
+        (resumeTimestamp === undefined || resumeTimestamp > fromTimestamp)) return true
+  }
+  return false
+}
+
+/**
+ * Returns a short trail as immutable absolute-clock segments. Segment geometry
+ * depends only on its participant and time bounds, never on the current cursor;
+ * advancing playback therefore adds or expires whole SVG-ready segments instead
+ * of trimming and re-simplifying an existing polyline.
+ */
+export function unifiedPlaybackTrailSegments(input: {
+  frames: TimelineFrame[]
+  events: TimelineEvent[]
+  lifeIntervals?: ParticipantLifeInterval[]
+  minimapReview?: MinimapPathingReview
+  bindings: MinimapParticipantBinding[]
+  participantId: number
+  timestamp: number
+  mapId: ReviewMapId
+  windowMs?: number
+  stepMs?: number
+  minimumConfidence?: number
+}): UnifiedPlaybackTrailSegment[] {
+  const minimumConfidence = clampMinimapPlaybackConfidence(input.minimumConfidence)
+  const stepMs = positiveMilliseconds(input.stepMs, DEFAULT_PLAYBACK_TRAIL_STEP_MS)
+  const windowMs = Math.max(
+    stepMs,
+    positiveMilliseconds(input.windowMs, DEFAULT_PLAYBACK_TRAIL_WINDOW_MS),
+  )
+  const timestamp = Math.max(0, Number.isFinite(input.timestamp) ? input.timestamp : 0)
+  const completedThrough = Math.floor(timestamp / stepMs) * stepMs
+  if (completedThrough <= 0) return []
+
+  const participantKey = input.bindings.find(
+    (binding) => binding.participantId === input.participantId,
+  )?.participantKey
+  const route = cachedUnifiedParticipantRoute({
+    frames: input.frames,
+    minimapReview: input.minimapReview,
+    participantKey,
+    participantId: input.participantId,
+    mapId: input.mapId,
+    minimumConfidence,
+  })
+  const segmentIndex = participantKey
+    ? indexedSegments(input.minimapReview).get(participantKey)
+    : undefined
+  const lifeWindows = participantLifeWindows({
+    route,
+    events: input.events,
+    lifeIntervals: input.lifeIntervals,
+    participantId: input.participantId,
+    mapId: input.mapId,
+  })
+  const cutoff = Math.max(0, timestamp - windowMs)
+  const firstBoundary = Math.floor(cutoff / stepMs) * stepMs
+  const segments: UnifiedPlaybackTrailSegment[] = []
+
+  for (let fromTimestamp = firstBoundary;
+    fromTimestamp < completedThrough;
+    fromTimestamp += stepMs) {
+    const toTimestamp = fromTimestamp + stepMs
+    if (toTimestamp <= cutoff ||
+        intervalOverlapsUnknownSegment(segmentIndex, fromTimestamp, toTimestamp) ||
+        intervalOverlapsLifeGap(
+          lifeWindows,
+          fromTimestamp,
+          toTimestamp,
+        )) continue
+
+    const midpointTimestamp = fromTimestamp + stepMs / 2
+    const from = routePositionAt({
+      route,
+      events: input.events,
+      lifeIntervals: input.lifeIntervals,
+      lifeWindows,
+      participantId: input.participantId,
+      timestamp: fromTimestamp,
+      mapId: input.mapId,
+    })
+    const midpoint = routePositionAt({
+      route,
+      events: input.events,
+      lifeIntervals: input.lifeIntervals,
+      lifeWindows,
+      participantId: input.participantId,
+      timestamp: midpointTimestamp,
+      mapId: input.mapId,
+    })
+    const to = routePositionAt({
+      route,
+      events: input.events,
+      lifeIntervals: input.lifeIntervals,
+      lifeWindows,
+      participantId: input.participantId,
+      timestamp: toTimestamp,
+      mapId: input.mapId,
+    })
+    if (!from || !midpoint || !to) continue
+
+    const positions = [from, midpoint, to]
+    segments.push({
+      key: `trail:${input.participantId}:${fromTimestamp}:${toTimestamp}`,
+      participantId: input.participantId,
+      fromTimestamp,
+      toTimestamp,
+      from: from.point,
+      to: to.point,
+      evidence: positions.every((position) => position.source === "cv_observed")
+        ? "observed"
+        : "estimated",
+      origin: positions.some((position) => position.origin === "minimap_cv")
+        ? "minimap_cv"
+        : "riot_timeline",
+      confidence: Math.min(...positions.map((position) => position.confidence)),
+    })
+  }
+  return segments
 }
 
 function pointTimestamp(segment: PathSegment, index: number) {
@@ -1089,6 +1427,7 @@ export function minimapPlaybackTrails(input: {
 export function unifiedPlaybackTrails(input: {
   frames: TimelineFrame[]
   events: TimelineEvent[]
+  lifeIntervals?: ParticipantLifeInterval[]
   minimapReview?: MinimapPathingReview
   bindings: MinimapParticipantBinding[]
   participantIds: number[]
@@ -1112,25 +1451,36 @@ export function unifiedPlaybackTrails(input: {
       mapId: input.mapId,
       minimumConfidence,
     })
+    const lifeWindows = participantLifeWindows({
+      route,
+      events: input.events,
+      lifeIntervals: input.lifeIntervals,
+      participantId,
+      mapId: input.mapId,
+    })
     const current = routePositionAt({
       route,
       events: input.events,
+      lifeIntervals: input.lifeIntervals,
+      lifeWindows,
       participantId,
       timestamp: input.timestamp,
       mapId: input.mapId,
     })
     if (!current) return []
-    const deaths = indexedParticipantDeaths(input.events, participantId)
-    const latestDeath = deaths.events[upperBound(deaths.timestamps, input.timestamp) - 1]
+    const latestLifeWindow = latestLifeWindowAt(lifeWindows, input.timestamp)
+    const latestResumeAt = latestLifeWindow?.renderableRespawnAtMs
     const earliest = Math.max(
       0,
       input.timestamp - lookbackMs,
-      latestDeath?.timestamp ?? 0,
+      latestResumeAt ?? latestLifeWindow?.diedAtMs ?? 0,
     )
     const points: NormalizedPoint[] = []
     const start = routePositionAt({
       route,
       events: input.events,
+      lifeIntervals: input.lifeIntervals,
+      lifeWindows,
       participantId,
       timestamp: earliest,
       mapId: input.mapId,
