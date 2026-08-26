@@ -71,7 +71,7 @@
     "@fortawesome/vue-fontawesome": "^3.3.3",
     "@playwright/test": "1.62.1",
     "@types/better-sqlite3": "^9.6.0",
-    "@types/node": "24.13.3",
+    "@types/node": "26.2.0",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-vue": "^6.0.8",
     "@vue/test-utils": "2.4.11",
