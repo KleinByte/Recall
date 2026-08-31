@@ -74,28 +74,28 @@
     "@types/node": "24.13.3",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-vue": "^6.0.8",
-    "@vue/test-utils": "2.4.11",
+    "@vue/test-utils": "2.5.0",
     "better-sqlite3-node": "npm:better-sqlite3@13.0.3",
     "echarts": "6.1.0",
     "electron": "^43.4.0",
     "electron-builder": "^26.15.3",
     "electron-store": "^11.0.2",
     "electron-updater": "^6.8.9",
-    "happy-dom": "20.11.2",
-    "node-abi": "4.33.0",
-    "node-gyp": "13.0.1",
+    "happy-dom": "20.11.12",
+    "node-abi": "4.34.0",
+    "node-gyp": "13.0.2",
     "typescript": "^5.9.3",
-    "vite": "^8.2.1",
+    "vite": "^8.2.2",
     "vite-plugin-electron": "^1.1.1",
     "vite-plugin-electron-renderer": "^1.0.0",
-    "vitest": "4.1.10",
-    "vue": "^3.5.41",
-    "vue-tsc": "^3.3.9"
+    "vitest": "4.1.11",
+    "vue": "^3.5.42",
+    "vue-tsc": "^3.3.11"
   },
   "dependencies": {
     "better-sqlite3": "13.0.3",
     "ws": "^8.21.3",
     "@techstark/opencv-js": "5.0.0-release.1",
-    "onnxruntime-node": "1.27.0"
+    "onnxruntime-node": "1.29.0"
   }
 }
